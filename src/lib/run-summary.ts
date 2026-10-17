@@ -1,5 +1,6 @@
 // G-07 (wave 4): runs/<runId>, the summary of a forge execution once it ends, or of a Small, Medium or Large task closed
 // outside one. FORGE roadmap-run writes it; the page lists it (the Runs view of plan 4c). Pure, without Node imports.
+import { cleanText } from './batches.js';
 import { isPlanId } from './ids.js';
 import { byteLength, type DocReport } from './roadmap-doc.js';
 
@@ -31,14 +32,14 @@ const kindOf = (v: unknown): string => (v === null ? 'null' : Array.isArray(v) ?
 const int = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
 const iso = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) && !Number.isNaN(Date.parse(v));
 const oneOf = <T extends string>(list: readonly T[], x: unknown): x is T => (list as readonly unknown[]).includes(x);
-const text = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
-// eslint-disable-next-line no-control-regex
-const clip = (v: string, max: number): string => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim().slice(0, max);
+/** Carry 3: one line without control or bidi characters, clipped by code point; '' for anything that is not text. */
+const clip = (v: unknown, max: number): string => (typeof v === 'string' ? cleanText(v, max) : '');
 
 function taskOf(t: unknown): RunSummaryTask | null {
   if (!isObj(t) || typeof t.id !== 'string' || !isPlanId(t.id) || !oneOf(RUN_TASK_STATUSES, t.status)) return null;
   const out: RunSummaryTask = { id: t.id, status: t.status };
-  if (text(t.title)) out.title = clip(t.title, 200);
+  const title = clip(t.title, 200);
+  if (title) out.title = title;
   if (int(t.seconds, 0, 30 * 86400)) out.seconds = t.seconds;
   if (int(t.rounds, 0, 99)) out.rounds = t.rounds;
   if (int(t.deferred, 0, 999)) out.deferred = t.deferred;
@@ -52,7 +53,8 @@ export function normalizeRunSummary(x: unknown, report?: DocReport): RunSummaryD
   if (x.v !== 1) return bad('no v: 1');
   if (typeof x.runId !== 'string' || !SAFE_ID.test(x.runId)) return bad('runId');
   if (!oneOf(KINDS, x.kind) || !oneOf(MODES, x.mode) || !int(x.parallel, 1, 10)) return bad('kind, mode or parallel');
-  if (!text(x.branch) || !text(x.target) || !text(x.coordinator)) return bad('branch, target or coordinator');
+  const branch = clip(x.branch, 200), target = clip(x.target, 200), coordinator = clip(x.coordinator, 120);
+  if (!branch || !target || !coordinator) return bad('branch, target or coordinator');
   if (!iso(x.startedAt) || !iso(x.endedAt)) return bad('startedAt or endedAt');
   if (x.stopReason !== null && !oneOf(STOPS, x.stopReason)) return bad('stopReason');
   if (x.closedBy !== null && x.closedBy !== 'merge' && x.closedBy !== 'close') return bad('closedBy');
@@ -73,7 +75,7 @@ export function normalizeRunSummary(x: unknown, report?: DocReport): RunSummaryD
   }
   return {
     v: 1, runId: x.runId, kind: x.kind as RunSummaryDoc['kind'], mode: x.mode as RunSummaryDoc['mode'], parallel: x.parallel,
-    branch: clip(x.branch, 200), target: clip(x.target, 200), coordinator: clip(x.coordinator, 120),
+    branch, target, coordinator,
     startedAt: x.startedAt, endedAt: x.endedAt, stopReason: (x.stopReason ?? null) as RunSummaryDoc['stopReason'],
     closedBy: (x.closedBy ?? null) as RunSummaryDoc['closedBy'], merged: x.merged, tasks, loose: x.loose, finalReview,
     decisions: x.decisions, deferred: x.deferred,

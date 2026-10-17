@@ -192,8 +192,9 @@ const STEPS: readonly Step[] = [
   ['validators.failing', d => (d.validators.some(v => v.failing !== undefined) ? { ...d, validators: d.validators.map(({ failing: _f, ...v }) => v) } : null)],
   ['rounds.note:60', d => (d.rounds.some(r => r.note.length > 60) ? { ...d, rounds: d.rounds.map(r => ({ ...r, note: clip(r.note, 60) })) } : null)],
   ['deferred.problem:80', d => (d.deferred.some(x => x.problem.length > 80) ? { ...d, deferred: d.deferred.map(x => ({ ...x, problem: clip(x.problem, 80) })) } : null)],
-  // The last resort, so the cap is a guarantee: the v1 core and the v2 scalars. Every v2 list goes (rounds, deferred
-  // findings, reviewers, the verification and the integration), and of the validators only the ones that failed stay.
+  // The last resort, so the cap is a guarantee: the v1 core and the v2 scalars. Every v2 list goes (the rounds, and with
+  // them their reviewers; the deferred findings, the verification and the integration), and of the validators only the
+  // ones that failed stay, without their v2 fields.
   ['core', d => ({ ...d, validators: d.validators.filter(v => !v.ok).map(v => ({ name: v.name, ok: v.ok })), rounds: [], verify: null, integration: null, deferred: [] })],
 ];
 

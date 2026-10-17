@@ -285,6 +285,7 @@ elsewhere and are reconstructed from their READMEs.
 #### Changed
 - Auto-approval fails safe: only proposals forge itself added are auto-approved, and only with objective signals (a tests proposal names a test file); nothing that proposes deleting or migrating data, or touches a sensitive zone by its path or its words, and no lookalike of a rejected or open proposal, is approved without you.
 - The skills no longer compose `state/T.forge`, `evidence`, `meta/run`, `runs/`, `meta/infinite` or decision notes: they send what the CLI prints and pin it with the newest version they listed. Forge's blocking paths give their reason (`waypoint block --why-file`) and members finish with `waypoint done`.
+- A task past its review cap keeps publishing (`overCap`); `swarm merge` prints each integrated task's block with `merged: true` for the skill to send; decisions are logged only when the owner takes them (`proposals save` only mirrors); `swarm close` and an ended run's `swarm status` print the writes that free the coordinator's tasks; `proposals policy` says why it refuses (`reason`); verification uploads count only for their own run and round.
 - Requires waypoint ^0.26.0.
 
 ### 0.21.1 — 2026-10-17

@@ -7,7 +7,7 @@ import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { readExecution, saveExecution } from '../src/forge/execution.js';
 import * as ledger from '../src/forge/ledger.js';
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
-import { swarmStep, stepSay } from '../src/forge/cli/step.js';
+import { publishOf, swarmStep, stepSay } from '../src/forge/cli/step.js';
 
 const spyOrig = ledger.readEvents;
 
@@ -928,17 +928,19 @@ describe('a new execution of the same plan task counts only its own reviews (car
     expect(readEvents(root).filter(e => e.kind === 'round' && e.task === 'T1-1').at(-1)).toMatchObject({ round: 1, next: 'resume' });
   });
   it('the writes of a step share one read of the ledger: publishOf reads it once for all its tasks', () => {
+    step();
+    // Carry 2: counted through the reader publishOf is given, and no other read of the ledger happens meanwhile.
     const reads: string[] = [];
-    const spy = vi.spyOn(ledger, 'readEvents').mockImplementation(((root: string) => {
-      if (new Error().stack?.includes('publishOf')) reads.push(root);
-      return spyOrig(root);
-    }) as typeof ledger.readEvents);
+    const spy = vi.spyOn(ledger, 'readEvents');
+    let pub: ReturnType<typeof publishOf>;
     try {
-      const s = step();
-      expect(s.publish.tasks.length).toBeGreaterThanOrEqual(2);
-      expect(s.publish.tasks.every(x => x.write !== null)).toBe(true);
+      pub = publishOf(io, readExecution(root)!, new Set(), { state: {}, sessions: {} }, NOW, r => { reads.push(r); return spyOrig(r); });
+      expect(spy).not.toHaveBeenCalled();
     } finally { spy.mockRestore(); }
-    expect(reads).toHaveLength(1);
+    const tasks = pub.tasks as { write: unknown }[];
+    expect(tasks.length).toBeGreaterThanOrEqual(2);
+    expect(tasks.every(x => x.write !== null)).toBe(true);
+    expect(reads).toEqual([root]);
   });
   it('the publish of a task back from its implementer is the same file roadmap-doc gives (J-15)', () => {
     step();

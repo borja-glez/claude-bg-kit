@@ -114,6 +114,8 @@ describe('fitForgeDoc: at most 4 KB (C7)', () => {
     expect(parseForgeDocV2(r.doc)).not.toBeNull();
     expect(r.doc).toMatchObject({ v: 2, path: 'medium', brief: 1, stage: 'review', round: 3, cap: 4, overCap: false, rounds: [], deferred: [], verify: null, integration: null });
     expect(r.doc.validators.every(v => v.ok === false)).toBe(true);
+    // Carry 1: the reviewers go with their rounds; none is left anywhere in the core.
+    expect(JSON.stringify(r.doc)).not.toContain('reviewers');
   });
   it('fits is false only when even the core exceeds the limit', () => {
     const r = fitForgeDoc(doc(), 50);

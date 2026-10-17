@@ -4,7 +4,8 @@ import { readExecution } from './execution.js';
 import { readEvents } from './ledger.js';
 import { claudeBindings } from '../lib/bound-fs.js';
 import { bindingLive } from '../lib/bound.js';
-import { LEASE_MINUTES } from '../lib/coordination.js';
+import { LEASE_CAP_MINUTES, LEASE_MINUTES } from '../lib/coordination.js';
+import { cleanText } from '../lib/batches.js';
 import { isSafeId } from '../lib/execution-state.js';
 import type { RunState } from '../lib/forge-run.js';
 import type { InfiniteDoc } from '../lib/types.js';
@@ -24,14 +25,17 @@ export function seatOf(main: string, claude: string, now: number, alive?: (pid: 
 export function infiniteDocOf(run: RunState, o: { now: Date; sid: string | null; sleepUntil: string | null; lastCycleAt: string | null }): InfiniteDoc {
   const t = o.now.getTime();
   const sleep = o.sleepUntil ? Date.parse(o.sleepUntil) - t : NaN;
-  const ms = Math.max(LEASE_MINUTES * 60_000, Number.isFinite(sleep) && sleep > 0 ? sleep + INFINITE_SLEEP_MARGIN_MIN * 60_000 : 0);
+  // Carry 4: never past LEASE_CAP_MINUTES, whatever sleep the execution claims.
+  const ms = Math.min(LEASE_CAP_MINUTES * 60_000, Math.max(LEASE_MINUTES * 60_000, Number.isFinite(sleep) && sleep > 0 ? sleep + INFINITE_SLEEP_MARGIN_MIN * 60_000 : 0));
   // A run forge 0.15 started has no session: no coordinator, and the page draws the pill as before.
   const coordinator = run.sessionId && isSafeId(run.sessionId)
     ? { sid: o.sid, claude: run.sessionId, seenAt: o.now.toISOString(), leaseUntil: new Date(t + ms).toISOString() }
     : null;
+  // Carry 4: the stop reason as one clean line (it is the run's own text, but the page reads it as untrusted).
+  const stopReason = run.active ? null : cleanText(run.stoppedReason ?? '', 80) || null;
   return {
     active: run.active, cycle: run.cycle, budget: run.budget, startedAt: run.startedAt, lastCycleAt: o.lastCycleAt,
-    coordinator, stopReason: run.active ? null : run.stoppedReason ?? null,
+    coordinator, stopReason,
   };
 }
 

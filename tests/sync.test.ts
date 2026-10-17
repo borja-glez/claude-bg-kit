@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { buildSync } from 'esbuild';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs, buildSyncWrites, planHash, planViewFromDocs } from '../src/lib/sync.js';
 import type { States } from '../src/lib/types.js';
@@ -166,5 +170,16 @@ describe('the waypoint version (G-13)', () => {
     expect(compareVersions('1.2.3', '1.2.3')).toBe(0);
     expect(compareVersions('junk', '0.0.1')).toBe(-1);
     expect(compareVersions(undefined, '0.0.0')).toBe(0);
+  });
+  it('carry 9: a bundle built without the define says 0.0.0 and does not throw', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'wp-version-'));
+    try {
+      const out = path.join(dir, 'v.cjs');
+      buildSync({
+        stdin: { contents: `import { WAYPOINT_VERSION } from './src/lib/waypoint-version.ts'; console.log(WAYPOINT_VERSION);`, resolveDir: process.cwd(), loader: 'ts' },
+        bundle: true, platform: 'node', format: 'cjs', outfile: out, logLevel: 'silent',
+      });
+      expect(execFileSync(process.execPath, [out], { encoding: 'utf8' }).trim()).toBe('0.0.0');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

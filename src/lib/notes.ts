@@ -11,6 +11,11 @@ type Note = NoteDoc & { id: string };
 export type NoteFilter = 'all' | NoteType | 'mine' | 'open';
 
 const str = (x: unknown): x is string => typeof x === 'string';
+/** H-17: a note id of the roadmap (an event id, or the page's own id): no `/`, at most 160 characters. The one rule
+ *  (carry 6) for `answeredByNote` here and for forge's `resolves`. */
+export const NOTE_ID = /^[A-Za-z0-9_.:~@+-]{1,160}$/;
+/** At most `max` code points: a clip never splits a surrogate pair (carry 6). */
+const clipPoints = (s: string, max: number): string => (s.length <= max ? s : Array.from(s).slice(0, max).join(''));
 
 /** Strict normalizer for shared (untrusted) note docs. A missing ts becomes '' (treated as old). */
 export function normalizeNote(x: unknown): NoteDoc | null {
@@ -18,13 +23,13 @@ export function normalizeNote(x: unknown): NoteDoc | null {
   const o = x as Record<string, unknown>;
   if (!str(o.type) || !(NOTE_TYPES as string[]).includes(o.type)) return null;
   if (!str(o.author) || !str(o.text)) return null;
-  const out: NoteDoc = { ts: str(o.ts) ? o.ts : '', type: o.type as NoteType, author: o.author, text: o.text.slice(0, MAX_NOTE) };
+  const out: NoteDoc = { ts: str(o.ts) ? o.ts : '', type: o.type as NoteType, author: o.author, text: clipPoints(o.text, MAX_NOTE) };
   if (str(o.taskId)) out.taskId = o.taskId;
-  if (str(o.answer)) out.answer = o.answer.slice(0, MAX_NOTE);
+  if (str(o.answer)) out.answer = clipPoints(o.answer, MAX_NOTE);
   if (str(o.answeredBy)) out.answeredBy = o.answeredBy;
   if (str(o.answeredAt)) out.answeredAt = o.answeredAt;
   // H-17: the decision note that closed this question; an id, never a path.
-  if (str(o.answeredByNote) && /^[A-Za-z0-9_.:~@+-]{1,160}$/.test(o.answeredByNote)) out.answeredByNote = o.answeredByNote;
+  if (str(o.answeredByNote) && NOTE_ID.test(o.answeredByNote)) out.answeredByNote = o.answeredByNote;
   // Optional display names a writer may store next to the user:<id>; never required.
   if (str(o.authorName) && o.authorName.trim()) out.authorName = clean(o.authorName, MAX_NAME);
   if (str(o.answeredByName) && o.answeredByName.trim()) out.answeredByName = clean(o.answeredByName, MAX_NAME);

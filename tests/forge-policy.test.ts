@@ -137,4 +137,18 @@ describe('autoApprovable: objective signals only (D-16, K2-16)', () => {
     expect(autoApprovable(doc({ category: 'tests', path: 'tests/auth/login.test.ts' }))).toBe(false);
     expect(autoApprovable(doc({ title: 'Rename a helper', path: 'src/util/strings.ts' }))).toBe(true);
   });
+  it('carry 5: the zone words the shared table misses, in the title or the rationale', () => {
+    for (const t of ['Simplify the sign-in form', 'Tidy the sign in handler', 'Refactor the signin page', 'Refactor logins handler', 'Log in faster',
+      'Store credentials in one place', 'Rotate the API keys', 'Move the api-key parsing', 'Use bcrypt for the hashes', 'Faster password hashing',
+      'Split the cryptography helpers', 'Single sign-on cleanup', 'Ordenar las credenciales', 'Rotar las claves de la API']) {
+      expect(autoApprovable(doc({ title: t })), t).toBe(false);
+      expect(autoApprovable(doc({ title: 'Tidy the parser', rationale: t })), `rationale: ${t}`).toBe(false);
+    }
+    expect(autoApprovable(doc({ title: 'Design a cleaner key layout for the cache' }))).toBe(true);
+  });
+  it('carry 5: deleting or migrating data in the evidence refuses too', () => {
+    for (const e of ['the job drops the users table each night', 'grep: 3 places delete old records', 'borra los registros antiguos'])
+      expect(autoApprovable(doc({ title: 'Tidy the parser', evidence: e })), e).toBe(false);
+    expect(autoApprovable(doc({ title: 'Tidy the parser', evidence: 'grep: 4 helpers in parser.ts' }))).toBe(true);
+  });
 });

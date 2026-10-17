@@ -17,9 +17,12 @@ const BIDI = new RegExp(`[${[0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x2
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 
+/** At most `max` code points, so a clip never splits a surrogate pair (carry 1). */
+export const clipPoints = (text: string, max: number): string => (text.length <= max ? text : Array.from(text).slice(0, max).join(''));
+
 /** Free text for the roadmap (a block reason, a summary): one line, without control or bidi characters, at most `max`. */
 export function cleanText(text: string, max: number): string {
-  return text.replace(CONTROL, ' ').replace(BIDI, '').replace(/\s+/g, ' ').trim().slice(0, max);
+  return clipPoints(text.replace(CONTROL, ' ').replace(BIDI, '').replace(/\s+/g, ' ').trim(), max);
 }
 
 const event = (doc_id: string, data: Record<string, unknown>): Write => ({ op: 'set', collection: 'events', doc_id, data });

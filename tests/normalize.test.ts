@@ -94,10 +94,29 @@ describe('normalizeMeta', () => {
     expect(normalizePhase({ id: 'F1', name: 'Base', order: 0, tasks: [], goal: 'orders' })!.goal).toBe('orders');
     expect(normalizePhase({ id: 'F1', name: 'Base', order: 0, tasks: [], goal: 5 })).not.toHaveProperty('goal');
   });
+  it('carry 8: the design link and a phase goal are clean text; a link that does not fit or is not one URL is dropped; a target is a real date', () => {
+    const rlo = String.fromCharCode(0x202e), bell = String.fromCharCode(7), face = String.fromCodePoint(0x1f600);
+    const got: string[] = [];
+    const rep = (f: string, a: string) => { got.push(`${f} · ${a}`); };
+    const goal = normalizePhase({ id: 'F1', name: 'Base', order: 0, tasks: [], goal: `  first${rlo}\nsecond${bell} ${face.repeat(400)}` }, rep)!.goal!;
+    expect(goal.startsWith('first second ')).toBe(true);
+    expect(Array.from(goal)).toHaveLength(300);
+    expect(goal).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+    expect(normalizePhase({ id: 'F1', name: 'Base', order: 0, tasks: [], goal: 5 }, rep)).not.toHaveProperty('goal');
+    expect(normalizePhase({ id: 'F1', name: 'Base', order: 0, tasks: [], goal: rlo }, rep)).not.toHaveProperty('goal');
+    expect(got).toEqual(['goal · dropped', 'goal · dropped']);
+    for (const design of [`https://claude.ai/artifact/${'d'.repeat(500)}`, `https://claude.ai/a${rlo}b`, 'https://claude.ai/a b', `https://claude.ai/a\nb`]) {
+      expect(normalizeMeta({ name: 'x', links: { design } })!, JSON.stringify(design.slice(-10))).not.toHaveProperty('links');
+    }
+    for (const target of ['2026-02-30', '2026-13-01', '2026-00-10']) expect(normalizeMeta({ name: 'x', versions: [{ id: '1', phases: [], target }] })!.versions[0], target).not.toHaveProperty('target');
+    expect(normalizeMeta({ name: 'x', versions: [{ id: '1', phases: [], target: '2028-02-29' }] })!.versions[0]).toHaveProperty('target', '2028-02-29');
+  });
   it('keeps the waypoint version that synced the plan, only when it is one (G-13)', () => {
     expect(normalizeMeta({ name: 'x', waypointVersion: '0.26.0' })!.waypointVersion).toBe('0.26.0');
     expect(normalizeMeta({ name: 'x', waypointVersion: 'new' })).not.toHaveProperty('waypointVersion');
     expect(normalizeMeta({ name: 'x', waypointVersion: 7 })).not.toHaveProperty('waypointVersion');
+    // Carry 9: the version is anchored at its end too.
+    expect(normalizeMeta({ name: 'x', waypointVersion: '1.2.3<b>x</b>' })).not.toHaveProperty('waypointVersion');
   });
 });
 
@@ -236,6 +255,28 @@ describe('normalizeInfinite', () => {
     expect(normalizeInfinite({ ...base, stopReason: 'x'.repeat(500) })!.stopReason).toHaveLength(80);
     expect(normalizeInfinite({ ...base, stopReason: 7 })!.stopReason).toBeNull();
   });
+  it('carry 4: the stop reason is cleaned of control and bidi characters, and a lease longer than the cap is clamped to it', () => {
+    const base = { active: false, cycle: 1, budget: {}, startedAt: '2026-10-11T09:00:00.000Z', lastCycleAt: null };
+    const rlo = String.fromCharCode(0x202e), bell = String.fromCharCode(7);
+    expect(normalizeInfinite({ ...base, stopReason: `budget${rlo}-cycles${bell}x` })!.stopReason).toBe('budget-cycles x');
+    expect(normalizeInfinite({ ...base, stopReason: rlo })!.stopReason).toBeNull();
+    const coordinator = { sid: 'main', claude: 'c1', seenAt: '2026-10-11T10:00:00.000Z', leaseUntil: '2099-01-01T00:00:00.000Z' };
+    expect(normalizeInfinite({ ...base, coordinator })!.coordinator).toEqual({ ...coordinator, leaseUntil: '2026-10-11T11:30:00.000Z' });
+    const fine = { ...coordinator, leaseUntil: '2026-10-11T10:10:00.000Z' };
+    expect(normalizeInfinite({ ...base, coordinator: fine })!.coordinator).toEqual(fine);
+  });
+});
+
+describe('carry 3: meta/run text is cleaned as well as clipped', () => {
+  it('the stall reason and the loose titles lose control and bidi characters', () => {
+    const rlo = String.fromCharCode(0x202e), bell = String.fromCharCode(7);
+    const run = { runId: 'r1', mode: 'subagents', parallel: 3, branch: 'forge/run-x', mergeOnFinish: false, active: false, stopReason: 'stalled', coordinator: 'main', slots: [],
+      kind: 'ephemeral', stallReason: `T2${rlo} is${bell}blocked`, loose: [{ id: 'fix-a', title: `Fix${rlo} a${bell}`, status: 'queued', stage: null, agent: null }] };
+    const r = normalizeRun(run)!;
+    expect(r.stallReason).toBe('T2 is blocked');
+    expect(r.loose[0].title).toBe('Fix a');
+    expect(normalizeRun({ ...run, stallReason: rlo })).not.toHaveProperty('stallReason');
+  });
 });
 
 describe('report (H-04, G-03)', () => {
@@ -322,5 +363,14 @@ describe('meta/metrics (A-10)', () => {
     expect(normalizeMetrics(null)).toBeNull();
     expect(mergeMetrics({ tests: 41, lastCommit: { sha: 'old', ts: 'o' } }, m)).toEqual({ tests: 41, lastCommit: { sha: 'abc', ts: 't' } });
     expect(mergeMetrics({ tests: 41 }, null)).toEqual({ tests: 41 });
+  });
+  it('carry 7: a sha or a ts longer than a commit has are dropped with a report; no meta/project metrics at all still merge', () => {
+    const got: string[] = [];
+    expect(normalizeMetrics({ lastCommit: { sha: 'a'.repeat(41), ts: '2026-10-11T11:00:00Z' } }, (f, a) => { got.push(`${f} · ${a}`); })).toEqual({});
+    expect(normalizeMetrics({ lastCommit: { sha: 'abc1234', ts: 'x'.repeat(41) } }, (f, a) => { got.push(`${f} · ${a}`); })).toEqual({});
+    expect(got).toEqual(['lastCommit · dropped', 'lastCommit · dropped']);
+    expect(normalizeMetrics({ lastCommit: { sha: 'a'.repeat(40), ts: '2026-10-11T11:00:00.000Z' } })).toEqual({ lastCommit: { sha: 'a'.repeat(40), ts: '2026-10-11T11:00:00.000Z' } });
+    expect(mergeMetrics(undefined, { tests: 3 })).toEqual({ tests: 3 });
+    expect(mergeMetrics(null, null)).toEqual({});
   });
 });

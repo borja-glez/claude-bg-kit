@@ -179,10 +179,11 @@ describe('decision add --session publishes the decision note (H-17)', () => {
     writeFileSync(path.join(root, 'd.json'), JSON.stringify({ ...INPUT, alternatives: ['wait'], revert: 'reopen the design', resolves: 'q-20261013T090000000Z-main-0000' }));
     const r = JSON.parse(cli(['decision', 'add', '--data-file', 'd.json', '--task', 'T5-2', '--session', 'main']).stdout);
     const text = 'diseño aprobado (v4) → approve: ronda 2 sin critical';
+    // Carry 6: the note's id comes from the decision (its time, the session and its number), never from chance.
     expect(r.publish).toEqual([
-      { op: 'set', collection: 'notes', doc_id: '20261013T100000000Z-main-0000', data: { ts: at(0), type: 'decision', author: 'session:main', text, taskId: 'T5',
+      { op: 'set', collection: 'notes', doc_id: '20261013T100000000Z-main-d1', data: { ts: at(0), type: 'decision', author: 'session:main', text, taskId: 'T5',
         decision: { point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', alternatives: ['wait'], why: 'ronda 2 sin critical', revert: 'reopen the design', auto: true } } },
-      { op: 'update', collection: 'notes', doc_id: 'q-20261013T090000000Z-main-0000', data: { answer: text, answeredBy: 'session:main', answeredAt: at(0), answeredByNote: '20261013T100000000Z-main-0000' } },
+      { op: 'update', collection: 'notes', doc_id: 'q-20261013T090000000Z-main-0000', data: { answer: text, answeredBy: 'session:main', answeredAt: at(0), answeredByNote: '20261013T100000000Z-main-d1' } },
     ]);
     expect(readEvents(root).at(-1)).not.toHaveProperty('resolves');
   });
@@ -193,6 +194,41 @@ describe('decision add --session publishes the decision note (H-17)', () => {
     const before = readEvents(root).length;
     expect(cli(['decision', 'add', '--data-file', 'bad.json', '--session', 'main']).code).toBe(2);
     expect(cli(['decision', 'add', '--data-file', 'd.json', '--session', 'a b']).code).toBe(2);
+    // Carry 6: a resolves that is not a string, or one without --session (nothing would close the question), is exit 2 too.
+    writeFileSync(path.join(root, 'num.json'), JSON.stringify({ ...INPUT, resolves: 7 }));
+    expect(cli(['decision', 'add', '--data-file', 'num.json', '--session', 'main']).code).toBe(2);
+    writeFileSync(path.join(root, 'q.json'), JSON.stringify({ ...INPUT, resolves: 'q-1' }));
+    const lone = cli(['decision', 'add', '--data-file', 'q.json']);
+    expect(lone.code).toBe(2);
+    expect(lone.stderr).toContain('--session');
     expect(readEvents(root)).toHaveLength(before);
+  });
+  it('carry 6: the same decision gives the same note id whatever the chance; the next one its own', () => {
+    writeFileSync(path.join(root, 'd.json'), JSON.stringify(INPUT));
+    const id = (rand: number) => JSON.parse(run(['decision', 'add', '--data-file', 'd.json', '--session', 'main'], { cwd: root, now: () => new Date(at(0)), env: {}, rand: () => rand }).stdout).publish[0].doc_id;
+    expect(id(0.1)).toBe('20261013T100000000Z-main-d1');
+    expect(id(0.9)).toBe('20261013T100000000Z-main-d2');
+  });
+  it('carry 6: a user decision is not auto, one without a task has no taskId, and the text is clean and never splits a character', () => {
+    const rlo = String.fromCharCode(0x202e), face = String.fromCodePoint(0x1f600);
+    writeFileSync(path.join(root, 'u.json'), JSON.stringify({ ...INPUT, by: 'user', what: `a${rlo}b${String.fromCharCode(7)}c`, why: face.repeat(600) }));
+    const note = JSON.parse(cli(['decision', 'add', '--data-file', 'u.json', '--session', 'main']).stdout).publish[0].data;
+    expect(note.decision.auto).toBe(false);
+    expect(note).not.toHaveProperty('taskId');
+    expect(note.text.startsWith('a b c → approve: ')).toBe(true);
+    expect(note.text).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/);
+    expect(Array.from(note.decision.why)).toHaveLength(500);
+  });
+  it('carry 6: with --db, a question already answered is not answered again: the update is left out and said', () => {
+    mkdirSync(path.join(root, 'db', 'notes'), { recursive: true });
+    writeFileSync(path.join(root, 'db', 'notes', 'q-1.json'), JSON.stringify({ ts: at(-5), type: 'question', author: 'session:x', text: '?', answer: 'done already', answeredBy: 'user:me' }));
+    writeFileSync(path.join(root, 'db', 'notes', 'q-2.json'), JSON.stringify({ ts: at(-5), type: 'question', author: 'session:x', text: '?' }));
+    const add = (q: string) => { writeFileSync(path.join(root, `${q}.json`), JSON.stringify({ ...INPUT, resolves: q })); return JSON.parse(cli(['decision', 'add', '--data-file', `${q}.json`, '--session', 'main', '--db', 'db']).stdout); };
+    const answered = add('q-1');
+    expect(answered.publish).toHaveLength(1);
+    expect(answered.resolvesRefused).toContain('q-1');
+    const open = add('q-2');
+    expect(open.publish.map((w: { doc_id: string }) => w.doc_id)).toContain('q-2');
+    expect(open).not.toHaveProperty('resolvesRefused');
   });
 });

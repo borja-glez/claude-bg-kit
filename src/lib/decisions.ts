@@ -49,7 +49,11 @@ const cp = (n: number) => String.fromCharCode(n);
 // eslint-disable-next-line no-control-regex
 const UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(0x202a)}-${cp(0x202e)}${cp(0x2066)}-${cp(0x2069)}]`, 'g');
 /** One line: C0, DEL and C1 controls and bidi overrides become spaces, whitespace collapses, clipped to `max`. */
-export const clean = (s: string, max: number): string => s.replace(UNSAFE, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+/** One line without control or bidi characters, at most `max` code points (carry 6: a clip never splits a surrogate pair). */
+export const clean = (s: string, max: number): string => {
+  const t = s.replace(UNSAFE, ' ').replace(/\s+/g, ' ').trim();
+  return t.length <= max ? t : Array.from(t).slice(0, max).join('');
+};
 const text = (x: unknown, max: number): string | null => (str(x) ? clean(x, max) || null : null);
 const ident = (x: unknown, re: RegExp): string | null => (str(x) && re.test(x) && notDots(x) ? x : null);
 

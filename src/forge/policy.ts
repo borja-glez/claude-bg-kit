@@ -20,6 +20,10 @@ const DESTRUCTIVE = new RegExp([
 ].join('|'), 'iu');
 // I2: path segments that name a sensitive area, as a substring (oauth, authentication, secrets, permissions, cryptography...).
 const SENSITIVE_PATH = /auth|login|secret|credential|token|permission|session|crypto|security/i;
+// Carry 5: the authentication words of a title or a rationale that triage's zone table (shared, untouched) misses: sign-in
+// and its forms, logins, credentials, API keys, password hashing, cryptography; in Spanish credenciales and claves. Only
+// English and Spanish are read: a proposal in another language is not judged by its words (the README says so).
+const SENSITIVE_TEXT = /\b(?:sign[\s-]?(?:in|on|up)s?|log[\s-]?ins?|logins|credentials?|api[\s-]?keys?|bcrypt|argon2|scrypt|hash(?:ing|es)?\s+(?:the\s+)?passwords?|password\s+hash\w*|hashing|cryptograph\w*|credenciales?|claves?)\b/i;
 // Minor 4: compatibility forms folded, zero-width and format characters stripped, before any match.
 const clean = (s: string): string => String(s).normalize('NFKC').replace(/\p{Cf}/gu, '');
 // A letter outside the Latin script (a Cyrillic «а» inside «drop»): it may hide a word, so nothing is approved.
@@ -39,15 +43,16 @@ function hasUnnegated(text: string, re: RegExp): boolean {
 
 // Only low-risk, verifiable work is approved without the user (D-16, K2-16). Every rule fails safe: when in doubt the
 // proposal goes to the owner. It needs a concrete, safe path (no glob); a tests proposal names a test file; nothing
-// proposes deleting or migrating data; nothing touches a sensitive zone by its path or by its words; no letter outside
-// the Latin script hides in the title, the rationale or the path.
+// proposes deleting or migrating data (in its words or in its evidence, carry 5); nothing touches a sensitive zone by
+// its path or by its words; no letter outside the Latin script hides in the title, the rationale or the path.
 export function autoApprovable(p: ProposalDoc): boolean {
   if (p.risk !== 'low') return false;
   const text = clean(`${p.title} ${p.rationale}`);
+  const evidence = clean(typeof p.evidence === 'string' ? p.evidence : '');
   const where = clean(typeof p.path === 'string' ? p.path : '').replace(/\\/g, '/');
   if (!where || where.includes('*') || !safeZone(where)) return false;
   if (NON_LATIN.test(text) || NON_LATIN.test(where)) return false;
-  if (DESTRUCTIVE.test(text) || DESTRUCTIVE.test(where) || SENSITIVE_PATH.test(where)) return false;
+  if (DESTRUCTIVE.test(text) || DESTRUCTIVE.test(evidence) || DESTRUCTIVE.test(where) || SENSITIVE_PATH.test(where) || SENSITIVE_TEXT.test(text)) return false;
   if (zonesFromPaths([where]).length || zonesFromText(`${text} ${where}`).length) return false;
   switch (p.category) {
     case 'tests': return TEST_PATH.test(where);

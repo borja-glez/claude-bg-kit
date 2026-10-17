@@ -102,10 +102,15 @@ export function run(argv: string[], io: Io): Result {
         // G-25: with --design, each design_ref must name a section of the design (a warning, never a failure).
         let refs = '';
         const designArg = flag('design');
+        // Carry 8: --design without its file is an error, not a silent skip; a file that cannot be read and one that is
+        // no design say so apart.
+        if (args.includes('--design') && (!designArg || designArg.startsWith('--'))) return fail('validate: --design needs the design file', 2);
         if (designArg) {
+          let text: string;
+          try { text = readFileSync(abs(designArg), 'utf8'); } catch (e) { return fail(`validate: cannot read the design ${designArg}: ${(e as Error).message}`, 2); }
           let slugs: Set<string>;
-          try { slugs = new Set(['_intro', ...parseDesign(readFileSync(abs(designArg), 'utf8')).sections.map(s => s.slug)]); }
-          catch (e) { return fail(`validate: cannot read the design ${designArg}: ${(e as Error).message}`, 2); }
+          try { slugs = new Set(['_intro', ...parseDesign(text).sections.map(s => s.slug)]); }
+          catch (e) { return fail(`validate: ${designArg} is not a design: ${(e as Error).message}`, 2); }
           const unknown = p.tasks.filter(t => t.design_ref && !slugs.has(t.design_ref)).map(t => `${t.id} (${t.design_ref})`);
           if (unknown.length) refs = `\nwarning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(', ')}`;
         }
@@ -138,7 +143,7 @@ export function run(argv: string[], io: Io): Result {
         const now = io.now().toISOString();
         // G-13, G-14: the snapshot says which waypoint built the page and, with --states, the states the last listing saw
         // (the page shows them until the database answers, and offline).
-        const states = flag('states') ? statesOf(abs(flag('states')!)) : null;
+        const states = flag('states') ? statesOf(abs(flag('states')!), p.tasks.map(t => t.id)) : null;
         const snapshot = { ...buildDocs(p, now), pageVersion: WAYPOINT_VERSION, ...(states ? { states: states.states, statesAt: states.at } : {}) };
         const tpl = readFileSync(path.join(io.assetsDir, 'roadmap.template.html'), 'utf8');
         const html = tpl
@@ -896,19 +901,21 @@ function readDocs<T = unknown>(dir: string | undefined): Record<string, T> {
 }
 
 /** G-14: the states a `state` listing holds (id → status) and when its newest valid file was written; null with none. */
-function statesOf(dir: string): { states: Record<string, TaskStatus>; at: string } | null {
+function statesOf(dir: string, taskIds: readonly string[]): { states: Record<string, TaskStatus>; at: string } | null {
   if (!existsSync(dir)) return null;
   const states: Record<string, TaskStatus> = {};
   let newest = 0;
-  for (const f of readdirSync(dir).filter(n => n.endsWith('.json')).sort()) {
-    const id = f.slice(0, -5);
-    if (!isPlanId(id)) continue;
+  // Carry 9: only the plan's tasks, one file each (so the snapshot never grows past the plan), and a state counts only
+  // once its file's time is read.
+  for (const id of [...new Set(taskIds)].filter(isPlanId).sort()) {
+    const file = path.join(dir, `${id}.json`);
     try {
-      const doc = JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as { status?: unknown } | null;
+      const doc = JSON.parse(readFileSync(file, 'utf8')) as { status?: unknown } | null;
       if (!doc || typeof doc.status !== 'string' || !(TASK_STATUSES as readonly string[]).includes(doc.status)) continue;
+      const mtime = statSync(file).mtimeMs;
       states[id] = doc.status as TaskStatus;
-      newest = Math.max(newest, statSync(path.join(dir, f)).mtimeMs);
-    } catch { /* a broken file is left out */ }
+      newest = Math.max(newest, mtime);
+    } catch { /* a missing or broken file is left out */ }
   }
   return Object.keys(states).length ? { states, at: new Date(newest).toISOString() } : null;
 }

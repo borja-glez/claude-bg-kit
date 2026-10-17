@@ -57,10 +57,19 @@ export function setDesignStatus(text: string, status: DesignMeta['status']): str
   return `${bom}${m[1]}${lines.join(eol)}${m[3]}${rest.slice(m[0].length)}`;
 }
 
+/** Carry 8: the longest slug, the limit of a plan task's `design_ref`, so a task can name any section. */
+export const SLUG_MAX = 80;
+/** `slug` cut to `max` characters, without a dash left at its end. */
+const cutSlug = (slug: string, max: number): string => slug.slice(0, max).replace(/-+$/, '');
+
 export function slugify(heading: string): string {
-  return heading.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'section';
+  const slug = heading.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return cutSlug(slug, SLUG_MAX) || 'section';
 }
+
+/** The `n`-th section with slug `base` (n ≥ 2): its `-n` added after the cut, so it stays at most SLUG_MAX. */
+const nthSlug = (base: string, n: number): string => `${cutSlug(base, SLUG_MAX - `-${n}`.length)}-${n}`;
 
 /**
  * Splits a markdown body into sections. Only ATX headings `##` and `###` open a
@@ -92,7 +101,7 @@ function parseSections(body: string): { intro: string; sections: Section[] } {
       flush();
       const base = slugify(isHeading[2]);
       let slug = base;
-      for (let n = 2; seen.has(slug); n++) slug = `${base}-${n}`;
+      for (let n = 2; seen.has(slug); n++) slug = nthSlug(base, n);
       seen.add(slug);
       cur = { level: isHeading[1].length as 2 | 3, heading: isHeading[2], slug, text: '' };
     } else if (cur) {

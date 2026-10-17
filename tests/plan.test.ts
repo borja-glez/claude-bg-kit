@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan, PlanError } from '../src/lib/plan.js';
+import { planHash } from '../src/lib/sync.js';
 
 const fixture = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8');
 
@@ -92,6 +93,17 @@ describe('plan schema: the links to the design (G-25, K3-08)', () => {
       base.replace('    title: Esquema de pedidos\n', '    title: Esquema de pedidos\n    design_ref: "Arquitectura general"\n'),
       base.replace('  - { id: F1, name: Base, plan_status: committed }', `  - { id: F1, name: Base, plan_status: committed, goal: "${'g'.repeat(301)}" }`),
       base.replace('version: "0.1"\n', 'version: "0.1"\ndesign_version: 0\n'),
+      // Carry 8: a target that is no day of the calendar.
+      base.replace('    phases: [F1, F2]', '    phases: [F1, F2]\n    target: "2026-02-30"'),
+      base.replace('    phases: [F1, F2]', '    phases: [F1, F2]\n    target: "2026-13-01"'),
     ]) expect(() => parsePlan(bad)).toThrow(PlanError);
+  });
+  it('carry 8: the design intro is a design_ref, and the hash of a plan without the new fields is as before', () => {
+    const intro = parsePlan(base.replace('    title: Esquema de pedidos\n', '    title: Esquema de pedidos\n    design_ref: _intro\n'));
+    expect(intro.tasks[0].design_ref).toBe('_intro');
+    // The new keys absent: none of them reaches what planHash hashes, so a hash stored before wave 4 still matches.
+    const hashed = JSON.stringify(parsePlan(base));
+    for (const k of ['"design_version"', '"target"', '"goal"', '"design_ref"']) expect(hashed, k).not.toContain(k);
+    expect(planHash(parsePlan(base.replace('version: "0.1"\n', 'version: "0.1"\ndesign_version: 7\n')))).not.toBe(planHash(parsePlan(base)));
   });
 });

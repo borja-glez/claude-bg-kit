@@ -89,5 +89,9 @@ describe('task batches (A-14)', () => {
     const rlo = String.fromCharCode(0x202e);
     expect(cleanText(`  a\tb\r\nc${rlo}d ${String.fromCharCode(7)} `, 10)).toBe('a b cd');
     expect(cleanText('x'.repeat(20), 5)).toBe('xxxxx');
+    // Carry 1: clipped by code point, so a cut never leaves half a surrogate pair.
+    const face = String.fromCodePoint(0x1f600);
+    expect(cleanText(`${'a'.repeat(4)}${face}b`, 5)).toBe(`${'a'.repeat(4)}${face}`);
+    expect(cleanText(face.repeat(10), 3)).toBe(face.repeat(3));
   });
 });

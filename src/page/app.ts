@@ -720,7 +720,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   const onErr = () => { model.offline = true; schedule(); };
   const rebuild = () => { if (model.meta && phaseDocs.length) model.plan = planViewFromDocs(model.meta, phaseDocs); };
   // A-10: the metrics live in meta/metrics; a roadmap a forge before wave 4 wrote keeps them in meta/project.metrics.
-  let projectMetrics: MetaDoc['metrics'] = model.meta?.metrics ?? {};
+  // Carry 7: no meta yet (an empty snapshot) is a missing project, which mergeMetrics takes as it is.
+  let projectMetrics: MetaDoc['metrics'] | null = model.meta ? model.meta.metrics : null;
   let metricsDoc: MetaDoc['metrics'] | null = null;
   const withMetrics = () => { if (model.meta) model.meta = { ...model.meta, metrics: mergeMetrics(projectMetrics, metricsDoc) }; };
   // H-04: with ?debug=1, each snapshot of a collection replaces its list of what the normalizers dropped or coerced.

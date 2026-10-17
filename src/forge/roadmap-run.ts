@@ -1,6 +1,6 @@
 // G-07, G-04 (data): runs/<runId>, the summary of a forge execution once it ends (or of a Small, Medium or Large task
 // closed outside one, when the project has a roadmap), and `cleanup`, the run's executor sessions to delete from it.
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { listDecisions } from './decisions.js';
 import { eventsSince, readExecution, executionTaskFile } from './execution.js';
@@ -11,6 +11,8 @@ import { allMembersOf } from './members.js';
 import { integrationAt } from './roadmap-sources.js';
 import { eventsOf, projectOf, readWorkDir, type TaskRef } from './task-ref.js';
 import { compactTs } from '../lib/ids.js';
+import { cleanText } from '../lib/batches.js';
+import { sha256Hex } from '../lib/sha256.js';
 import { isSafeId, normalizePublicTask, type ExecutionState } from '../lib/execution-state.js';
 import { statusKey } from '../lib/forge-status.js';
 import { fitRunSummary, type RunSummaryDoc, type RunSummaryTask, type RunTaskStatus } from '../lib/run-summary.js';
@@ -67,8 +69,9 @@ function row(main: string, events: readonly LedgerEvent[], ref: TaskRef, status:
   const mine = dated ? eventsSince(eventsOf(events, ref), dated) : eventsOf(events, ref);
   const rounds = new Set(mine.filter(e => e.kind === 'verdict' && typeof e.dir === 'string').map(e => String(e.dir))).size;
   const deferred = deferredCount(main, ref, events, mine, dated);
+  const clean = title ? cleanText(title, 200) : '';
   return {
-    id: ref.task, ...(title ? { title: title.slice(0, 200) } : {}), status, ...(seconds !== undefined ? { seconds } : {}),
+    id: ref.task, ...(clean ? { title: clean } : {}), status, ...(seconds !== undefined ? { seconds } : {}),
     ...(rounds ? { rounds: Math.min(rounds, 99) } : {}), ...(deferred ? { deferred: Math.min(deferred, 999) } : {}),
   };
 }
@@ -92,11 +95,16 @@ function runSummary(main: string, e: ExecutionState, now: Date): RunSummaryDoc {
   const project = e.kind === 'plan' ? e.project : null;
   const tasks = Object.entries(e.tasks).map(([id, t]) => row(main, events, { project, task: id }, t.status, t.title, secondsOf(t.startedAt, t.finishedAt), e.startedAt));
   // An ephemeral run lists the requests it never started too.
-  if (e.kind === 'ephemeral') for (const l of readLoose(main, e.runId)?.tasks ?? []) if (!e.tasks[l.id]) tasks.push({ id: l.id, title: l.title.slice(0, 200), status: 'queued' });
+  if (e.kind === 'ephemeral') {
+    for (const l of readLoose(main, e.runId)?.tasks ?? []) {
+      const title = cleanText(l.title, 200);
+      if (!Object.hasOwn(e.tasks, l.id)) tasks.push({ id: l.id, ...(title ? { title } : {}), status: 'queued' });
+    }
+  }
   const final = events.filter(x => x.kind === 'verdict' && x.task === `${e.project}-final` && x.ts >= e.startedAt).at(-1);
   const n = (v: unknown) => (int(v, 0, 999) ? v : 0);
   return {
-    v: 1, runId: e.runId, kind: e.kind, mode: e.mode, parallel: e.parallel, branch: e.branch, target: e.base, coordinator: e.coordinator,
+    v: 1, runId: e.runId, kind: e.kind, mode: e.mode, parallel: e.parallel, branch: cleanText(e.branch, 200), target: cleanText(e.base, 200), coordinator: e.coordinator,
     startedAt: e.startedAt, endedAt: e.closedAt ?? e.lastStepAt ?? now.toISOString(), stopReason: e.stopReason, closedBy: e.closedBy ?? null,
     merged: e.closedBy === 'merge', tasks, loose: e.kind === 'ephemeral',
     finalReview: final && (final.action === 'accept' || final.action === 'fix' || final.action === 'redo')
@@ -106,8 +114,29 @@ function runSummary(main: string, e: ExecutionState, now: Date): RunSummaryDoc {
   };
 }
 
-function singleSummary(io: RunIo, main: string, task: string, given: string | null | undefined, session: string, now: Date): RunSummaryDoc {
-  const events = readEvents(io.cwd);
+/**
+ * The id of a single task's summary, `single-<T>-<instant>`, at most 120 characters (normalizeRunSummary's limit): a task
+ * id over 64 characters is cut there and followed by 12 hex digits of its SHA-256, so the same task keeps the same id.
+ */
+function singleRunId(task: string, at: Date): string {
+  const id = `single-${task}-${compactTs(at)}`;
+  return id.length <= 120 ? id : `single-${task.slice(0, 64)}-${sha256Hex(task).slice(0, 12)}-${compactTs(at)}`;
+}
+
+/** Carry 3: of `.forge/work/run/runs-*.json`, the summaries roadmap-run wrote, the newest RUNS_KEPT stay. */
+const RUNS_KEPT = 50;
+function pruneRuns(dir: string): void {
+  let names: string[];
+  try { names = readdirSync(dir).filter(n => /^runs-.+\.json$/.test(n)); } catch { return; }
+  if (names.length <= RUNS_KEPT) return;
+  const dated = names.map(n => { try { return { n, t: statSync(path.join(dir, n)).mtimeMs }; } catch { return { n, t: 0 }; } });
+  dated.sort((a, b) => b.t - a.t || (a.n < b.n ? 1 : -1));
+  for (const { n } of dated.slice(RUNS_KEPT)) rmSync(path.join(dir, n), { force: true });
+}
+
+// Carry 3: the events, the status and the integration all come from the main checkout, wherever this runs.
+function singleSummary(main: string, task: string, given: string | null | undefined, session: string, now: Date): RunSummaryDoc {
+  const events = readEvents(main);
   const project = given ?? projectOf(events, task);
   if (project !== null && !isSafeId(project)) throw new RoadmapRunError(2, 'roadmap-run: --project is not a project id');
   const key = statusKey(task, project);
@@ -117,12 +146,12 @@ function singleSummary(io: RunIo, main: string, task: string, given: string | nu
   if (s.path !== 'small' && s.path !== 'medium' && s.path !== 'large') throw new RoadmapRunError(2, `roadmap-run: ${task} is ${s.path || 'not triaged'}; only a Small, Medium or Large task has a run summary`);
   const started = s.taskStartedAt ?? s.ts;
   const at = Number.isFinite(Date.parse(started)) ? new Date(started) : now;
-  const integ = integrationAt(io.cwd);
+  const integ = integrationAt(main);
   const merged = !!s.doneAt && !!integ?.merged;
   const t = row(main, events, { project, task }, !s.doneAt ? 'running' : merged ? 'integrated' : 'accepted', null, secondsOf(started, s.doneAt));
   return {
-    v: 1, runId: `single-${task}-${compactTs(at)}`, kind: 'single', mode: 'single', parallel: 1,
-    branch: integ?.branch ?? 'HEAD', target: integ?.target ?? 'HEAD', coordinator: session,
+    v: 1, runId: singleRunId(task, at), kind: 'single', mode: 'single', parallel: 1,
+    branch: cleanText(integ?.branch ?? 'HEAD', 200) || 'HEAD', target: cleanText(integ?.target ?? 'HEAD', 200) || 'HEAD', coordinator: session,
     startedAt: at.toISOString(), endedAt: s.doneAt ?? now.toISOString(), stopReason: s.doneAt ? 'finished' : null, closedBy: null,
     merged, tasks: [t], loose: project === null, finalReview: null,
     decisions: listDecisions(main, { task, auto: true }).length, deferred: t.deferred ?? 0,
@@ -151,10 +180,12 @@ export function roadmapRun(io: RunIo, o: RunOptions): RunGenerated {
     if (!isSafeId(task)) throw new RoadmapRunError(2, 'roadmap-run: --task is not a task id');
     const session = o.session ?? 'main';
     if (!isSafeId(session)) throw new RoadmapRunError(2, 'roadmap-run: --session is not a session id');
-    doc = singleSummary(io, main, task, o.project, session, now);
+    doc = singleSummary(main, task, o.project, session, now);
   }
   const fit = fitRunSummary(doc);
-  const file = path.resolve(io.cwd, o.out ?? path.join(main, '.forge', 'work', 'run', `runs-${fit.doc.runId}.json`));
+  const runDir = path.join(main, '.forge', 'work', 'run');
+  const file = path.resolve(io.cwd, o.out ?? path.join(runDir, `runs-${fit.doc.runId}.json`));
   writeJsonAtomic(file, fit.doc);
+  pruneRuns(runDir);
   return { write: { op: 'set', collection: 'runs', doc_id: fit.doc.runId, file_path: file }, cleanup, bytes: fit.bytes, dropped: fit.dropped, doc: fit.doc };
 }

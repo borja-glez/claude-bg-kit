@@ -4,7 +4,8 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { appendEvent, forgeDir, readEvents, type LedgerEvent } from './ledger.js';
-import { MAX_NOTE } from '../lib/notes.js';
+import { MAX_NOTE, NOTE_ID } from '../lib/notes.js';
+import { compactTs } from '../lib/ids.js';
 import type { Write } from '../lib/sync.js';
 import { attribute, baseOf, projectOf } from './task-ref.js';
 import {
@@ -158,8 +159,11 @@ export function renderDecisionsMd(list: Numbered[], scope: string, locale: strin
   return out.join('\n');
 }
 
-/** H-17: a note id of the roadmap (an event id, or the page's own id): no `/`, at most 160 characters. */
-export const NOTE_ID = /^[A-Za-z0-9_.:~@+-]{1,160}$/;
+/** H-17: a note id of the roadmap: the same rule as the page's (carry 6, one regex). */
+export { NOTE_ID };
+
+/** Carry 6: the id of a decision's note, derived from the decision (its time, the session and its number), never from chance. */
+export const decisionNoteId = (event: LedgerEvent, session: string, n: number): string => `${compactTs(new Date(event.ts))}-${session}-d${n}`;
 
 /**
  * H-17: the roadmap writes of a decision, for the skill to send in one batch: its decision note (`notes/<eid>`, the
@@ -168,7 +172,8 @@ export const NOTE_ID = /^[A-Za-z0-9_.:~@+-]{1,160}$/;
 export function decisionWrites(i: { event: LedgerEvent; session: string; eid: string; resolves?: string | null }): Write[] {
   const d = normalizeDecision(i.event);
   if (!d) return [];
-  const text = `${d.what} → ${d.chosen}: ${d.why}`.slice(0, MAX_NOTE);
+  const full = `${d.what} → ${d.chosen}: ${d.why}`;
+  const text = full.length <= MAX_NOTE ? full : Array.from(full).slice(0, MAX_NOTE).join('');
   const author = `session:${i.session}`;
   const task = d.task ? baseOf(d.task) : null;
   const note: Write = {

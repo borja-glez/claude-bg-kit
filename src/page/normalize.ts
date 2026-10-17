@@ -1,8 +1,9 @@
 export { normalizeNote } from '../lib/notes.js';
 export { normalizeRunSummary } from '../lib/run-summary.js';
-import { isPlanId } from '../lib/ids.js';
+import { isPlanId, realDate } from '../lib/ids.js';
 import { parseForgeDocV2, UNCHECKED_MAX } from '../lib/roadmap-doc.js';
 import { cleanText, REASON_MAX } from '../lib/batches.js';
+import { LEASE_CAP_MINUTES } from '../lib/coordination.js';
 import { LOOSE_MAX_TASKS, LOOSE_STATUSES, STAGES, type ForgeV1, type LooseRunTask, type LooseStatus, type Commit, type EventDoc, type InfiniteDoc, type MessageDoc, type MetaDoc, type PhaseDoc, type PlanTask, type PlanTrack, type RunDoc, type SessionDoc, type Stage, type TaskExec, type TaskState } from '../lib/types.js';
 
 // Documents in the shared db are untrusted and may be malformed: coerce them into the shapes the renderer expects.
@@ -26,11 +27,17 @@ function keepAll<T>(list: unknown[], keep: (v: unknown) => v is T, field: string
   return out;
 }
 
+/** Carry 8: the longest design link the page keeps; a longer one is dropped whole, never cut into a broken URL. */
+const LINK_MAX = 500;
+// eslint-disable-next-line no-control-regex
+const NOT_IN_URL = new RegExp(`[\\s\\u0000-\\u001f\\u007f-\\u009f${[0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069].map(c => String.fromCharCode(c)).join('')}]`);
+
 /** G-25: meta/project.links, the design the plan comes from: an https url and a positive version; nothing else. */
 function linksOf(x: unknown): { links?: NonNullable<MetaDoc['links']> } {
   if (!isObj(x)) return {};
   const links: NonNullable<MetaDoc['links']> = {};
-  if (typeof x.design === 'string' && x.design.startsWith('https://')) links.design = x.design.slice(0, 500);
+  // One URL: https, at most LINK_MAX, without spaces, control or bidi characters (carry 8).
+  if (typeof x.design === 'string' && x.design.startsWith('https://') && x.design.length <= LINK_MAX && !NOT_IN_URL.test(x.design)) links.design = x.design;
   if (typeof x.designVersion === 'number' && Number.isInteger(x.designVersion) && x.designVersion > 0) links.designVersion = x.designVersion;
   return Object.keys(links).length ? { links } : {};
 }
@@ -50,7 +57,7 @@ export function normalizeMeta(x: unknown, report?: Report): MetaDoc | null {
     tracks: keepAll(arr(x.tracks), (t): t is PlanTrack => isObj(t) && typeof t.id === 'string' && typeof t.name === 'string', 'tracks', report),
     // G-25: a version's target is a date; any other value is dropped (and reported).
     versions: arr(x.versions).filter(isObj).map((v, i) => {
-      if (v.target === undefined || (typeof v.target === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.target))) return v;
+      if (v.target === undefined || (typeof v.target === 'string' && realDate(v.target))) return v;
       report?.(`versions[${i}].target`, 'dropped', kindOf(v.target));
       const { target: _t, ...rest } = v;
       return rest;
@@ -59,24 +66,32 @@ export function normalizeMeta(x: unknown, report?: Report): MetaDoc | null {
     metrics,
     syncedAt: str(x.syncedAt),
     ...linksOf(x.links),
-    ...(typeof x.waypointVersion === 'string' && /^\d+\.\d+\.\d+/.test(x.waypointVersion) ? { waypointVersion: x.waypointVersion.slice(0, 40) } : {}),
+    // Carry 9: x.y.z and nothing after it.
+    ...(typeof x.waypointVersion === 'string' && /^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(x.waypointVersion) ? { waypointVersion: x.waypointVersion } : {}),
   };
 }
+
+/** Carry 7: a commit's sha is at most 40 characters and its time an ISO date; a longer one is no commit. */
+const COMMIT_TEXT_MAX = 40;
+const commitOf = (lc: unknown): { sha: string; ts: string } | null =>
+  isObj(lc) && typeof lc.sha === 'string' && typeof lc.ts === 'string' && lc.sha.length > 0 && lc.sha.length <= COMMIT_TEXT_MAX && lc.ts.length <= COMMIT_TEXT_MAX
+    ? { sha: lc.sha, ts: lc.ts } : null;
 
 /** A-10: meta/metrics, the metrics written apart from meta/project (lastCommit, tests); null when it is not an object. */
 export function normalizeMetrics(x: unknown, report?: Report): MetaDoc['metrics'] | null {
   if (!isObj(x)) { if (x !== undefined && x !== null) report?.('metrics', 'dropped', kindOf(x)); return null; }
   const out: MetaDoc['metrics'] = {};
-  const lc = x.lastCommit;
-  if (isObj(lc) && typeof lc.sha === 'string' && typeof lc.ts === 'string') out.lastCommit = { sha: lc.sha, ts: lc.ts };
-  else if (lc !== undefined) report?.('lastCommit', 'dropped', kindOf(lc));
+  const lc = commitOf(x.lastCommit);
+  if (lc) out.lastCommit = lc;
+  else if (x.lastCommit !== undefined) report?.('lastCommit', 'dropped', kindOf(x.lastCommit));
   if (typeof x.tests === 'number' && Number.isInteger(x.tests) && x.tests >= 0) out.tests = x.tests;
   else if (x.tests !== undefined) report?.('tests', 'dropped', kindOf(x.tests));
   return out;
 }
 
-/** A-10: meta/metrics, field by field, completed with meta/project.metrics (what a forge before wave 4 wrote). */
-export const mergeMetrics = (project: MetaDoc['metrics'], doc: MetaDoc['metrics'] | null): MetaDoc['metrics'] => ({ ...project, ...(doc ?? {}) });
+/** A-10: meta/metrics, field by field, completed with meta/project.metrics (what a forge before wave 4 wrote); either may
+ *  be missing (carry 7: no meta/project yet, or a deleted meta/metrics). */
+export const mergeMetrics = (project: MetaDoc['metrics'] | null | undefined, doc: MetaDoc['metrics'] | null | undefined): MetaDoc['metrics'] => ({ ...(project ?? {}), ...(doc ?? {}) });
 
 function normalizeTask(t: Obj): PlanTask {
   return { ...(t as unknown as PlanTask), id: t.id as string, title: t.title as string, depends_on: strs(t.depends_on), zones: strs(t.zones), done_when: typeof t.done_when === 'string' ? t.done_when : '', track: str(t.track), phase: str(t.phase) };
@@ -91,9 +106,10 @@ export function normalizePhase(x: unknown, report?: Report): PhaseDoc | null {
     order: typeof x.order === 'number' && Number.isFinite(x.order) ? x.order : 0,
     tasks: keepAll(arr(x.tasks), (t): t is Obj => isObj(t) && typeof t.id === 'string' && typeof t.title === 'string', 'tasks', report).map(normalizeTask),
   };
-  // G-25: the phase's goal, text of at most 300 characters.
-  if (typeof x.goal === 'string' && x.goal.trim()) out.goal = x.goal.slice(0, 300);
-  else delete out.goal;
+  // G-25: the phase's goal, one clean line of at most 300 code points (carry 8); anything else is dropped and reported.
+  const goal = typeof x.goal === 'string' ? cleanText(x.goal, 300) : '';
+  if (goal) out.goal = goal;
+  else { delete out.goal; if (x.goal !== undefined) report?.('goal', 'dropped', kindOf(x.goal)); }
   return out;
 }
 
@@ -212,7 +228,8 @@ export function normalizeRun(x: unknown, report?: Report): RunDoc | null {
     kind, loose: kind === 'ephemeral' ? normalizeLoose(x.loose, report) : [],
     ...(isoOrNull(x.startedAt) ? { startedAt: x.startedAt as string } : {}),
     ...(isoOrNull(x.lastStepAt) ? { lastStepAt: x.lastStepAt as string } : {}),
-    ...(typeof x.stallReason === 'string' && x.stallReason ? { stallReason: x.stallReason.slice(0, 200) } : {}),
+    // Carry 3: one clean line (no control or bidi characters), clipped by code point.
+    ...(typeof x.stallReason === 'string' && cleanText(x.stallReason, 200) ? { stallReason: cleanText(x.stallReason, 200) } : {}),
     ...(isoOrNull(x.closedAt) ? { closedAt: x.closedAt as string } : {}),
   };
 }
@@ -223,7 +240,7 @@ function normalizeLoose(x: unknown, report?: Report): LooseRunTask[] {
   for (const [i, t] of arr(x).entries()) {
     if (out.length >= LOOSE_MAX_TASKS) break;
     if (!isObj(t) || typeof t.id !== 'string' || !isPlanId(t.id) || out.some(o => o.id === t.id)) { report?.(`loose[${i}]`, 'dropped', isObj(t) ? 'bad or repeated id' : kindOf(t)); continue; }
-    const title = typeof t.title === 'string' ? t.title.trim().slice(0, 200) : '';
+    const title = typeof t.title === 'string' ? cleanText(t.title, 200) : '';
     if (!title || !(LOOSE_STATUSES as readonly unknown[]).includes(t.status)) { report?.(`loose[${i}]`, 'dropped', 'no title or status'); continue; }
     out.push({
       id: t.id, title, status: t.status as LooseStatus,
@@ -258,10 +275,14 @@ export function normalizeInfinite(x: unknown, report?: Report): InfiniteDoc | nu
     const c = x.coordinator;
     if (c === null) out.coordinator = null;
     else if (isObj(c) && safeId(c.claude) && (c.sid === null || safeId(c.sid)) && isoOrNull(c.seenAt) && isoOrNull(c.leaseUntil)) {
-      out.coordinator = { sid: c.sid as string | null, claude: c.claude, seenAt: c.seenAt as string, leaseUntil: c.leaseUntil as string };
+      // Carry 4: a lease never reaches further than LEASE_CAP_MINUTES past the moment it was seen.
+      const cap = Date.parse(c.seenAt as string) + LEASE_CAP_MINUTES * 60_000;
+      const leaseUntil = Date.parse(c.leaseUntil as string) > cap ? new Date(cap).toISOString() : c.leaseUntil as string;
+      out.coordinator = { sid: c.sid as string | null, claude: c.claude, seenAt: c.seenAt as string, leaseUntil };
     } else report?.('coordinator', 'dropped', isObj(c) ? 'bad seat, Claude id or dates' : kindOf(c));
   }
-  if ('stopReason' in x) out.stopReason = typeof x.stopReason === 'string' && x.stopReason ? x.stopReason.slice(0, 80) : null;
+  // Carry 4: one clean line, as the other free text.
+  if ('stopReason' in x) out.stopReason = typeof x.stopReason === 'string' && cleanText(x.stopReason, 80) ? cleanText(x.stopReason, 80) : null;
   return out;
 }
 

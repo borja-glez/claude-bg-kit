@@ -3,8 +3,9 @@ import { mkdtempSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseRun, startRun, recordCycle, stopReason, saveRun, endRun, type RunState } from '../src/forge/run.js';
-import { LEASE_MINUTES } from '../src/lib/coordination.js';
+import { LEASE_CAP_MINUTES, LEASE_MINUTES } from '../src/lib/coordination.js';
 import { infiniteDocOf, seatOf } from '../src/forge/infinite-doc.js';
+import { runDocOf } from '../src/forge/run-doc.js';
 
 const T0 = new Date('2026-10-11T10:00:00.000Z');
 const ctx = (over: Partial<{ now: Date; stopFile: boolean; approvedPending: number; pendingProposals: number }> = {}) =>
@@ -148,6 +149,20 @@ describe('infiniteDocOf: meta/infinite with its coordinator (G-08)', () => {
     });
     expect(infiniteDocOf(base, { now, sid: null, sleepUntil: '2026-10-16T10:20:00.000Z', lastCycleAt: null }).coordinator!.leaseUntil).toBe('2026-10-16T10:25:00.000Z');
     expect(infiniteDocOf(base, { now, sid: null, sleepUntil: '2026-10-16T09:00:00.000Z', lastCycleAt: null }).coordinator!.leaseUntil).toBe(lease);
+    // Carry 4: a sleep far ahead never stretches the lease past the cap.
+    expect(infiniteDocOf(base, { now, sid: null, sleepUntil: '2099-01-01T00:00:00.000Z', lastCycleAt: null }).coordinator!.leaseUntil)
+      .toBe(new Date(now.getTime() + LEASE_CAP_MINUTES * 60_000).toISOString());
+  });
+  it('carry 3: meta/run carries its stall reason as one clean line', () => {
+    const rlo = String.fromCharCode(0x202e), bell = String.fromCharCode(7);
+    const e = { runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false, coordinator: 'main',
+      hookSession: 'h1', active: false, stopReason: 'stalled', stallReason: `T2${rlo} is${bell}blocked`, startedAt: '2026-10-16T09:00:00.000Z', lastStepAt: null,
+      lastBlockStep: null, sleepUntil: null, tasks: {}, closedAt: null, closedBy: null } as unknown as Parameters<typeof runDocOf>[1];
+    expect(runDocOf(path.join(tmpdir(), 'no-such-forge-root'), e).stallReason).toBe('T2 is blocked');
+  });
+  it('carry 4: the stop reason is one clean line', () => {
+    const rlo = String.fromCharCode(0x202e), bell = String.fromCharCode(7);
+    expect(infiniteDocOf(endRun(base, `budget${rlo}-hours${bell}`), { now, sid: null, sleepUntil: null, lastCycleAt: null }).stopReason).toBe('budget-hours');
   });
   it('an inactive run says why it stopped; a run of forge 0.15 (no session) has no coordinator', () => {
     expect(infiniteDocOf(endRun(base, 'budget-cycles'), { now, sid: null, sleepUntil: null, lastCycleAt: null })).toMatchObject({ active: false, stopReason: 'budget-cycles' });

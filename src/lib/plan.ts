@@ -1,7 +1,7 @@
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { TRACK_COLORS, type Plan } from './types.js';
-import { PLAN_ID_RE as SEG, isPlanId } from './ids.js';
+import { PLAN_ID_RE as SEG, isPlanId, realDate } from './ids.js';
 
 /** The plan's rule for task, track and phase ids (src/lib/ids.ts, free of yaml and zod for the page). */
 export { isPlanId };
@@ -32,7 +32,7 @@ const PlanSchema = z.object({
   version: z.string().min(1),
   design_version: z.number().int().positive().optional(),
   artifacts: z.object({ roadmap: z.string().url().optional(), design: z.string().url().optional() }).default({}),
-  versions: z.array(z.object({ id, phases: z.array(id), target: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'target must be a date (YYYY-MM-DD)').optional() })).default([]),
+  versions: z.array(z.object({ id, phases: z.array(id), target: z.string().refine(realDate, 'target must be a date (YYYY-MM-DD)').optional() })).default([]),
   tracks: z.array(z.object({ id, name: z.string().min(1), color: z.enum(TRACK_COLORS) })).min(1),
   phases: z.array(z.object({
     id,

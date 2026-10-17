@@ -793,6 +793,20 @@ export function commitInfo(git: (args: string[]) => string | null, sha: string):
   return { sha, ts: Number.isFinite(t) ? new Date(t).toISOString() : '', title, add: num(/(\d+) insertion/), del: num(/(\d+) deletion/) };
 }
 
+/**
+ * A-23, carry 10: the roadmap writes that give an ended plan run's coordinator tasks back (free, without owner, claim,
+ * start or exec), printed by forge stop, swarm close and the status of an ended run, so no skill composes them. A
+ * member's task stays with its session, and a loose task has no state/T. No if_version: the skill pins each write.
+ */
+export function releaseWrites(e: ExecutionState, ids: readonly string[]): { task: string; write: { op: 'update'; collection: 'state'; doc_id: string; data: Record<string, unknown> } }[] {
+  if (e.kind !== 'plan') return [];
+  const del = { __delete__: true };
+  return ids.filter(id => Object.hasOwn(e.tasks, id) && e.tasks[id].executor === 'subagents')
+    .map(id => ({ task: id, write: { op: 'update' as const, collection: 'state' as const, doc_id: id, data: { status: 'free', owner: del, claimedAt: del, startedAt: del, exec: del } } }));
+}
+/** The tasks an ended run leaves to release: running, or stopped by forge stop (K2-02). */
+const openTasks = (e: ExecutionState): string[] => Object.entries(e.tasks).filter(([, t]) => t.status === 'running' || t.status === 'stopped').map(([id]) => id);
+
 type Commit = ReturnType<typeof commitInfo>;
 /**
  * J-15, A-10: what a plan run's integration publishes, built here and by swarm step's recovery (an `integrated` again): the
@@ -1237,8 +1251,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       return json({
         present: state !== null, state, ...(state ? { work: tasksWork(main, state) } : {}), ...(coordinator ? { coordinator } : {}),
         ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}),
-        // J-15: meta/run as the roadmap takes it, built by the CLI.
-        publish: state ? { run: runDocOf(main, state) } : null,
+        // J-15: meta/run as the roadmap takes it, built by the CLI; carry 10: once the run ended, the writes that free the
+        // coordinator's tasks it left running or stopped.
+        publish: state ? { run: runDocOf(main, state), ...(!state.active ? { release: releaseWrites(state, openTasks(state)) } : {}) } : null,
       });
     }
     case 'propose': {
@@ -1289,6 +1304,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const stageArg = flag('stage') as Stage | undefined;
       if (stageArg !== undefined && !STAGES.includes(stageArg)) throw new UsageError(`swarm task: --stage must be one of ${STAGES.join('|')}`);
       const statusArg = flag('status') as ExecTask['status'] | undefined;
+      // Carry 2: a claim starts a task, as swarm report's does: it cannot go with a status that says the task is not running.
+      if (has('claim') && (statusArg ?? prev.status) !== 'running') throw new UsageError('swarm task: --claim starts a task and goes only with --status running');
       let detailArg: string | null | undefined;
       if (flag('detail-file')) {
         try { detailArg = readFileSync(path.resolve(io.cwd, flag('detail-file')!), 'utf8').trim().slice(0, 500) || null; } catch { throw new UsageError('swarm task: cannot read --detail-file'); }
@@ -1546,7 +1563,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       if (e.closedAt) return json({ closed: 'already', runId: e.runId, closedAt: e.closedAt, closedBy: e.closedBy ?? null });
       closeEnded(main, iso, 'close', lockDeps);
       // K2-02: forge stop leaves the tasks it stopped as stopped: they are released like running ones.
-      const open = Object.entries(e.tasks).filter(([, t]) => t.status === 'running' || t.status === 'stopped');
+      const open = openTasks(e).map(id => [id, e.tasks[id]] as const);
       // Every member of the run, not only those the role readers see: each is listed to message and its file goes.
       const sessions = allMembersOf(main, e.runId).map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
       // C4: the summary and its cleanup read the member files, so they are built before those files go.
@@ -1554,9 +1571,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       for (const m of sessions) rmSync(memberFile(main, m.sessionId), { force: true });
       return json({
         closed: true, runId: e.runId, kind: e.kind, stopReason: e.stopReason, closedAt: iso,
-        // The coordinator's own tasks go back to free on the roadmap; a member's task stays with its session.
-        // A loose task has no state/T to free, so an ephemeral run releases nothing.
-        release: e.kind !== 'plan' ? [] : open.filter(([, t]) => t.executor === 'subagents').map(([id]) => id),
+        // The coordinator's own tasks go back to free on the roadmap, as printed writes (carry 10); a member's task stays
+        // with its session. A loose task has no state/T to free, so an ephemeral run releases nothing.
+        release: releaseWrites(e, open.map(([id]) => id)),
         members: open.filter(([, t]) => t.executor !== 'subagents').map(([id]) => id),
         sessions,
         ...runs,

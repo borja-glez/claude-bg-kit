@@ -597,8 +597,9 @@ function integratedAgain(c: Ctx, task: string, t: ExecTask): void {
 /**
  * J-15: the roadmap batch of this step, built by the CLI: for each task the coordinator drives, the state/T write of
  * roadmap-doc (with the claim of a task the tick just started, and its started event); the coordinator's lease; meta/run.
+ * `read` is the one read of the ledger every task's write shares (a seam: tests count it).
  */
-function publishOf(io: Io, e: ExecutionState, started: Set<string>, versions: Versions, now: Date): Json {
+export function publishOf(io: Io, e: ExecutionState, started: Set<string>, versions: Versions, now: Date, read: (root: string) => LedgerEvent[] = readEvents): Json {
   const iso = now.toISOString();
   const own = new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
   const lease = (task: string) => {
@@ -609,7 +610,7 @@ function publishOf(io: Io, e: ExecutionState, started: Set<string>, versions: Ve
     return own;
   };
   // One read of the ledger for every task of the step.
-  const docIo = { ...io, events: readEvents(io.cwd) };
+  const docIo = { ...io, events: read(io.cwd) };
   const mine = Object.entries(e.tasks).filter(([, t]) => t.executor === 'subagents' && (t.status === 'running' || t.status === 'accepted')).map(([task]) => task);
   const tasks = mine.map(task => {
     const claim = started.has(task);

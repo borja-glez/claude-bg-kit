@@ -659,6 +659,22 @@ describe('notes', () => {
     expect(root.innerHTML).not.toContain('0000000');
     app.stop();
   });
+  it('carry 7: meta/metrics first, its tests over meta/project\'s, and a deleted meta/metrics falls back to meta/project', async () => {
+    const f = fakeDb();
+    const root = document.createElement('div');
+    const app = await start({ claude: { use: async () => f.db }, snapshot, root, now: () => NOW });
+    f.push('meta/metrics', { tests: 57, lastCommit: { sha: 'abc1234def', ts: '2026-10-11T11:00:00Z' } });
+    f.push('meta/project', { ...snapshot.meta, metrics: { tests: 41, lastCommit: { sha: '0000000old', ts: '2026-10-10T10:00:00Z' } } });
+    await flush();
+    expect(root.innerHTML).toContain('<b>57</b>');
+    expect(root.innerHTML).toContain('<b>abc1234</b>');
+    expect(root.innerHTML).not.toContain('<b>41</b>');
+    f.subs.get('meta/metrics')!({ exists: false, data: () => undefined });
+    await flush();
+    expect(root.innerHTML).toContain('<b>41</b>');
+    expect(root.innerHTML).toContain('<b>0000000</b>');
+    app.stop();
+  });
 });
 
 const PROP = { ts: '2026-10-11T10:00:00.000Z', category: 'perf', risk: 'low', title: 'Cache prices', rationale: 'why', evidence: 'bench', pillar: 'Fast checkout', status: 'proposed', source: 'scout', author: 'session:abc' };

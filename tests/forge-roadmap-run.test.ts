@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -141,5 +141,74 @@ describe('FORGE roadmap-run (G-07, G-04)', () => {
     expect(n.tasks).toHaveLength(4);
     expect(got).toEqual(['tasks[4] · dropped', 'tasks[5] · dropped']);
     for (const bad of [null, { ...doc, v: 2 }, { ...doc, runId: 'a b' }, { ...doc, kind: 'x' }, { ...doc, endedAt: 'later' }]) expect(normalizeRunSummary(bad)).toBeNull();
+  });
+});
+
+describe('roadmap-run: the final wave\'s carry 3', () => {
+  const rlo = String.fromCharCode(0x202e), bell = String.fromCharCode(7);
+  const summary = (...a: string[]) => { const r = out(run(['roadmap-run', ...a], io)); return { r, doc: JSON.parse(readFileSync(r.write.file_path, 'utf8')) }; };
+  it('titles, branch and target are cleaned of control and bidi characters, by the writer and by normalizeRunSummary', () => {
+    // The execution refuses such a branch on read; a title is plan text.
+    saveExecution(root, execution({ tasks: { T1: task('integrated', { title: `Ca${rlo}rt${bell}\nnow` }) } }));
+    const { doc } = summary('--run', RUN);
+    expect(doc).toMatchObject({ branch: 'forge/run-shop', target: 'main', tasks: [{ id: 'T1', title: 'Cartnow' }] });
+    const raw = { ...doc, branch: `x${rlo}y`, target: `a${bell}b`, tasks: [{ id: 'T1', status: 'integrated', title: `t${rlo}u` }] };
+    expect(normalizeRunSummary(raw)).toMatchObject({ branch: 'xy', target: 'a b', tasks: [{ title: 'tu' }] });
+    expect(normalizeRunSummary({ ...raw, branch: rlo })).toBeNull();
+  });
+  it('a --task id of up to 120 characters still gives a runId the summary\'s own validator accepts', () => {
+    const long = `T${'x'.repeat(99)}`;
+    appendEvent(root, { ts: ROADMAP_AT(250), kind: 'triage', task: long, project: 'shop', path: 'small', reasons: [] });
+    appendEvent(root, { ts: ROADMAP_AT(251), kind: 'phase', task: long, project: 'shop', phase: 'implement', brief: 1 });
+    const { doc } = summary('--task', long, '--project', 'shop');
+    expect(doc.runId.length).toBeLessThanOrEqual(120);
+    expect(normalizeRunSummary(doc)).not.toBeNull();
+    // The same task gives the same id.
+    expect(summary('--task', long, '--project', 'shop').doc.runId).toBe(doc.runId);
+  });
+  it('--task reads the events and the integration of the main checkout, also from a worktree', () => {
+    const wt = path.join(path.dirname(root), `${path.basename(root)}-wt`);
+    try {
+      g('worktree', 'add', '-q', '-b', 'side', wt);
+      const r = out(run(['roadmap-run', '--task', 'T1', '--project', 'shop'], { ...io, cwd: wt }));
+      expect(JSON.parse(readFileSync(r.write.file_path, 'utf8'))).toMatchObject({ branch: 'main', target: 'main', merged: true, tasks: [{ id: 'T1', rounds: 2 }] });
+    } finally {
+      try { g('worktree', 'remove', '--force', wt); } catch { rmSync(wt, { recursive: true, force: true }); }
+    }
+  });
+  it('keeps the newest 50 summaries in .forge/work/run', () => {
+    const dir = path.join(root, '.forge', 'work', 'run');
+    mkdirSync(dir, { recursive: true });
+    for (let i = 0; i < 55; i++) {
+      const f = path.join(dir, `runs-old-${String(i).padStart(2, '0')}.json`);
+      writeFileSync(f, '{}');
+      utimesSync(f, new Date(ROADMAP_AT(i)), new Date(ROADMAP_AT(i)));
+    }
+    writeFileSync(path.join(dir, 'agents.json'), '[]');
+    summary('--run', RUN);
+    const left = readdirSync(dir).filter(n => /^runs-.+\.json$/.test(n));
+    expect(left).toHaveLength(50);
+    expect(left).toContain(`runs-${RUN}.json`);
+    expect(left).not.toContain('runs-old-00.json');
+    expect(readdirSync(dir)).toContain('agents.json');
+  });
+  it('cleanup: more than 50 executor members, never the coordinator (listed as a member or as the by of a sessions task), a running member included', () => {
+    for (let i = 0; i < 52; i++) writeMember(root, { sessionId: `ex${i}`, role: 'executor', runId: RUN, task: 'T3', name: null, since: ROADMAP_AT(0), hookSession: null });
+    writeMember(root, { sessionId: 'main', role: 'executor', runId: RUN, task: 'T3', name: null, since: ROADMAP_AT(0), hookSession: null });
+    saveExecution(root, execution({ tasks: { ...execution().tasks, T5: task('running', { stage: 'review', executor: 'sessions' }), T6: task('stopped', { executor: 'sessions' }) } }));
+    pub('T5', 'live', 'sessions');
+    pub('T6', 'main', 'sessions');
+    const ids = out(run(['roadmap-run', '--run', RUN], io)).cleanup.map((x: { doc_id: string }) => x.doc_id);
+    expect(ids).toContain('live');
+    expect(ids).not.toContain('main');
+    expect(ids.filter((x: string) => /^ex\d+$/.test(x))).toHaveLength(52);
+  });
+  it('swarm close still closes when the summary cannot be written: runsError', () => {
+    saveExecution(root, execution({ closedAt: null, closedBy: null }));
+    rmSync(path.join(root, '.forge', 'work', 'run'), { recursive: true, force: true });
+    writeFileSync(path.join(root, '.forge', 'work', 'run'), 'not a folder');
+    const c = out(run(['swarm', 'close'], io));
+    expect(c).toMatchObject({ closed: true, runsError: expect.any(String) });
+    expect(c).not.toHaveProperty('runs');
   });
 });

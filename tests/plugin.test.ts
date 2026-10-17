@@ -937,8 +937,11 @@ describe('plugin layout', () => {
     const step7 = runRef('execution').split('\n').find(l => l.startsWith('7. **End.**'))!;
     const stop = read('plugins/forge/skills/stop/SKILL.md');
     for (const s of [step7, stop]) {
-      for (const w of ['FORGE swarm close', 'active: false', 'status: "free"', 'exec: {"__delete__": true}', 'owner: {"__delete__": true}']) expect(s).toContain(w);
+      for (const w of ['FORGE swarm close', 'active: false', 'release`', '`write`']) expect(s).toContain(w);
+      // Carry 10: the release of a task is a write the CLI prints; no skill composes it.
+      for (const w of ['status: "free"', 'exec: {"__delete__": true}']) expect(s, w).not.toContain(w);
     }
+    expect(step7).toContain('`publish.release`');
     for (const w of ['`stalled`', '`stopped`', '`budget`']) expect(step7).toContain(w);
     // Carry 2: a stopped or budget close also reaches the run's member sessions it prints.
     for (const w of ['`sessions`', '/forge:stop` step 2b']) expect(step7, w).toContain(w);
@@ -1323,7 +1326,9 @@ describe('plugin layout', () => {
     for (const w of ['`release`', '`members`', '`write`', 'if_version', 'FORGE swarm close', '{closed, runId, stopReason, release, members, sessions}']) expect(stop).toContain(w);
     expect(stop).not.toContain('.forge/members/');
     const step7 = runRef('execution').split('\n').find(l => l.startsWith('7. **End.**'))!;
-    expect(step7).toContain('`running` or `stopped` with `executor` `subagents`');
+    // Carry 10: the ended run's status prints those releases, stopped tasks included.
+    expect(step7).toContain('`publish.release`');
+    expect(step7).toContain('still `running` or `stopped`');
   });
   it('the ephemeral run says its tick closes it when it finishes (wave 0 handoff)', () => {
     expect(runRef('ephemeral')).toContain('`closedBy: merge`');
@@ -1510,8 +1515,9 @@ describe('plugin layout', () => {
 
   it('the waypoint skills that send CLI writes follow one pin rule stated in a waypoint reference (wave 4a)', () => {
     const rule = read('plugins/waypoint/skills/plan/references/roadmap-writes.md');
-    for (const w of ['NEWEST version you hold', 'only to create a document', 'On `version_mismatch`, re-read that one document', 'Never address one document twice in one batch',
-      'Never edit the printed data', '`meta/metrics`', '`meta/page`', '`sync --db`']) expect(rule, w).toContain(w);
+    // Carry 11: contracts only: the writes it covers, its sections, and the file ends with a newline.
+    for (const w of ['`meta/metrics`', '`meta/page`', '`sync --db`', '**Collections.**', '**Pin rule.**', '**Any other failure.**', 'clean-cache']) expect(rule, w).toContain(w);
+    expect(rule.endsWith('\n')).toBe(true);
     for (const f of ['work', 'plan']) {
       const md = read(`plugins/waypoint/skills/${f}/SKILL.md`);
       expect(md, f).toContain('references/roadmap-writes.md');
@@ -1519,7 +1525,23 @@ describe('plugin layout', () => {
     }
     // plan acts on sync's request to republish and writes meta/page after publishing.
     const plan = read('plugins/waypoint/skills/plan/SKILL.md');
-    for (const w of ['`republish: true`', 'do this step without asking', '`write`']) expect(plan, w).toContain(w);
+    for (const w of ['`republish: true`', 'meta/page']) expect(plan, w).toContain(w);
+  });
+  it('carry 11: the waypoint and forge references state the same pin rule, bullet by bullet (no drift)', () => {
+    const bullets = (text: string) => {
+      const from = text.indexOf('**Pin rule.**');
+      const block = text.slice(from, text.indexOf('\n\n', from));
+      // The rule's own words: the examples in parentheses and the plugin's own extra bullet aside.
+      return block.split('\n').filter(l => l.startsWith('- ')).map(l => l.replace(/\s*\([^)]*\)/g, '')).slice(0, 4);
+    };
+    const forge = bullets(runRef('roadmap-writes'));
+    const waypoint = bullets(read('plugins/waypoint/skills/plan/references/roadmap-writes.md'));
+    expect(forge).toHaveLength(4);
+    expect(waypoint).toEqual(forge);
+    // Its §4 step 4 says the sync batches come pinned and are sent as printed, as the reference says.
+    const step4 = read('plugins/waypoint/skills/plan/SKILL.md').split('\n').find(l => l.startsWith('4. For each batch'))!;
+    expect(step4).not.toContain('never pin or unpin one yourself');
+    expect(step4).toContain('references/roadmap-writes.md');
   });
   it('waypoint:plan hands page --publish-info the capabilities file it publishes, every time (final review I5)', () => {
     const plan = read('plugins/waypoint/skills/plan/SKILL.md');

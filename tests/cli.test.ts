@@ -87,6 +87,17 @@ describe('waypoint CLI', () => {
     expect(r.stdout).toContain('warning: 1 design_ref(s) not in the design: T002 (pagos)');
     expect(run(['validate', 'plan.yaml'], io).stdout).not.toContain('design_ref');
     expect(run(['validate', 'plan.yaml', '--design', 'nope.md'], io).code).toBe(2);
+    // Carry 8: several refs at once, the intro as a ref, --design without a file, and a file that is no design.
+    writeFileSync(p, readFileSync(p, 'utf8').replace('    title: Email de confirmación\n', '    title: Email de confirmación\n    design_ref: correo\n')
+      .replace('    design_ref: arquitectura\n', '    design_ref: _intro\n'));
+    expect(run(['validate', 'plan.yaml', '--design', 'design.md'], io).stdout).toMatch(/warning: 2 design_ref\(s\) not in the design: T002 \(pagos\), T\d+ \(correo\)/);
+    const bare = run(['validate', 'plan.yaml', '--design'], io);
+    expect(bare.code).toBe(2);
+    expect(bare.stderr).toContain('--design');
+    writeFileSync(path.join(dir, 'notdesign.md'), 'just text, no front matter\n');
+    const wrong = run(['validate', 'plan.yaml', '--design', 'notdesign.md'], io);
+    expect(wrong.code).toBe(2);
+    expect(wrong.stderr).toContain('is not a design');
   });
 
   it('page embeds a safe snapshot and the title', () => {
@@ -1804,9 +1815,12 @@ describe('page --publish-info and the sync line', () => {
     put('T001', 'done', '2026-10-11T09:45:00.000Z');
     put('T002', 'in_progress', '2026-10-11T09:30:00.000Z');
     put('T003', 'lost', '2026-10-11T09:50:00.000Z');
+    // Carry 9: only the plan's tasks are read; a stale one the plan dropped stays out (and its mtime does not count).
+    put('T999', 'done', '2026-10-11T09:59:00.000Z');
     const snap = snapshotOf(run(['page', 'plan.yaml', '--out', 'r.html', '--states', 'db/state'], io).stdout.trim());
     expect(snap).toMatchObject({ pageVersion: WP, states: { T001: 'done', T002: 'in_progress' }, statesAt: '2026-10-11T09:45:00.000Z' });
     expect(snap.states).not.toHaveProperty('T003');
+    expect(snap.states).not.toHaveProperty('T999');
   });
 });
 

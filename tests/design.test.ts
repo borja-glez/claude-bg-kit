@@ -63,6 +63,18 @@ describe('sections and words', () => {
   it('disambiguates duplicate headings', () => {
     expect(sectionsOf('## A\n\nx\n\n## A\n\ny\n').map(s => s.slug)).toEqual(['a', 'a-2']);
   });
+  it('carry 8: a long heading gives a slug of at most 80 characters, its -2 added after the cut, so a design_ref can name it', () => {
+    const heading = `${'Una sección con un título muy largo '.repeat(4)}y más`;
+    const slug = slugify(heading);
+    expect(slug.length).toBeLessThanOrEqual(80);
+    expect(slug).not.toMatch(/-$/);
+    const slugs = sectionsOf(`## ${heading}\n\nx\n\n## ${heading}\n\ny\n\n## ${heading}\n\nz\n`).map(s => s.slug);
+    expect(slugs).toHaveLength(3);
+    expect(new Set(slugs).size).toBe(3);
+    for (const s of slugs) expect(s, s).toMatch(/^[a-z0-9-]{1,80}$/);
+    expect(slugs[1].endsWith('-2')).toBe(true);
+    expect(slugs[2].endsWith('-3')).toBe(true);
+  });
   it('ignores headings inside fenced code', () => {
     expect(sectionsOf('## A\n\n```md\n## not a heading\n```\n').map(s => s.slug)).toEqual(['a']);
   });

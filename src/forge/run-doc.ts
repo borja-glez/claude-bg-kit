@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { executionTaskFile } from './execution.js';
 import { readLoose } from './loose.js';
 import { normalizePublicTask, type ExecutionState } from '../lib/execution-state.js';
+import { cleanText } from '../lib/batches.js';
 import type { LooseRunTask, LooseStatus, RunDoc } from '../lib/types.js';
 
 const STALL_MAX = 200;
@@ -25,7 +26,7 @@ function looseOf(root: string, e: ExecutionState): LooseRunTask[] {
     const status: LooseStatus = !t ? 'queued' : t.status === 'accepted' ? 'running' : t.status === 'stopped' ? 'blocked' : t.status;
     const from = t ? Date.parse(t.startedAt) : NaN, to = t?.finishedAt ? Date.parse(t.finishedAt) : NaN;
     return {
-      id: l.id, title: l.title, status, stage: t ? t.stage : null, agent: t?.agent ?? null,
+      id: l.id, title: cleanText(l.title, 200) || l.id, status, stage: t ? t.stage : null, agent: t?.agent ?? null,
       ...(Number.isFinite(from) && Number.isFinite(to) && to >= from ? { seconds: Math.round((to - from) / 1000) } : {}),
     };
   });
@@ -41,7 +42,9 @@ export function runDocOf(root: string, e: ExecutionState): RunDoc {
     startedAt: e.startedAt,
   };
   if (e.lastStepAt) doc.lastStepAt = e.lastStepAt;
-  if (e.stallReason) doc.stallReason = e.stallReason.slice(0, STALL_MAX);
+  // Carry 3: one clean line, as the page keeps it.
+  const stall = e.stallReason ? cleanText(e.stallReason, STALL_MAX) : '';
+  if (stall) doc.stallReason = stall;
   if (e.closedAt) doc.closedAt = e.closedAt;
   return doc;
 }

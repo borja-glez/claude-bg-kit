@@ -27,7 +27,7 @@ import type { PlanTask } from '../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { UsageError } from './errors.js';
-import { swarmCommand, restoringRegenerated, runSetup } from './swarm.js';
+import { swarmCommand, releaseWrites, restoringRegenerated, runSetup } from './swarm.js';
 import { reviewCommand } from './review.js';
 import { roadmapCommand } from './roadmap.js';
 import { readKeptAssets, runHolding } from '../roadmap-sources.js';
@@ -49,8 +49,8 @@ import { hookRoute } from '../route-hooks.js';
 import { liveJobs, noSlot, slotFor, withJob, writeJsonAtomic, type Slot } from '../jobs.js';
 import { sleepSync } from '../pid.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, permissionHash, hashMatches, LEARNED_HEADINGS, type Surface } from '../surfaces.js';
-import { addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionWrites, NOTE_ID, DecisionInputError } from '../decisions.js';
-import { eventId } from '../../lib/ids.js';
+import { addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionNoteId, decisionWrites, NOTE_ID, DecisionInputError } from '../decisions.js';
+import { normalizeNote } from '../../lib/notes.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
 import { claudeConfigDir, claudeJsonDir, locateSuperpowersFor, spLedgerDone, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
 import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute, type RouteDoc, type RouteOption, type RouteStage } from '../route.js';
@@ -452,16 +452,34 @@ function briefThreatModel(dir: string): string | null {
   try { const tm = loadConfig(dir).threatModel; return tm ? renderThreatModel(tm) : null; } catch { return null; }
 }
 
-/** The status each proposal's latest decision event in this checkout's ledger left it in: decide, confirm, a reopen (its `to`) and
- *  the policy's auto-approval; a policy that declined decided nothing. A pid with no such event is absent. */
-function lastDecisions(root: string): Record<string, string> {
-  const out: Record<string, string> = {};
+/** The status each proposal's latest decision event in this checkout's ledger left it in, and when: decide, confirm, a reopen
+ *  (its `to`) and the policy's auto-approval; a policy that declined decided nothing. A pid with no such event is absent. */
+function lastDecisions(root: string): Record<string, { status: string; ts: string }> {
+  const out: Record<string, { status: string; ts: string }> = {};
   for (const e of readEvents(root)) {
     if (e.kind !== 'proposal' || typeof e.id !== 'string') continue;
     const status = e.action === 'reopen' ? e.to : e.action === 'decide' || e.action === 'confirm' || (e.action === 'policy' && e.status === 'auto_approved') ? e.status : undefined;
-    if (typeof status === 'string') out[e.id] = status;
+    if (typeof status === 'string') out[e.id] = { status, ts: e.ts };
   }
   return out;
+}
+
+/** Carry 12: the rules of the roadmap page the last `proposals pull --approvals` read (meta/page.rules), kept in .forge/. */
+const approvalsPageFile = (root: string) => path.join(root, '.forge', 'approvals-page.json');
+function pulledRules(root: string): number {
+  try { const r = (JSON.parse(readFileSync(approvalsPageFile(root), 'utf8')) as { rules?: unknown }).rules; return typeof r === 'number' ? r : 0; } catch { return 0; }
+}
+
+/**
+ * The latest decision of this checkout that a mark must agree with (ownerCheck's `last`), or undefined when none binds it.
+ * Carry 12: an owner's mark newer than that decision (its decidedAt later than the event) is the owner's own later
+ * decision, taken on the page or in another checkout, and counts by itself; only on a roadmap with the owner rule
+ * (meta/page.rules ≥ PAGE_RULES at the last pull), where only the owner writes approvals/ and so decidedAt is the owner's.
+ */
+function bindingDecision(last: { status: string; ts: string } | undefined, mark: ApprovalDoc | null | undefined, ownerRule: boolean): string | undefined {
+  if (!last) return undefined;
+  if (ownerRule && mark && Date.parse(mark.decidedAt) > Date.parse(last.ts)) return undefined;
+  return last.status;
 }
 
 // What the stop conditions need from the repository: the stop file and the proposal mirror.
@@ -470,12 +488,13 @@ function stopContext(cwd: string, now: Date): StopContext {
   const proposals = loadProposals(cwd);
   const marks = loadApprovals(cwd);
   const last = lastDecisions(cwd);
+  const ownerRule = pulledRules(cwd) >= PAGE_RULES;
   return {
     now,
     stopFile: existsSync(stopFile(cwd)),
     // Wave 4: approved work counts only with the owner's mark (with or without a task, as before); one without a task also
     // needs the mark to be of its present text: an edited one never becomes a task, so it does not hold the queue open.
-    approvedPending: proposals.filter(p => p.taskId === undefined ? ownerCheck(p.id, p, marks[p.id], last[p.id]) === 'ok' : markMatches(p, marks[p.id])).length,
+    approvedPending: proposals.filter(p => p.taskId === undefined ? ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule)) === 'ok' : markMatches(p, marks[p.id])).length,
     pendingProposals: proposals.filter(p => p.status === 'proposed' || p.status === 'discussing').length,
   };
 }
@@ -485,10 +504,11 @@ function stopContext(cwd: string, now: Date): StopContext {
 function unownedReasons(root: string): Record<string, 'no-mark' | 'edited'> {
   const marks = loadApprovals(root);
   const last = lastDecisions(root);
+  const ownerRule = pulledRules(root) >= PAGE_RULES;
   const out: Record<string, 'no-mark' | 'edited'> = {};
   for (const p of loadProposals(root)) {
     if (!isActionable(p) || p.taskId !== undefined) continue;
-    const c = ownerCheck(p.id, p, marks[p.id], last[p.id]);
+    const c = ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule));
     if (c !== 'ok') out[p.id] = c;
   }
   return out;
@@ -1407,13 +1427,18 @@ function runCommand(argv: string[], io: Io): Result {
               n++;
             }
             if (!withMarks) return ok(String(n));
+            // Carry 12: the rules this pull read decide whether a newer owner mark may outrank an older local decision.
+            forgeDir(io.cwd);
+            writeFileSync(approvalsPageFile(io.cwd), JSON.stringify({ rules }) + '\n');
             let removed = 0;
             for (const id of Object.keys(loadApprovals(io.cwd))) if (!db[id]) { removeApproval(io.cwd, id); removed++; }
             for (const [id, a] of Object.entries(db)) saveApproval(io.cwd, id, a);
             const count = Object.keys(db).length;
             // The owner rule is known here only from meta/page.rules, which an editor can also write on a roadmap that lacks it.
-            // Said once per checkout and roadmap (--roadmap, else page.roadmap): the marker lives in .forge/.
-            const roadmap = subFlag('roadmap') ?? (page && typeof page === 'object' && typeof (page as { roadmap?: unknown }).roadmap === 'string' ? (page as { roadmap: string }).roadmap : '');
+            // Said once per checkout and roadmap: the marker lives in .forge/. Carry 10: one source for the key, the page's
+            // own id (meta/page.roadmap, the plan's project), and --roadmap only for a page that has none.
+            const pageRoadmap = page && typeof page === 'object' && typeof (page as { roadmap?: unknown }).roadmap === 'string' ? (page as { roadmap: string }).roadmap : '';
+            const roadmap = pageRoadmap || (subFlag('roadmap') ?? '');
             const markerFile = path.join(io.cwd, '.forge', 'approvals-warned.json');
             const warnedFor = (() => { try { return (JSON.parse(readFileSync(markerFile, 'utf8')) as { roadmap?: unknown }).roadmap; } catch { return undefined; } })();
             const warning = count > 0 && warnedFor !== roadmap ? 'proposals pull: approvals are owner-only once the roadmap is republished with this version; until then an editor could write them\n' : '';
@@ -1431,11 +1456,15 @@ function runCommand(argv: string[], io: Io): Result {
             // one an editor wrote on the page and a pull saved, or whose text changed since, is left to the owner.
             // The policy speaks once and first: a pid already decided, reopened or converted, and a v2 (--revises), are left to the owner.
             const events = readEvents(io.cwd).filter(e => e.kind === 'proposal' && e.id === id);
-            const forgeMade = events.some(e => e.action === 'add' && e.digest === proposalDigest(id, doc) && !e.revises)
-              && !events.some(e => e.action === 'decide' || e.action === 'reopen' || e.action === 'to-task');
-            if (doc.status !== 'proposed' || loadApproval(io.cwd, id) !== null || !forgeMade || !autoApprovable(doc)) {
+            const decided = doc.status !== 'proposed' || loadApproval(io.cwd, id) !== null
+              || events.some(e => e.action === 'decide' || e.action === 'reopen' || e.action === 'to-task');
+            const forgeMade = events.some(e => e.action === 'add' && e.digest === proposalDigest(id, doc) && !e.revises);
+            // Carry 5: a refusal says why, so the infinite skill and the person can tell them apart: already decided (or
+            // marked, or converted), not this checkout's own text, or its signals.
+            const reason = decided ? 'decided' : !forgeMade ? 'origin' : !autoApprovable(doc) ? 'signals' : null;
+            if (reason) {
               appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'policy', id, status: doc.status });
-              return json({ id, status: doc.status, write: null, approval: null });
+              return json({ id, status: doc.status, write: null, approval: null, reason });
             }
             const at = ts();
             saveProposal(io.cwd, id, { ...doc, status: 'auto_approved', decidedBy: 'forge:policy', decidedAt: at });
@@ -1454,11 +1483,13 @@ function runCommand(argv: string[], io: Io): Result {
             if (!isActionable(found)) throw new UsageError(`proposals to-task: ${id} is not approved`);
             if (found.taskId !== undefined) throw new UsageError(`proposals to-task: ${id} already has task ${found.taskId}`);
             // §4.1: only the roadmap owner's approvals become tasks: the mark must agree with the proposal and with its text.
-            // A decision this checkout reopened since stops counting, even if its mark is still in the roadmap.
-            const lastStatus = lastDecisions(io.cwd)[id];
-            const check = ownerCheck(id, found, loadApproval(io.cwd, id), lastStatus);
+            // A decision this checkout reopened since stops counting, even if its mark is still in the roadmap, unless the
+            // owner decided again after it (carry 12).
+            const mark = loadApproval(io.cwd, id);
+            const lastStatus = bindingDecision(lastDecisions(io.cwd)[id], mark, pulledRules(io.cwd) >= PAGE_RULES);
+            const check = ownerCheck(id, found, mark, lastStatus);
             if (check === 'no-mark') throw new UsageError(`proposals to-task: ${id} has no mark of the roadmap's owner (approvals/${id}); only the owner's approvals become tasks`);
-            if (!ownerApproved(id, found, loadApproval(io.cwd, id), lastStatus)) throw new UsageError(`proposals to-task: ${id} was edited after the owner's approval; it needs a new approval`);
+            if (!ownerApproved(id, found, mark, lastStatus)) throw new UsageError(`proposals to-task: ${id} was edited after the owner's approval; it needs a new approval`);
             // A mark is spent once: a proposal that already became a task (the ledger, which a pull never touches, or the plan)
             // is not turned into another by a copy that lost its taskId.
             const spent = readEvents(io.cwd).find(e => e.kind === 'proposal' && e.action === 'to-task' && e.id === id);
@@ -1822,11 +1853,8 @@ function runCommand(argv: string[], io: Io): Result {
           const listed = allMembersOf(main, after.runId);
           members = listed.map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
           for (const m of listed) { if (m.hookSession) own.add(m.hookSession); rmSync(memberFile(main, m.sessionId), { force: true }); }
-          // A-23: the coordinator's own tasks go back to free on the roadmap; a member's task stays with its session, and a
-          // loose task has no state/T. No if_version: the skill pins each write to the version it lists.
-          const del = { __delete__: true };
-          release = after.kind !== 'plan' ? [] : stopped.filter(id => after.tasks[id]?.executor === 'subagents')
-            .map(id => ({ task: id, write: { op: 'update' as const, collection: 'state' as const, doc_id: id, data: { status: 'free', owner: del, claimedAt: del, startedAt: del, exec: del } } }));
+          // A-23: the coordinator's own tasks go back to free on the roadmap (releaseWrites, the same writes swarm close prints).
+          release = releaseWrites(after, stopped);
         }
         // forge stop kills nothing: a background job of this run (a swarm step, an integrate, a validate…: one of its
         // sessions', or one with no session) still running finishes its current step. They are named so the person knows
@@ -2009,14 +2037,27 @@ function runCommand(argv: string[], io: Io): Result {
           if (has('session') && (!session || !/^[A-Za-z0-9_\-.~:@+]{1,80}$/.test(session))) throw new UsageError('decision add: --session needs the waypoint session id');
           const { resolves, ...decision } = raw as Record<string, unknown>;
           if (resolves !== undefined && (typeof resolves !== 'string' || !NOTE_ID.test(resolves))) throw new UsageError('decision add: resolves must be the id of a note');
+          // Carry 6: only --session prints the update that closes the question; without it nothing would close it.
+          if (resolves !== undefined && !session) throw new UsageError('decision add: resolves needs --session, which prints the update that closes the question');
           const task = flag('task');
           if (task !== undefined && (!TASK_ID.test(task) || task === '.' || task === '..')) throw new UsageError(`decision add: invalid --task ${task}`);
+          // Carry 6: with --db (the listed cache), a question someone already answered is not answered again.
+          const dbArg = flag('db');
+          if (has('db') && !dbArg) throw new UsageError('decision add: --db needs the listed cache directory');
+          let resolvesRefused: string | null = null;
+          if (typeof resolves === 'string' && dbArg) {
+            try {
+              const q = normalizeNote(JSON.parse(readFileSync(path.resolve(io.cwd, dbArg, 'notes', `${resolves}.json`), 'utf8')));
+              if (q?.answer) resolvesRefused = `${resolves} is already answered${q.answeredBy ? ` by ${q.answeredBy}` : ''}: it is left as it is`;
+            } catch { /* not listed: nothing to judge */ }
+          }
           // An active execution names the run the decision belongs to (its scope), unless the data names one.
           const exec = readExecution(root);
           try {
             const { n, event } = addDecision(root, decision, { ts: ts(), ...(task ? { task } : {}), runId: exec?.active ? exec.runId : null });
-            const publish = session ? decisionWrites({ event, session, eid: eventId(io.now(), session, io.rand), resolves: (resolves as string | undefined) ?? null }) : null;
-            return json({ n, ...event, ...(publish ? { publish } : {}) });
+            const closes = typeof resolves === 'string' && !resolvesRefused ? resolves : null;
+            const publish = session ? decisionWrites({ event, session, eid: decisionNoteId(event, session, n), resolves: closes }) : null;
+            return json({ n, ...event, ...(publish ? { publish } : {}), ...(resolvesRefused ? { resolvesRefused } : {}) });
           } catch (e) {
             if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
             throw e;

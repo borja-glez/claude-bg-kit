@@ -73,9 +73,16 @@ describe('forge swarm (execution)', () => {
     const calls: string[][] = [];
     const deps = { git: (a: string[]) => { calls.push(a); return null; }, exec: defaultExec(root), repo: repoReader(root), at: (): never => { throw new Error('no git'); } };
     expect(() => swarmCommand(['close'], io, deps)).toThrow(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
+    // An active run frees nothing.
+    expect(JSON.parse(swarmCommand(['status'], io, deps).stdout).publish).not.toHaveProperty('release');
     saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T2 is blocked' });
+    // Carry 10: the release is the printed write, as forge stop prints it; the skill never composes it.
+    const del = { __delete__: true };
+    const free = (id: string) => ({ task: id, write: { op: 'update', collection: 'state', doc_id: id, data: { status: 'free', owner: del, claimedAt: del, startedAt: del, exec: del } } });
+    // An ended run's status prints the same writes for the coordinator's tasks still running or stopped.
+    expect(JSON.parse(swarmCommand(['status'], io, deps).stdout).publish).toMatchObject({ release: [free('T1')] });
     expect(JSON.parse(swarmCommand(['close'], io, deps).stdout))
-      .toEqual({ closed: true, runId: e.runId, kind: 'plan', stopReason: 'stalled', closedAt: at, release: ['T1'], members: ['T2'], sessions: [],
+      .toEqual({ closed: true, runId: e.runId, kind: 'plan', stopReason: 'stalled', closedAt: at, release: [free('T1')], members: ['T2'], sessions: [],
         runs: { write: { op: 'set', collection: 'runs', doc_id: e.runId, file_path: expect.stringContaining(`runs-${e.runId}.json`) }, cleanup: [], bytes: expect.any(Number), dropped: [] } });
     expect(readExecution(root)).toMatchObject({ active: false, closedAt: at, closedBy: 'close' });
     expect(JSON.parse(swarmCommand(['close'], io, deps).stdout)).toEqual({ closed: 'already', runId: e.runId, closedAt: at, closedBy: 'close' });
@@ -1431,7 +1438,7 @@ describe('forge stop stops the execution of the main checkout for real, from any
     expect(existsSync(path.join(wt, '.forge'))).toBe(false);
     // swarm close afterwards lists the same tasks to release: stopping never empties it.
     // Its members were messaged from forge stop's list and their files are gone: swarm close names none again.
-    expect(out(run(['swarm', 'close'], io))).toMatchObject({ closed: true, release: ['T1'], members: ['T2'], sessions: [] });
+    expect(out(run(['swarm', 'close'], io))).toMatchObject({ closed: true, release: r.release, members: ['T2'], sessions: [] });
     // Nothing active any more: a second stop releases nothing and logs no phase.
     const phases = readFileSync(path.join(root, '.forge', 'ledger.jsonl'), 'utf8').split('\n').filter(l => l.includes('"phase":"stopped"')).length;
     expect(out(run(['stop'], w))).toMatchObject({ run: { stopped: false }, execution: null, release: [], members: [] });
@@ -1937,6 +1944,13 @@ describe('the swarm commands print the state/T write the CLI builds (J-15)', () 
     expect(d.exec).toMatchObject({ runId: readExecution(root)!.runId, stage: 'review' });
     expect(d).not.toHaveProperty('status');
     expect(r).not.toHaveProperty('event');
+    // Carry 2: a claim starts a task, so it goes only with a running task, as swarm report's does; nothing changes.
+    for (const status of ['blocked', 'accepted']) {
+      const bad = run(['swarm', 'task', 'T1', '--stage', 'review', '--status', status, '--claim'], io);
+      expect(bad.code, status).toBe(2);
+      expect(bad.stderr).toContain('--claim starts a task and goes only with --status running');
+    }
+    expect(readExecution(root)!.tasks.T1.status).toBe('running');
   });
   it('swarm report prints the publish of a member, and swarm status publish.run, which normalizeRun keeps whole', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));

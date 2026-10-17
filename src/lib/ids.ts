@@ -20,6 +20,10 @@ export function eventIds(d: Date, sessionId: string, n: number, rand: () => numb
   return Array.from({ length: n }, (_, i) => eventId(new Date(d.getTime() + i), sessionId, rand));
 }
 
+/** The plan's rule for a date (a version's target, G-25): YYYY-MM-DD and a day of the calendar (no 2026-02-30; carry 8). */
+export const realDate = (v: string): boolean =>
+  /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+
 /** The plan's rule for task, track and phase ids, also for loose tasks: letters, digits, _ - .; at most 64; not . or .. */
 export const PLAN_ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 export const isPlanId = (s: string): boolean => PLAN_ID_RE.test(s) && s !== '.' && s !== '..';
