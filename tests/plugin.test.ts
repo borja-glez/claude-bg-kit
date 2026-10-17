@@ -1666,4 +1666,17 @@ describe('plugin layout', () => {
     expect(md).not.toMatch(/dismissed at approval/i);    const plan = read('plugins/waypoint/skills/plan/SKILL.md');
     for (const w of ['artifacts.design', 'design_version', 'design_ref', 'validate <plan> --design docs/waypoint/<project>/design.md', 'waypoint design-impact', '**The link to the design.**']) expect(plan, w).toContain(w);
   });
+
+  it('forge in auto runs the converging design loop, reopens the design for an infinite Large task and plans with design_ref (wave 4d)', () => {
+    const auto = runRef('autonomy');
+    for (const w of ['/waypoint:design round --auto', '/waypoint:design round --verify --auto', 'verdict: ready', 'verdict: changes', '--reason-file .forge/work/<project>/dismiss-reason.txt',
+      'auto: minor', 'at most 3 rounds', 'el diseño necesita tu decisión', '/waypoint:design approve --auto', 'waypoint design-gate']) expect(auto, w).toContain(w);
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    for (const w of ['/waypoint:design reopen --auto', '`design_ref`', 'the approved-design rule', '`design_version`', '`round --verify`']) expect(inf, w).toContain(w);
+    expect(inf).not.toContain('apply the approved-design rule without asking (`status: draft`)');
+    const planner = read('plugins/forge/agents/forge-planner.md');
+    for (const w of ['design_ref?', '`design_ref`', '--design <design path>', '`_intro`']) expect(planner, w).toContain(w);
+    expect(read('plugins/forge/skills/decisions/SKILL.md')).toContain('design-snapshot DESIGN --kind reopen');
+    expect(Buffer.byteLength(read('plugins/forge/skills/run/SKILL.md'), 'utf8')).toBeLessThanOrEqual(22528);
+  });
 });
