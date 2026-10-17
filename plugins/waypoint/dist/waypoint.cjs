@@ -11434,6 +11434,7 @@ function eventId(d, sessionId, rand = Math.random) {
 function eventIds(d, sessionId, n, rand = Math.random) {
   return Array.from({ length: n }, (_2, i) => eventId(new Date(d.getTime() + i), sessionId, rand));
 }
+var realDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && (/* @__PURE__ */ new Date(`${v}T00:00:00Z`)).toISOString().slice(0, 10) === v;
 var PLAN_ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 var isPlanId = (s) => PLAN_ID_RE.test(s) && s !== "." && s !== "..";
 
@@ -11461,7 +11462,7 @@ var PlanSchema = external_exports.object({
   version: external_exports.string().min(1),
   design_version: external_exports.number().int().positive().optional(),
   artifacts: external_exports.object({ roadmap: external_exports.string().url().optional(), design: external_exports.string().url().optional() }).default({}),
-  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id), target: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "target must be a date (YYYY-MM-DD)").optional() })).default([]),
+  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id), target: external_exports.string().refine(realDate, "target must be a date (YYYY-MM-DD)").optional() })).default([]),
   tracks: external_exports.array(external_exports.object({ id, name: external_exports.string().min(1), color: external_exports.enum(TRACK_COLORS) })).min(1),
   phases: external_exports.array(external_exports.object({
     id,
@@ -11684,7 +11685,10 @@ var DECISIONS_WINDOW_MS = 24 * 36e5;
 var FUTURE_SKEW_MS = 5 * 6e4;
 var cp = (n) => String.fromCharCode(n);
 var UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(8234)}-${cp(8238)}${cp(8294)}-${cp(8297)}]`, "g");
-var clean = (s, max) => s.replace(UNSAFE, " ").replace(/\s+/g, " ").trim().slice(0, max);
+var clean = (s, max) => {
+  const t = s.replace(UNSAFE, " ").replace(/\s+/g, " ").trim();
+  return t.length <= max ? t : Array.from(t).slice(0, max).join("");
+};
 
 // src/lib/notes.ts
 var NOTE_TYPES = ["decision", "idea", "debt", "question"];
@@ -11692,17 +11696,19 @@ var MAX_NOTE = 2e3;
 var MAX_NAME = 80;
 var SAY_MAX = 200;
 var str = (x2) => typeof x2 === "string";
+var NOTE_ID = /^[A-Za-z0-9_.:~@+-]{1,160}$/;
+var clipPoints = (s, max) => s.length <= max ? s : Array.from(s).slice(0, max).join("");
 function normalizeNote(x2) {
   if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
   const o = x2;
   if (!str(o.type) || !NOTE_TYPES.includes(o.type)) return null;
   if (!str(o.author) || !str(o.text)) return null;
-  const out = { ts: str(o.ts) ? o.ts : "", type: o.type, author: o.author, text: o.text.slice(0, MAX_NOTE) };
+  const out = { ts: str(o.ts) ? o.ts : "", type: o.type, author: o.author, text: clipPoints(o.text, MAX_NOTE) };
   if (str(o.taskId)) out.taskId = o.taskId;
-  if (str(o.answer)) out.answer = o.answer.slice(0, MAX_NOTE);
+  if (str(o.answer)) out.answer = clipPoints(o.answer, MAX_NOTE);
   if (str(o.answeredBy)) out.answeredBy = o.answeredBy;
   if (str(o.answeredAt)) out.answeredAt = o.answeredAt;
-  if (str(o.answeredByNote) && /^[A-Za-z0-9_.:~@+-]{1,160}$/.test(o.answeredByNote)) out.answeredByNote = o.answeredByNote;
+  if (str(o.answeredByNote) && NOTE_ID.test(o.answeredByNote)) out.answeredByNote = o.answeredByNote;
   if (str(o.authorName) && o.authorName.trim()) out.authorName = clean(o.authorName, MAX_NAME);
   if (str(o.answeredByName) && o.answeredByName.trim()) out.answeredByName = clean(o.answeredByName, MAX_NAME);
   if (str(o.proposalId) && o.proposalId && !o.proposalId.includes("/")) out.proposalId = o.proposalId;
@@ -11775,11 +11781,6 @@ function noteLines(notes, since, locale, taskIds) {
   }
   return { say, mentions };
 }
-
-// src/lib/roadmap-doc.ts
-var DOC_STAGES = [...STAGES, "triage", "done", "blocked", "stopped"];
-var STAGE_KEYS = [...STAGES, "triage"];
-var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
 
 // src/lib/deps.ts
 var statusOf = (states, id2) => states[id2]?.status ?? "free";
@@ -11952,10 +11953,11 @@ var SUMMARY_MAX = 300;
 var DEL2 = { __delete__: true };
 var MIN = 6e4;
 var iso = (ms) => new Date(ms).toISOString();
-var BIDI2 = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
+var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
 var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+var clipPoints2 = (text, max) => text.length <= max ? text : Array.from(text).slice(0, max).join("");
 function cleanText(text, max) {
-  return text.replace(CONTROL, " ").replace(BIDI2, "").replace(/\s+/g, " ").trim().slice(0, max);
+  return clipPoints2(text.replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim(), max);
 }
 var event = (doc_id, data) => ({ op: "set", collection: "events", doc_id, data });
 function claimBatch(i) {
@@ -12047,6 +12049,11 @@ function freeBatch(i) {
   ];
 }
 
+// src/lib/roadmap-doc.ts
+var DOC_STAGES = [...STAGES, "triage", "done", "blocked", "stopped"];
+var STAGE_KEYS = [...STAGES, "triage"];
+var BIDI2 = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
+
 // src/page/normalize.ts
 var isObj = (x2) => typeof x2 === "object" && x2 !== null && !Array.isArray(x2);
 var str2 = (v) => String(v ?? "");
@@ -12061,10 +12068,12 @@ function keepAll(list, keep, field2, report) {
   });
   return out;
 }
+var LINK_MAX = 500;
+var NOT_IN_URL = new RegExp(`[\\s\\u0000-\\u001f\\u007f-\\u009f${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`);
 function linksOf(x2) {
   if (!isObj(x2)) return {};
   const links = {};
-  if (typeof x2.design === "string" && x2.design.startsWith("https://")) links.design = x2.design.slice(0, 500);
+  if (typeof x2.design === "string" && x2.design.startsWith("https://") && x2.design.length <= LINK_MAX && !NOT_IN_URL.test(x2.design)) links.design = x2.design;
   if (typeof x2.designVersion === "number" && Number.isInteger(x2.designVersion) && x2.designVersion > 0) links.designVersion = x2.designVersion;
   return Object.keys(links).length ? { links } : {};
 }
@@ -12086,7 +12095,7 @@ function normalizeMeta(x2, report) {
     tracks: keepAll(arr(x2.tracks), (t) => isObj(t) && typeof t.id === "string" && typeof t.name === "string", "tracks", report),
     // G-25: a version's target is a date; any other value is dropped (and reported).
     versions: arr(x2.versions).filter(isObj).map((v, i) => {
-      if (v.target === void 0 || typeof v.target === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.target)) return v;
+      if (v.target === void 0 || typeof v.target === "string" && realDate(v.target)) return v;
       report?.(`versions[${i}].target`, "dropped", kindOf(v.target));
       const { target: _t, ...rest } = v;
       return rest;
@@ -12095,7 +12104,8 @@ function normalizeMeta(x2, report) {
     metrics,
     syncedAt: str2(x2.syncedAt),
     ...linksOf(x2.links),
-    ...typeof x2.waypointVersion === "string" && /^\d+\.\d+\.\d+/.test(x2.waypointVersion) ? { waypointVersion: x2.waypointVersion.slice(0, 40) } : {}
+    // Carry 9: x.y.z and nothing after it.
+    ...typeof x2.waypointVersion === "string" && /^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(x2.waypointVersion) ? { waypointVersion: x2.waypointVersion } : {}
   };
 }
 function normalizeTask(t) {
@@ -12110,8 +12120,12 @@ function normalizePhase(x2, report) {
     order: typeof x2.order === "number" && Number.isFinite(x2.order) ? x2.order : 0,
     tasks: keepAll(arr(x2.tasks), (t) => isObj(t) && typeof t.id === "string" && typeof t.title === "string", "tasks", report).map(normalizeTask)
   };
-  if (typeof x2.goal === "string" && x2.goal.trim()) out.goal = x2.goal.slice(0, 300);
-  else delete out.goal;
+  const goal = typeof x2.goal === "string" ? cleanText(x2.goal, 300) : "";
+  if (goal) out.goal = goal;
+  else {
+    delete out.goal;
+    if (x2.goal !== void 0) report?.("goal", "dropped", kindOf(x2.goal));
+  }
   return out;
 }
 
@@ -12165,9 +12179,13 @@ function setDesignStatus(text, status) {
   else lines2.push(`status: ${status}`);
   return `${bom}${m[1]}${lines2.join(eol)}${m[3]}${rest.slice(m[0].length)}`;
 }
+var SLUG_MAX = 80;
+var cutSlug = (slug, max) => slug.slice(0, max).replace(/-+$/, "");
 function slugify(heading) {
-  return heading.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+  const slug = heading.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return cutSlug(slug, SLUG_MAX) || "section";
 }
+var nthSlug = (base, n) => `${cutSlug(base, SLUG_MAX - `-${n}`.length)}-${n}`;
 function sectionsOf(body) {
   return parseSections(body).sections;
 }
@@ -12198,7 +12216,7 @@ function parseSections(body) {
       flush();
       const base = slugify(isHeading[2]);
       let slug = base;
-      for (let n = 2; seen.has(slug); n++) slug = `${base}-${n}`;
+      for (let n = 2; seen.has(slug); n++) slug = nthSlug(base, n);
       seen.add(slug);
       cur = { level: isHeading[1].length, heading: isHeading[2], slug, text: "" };
     } else if (cur) {
@@ -15050,6 +15068,13 @@ function roadmapCapabilities(assets) {
     ...assets ? { assets: {} } : {}
   };
 }
+function rulesOf(capabilities) {
+  const field2 = (x2, key) => x2 && typeof x2 === "object" && !Array.isArray(x2) ? x2[key] : void 0;
+  const rules = field2(field2(capabilities, "db"), "rules");
+  const onApprovals = Array.isArray(rules) ? rules.filter((r2) => field2(r2, "path") === "approvals") : [];
+  const owner = onApprovals.length > 0 && onApprovals.every((r2) => field2(r2, "read") === "view" && field2(r2, "write") === "owner");
+  return owner ? PAGE_RULES : 1;
+}
 var isEs = (locale) => (locale ?? "").toLowerCase().split(/[-_]/)[0] === "es";
 function sharingNotice(plan, internal) {
   if (!internal || plan.artifacts.roadmap) return null;
@@ -15230,12 +15255,19 @@ function run(argv, io) {
 warning: ${loose.length} task(s) without zones run alone in a forge execution: ${loose.join(", ")}` : "";
         let refs = "";
         const designArg = flag("design");
+        if (args.includes("--design") && (!designArg || designArg.startsWith("--"))) return fail("validate: --design needs the design file", 2);
         if (designArg) {
-          let slugs;
+          let text;
           try {
-            slugs = /* @__PURE__ */ new Set(["_intro", ...parseDesign((0, import_node_fs6.readFileSync)(abs(designArg), "utf8")).sections.map((s) => s.slug)]);
+            text = (0, import_node_fs6.readFileSync)(abs(designArg), "utf8");
           } catch (e) {
             return fail(`validate: cannot read the design ${designArg}: ${e.message}`, 2);
+          }
+          let slugs;
+          try {
+            slugs = /* @__PURE__ */ new Set(["_intro", ...parseDesign(text).sections.map((s) => s.slug)]);
+          } catch (e) {
+            return fail(`validate: ${designArg} is not a design: ${e.message}`, 2);
           }
           const unknown = p.tasks.filter((t) => t.design_ref && !slugs.has(t.design_ref)).map((t) => `${t.id} (${t.design_ref})`);
           if (unknown.length) refs = `
@@ -15257,9 +15289,20 @@ warning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(", ")
         return ok(planHash(loadPlan()));
       case "page": {
         const p = loadPlan();
+        let published;
+        if (args.includes("--publish-info")) {
+          const capsArg = flag("capabilities");
+          if (!capsArg || capsArg.startsWith("--")) return fail("page: --publish-info needs --capabilities <file>, the capabilities JSON passed to the Artifact publish", 2);
+          try {
+            published = JSON.parse((0, import_node_fs6.readFileSync)(abs(capsArg), "utf8"));
+          } catch {
+            return fail(`page: cannot read --capabilities ${capsArg} as JSON`, 2);
+          }
+          if (!published || typeof published !== "object" || Array.isArray(published)) return fail(`page: --capabilities ${capsArg} must be a JSON object`, 2);
+        }
         const out2 = abs(flag("out") ?? ".waypoint/roadmap.html");
         const now = io.now().toISOString();
-        const states = flag("states") ? statesOf(abs(flag("states"))) : null;
+        const states = flag("states") ? statesOf(abs(flag("states")), p.tasks.map((t) => t.id)) : null;
         const snapshot = { ...buildDocs(p, now), pageVersion: WAYPOINT_VERSION, ...states ? { states: states.states, statesAt: states.at } : {} };
         const tpl = (0, import_node_fs6.readFileSync)(import_node_path7.default.join(io.assetsDir, "roadmap.template.html"), "utf8");
         const html = tpl.replace("__TITLE__", () => `${p.project} Roadmap`).replace("__SNAPSHOT__", () => JSON.stringify(snapshot).replace(/</g, "\\u003c"));
@@ -15267,14 +15310,15 @@ warning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(", ")
         (0, import_node_fs6.writeFileSync)(out2, html);
         if (!args.includes("--publish-info")) return ok(out2);
         const internal = evidenceUploaded(io.cwd);
+        const rules = rulesOf(published);
         return ok(JSON.stringify({
           out: out2,
           capabilities: roadmapCapabilities(internal),
           internal,
           say: sharingNotice(p, internal),
           pageVersion: WAYPOINT_VERSION,
-          rules: PAGE_RULES,
-          write: { op: "set", collection: "meta", doc_id: "page", data: { version: WAYPOINT_VERSION, rules: PAGE_RULES, roadmap: p.project, publishedAt: now } }
+          rules,
+          write: { op: "set", collection: "meta", doc_id: "page", data: { version: WAYPOINT_VERSION, rules, roadmap: p.project, publishedAt: now } }
         }));
       }
       case "sync": {
@@ -16044,18 +16088,18 @@ function readDocs(dir) {
     (0, import_node_fs6.readdirSync)(dir).filter((f) => f.endsWith(".json")).map((f) => [f.slice(0, -5), JSON.parse((0, import_node_fs6.readFileSync)(import_node_path7.default.join(dir, f), "utf8"))])
   );
 }
-function statesOf(dir) {
+function statesOf(dir, taskIds) {
   if (!(0, import_node_fs6.existsSync)(dir)) return null;
   const states = {};
   let newest2 = 0;
-  for (const f of (0, import_node_fs6.readdirSync)(dir).filter((n) => n.endsWith(".json")).sort()) {
-    const id2 = f.slice(0, -5);
-    if (!isPlanId(id2)) continue;
+  for (const id2 of [...new Set(taskIds)].filter(isPlanId).sort()) {
+    const file = import_node_path7.default.join(dir, `${id2}.json`);
     try {
-      const doc = JSON.parse((0, import_node_fs6.readFileSync)(import_node_path7.default.join(dir, f), "utf8"));
+      const doc = JSON.parse((0, import_node_fs6.readFileSync)(file, "utf8"));
       if (!doc || typeof doc.status !== "string" || !TASK_STATUSES.includes(doc.status)) continue;
+      const mtime = (0, import_node_fs6.statSync)(file).mtimeMs;
       states[id2] = doc.status;
-      newest2 = Math.max(newest2, (0, import_node_fs6.statSync)(import_node_path7.default.join(dir, f)).mtimeMs);
+      newest2 = Math.max(newest2, mtime);
     } catch {
     }
   }

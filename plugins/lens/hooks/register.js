@@ -10540,9 +10540,13 @@ function parseDesign(text2) {
   const body = m[2];
   return { meta: r.data, body, sections: sectionsOf(body), words: wordCount(body) };
 }
+var SLUG_MAX = 80;
+var cutSlug = (slug, max) => slug.slice(0, max).replace(/-+$/, "");
 function slugify(heading) {
-  return heading.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+  const slug = heading.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return cutSlug(slug, SLUG_MAX) || "section";
 }
+var nthSlug = (base, n2) => `${cutSlug(base, SLUG_MAX - `-${n2}`.length)}-${n2}`;
 function sectionsOf(body) {
   return parseSections(body).sections;
 }
@@ -10573,7 +10577,7 @@ function parseSections(body) {
       flush();
       const base = slugify(isHeading[2]);
       let slug = base;
-      for (let n2 = 2; seen.has(slug); n2++) slug = `${base}-${n2}`;
+      for (let n2 = 2; seen.has(slug); n2++) slug = nthSlug(base, n2);
       seen.add(slug);
       cur = { level: isHeading[1].length, heading: isHeading[2], slug, text: "" };
     } else if (cur) {
@@ -10633,6 +10637,7 @@ var TRACK_COLORS = ["blue", "mauve", "teal", "pink", "sky", "flamingo"];
 var STAGES = ["brief", "implement", "validate", "verify", "review", "verdict", "integrate"];
 
 // src/lib/ids.ts
+var realDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && (/* @__PURE__ */ new Date(`${v}T00:00:00Z`)).toISOString().slice(0, 10) === v;
 var PLAN_ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 var isPlanId = (s) => PLAN_ID_RE.test(s) && s !== "." && s !== "..";
 
@@ -10660,7 +10665,7 @@ var PlanSchema = external_exports.object({
   version: external_exports.string().min(1),
   design_version: external_exports.number().int().positive().optional(),
   artifacts: external_exports.object({ roadmap: external_exports.string().url().optional(), design: external_exports.string().url().optional() }).default({}),
-  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id), target: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "target must be a date (YYYY-MM-DD)").optional() })).default([]),
+  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id), target: external_exports.string().refine(realDate, "target must be a date (YYYY-MM-DD)").optional() })).default([]),
   tracks: external_exports.array(external_exports.object({ id, name: external_exports.string().min(1), color: external_exports.enum(TRACK_COLORS) })).min(1),
   phases: external_exports.array(external_exports.object({
     id,
@@ -11078,7 +11083,10 @@ var str2 = (x) => typeof x === "string";
 var oneOf2 = (list, x) => str2(x) && list.includes(x) ? x : null;
 var cp = (n2) => String.fromCharCode(n2);
 var UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(8234)}-${cp(8238)}${cp(8294)}-${cp(8297)}]`, "g");
-var clean = (s, max) => s.replace(UNSAFE, " ").replace(/\s+/g, " ").trim().slice(0, max);
+var clean = (s, max) => {
+  const t = s.replace(UNSAFE, " ").replace(/\s+/g, " ").trim();
+  return t.length <= max ? t : Array.from(t).slice(0, max).join("");
+};
 var text = (x, max) => str2(x) ? clean(x, max) || null : null;
 var posInt = (x) => typeof x === "number" && Number.isInteger(x) && x > 0 ? x : null;
 function entryOf(x) {
