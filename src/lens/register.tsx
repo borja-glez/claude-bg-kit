@@ -158,17 +158,24 @@ async function closeBand($: Engine, subject: string): Promise<void> {
   } catch { /* the band stays */ }
 }
 
+// Re-review m-4: what the band is about, with the todo list and the subagents lens holds in memory: the band closed on a
+// list or on some agents comes back with a new todo or a new agent.
+function subjectOf(model: PanelModel | null): string {
+  const todos = Array.isArray(activity.todos) ? activity.todos.map(t => String((t as { content?: unknown } | null)?.content ?? '')) : [];
+  return bandSubject(model, { todos, agents: activity.subagents.map(s => s.id) });
+}
+
 // F-06, carry 3: whether lens's band is up, from its state rather than its last drawing: activity, no band of waypoint's,
 // not closed for what it is about. Read while the hint draws, so the hint follows waypoint's drawn and lens's × at once.
 async function bandUp($: Engine): Promise<boolean> {
   if (!busy || await waypointDraws($)) return false;
-  return !(await read($, hidden) && hiddenSubject === bandSubject(bandModel));
+  return !(await read($, hidden) && hiddenSubject === subjectOf(bandModel));
 }
 
 // A model about something else than what the band was closed for opens it again (and so does one after a reload, which
 // forgot the subject): the band never stays closed for a whole session.
 async function releaseBand($: Engine, model: PanelModel): Promise<void> {
-  if (hiddenSubject !== null && hiddenSubject === bandSubject(model)) return;
+  if (hiddenSubject !== null && hiddenSubject === subjectOf(model)) return;
   hiddenSubject = null;
   try { if (await read($, hidden)) await update($, hidden, () => false); } catch { /* the render draws it anyway */ }
 }
@@ -260,10 +267,12 @@ let waypointBand = false;
 let waypointLoaded: boolean | null = null;
 async function checkWaypoint($: Engine): Promise<void> {
   try { if (await read($, hidden)) return; } catch { /* check anyway */ }
-  let installed = false;
-  try { installed = (await $.command.list()).some(c => c.plugin === 'waypoint' || c.name.startsWith('waypoint:')); } catch { /* treat as absent */ }
-  const loadedChanged = installed !== waypointLoaded;
-  waypointLoaded = installed;
+  let listed: boolean | null = null;
+  try { listed = (await $.command.list()).some(c => c.plugin === 'waypoint' || c.name.startsWith('waypoint:')); } catch { listed = null; }
+  // Re-review m-5: a listing that fails says nothing: what lens knew stands, and it is never read as «unloaded».
+  const loadedChanged = listed !== null && listed !== waypointLoaded;
+  if (listed !== null) waypointLoaded = listed;
+  const installed = waypointLoaded === true;
   // F-16: a loaded waypoint that says whether it draws needs no guess (and no read of its files).
   let said = false;
   try { said = installed && typeof (await read($, waypointDrawn)) === 'boolean'; } catch { /* guess below */ }
@@ -1640,7 +1649,7 @@ export const register: Register = on => {
         waypointSeen = false;
         void nowMs($).then(at => { takeoverAt = at; });
       }
-      const subject = bandSubject(bandModel);
+      const subject = subjectOf(bandModel);
       if (await read($, hidden) && hiddenSubject === subject) return below;
       const ui = $.ui.resolve(e);
       const { Box, Button } = ui;

@@ -1478,6 +1478,33 @@ test('a band whose drawing throws is published as not drawn, and as drawn again 
   expect(published.at(-1)).toBe(true);
 });
 
+test('a drawing that fails on one surface only keeps drawn false until that surface draws: another surface never flips it (re-review m-6)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  const published = recordDrawn(on);
+  let model: WaypointBand = { ...RUN, slots: null } as unknown as WaypointBand;
+  serveBand(on, () => model);
+  const draw = async (surface: 'terminal' | 'desktop') => {
+    const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
+    await ui.unmount();
+  };
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await draw('terminal');
+  await settle(() => published.at(-1) === false);
+  expect(published.at(-1)).toBe(false);
+  // The desktop draws it; the terminal's last drawing still failed, so drawn stays false.
+  model = RUN;
+  await draw('desktop');
+  await sleepMs(30);
+  expect(published.at(-1)).toBe(false);
+  await draw('terminal');
+  await settle(() => published.at(-1) === true);
+  expect(published.at(-1)).toBe(true);
+});
+
 test('two publishes that overlap: the later one wins, so a refresh that read before × never draws the band back (carry 2)', async ($, on) => {
   engineBand(on);
   serveFiles(on, {});
@@ -1554,13 +1581,56 @@ test("the second row is fitted to the band's width: the Spanish design band with
     if (more && !findNode(await ui.drawn(), el => el.props?.key === 'band-row2')) await ui.press({ key: 'more' });
     const row = findNode(await ui.drawn(), el => el.props?.key === 'band-row2');
     const kids = (Array.isArray(row?.children) ? row!.children : [row?.children]).filter(Boolean) as DrawnNode[];
-    const cells = kids.map(k => {
-      const label = String(k.props?.label ?? strings(k.children).join(''));
+    const shown = kids.map(k => String(k.props?.label ?? strings(k.children).join('')));
+    const cells = kids.map((k, i) => {
+      const label = shown[i]!;
       if (k.type === 'Link' || k.type === 'Text') return [...label].length;
       return k.props?.plain ? [...label].length + (k.props?.hotkey ? 3 : 0) : [...label].length + 4;
     });
+    // As the engine wraps the row: a cell of gap between two controls; with 10 rows above the prompt it may take two lines.
+    const lines: number[] = [];
+    for (const w of cells) {
+      if (lines.length && lines[lines.length - 1]! + 1 + w <= bodyColumns) lines[lines.length - 1]! += 1 + w;
+      else lines.push(w);
+    }
     expect(kids.length, `${bodyColumns}`).toBeGreaterThan(0);
-    expect(cells.reduce((n, w) => n + w, 0) + kids.length - 1, `${bodyColumns}`).toBeLessThanOrEqual(bodyColumns);
+    expect(lines.length, `${bodyColumns}`).toBeLessThanOrEqual(2);
+    for (const w of lines) expect(w, `${bodyColumns}`).toBeLessThanOrEqual(bodyColumns);
+    // Re-review m-2: no two buttons read the same (outside fullscreen their letters already tell them apart).
+    const seen = kids.map((k, i) => (k.props?.plain && k.props?.hotkey ? `${String(k.props.hotkey)}: ${shown[i]}` : shown[i]));
+    expect(new Set(seen).size, `${bodyColumns}: ${seen.join(' | ')}`).toBe(seen.length);
     await ui.unmount();
   }
+});
+
+test('with two rows and no room for every folded button told apart, m opens the pages of ⋯ one after another, then closes it (re-review m-2)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('command.list', () => ({ value: [LENS] }));
+  const sent: string[] = [];
+  recordCommands(on, sent);
+  serveBand(on, () => ({ ...DESIGN, locale: 'es', proposals: 4, pending: 4 }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(40, { maxRows: 2, scroll: { offset: 0, bodyRows: 1 } }), viewport: VIEW(true, 45) });
+  const rowKeys = async () => {
+    const row = findNode(await ui.drawn(), el => el.props?.key === 'band-row2');
+    return ((Array.isArray(row?.children) ? row!.children : [row?.children]).filter(Boolean) as DrawnNode[])
+      .map(k => String(k.props?.key ?? (k as { key?: unknown }).key ?? (k.type === 'Link' ? 'design' : '?')));
+  };
+  expect(await rowKeys()).toEqual([]);
+  const pages: string[][] = [];
+  for (let page = 0; page < 9; page++) {
+    await ui.press({ key: 'more' });
+    const keys = await rowKeys();
+    if (!keys.length) break;
+    pages.push(keys);
+  }
+  // More than one page; every folded button on one of them, once, in order; and the last m closed the row.
+  expect(pages.length).toBeGreaterThan(1);
+  expect(pages.flat()).toEqual(['apply-all', 'pick', 'round', 'rewrite', 'interview', 'approve', 'design', 'panel']);
+  expect(await rowKeys()).toEqual([]);
+  await ui.unmount();
 });

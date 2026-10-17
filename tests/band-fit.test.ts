@@ -150,23 +150,38 @@ describe('layoutBand (F-02, F-05, F-15)', () => {
   it('a second row that fits keeps its labels; one that does not clips the widest first, so it never wraps (carry 3)', () => {
     expect(lay(120).labels).toEqual({});
     expect(lay(80, 10, true, true).labels).toEqual({});
-    const narrow = lay(30, 10, false, true);
+    const narrow = lay(30, 2, false, true);
     expect(Object.keys(narrow.labels).length).toBeGreaterThan(0);
-    expect(rowTwo(narrow, controls(false))).toBeLessThanOrEqual(30);
+    expect(rowTwo(narrow, controls(false), 30)).toEqual([expect.any(Number)]);
+    expect(rowTwo(narrow, controls(false), 30)[0]).toBeLessThanOrEqual(30);
     // the widest label is clipped first: Siguiente goes before Estado
     expect(narrow.labels['next-task']).toMatch(/…$/);
   });
+  it('with 3 rows or more the second row takes a second line before it clips a label (re-review m-2)', () => {
+    const roomy = lay(30, 10, false, true);
+    expect(roomy.labels).toEqual({});
+    expect(rowTwo(roomy, controls(false), 30)).toHaveLength(2);
+    for (const w of rowTwo(roomy, controls(false), 30)) expect(w).toBeLessThanOrEqual(30);
+  });
 });
 
-// The cells the second row takes, as register.tsx draws it: each control with its label (or the fitted one), one gap
-// between two.
-function rowTwo(l: ReturnType<typeof layoutBand>, cs: readonly BandControl[]): number {
+// The lines the second row takes, as the engine wraps it (one cell of gap between two controls): the cells of each line.
+function rowTwo(l: ReturnType<typeof layoutBand>, cs: readonly BandControl[], cols: number): number[] {
   const byKey = new Map(cs.map(c => [c.key, c] as const));
-  const widths = l.second.map(k => {
+  const lines: number[] = [];
+  for (const k of l.second) {
     const c = byKey.get(k)!;
-    return controlWidth(l.labels[k] ?? (l.long ? c.label : c.short ?? c.label), { plain: l.plain, hotkey: c.hotkey, kind: c.kind });
-  });
-  return widths.reduce((n, w) => n + w, 0) + Math.max(0, widths.length - 1);
+    const w = controlWidth(l.labels[k] ?? (l.long ? c.label : c.short ?? c.label), { plain: l.plain, hotkey: c.hotkey, kind: c.kind });
+    if (lines.length && lines[lines.length - 1]! + 1 + w <= cols) lines[lines.length - 1]! += 1 + w;
+    else lines.push(w);
+  }
+  return lines;
+}
+// What a control shows: outside fullscreen a button with a letter reads «k: label»; a link, a text or a button in
+// fullscreen shows its label alone.
+function visibleOf(l: ReturnType<typeof layoutBand>, c: BandControl, where: 'inline' | 'second'): string {
+  const label = (where === 'second' ? l.labels[c.key] : undefined) ?? (l.long ? c.label : c.short ?? c.label);
+  return l.plain && c.hotkey && c.kind !== 'link' && c.kind !== 'text' ? `${c.hotkey}: ${label}` : label;
 }
 // The cells the first row takes: the parts, then each control on it and ⋯, a gap before each.
 function rowOne(l: ReturnType<typeof layoutBand>, cs: readonly BandControl[]): number {
@@ -230,27 +245,68 @@ describe('every band fits its rows at every width (carries 1 and 3)', () => {
       ]],
     ];
   };
-  it('row 1 stays within the band\'s cells from 30 to 200 columns, and an open row 2 from 50, in both locales, in and outside fullscreen, at 2 and 10 rows', () => {
+  it('row 1 and an open row 2 stay within the band\'s cells from 30 to 200 columns, row 2 on the lines its rows allow, in both locales, in and outside fullscreen, at 2 and 10 rows', () => {
     const over: string[] = [];
     // Every width where the levels one and two live, then the wide level every 5 columns.
     const widths = [...Array.from({ length: 111 }, (_, i) => 30 + i), ...Array.from({ length: 13 }, (_, i) => 141 + 5 * i)];
     for (const locale of ['es', 'en'] as const) {
       for (const fullscreen of [true, false]) {
         for (const [name, model, cs] of bands(locale, fullscreen)) {
+          const parts = bandParts(model, NOW);
           for (const cols of widths) {
             // Outside fullscreen the band is one row whatever its rows: one count of them is enough there.
             for (const maxRows of fullscreen ? [2, 10] : [10]) {
-              const l = layoutBand(bandParts(model, NOW), cs, { bodyColumns: cols, maxRows, fullscreen, moreOpen: true });
+              const l = layoutBand(parts, cs, { bodyColumns: cols, maxRows, fullscreen, moreOpen: true });
               const where = `${locale} ${fullscreen ? 'fullscreen' : 'main'} ${name} @ ${cols}x${maxRows}`;
               if (rowOne(l, cs) > cols) over.push(`${where}: row 1 ${rowOne(l, cs)}`);
-              // Under 50 columns the nine controls of the design band cannot all keep a cell of label: row 2 is checked from 50.
-              if (cols >= 50 && rowTwo(l, cs) > cols) over.push(`${where}: row 2 ${rowTwo(l, cs)}`);
+              const lines = rowTwo(l, cs, cols);
+              if (lines.length > (maxRows >= 3 ? 2 : 1)) over.push(`${where}: row 2 on ${lines.length} lines`);
+              if (lines.some(w => w > cols)) over.push(`${where}: row 2 ${Math.max(...lines)} cells`);
             }
           }
         }
       }
     }
     expect(over).toEqual([]);
+  });
+  it('no two controls ever show the same thing, and every control stays on row 1 or on a page of ⋯, from 30 to 120 columns (re-review m-2)', () => {
+    const bad: string[] = [];
+    for (const locale of ['es', 'en'] as const) {
+      for (const fullscreen of [true, false]) {
+        for (const [name, model, cs] of bands(locale, fullscreen)) {
+          const parts = bandParts(model, NOW);
+          for (let cols = 30; cols <= 120; cols++) {
+            for (const maxRows of [2, 10]) {
+              const where = `${locale} ${fullscreen ? 'fullscreen' : 'main'} ${name} @ ${cols}x${maxRows}`;
+              const at = (page: number) => layoutBand(parts, cs, { bodyColumns: cols, maxRows, fullscreen, moreOpen: true, page });
+              const first = at(0);
+              const reached = new Set(first.inline);
+              for (let page = 0; page < first.pages; page++) {
+                const l = page ? at(page) : first;
+                for (const k of l.second) reached.add(k);
+                const shown = [...l.inline.map(k => visibleOf(l, cs.find(c => c.key === k)!, 'inline')), ...l.second.map(k => visibleOf(l, cs.find(c => c.key === k)!, 'second'))];
+                if (new Set(shown).size !== shown.length) bad.push(`${where} page ${page}: ${shown.join(' | ')}`);
+              }
+              const lost = cs.map(c => c.key).filter(k => !reached.has(k));
+              if (lost.length) bad.push(`${where}: ${lost.join(', ')} on no row nor page`);
+            }
+          }
+        }
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+  it('a button that does not fit uniquely folds into the next page of ⋯, the less important last: m opens one page after another (re-review m-2)', () => {
+    const [, design, cs] = bands('es', true)[0]!;
+    const at = (page: number) => layoutBand(bandParts(design, NOW), cs, { bodyColumns: 40, maxRows: 2, fullscreen: true, moreOpen: true, page });
+    expect(at(0).pages).toBeGreaterThan(1);
+    expect(at(0).second[0]).toBe('apply-all');
+    const pages = Array.from({ length: at(0).pages }, (_, p) => at(p).second);
+    expect(pages.flat()).toEqual(cs.filter(c => c.key !== 'dismiss').map(c => c.key));
+    // At 60 columns and two rows, Apply all and Approve are no longer both «Ap…».
+    const sixty = layoutBand(bandParts(design, NOW), cs, { bodyColumns: 60, maxRows: 2, fullscreen: true, moreOpen: true });
+    const label = (k: string) => sixty.labels[k] ?? cs.find(c => c.key === k)!.short ?? cs.find(c => c.key === k)!.label;
+    if (sixty.second.includes('apply-all') && sixty.second.includes('approve')) expect(label('apply-all')).not.toBe(label('approve'));
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 import { charWidth, clipWidth, splitClusters, stringWidth } from '../src/lib/text-width.js';
 import { GLYPHS } from '../src/lens/view.js';
 
@@ -25,6 +26,24 @@ function reference(text: string): number {
     if (cells) last = cells;
   }
   return width;
+}
+
+// Re-review m-7: the lines where a name `h` is bound (a parameter, a variable, a destructured element, a function, a
+// class, an import, a catch clause), from the TypeScript syntax tree: every form shadows the JSX factory; a use does not.
+function bindingsNamedH(file: string, text: string): number[] {
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const out: number[] = [];
+  const named = (n: ts.Node | undefined) => {
+    if (n && ts.isIdentifier(n) && n.text === 'h') out.push(source.getLineAndCharacterOfPosition(n.getStart(source)).line + 1);
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isParameter(node) || ts.isVariableDeclaration(node) || ts.isBindingElement(node)) named(node.name);
+    if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isClassDeclaration(node)) named(node.name);
+    if (ts.isImportSpecifier(node) || ts.isImportClause(node) || ts.isNamespaceImport(node) || ts.isImportEqualsDeclaration(node)) named(node.name);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return out;
 }
 
 function sources(dir: string): string[] {
@@ -95,15 +114,20 @@ describe('the glyphs of the band and the panel (F-13)', () => {
     }
     expect(hits).toEqual([]);
   });
+  it('the binding scan finds every form that names h, and no use of it (re-review m-7)', () => {
+    const lines = (code: string) => bindingsNamedH('probe.tsx', code);
+    for (const code of [
+      'function f(h: number) {}', 'const f = (h?: number) => 1;', 'const f = h => 1;', 'const h = 1;', 'let a, h;',
+      'const { h } = o;', 'const { a: h } = o;', 'function f({ h }: P) {}', 'const [h, w] = xs;', 'function f(...h: number[]) {}',
+      'function h() {}', 'import { h } from "x";', 'try {} catch (h) {}', 'for (const h of xs) {}',
+    ]) expect(lines(code), code).toEqual([1]);
+    expect(lines('function f(\n  a: number,\n  h: string,\n) {}')).toEqual([3]);
+    expect(lines('draw(h, 2); o.h = 1; const k = { h: 1 }; type T = { h: number };')).toEqual([]);
+  });
   it('no local or parameter under src/mod or src/lens is named h: it would shadow the JSX factory (global constraint, carry 9)', () => {
-    // A parameter (`(h: …`, `, h)`, `h =>`) or a declaration (`const h =`, `let h,`), outside comments and strings.
-    const named = /(?:[(,]\s*h\s*[:,)=]|(?:^|[^\w.$])h\s*=>|\b(?:const|let|var)\s+h\b)/;
     const hits: string[] = [];
     for (const f of [...sources('src/mod'), ...sources('src/lens')]) {
-      readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
-        const code = line.replace(/\/\/.*$/, '').replace(/'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|"(?:[^"\\]|\\.)*"/g, '""');
-        if (named.test(code)) hits.push(`${f.split(path.sep).join('/')}:${i + 1}`);
-      });
+      for (const line of bindingsNamedH(f, readFileSync(f, 'utf8'))) hits.push(`${f.split(path.sep).join('/')}:${line}`);
     }
     expect(hits).toEqual([]);
   });

@@ -69,9 +69,10 @@ async function dismissNotice($: Engine, n: NoticeBand): Promise<void> {
 // F-16, carry 2: every publish is numbered, and one a later publish overtook writes nothing: the last word is the
 // freshest, so a refresh that read before × never draws the band back for lens.
 let drawnGen = 0;
-// Carry 2: whether the band's last drawing threw (its catch left the site to what is beneath); drawn says so until it
-// draws again.
-let renderFailed = false;
+// Carry 2: the surfaces whose last drawing of the band threw (its catch left the site to what is beneath); drawn says so
+// while any does. Re-review m-6: kept per surface, and published only when that «any» changes, so two surfaces that
+// draw differently never flip drawn back and forth.
+const failedOn = new Set<string>();
 // Carry 2: the one timer that publishes again when the dismissal of the notice the band shows ends; one further off
 // than EXPIRY_MAX_MS is left to the 30 s refresh.
 let expiry: Timer | null = null;
@@ -94,7 +95,7 @@ async function publishDrawn($: Engine): Promise<void> {
   const gen = ++drawnGen;
   try {
     const m = await read($, band);
-    let shown = !renderFailed && !(await read($, hidden)) && m.mode !== 'none';
+    let shown = failedOn.size === 0 && !(await read($, hidden)) && m.mode !== 'none';
     if (shown && m.mode === 'notice') {
       // M6, carry 2: after a hot reload no session start read the dismissals; the notice waits for them, as its drawing does.
       if (!dismissalsLoaded) await readDismissals($);
@@ -109,16 +110,19 @@ async function publishDrawn($: Engine): Promise<void> {
   } catch { /* lens keeps what it read */ }
 }
 
-// Carry 2: a drawing that throws leaves the band to what is beneath, and lens is told; and told again once it draws.
-function noteDrawing($: Engine, ok: boolean): void {
-  if (renderFailed === !ok) return;
-  renderFailed = !ok;
-  void publishDrawn($);
+// Carry 2: a drawing that throws leaves the band to what is beneath, and lens is told; and told again once every surface
+// draws it.
+function noteDrawing($: Engine, surface: unknown, ok: boolean): void {
+  const before = failedOn.size > 0;
+  if (ok) failedOn.delete(String(surface)); else failedOn.add(String(surface));
+  if (before !== failedOn.size > 0) void publishDrawn($);
 }
 
-// F-05: the ⋯ row of a one-row band stays open until an action is pressed or 30 s pass.
+// F-05: the ⋯ row of a one-row band stays open until an action is pressed or 30 s pass. Re-review m-2: where its buttons
+// do not all fit with labels told apart, it has pages, and morePage is the one open.
 const MORE_OPEN_MS = 30_000;
 let moreUntil = 0;
+let morePage = 0;
 // F-06: Stop, and Close on a run still active, ask twice: which button is armed, for which run, and until when.
 const CONFIRM_MS = 5_000;
 let armed: { key: string; runId: string | null; until: number } | null = null;
@@ -215,16 +219,22 @@ async function copyUrl($: Engine, url: string, surface: UiPressArgument['surface
 }
 
 // F-05: the ⋯ row, open for 30 s or closed again; the band is redrawn now, and once more when the 30 s are up.
-async function toggleMore($: Engine): Promise<void> {
+// Re-review m-2: with `pages` pages, m opens the first, then each next one, and closes the row after the last.
+async function toggleMore($: Engine, pages: number): Promise<void> {
   const now = await nowMs($);
-  moreUntil = now < moreUntil ? 0 : now + MORE_OPEN_MS;
+  const open = now < moreUntil;
+  if (open && morePage + 1 < pages) morePage++;
+  else if (open) { moreUntil = 0; morePage = 0; }
+  else morePage = 0;
+  if (open && !moreUntil) { $.ui.invalidate('ui.render'); return; }
+  moreUntil = now + MORE_OPEN_MS;
   $.ui.invalidate('ui.render');
-  if (moreUntil) $.clock.after(MORE_OPEN_MS, () => { $.ui.invalidate('ui.render'); });
+  $.clock.after(MORE_OPEN_MS, () => { $.ui.invalidate('ui.render'); });
 }
 
 // F-05: an action closes the ⋯ row.
 function closeMore($: Engine): void {
-  if (moreUntil) { moreUntil = 0; $.ui.invalidate('ui.render'); }
+  if (moreUntil) { moreUntil = 0; morePage = 0; $.ui.invalidate('ui.render'); }
 }
 
 // F-02, F-06: a confirmation armed from the ⋯ row keeps the row open until it is due, so the second press finds its
@@ -243,7 +253,10 @@ const TONE: Record<BandHue, { color?: string; dimColor?: boolean }> = {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     moreUntil = 0;
+    morePage = 0;
     armed = null;
+    // A surface that failed in an earlier session says so again when it draws.
+    failedOn.clear();
     try { await update($, hidden, () => false); } catch { /* ignore */ }
     await loadDismissals($);
     await checkLens($);
@@ -436,7 +449,7 @@ export const register: Register = on => {
       };
       const panel: Control[] = lens ? [{ key: 'panel', label: t.panel, hotkey: 'p', press: submit('/lens') }] : [];
       const controls: Control[] = [...modeControls, ...panel, { key: DISMISS_KEY, label: '×', hotkey: 'x', dismiss: true, press: dismiss }];
-      const lay = layoutBand(bandParts(m, now), controls, { bodyColumns: e.props.bodyColumns, maxRows: e.props.maxRows, fullscreen, moreOpen: now < moreUntil });
+      const lay = layoutBand(bandParts(m, now), controls, { bodyColumns: e.props.bodyColumns, maxRows: e.props.maxRows, fullscreen, moreOpen: now < moreUntil, page: morePage });
       // Any action closes the ⋯ row; a press that only arms a confirmation is not one yet.
       const act = (c: Control) => (pressed: UiPressArgument) => {
         if (!c.confirm) closeMore($);
@@ -469,17 +482,17 @@ export const register: Register = on => {
           <Box key="band-row" flexDirection="row" columnGap={1}>
             <Box key="band-line" flexShrink={1} minWidth={0}>{line}</Box>
             {drawKeys(lay.inline.filter(k => k !== DISMISS_KEY))}
-            {lay.more ? <Button key={MORE_KEY} label={MORE_LABEL} hotkey={MORE_HOTKEY} {...plain} onPress={() => { void toggleMore($); }} /> : null}
+            {lay.more ? <Button key={MORE_KEY} label={MORE_LABEL} hotkey={MORE_HOTKEY} {...plain} onPress={() => { void toggleMore($, lay.pages); }} /> : null}
             {drawKeys(lay.inline.filter(k => k === DISMISS_KEY))}
           </Box>
           {lay.second.length ? <Box key="band-row2" flexDirection="row" flexWrap="wrap" columnGap={1}>{drawKeys(lay.second)}</Box> : null}
           {below}
         </Box>
       );
-      noteDrawing($, true);
+      noteDrawing($, e.surface, true);
       return tree;
     } catch {
-      noteDrawing($, false);
+      noteDrawing($, e.surface, false);
       return below;
     }
   });

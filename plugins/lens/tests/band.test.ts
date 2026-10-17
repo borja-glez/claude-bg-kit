@@ -317,7 +317,8 @@ test("lens's × closes its band for what it is about: todos that move on keep it
   on('command.list', () => ({ value: [] }));
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  // The same list throughout (re-review m-4 keys it by its items): only its statuses move on.
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'in_progress', activeForm: 'a' }, { content: 'b', status: 'pending', activeForm: 'b' }] });
   await clock.advance(30_000);
   const mount = () => $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
   let ui = await mount();
@@ -335,6 +336,74 @@ test("lens's × closes its band for what it is about: todos that move on keep it
   expect(await ui.find({ key: 'panel' })).toBeDefined();
   expect(await lineOf(ui)).toContain('T002');
   await ui.unmount();
+});
+
+test("lens's × on the todos holds while the list moves on, and a new todo brings the band back (re-review m-4)", async ($, on) => {
+  serveFiles(on, {});
+  engineBand(on);
+  const clock = start(on);
+  on('command.list', () => ({ value: [] }));
+  const todo = (content: string, status: 'pending' | 'in_progress' | 'completed') => ({ content, status, activeForm: content });
+  const mount = () => $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
+  await $.session.start(SESSION);
+  await $.tool.call({ tool: 'TodoWrite', todos: [todo('a', 'in_progress'), todo('b', 'pending')] });
+  await clock.advance(30_000);
+  let ui = await mount();
+  await ui.press({ key: 'dismiss' });
+  await ui.unmount();
+  await $.tool.call({ tool: 'TodoWrite', todos: [todo('a', 'completed'), todo('b', 'in_progress')] });
+  await clock.advance(30_000);
+  ui = await mount();
+  expect(await ui.find({ key: 'panel' })).toBeUndefined();
+  await ui.unmount();
+  await $.tool.call({ tool: 'TodoWrite', todos: [todo('a', 'completed'), todo('b', 'in_progress'), todo('c', 'pending')] });
+  await clock.advance(30_000);
+  ui = await mount();
+  expect(await ui.find({ key: 'panel' })).toBeDefined();
+  await ui.unmount();
+});
+
+test("lens's × on the subagents holds for those agents, and a new one brings the band back (re-review m-4)", async ($, on) => {
+  serveFiles(on, {});
+  engineBand(on);
+  const clock = start(on);
+  on('command.list', () => ({ value: [] }));
+  on('classic.SubagentStart', () => ({}));
+  const mount = () => $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
+  await $.session.start(SESSION);
+  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' } as never);
+  await clock.advance(30_000);
+  let ui = await mount();
+  expect(await ui.find({ key: 'panel' })).toBeDefined();
+  await ui.press({ key: 'dismiss' });
+  await ui.unmount();
+  await clock.advance(30_000);
+  ui = await mount();
+  expect(await ui.find({ key: 'panel' })).toBeUndefined();
+  await ui.unmount();
+  await $.classic.SubagentStart({ agent_id: 'a2', agent_type: 'Explore' } as never);
+  await clock.advance(30_000);
+  ui = await mount();
+  expect(await ui.find({ key: 'panel' })).toBeDefined();
+  await ui.unmount();
+});
+
+test('a command listing that fails keeps waypoint loaded: its own drawn still keeps lens off the site (re-review m-5)', async ($, on) => {
+  serveFiles(on, WAYPOINT_PROJECT);
+  engineBand(on);
+  const clock = start(on);
+  let fails = false;
+  on('command.list', () => {
+    if (fails) throw new Error('listing refused');
+    return { value: [WAYPOINT_COMMAND] };
+  });
+  serveWaypointState(on, { drawn: true });
+  await $.session.start(SESSION);
+  await $.tool.call(TODOS);
+  expect(await buttons($)).toEqual([[], []]);
+  fails = true;
+  await clock.advance(30_000);
+  expect(await buttons($)).toEqual([[], []]);
 });
 
 test("lens's band names this session's tasks in progress, each as short as a band says it (F-09)", async ($, on) => {

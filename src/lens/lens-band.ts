@@ -29,17 +29,22 @@ export function activityTag(a: Row): string {
 export interface LensBand { parts: BandPart[]; section: SectionId; cells: CellState[]; ratio: number; spin: boolean }
 
 /**
- * Final review m-4: what lens's band is about, which its × closes it for: the tasks it names, the run, the todos (however
- * they move on), the subagents, or the section and title of its headline (forge's task, the roadmap's project, the
- * superpowers plan). A band about something else is drawn again.
+ * Final review m-4: what lens's band is about, which its × closes it for: the tasks it names, the run, the todo list, the
+ * subagents, or the section and title of its headline (forge's task, the roadmap's project, the superpowers plan). A band
+ * about something else is drawn again. Re-review m-3, m-4: a set is keyed whatever its order; the todos by the items of
+ * their list (`live.todos`; a step along it is the same subject, a new item another) and the subagents by their ids
+ * (`live.agents`, else the model's), so neither lasts a whole session.
  */
-export function bandSubject(m: PanelModel | null): string {
+export function bandSubject(m: PanelModel | null, live: { todos?: readonly string[]; agents?: readonly string[] } = {}): string {
+  const set = (xs: readonly string[], sep: string) => [...new Set(xs)].sort().join(sep);
+  const agents = () => `agents:${set(live.agents ?? (m?.subagents ?? []).map(s => s.id), ' ')}`;
   const acts = ownInProgress(m);
-  if (acts.length >= 2) return `tasks:${acts.map(a => a.key).join(' ')}`;
+  if (acts.length >= 2) return `tasks:${set(acts.map(a => a.key), ' ')}`;
   const head = m ? headline(m) : null;
-  if (!head) return 'agents';
+  if (!head) return agents();
   if (m?.execution?.active) return `run:${m.execution.runId}`;
-  if (head.section === 'todos' || head.section === 'agents') return head.section;
+  if (head.section === 'todos') return `todos:${live.todos ? set(live.todos, '\n') : String(m?.todos?.total ?? 0)}`;
+  if (head.section === 'agents') return agents();
   return `${head.section}:${head.title}`;
 }
 

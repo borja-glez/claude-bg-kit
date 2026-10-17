@@ -50,14 +50,28 @@ describe("what lens's band is about, which its × closes it for (final review m-
   const todos = { total: 3, done: 1, inProgress: 'Writing tests', next: ['c'], active: ['Writing tests'], cells: 'dap' };
   it('the tasks it names, the run, the todos, the subagents, or the section and title of its headline', () => {
     expect(bandSubject({ ...EMPTY, activities: [ACT(), ACT({ key: 'T002', task: 'T002' })] })).toBe('tasks:T001 T002');
-    expect(bandSubject({ ...EMPTY, todos })).toBe('todos');
-    expect(bandSubject(null)).toBe('agents');
-    expect(bandSubject({ ...EMPTY, subagents: [{ id: 'x', type: 'Explore', seconds: 5 }] })).toBe('agents');
+    expect(bandSubject({ ...EMPTY, todos })).toBe('todos:3');
+    expect(bandSubject(null)).toBe('agents:');
+    expect(bandSubject({ ...EMPTY, subagents: [{ id: 'x', type: 'Explore', seconds: 5 }] })).toBe('agents:x');
     const sp = { plan: 'docs/plan.md', tasks: 4, done: 1, current: null, stale: false } as unknown as PanelModel['superpowers'];
     expect(bandSubject({ ...EMPTY, superpowers: sp })).toBe('superpowers:docs/plan.md');
   });
   it('stays the same while the todos move on, and changes when the work it is about changes', () => {
     expect(bandSubject({ ...EMPTY, todos: { ...todos, done: 2, inProgress: 'Fixing the parser' } })).toBe(bandSubject({ ...EMPTY, todos }));
     expect(bandSubject({ ...EMPTY, activities: [ACT(), ACT({ key: 'T003', task: 'T003' })] })).not.toBe(bandSubject({ ...EMPTY, activities: [ACT(), ACT({ key: 'T002', task: 'T002' })] }));
+  });
+  it('the tasks it names, whatever their order: two tasks that swap recency are the same subject (re-review m-3)', () => {
+    const t2 = ACT({ key: 'T002', task: 'T002' });
+    expect(bandSubject({ ...EMPTY, activities: [ACT(), t2] })).toBe(bandSubject({ ...EMPTY, activities: [t2, ACT()] }));
+  });
+  it('the todos by their list and the subagents by their ids: a new todo or agent is another subject, a step along the list is not (re-review m-4)', () => {
+    const m = { ...EMPTY, todos };
+    const list = ['Write tests', 'Fix the parser', 'Ship it'];
+    expect(bandSubject(m, { todos: list })).toBe(bandSubject(m, { todos: [...list].reverse() }));
+    expect(bandSubject(m, { todos: [...list, 'Write the docs'] })).not.toBe(bandSubject(m, { todos: list }));
+    const agents = { ...EMPTY, subagents: [{ id: 'a1', type: 'Explore', seconds: 5 }] };
+    expect(bandSubject(agents, { agents: ['a1'] })).not.toBe(bandSubject(agents, { agents: ['a1', 'a2'] }));
+    expect(bandSubject(null, { agents: ['a2', 'a1'] })).toBe(bandSubject(null, { agents: ['a1', 'a2'] }));
+    expect(bandSubject(null, { agents: ['a1'] })).not.toBe(bandSubject(null, { agents: ['a3'] }));
   });
 });

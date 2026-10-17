@@ -131,10 +131,14 @@ export const MORE_HOTKEY = 'm';
 export const DISMISS_KEY = 'dismiss';
 
 /**
- * How a band is drawn: its level, its parts, the controls on the parts' row and on a second row, whether ⋯ shows, and
- * the labels of the second row's controls clipped so that row fits (by key; a control not named keeps its label).
+ * How a band is drawn: its level, its parts, the controls on the parts' row and on a second row, whether ⋯ shows, the
+ * labels of the second row's controls clipped so that row fits (by key; a control not named keeps its label), and how
+ * many pages ⋯ opens one after another (1 when its row holds every folded button).
  */
-export interface BandLayout { level: BandLevel; plain: boolean; long: boolean; shown: BandPart[]; inline: string[]; second: string[]; more: boolean; labels: Record<string, string> }
+export interface BandLayout {
+  level: BandLevel; plain: boolean; long: boolean; shown: BandPart[]; inline: string[]; second: string[]; more: boolean;
+  labels: Record<string, string>; pages: number;
+}
 
 const positive = (v: unknown, fallback: number): number =>
   (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback);
@@ -142,44 +146,145 @@ const positive = (v: unknown, fallback: number): number =>
 /** The fewest cells a label of a crowded second row keeps, its «…» included. */
 export const LABEL_MIN = 1;
 
+/** The lines a row of controls of these widths takes at `cols` cells, wrapped as the engine wraps it: a cell of gap between two. */
+export function rowLines(widths: readonly number[], cols: number): number {
+  let lines = 0;
+  let used = 0;
+  for (const w of widths) {
+    if (lines && used + 1 + w <= cols) used += 1 + w;
+    else { lines++; used = w; }
+  }
+  return lines;
+}
+
+/** What a control shows: outside fullscreen a button with a letter reads «k: label»; a link, a text or a button in fullscreen its label. */
+const visibleOf = (c: BandControl, label: string, plain: boolean): string =>
+  (plain && c.hotkey && c.kind !== 'link' && c.kind !== 'text' ? `${c.hotkey}: ${label}` : label);
+
 /**
- * Carry 3: the labels of a second row's controls clipped so the row, one cell of gap between two controls, fits in `cols`
- * cells and never wraps onto a third: the widest label is cut first, to what the row needs or down to the next widest,
- * never under LABEL_MIN. A row that fits, or one that cannot even at the floor, keeps what it got that far; an empty map
- * when nothing was clipped.
+ * Carry 3, re-review m-2: the labels of a row of controls clipped so the row fits in `cols` cells on at most `o.lines`
+ * lines (its wrap included), or null when it cannot. The widest label is cut first, to the longest form that makes the
+ * row fit or down to the next widest, never under LABEL_MIN; a cut that would show two controls the same is made a cell
+ * longer until it does not, and one that cannot be is not made. An empty map when nothing was clipped.
  */
-export function fitRow(controls: readonly BandControl[], cols: number, o: { plain: boolean; long: boolean }): Record<string, string> {
+export function fitRow(controls: readonly BandControl[], cols: number, o: { plain: boolean; long: boolean; lines?: number }): Record<string, string> | null {
+  const lines = Math.max(1, Math.floor(o.lines ?? 1));
   const base = (c: BandControl) => (o.long ? c.label : c.short ?? c.label);
-  const cur = controls.map(base);
-  for (;;) {
-    const widths = cur.map(label => stringWidth(label));
-    const used = cur.reduce((n, label, i) => n + controlWidth(label, { plain: o.plain, hotkey: controls[i].hotkey, kind: controls[i].kind }), 0)
-      + Math.max(0, controls.length - 1);
-    const excess = used - cols;
-    if (excess <= 0) break;
-    let at = -1;
-    widths.forEach((w, i) => { if (w > LABEL_MIN && (at < 0 || w > widths[at])) at = i; });
-    if (at < 0) break;
-    const next = Math.max(0, ...widths.filter((_, i) => i !== at));
-    cur[at] = clipWidth(base(controls[at]), Math.min(widths[at] - 1, Math.max(LABEL_MIN, widths[at] - excess, next)));
+  const forms = controls.map(c => formsOf(base(c)));
+  // The cells asked of each label (its full width to start with); its form and the cells its control takes then.
+  const asked = forms.map(f => f.forms.length - 1);
+  const labelAt = (i: number, t = asked[i]) => forms[i].forms[t];
+  const cellsAt = (i: number, t = asked[i]) => {
+    const c = controls[i];
+    const w = forms[i].cells[t];
+    return c.kind === 'link' || c.kind === 'text' ? w : o.plain ? w + (c.hotkey ? 3 : 0) : w + 4;
+  };
+  const linesWith = (i: number, t: number) => rowLines(controls.map((_, j) => (j === i ? cellsAt(j, t) : cellsAt(j))), cols);
+  const unique = (i: number, t: number) => {
+    const seen = visibleOf(controls[i], labelAt(i, t), o.plain);
+    return controls.every((c, j) => j === i || visibleOf(c, labelAt(j), o.plain) !== seen);
+  };
+  while (rowLines(controls.map((_, j) => cellsAt(j)), cols) > lines) {
+    const order = controls.map((_, i) => i).filter(i => forms[i].cells[asked[i]] > LABEL_MIN)
+      .sort((a, b) => forms[b].cells[asked[b]] - forms[a].cells[asked[a]] || a - b);
+    let cut = false;
+    for (const i of order) {
+      const w = forms[i].cells[asked[i]];
+      // Down to the next widest, or a cell at a time while another is as wide: the labels are evened from the top.
+      const others = controls.map((_, j) => forms[j].cells[asked[j]]).filter((_, j) => j !== i);
+      const floor = Math.max(LABEL_MIN, others.some(x => x === w) ? w - 1 : Math.max(0, ...others.filter(x => x < w)));
+      let chosen = -1;
+      for (let t = Math.min(asked[i], w) - 1; t >= floor; t--) {
+        if (labelAt(i, t) === labelAt(i) || !unique(i, t)) continue;
+        chosen = t;
+        if (linesWith(i, t) <= lines) break;
+      }
+      if (chosen < 0) continue;
+      asked[i] = chosen;
+      cut = true;
+      break;
+    }
+    if (!cut) return null;
   }
   const out: Record<string, string> = {};
-  controls.forEach((c, i) => { if (cur[i] !== base(c)) out[c.key] = cur[i]; });
+  controls.forEach((c, i) => { if (labelAt(i) !== base(c)) out[c.key] = labelAt(i); });
   return out;
+}
+
+// The forms a label takes clipped to 0, 1, 2… cells (index: the cells asked) and the cells each takes, kept per label:
+// the band asks again for the same few labels at every drawing. At most FORMS_MAX labels are kept.
+const FORMS = new Map<string, { forms: string[]; cells: number[] }>();
+const FORMS_MAX = 500;
+function formsOf(label: string): { forms: string[]; cells: number[] } {
+  let hit = FORMS.get(label);
+  if (!hit) {
+    const full = stringWidth(label);
+    const forms: string[] = [];
+    const cells: number[] = [];
+    for (let t = 0; t <= full; t++) {
+      const form = t >= full ? label : clipWidth(label, t);
+      forms.push(form);
+      cells.push(stringWidth(form));
+    }
+    hit = { forms, cells };
+    if (FORMS.size >= FORMS_MAX) FORMS.clear();
+    FORMS.set(label, hit);
+  }
+  return hit;
+}
+
+/**
+ * Re-review m-2: the folded buttons on the pages ⋯ opens one after another: each page as many of them as fit their row
+ * with labels all told apart, in their order, so the less important fold onto a later page. A button alone that cannot
+ * fit is clipped to the floor on a page of its own.
+ */
+export function pageRow(controls: readonly BandControl[], cols: number, o: { plain: boolean; long: boolean; lines?: number }): { pages: string[][]; labels: Record<string, string> } {
+  const pages: string[][] = [];
+  const labels: Record<string, string> = {};
+  let rest = [...controls];
+  while (rest.length) {
+    // All of them most of the time; else the most that fit, found by halves (fewer always fit when more do).
+    let n = rest.length;
+    let fit = fitRow(rest, cols, o);
+    if (fit === null) {
+      let lo = 1;
+      let hi = rest.length - 1;
+      n = 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const tried = fitRow(rest.slice(0, mid), cols, o);
+        if (tried === null) hi = mid - 1;
+        else { fit = tried; n = mid; lo = mid + 1; }
+      }
+    }
+    const page = rest.slice(0, n);
+    if (fit === null) {
+      const only = page[0];
+      const label = o.long ? only.label : only.short ?? only.label;
+      fit = stringWidth(label) > LABEL_MIN ? { [only.key]: clipWidth(label, LABEL_MIN) } : {};
+    }
+    pages.push(page.map(c => c.key));
+    Object.assign(labels, fit);
+    rest = rest.slice(n);
+  }
+  return { pages, labels };
 }
 
 /**
  * F-05: the band's layout. `lead` is what goes before the parts (an icon and its gap). wide falls back to two when the
  * parts of priority 1 to 4, whole, do not fit beside the long buttons; in one, the buttons fold into ⋯ (m) when those
  * parts, whole, do not fit beside the short ones, and come back on a second row while `moreOpen`. × always stays on the
- * parts' row. Each control takes one cell of gap before it. A second row is fitted to the width (fitRow), so the band
- * is never taller than its two rows.
+ * parts' row. Each control takes one cell of gap before it. A second row is fitted to the width (fitRow): with 3 rows or
+ * more it may take a second line before a label is clipped, and its labels always tell the controls apart; at level two
+ * a row that cannot folds into ⋯, and the ⋯ row puts what does not fit on its next page (`page`, from 0).
  */
-export function layoutBand(parts: readonly BandPart[], controls: readonly BandControl[], o: { bodyColumns: unknown; maxRows: unknown; fullscreen: boolean; moreOpen: boolean; lead?: number }): BandLayout {
+export function layoutBand(parts: readonly BandPart[], controls: readonly BandControl[], o: { bodyColumns: unknown; maxRows: unknown; fullscreen: boolean; moreOpen: boolean; page?: number; lead?: number }): BandLayout {
   const cols = positive(o.bodyColumns, DEFAULT_COLUMNS);
   const maxRows = positive(o.maxRows, 10);
   const plain = !o.fullscreen;
   const lead = o.lead ?? 0;
+  // Re-review m-2: the second row takes two lines where the band has three rows or more, one otherwise.
+  const lines = maxRows >= ONE_ROW_BELOW ? 2 : 1;
   const width = (cs: readonly BandControl[], long: boolean) =>
     cs.reduce((n, c) => n + 1 + controlWidth(long ? c.label : c.short ?? c.label, { plain, hotkey: c.hotkey, kind: c.kind }), 0);
   const keys = (cs: readonly BandControl[]) => cs.map(c => c.key);
@@ -187,19 +292,23 @@ export function layoutBand(parts: readonly BandPart[], controls: readonly BandCo
   let level = bandLevel({ bodyColumns: cols, maxRows, fullscreen: o.fullscreen });
   if (level === 'wide') {
     const room = cols - lead - width(controls, true);
-    if (partsWidth(core) <= room) return { level, plain, long: true, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false, labels: {} };
+    if (partsWidth(core) <= room) return { level, plain, long: true, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false, labels: {}, pages: 1 };
     level = 'two';
   }
   if (level === 'two') {
-    return { level, plain, long: false, shown: fitParts(parts, cols - lead).shown, inline: [], second: keys(controls), more: false, labels: fitRow(controls, cols, { plain, long: false }) };
+    const labels = fitRow(controls, cols, { plain, long: false, lines });
+    if (labels) return { level, plain, long: false, shown: fitParts(parts, cols - lead).shown, inline: [], second: keys(controls), more: false, labels, pages: 1 };
+    level = 'one';
   }
   const room = cols - lead - width(controls, false);
-  if (partsWidth(core) <= room) return { level, plain, long: false, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false, labels: {} };
+  if (partsWidth(core) <= room) return { level, plain, long: false, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false, labels: {}, pages: 1 };
   const dismiss = controls.filter(c => c.key === DISMISS_KEY);
   const rest = controls.filter(c => c.key !== DISMISS_KEY);
   const folded = cols - lead - (1 + controlWidth(MORE_LABEL, { plain, hotkey: MORE_HOTKEY })) - width(dismiss, false);
+  const paged = pageRow(rest, cols, { plain, long: false, lines });
+  const page = paged.pages[Math.min(paged.pages.length - 1, Math.max(0, Math.floor(Number(o.page) || 0)))] ?? [];
   return {
-    level, plain, long: false, shown: fitParts(parts, folded).shown, inline: keys(dismiss), second: o.moreOpen ? keys(rest) : [], more: true,
-    labels: o.moreOpen ? fitRow(rest, cols, { plain, long: false }) : {},
+    level, plain, long: false, shown: fitParts(parts, folded).shown, inline: keys(dismiss), second: o.moreOpen ? page : [], more: true,
+    labels: o.moreOpen ? Object.fromEntries(Object.entries(paged.labels).filter(([k]) => page.includes(k))) : {}, pages: Math.max(1, paged.pages.length),
   };
 }
