@@ -252,6 +252,11 @@ describe('normalizeState: forge v2, evidence v2 and blockedReason (C7, wave 4)',
     expect(normalizeState({ evidence: { ...ev, unchecked: ['a', 3, ...Array(12).fill('b')], shots: [{ surface: 'w', check: 'c', ok: true, round: 0 }] } }).evidence)
       .toMatchObject({ unchecked: ['a', ...Array(9).fill('b')], shots: [{ surface: 'w', check: 'c', ok: true }] });
   });
+  it('each unchecked item is one clean line of at most 200 characters, and an empty one goes', () => {
+    const bell = String.fromCharCode(7), rlo = String.fromCharCode(0x202e);
+    const ev = { surfaces: [], result: 'blocked', passed: 0, total: 0, unchecked: [`a${bell}b${rlo}c`, 'z'.repeat(500), bell, ''], shots: [] };
+    expect(normalizeState({ evidence: ev }).evidence!.unchecked).toEqual(['a bc', 'z'.repeat(200)]);
+  });
   it('blockedReason: one clean line of at most 300 characters; anything else is dropped and reported', () => {
     const bell = String.fromCharCode(7), rlo = String.fromCharCode(0x202e);
     const s = normalizeState({ status: 'blocked', blockedReason: `Waits for the${bell} payments${rlo} API ${'.'.repeat(400)}` });

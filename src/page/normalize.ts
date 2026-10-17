@@ -67,7 +67,8 @@ export function normalizeState(x: unknown, report?: Report): TaskState {
   if (!('commits' in o) || o.commits === undefined) delete s.commits;
   s.blockedBy = Array.isArray(o.blockedBy) ? strs(o.blockedBy) : undefined;
   // H-15: why it is blocked, as `waypoint block --why-file` wrote it: one clean line of at most 300 characters.
-  if (typeof o.blockedReason === 'string' && cleanText(o.blockedReason, REASON_MAX)) s.blockedReason = cleanText(o.blockedReason, REASON_MAX);
+  const reason = typeof o.blockedReason === 'string' ? cleanText(o.blockedReason, REASON_MAX) : '';
+  if (reason) s.blockedReason = reason;
   else { delete s.blockedReason; if (o.blockedReason !== undefined) report?.('blockedReason', 'dropped', kindOf(o.blockedReason)); }
   for (const k of ['claimedAt', 'startedAt', 'doneAt'] as const) s[k] = optStr(o[k]);
   const forge = normalizeForge(o.forge, report);
@@ -242,6 +243,6 @@ function normalizeEvidence(x: unknown, report?: Report): TaskState['evidence'] |
   if (typeof x.reason === 'string') e.reason = x.reason;
   // C7 v2: the version, and the checks the verification could not run (K2-14).
   if (x.v === 2) e.v = 2;
-  if (Array.isArray(x.unchecked)) e.unchecked = strs(x.unchecked).slice(0, UNCHECKED_MAX);
+  if (Array.isArray(x.unchecked)) e.unchecked = strs(x.unchecked).map(u => cleanText(u, 200)).filter(Boolean).slice(0, UNCHECKED_MAX);
   return e;
 }

@@ -63,8 +63,10 @@ const isAction = (v: unknown): v is DocAction => (ACTIONS as readonly unknown[])
 const BIDI = new RegExp(`[${[0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069].map(c => String.fromCharCode(c)).join('')}]`, 'g');
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+/** At most `max` code points, so a clip never splits a surrogate pair. */
+const clip = (v: string, max: number): string => (v.length <= max ? v : Array.from(v).slice(0, max).join(''));
 /** One line of text: control characters as spaces, without bidi characters, trimmed, at most `max` characters. */
-const line = (v: string, max: number): string => v.replace(CONTROL, ' ').replace(BIDI, '').trim().slice(0, max);
+const line = (v: string, max: number): string => clip(v.replace(CONTROL, ' ').replace(BIDI, '').trim(), max);
 
 /** The UTF-8 size of a text, which the 4 KB budget counts. */
 export const byteLength = (s: string): number => new TextEncoder().encode(s).length;
@@ -101,7 +103,7 @@ function deferredOf(d: unknown): DeferredV2 | null {
 }
 
 function verifyOf(v: Obj, report?: DocReport): VerifyV2 | null {
-  if (typeof v.planned !== 'boolean') { report?.('forge.verify', 'dropped', 'planned'); return null; }
+  if (typeof v.planned !== 'boolean') { report?.('forge.verify', 'coerced', 'planned'); return null; }
   return {
     planned: v.planned,
     result: v.result === 'pass' || v.result === 'fail' || v.result === 'blocked' ? v.result : null,
@@ -115,7 +117,7 @@ function verifyOf(v: Obj, report?: DocReport): VerifyV2 | null {
 const SHA = /^[0-9a-f]{7,40}$/i;
 function integrationOf(v: Obj, report?: DocReport): IntegrationV2 | null {
   if (typeof v.branch !== 'string' || !v.branch.trim() || typeof v.target !== 'string' || !v.target.trim() || typeof v.merged !== 'boolean') {
-    report?.('forge.integration', 'dropped', 'branch, target or merged');
+    report?.('forge.integration', 'coerced', 'branch, target or merged');
     return null;
   }
   return { branch: line(v.branch, TEXT_MAX), sha: typeof v.sha === 'string' && SHA.test(v.sha) ? v.sha : null, merged: v.merged, target: line(v.target, TEXT_MAX) };
@@ -164,12 +166,20 @@ export function parseForgeDocV2(x: unknown, report?: DocReport): ForgeDocV2 | nu
     deferred: keep(x.deferred, deferredOf, 'deferred', DEFERRED_MAX),
     acceptedRound: x.acceptedRound as number | null, overCap: x.overCap, updatedAt: x.updatedAt,
   };
+  // The optional v1 fields: left out when absent; one that is there and invalid is left out and reported.
+  const coerced = (field: string, v: unknown): void => report?.(`forge.${field}`, 'coerced', kindOf(v));
   if (typeof x.agent === 'string' && x.agent.trim()) doc.agent = line(x.agent, NAME_MAX);
+  else if (x.agent !== undefined) coerced('agent', x.agent);
   if (isObj(x.verdict) && isAction(x.verdict.action)) {
     doc.verdict = { action: x.verdict.action, score: typeof x.verdict.score === 'number' && Number.isFinite(x.verdict.score) ? x.verdict.score : null };
-  }
+    if (doc.verdict.score === null && x.verdict.score !== null) coerced('verdict', x.verdict.score);
+  } else if (x.verdict !== undefined) coerced('verdict', x.verdict);
   if (int(x.round, 1, 99)) doc.round = x.round;
+  else if (x.round !== undefined) coerced('round', x.round);
   if (int(x.cap, 1, 99)) doc.cap = x.cap;
+  else if (x.cap !== undefined) coerced('cap', x.cap);
+  // round is reviews.n and cap is reviews.max: a round above its cap is a producer bug, and the round is the one that goes.
+  if (doc.round !== undefined && doc.cap !== undefined && doc.round > doc.cap) { delete doc.round; report?.('forge.round', 'coerced', 'above cap'); }
   return doc;
 }
 
@@ -179,12 +189,18 @@ const STEPS: readonly Step[] = [
   ['deferred>5', d => (d.deferred.length > 5 ? { ...d, deferred: d.deferred.slice(0, 5) } : null)],
   ['rounds:earlier-briefs', d => (d.rounds.some(r => r.brief !== d.brief) ? { ...d, rounds: d.rounds.filter(r => r.brief === d.brief) } : null)],
   ['validators.failing', d => (d.validators.some(v => v.failing !== undefined) ? { ...d, validators: d.validators.map(({ failing: _f, ...v }) => v) } : null)],
-  ['rounds.note:60', d => (d.rounds.some(r => r.note.length > 60) ? { ...d, rounds: d.rounds.map(r => ({ ...r, note: r.note.slice(0, 60) })) } : null)],
-  ['deferred.problem:80', d => (d.deferred.some(x => x.problem.length > 80) ? { ...d, deferred: d.deferred.map(x => ({ ...x, problem: x.problem.slice(0, 80) })) } : null)],
+  ['rounds.note:60', d => (d.rounds.some(r => r.note.length > 60) ? { ...d, rounds: d.rounds.map(r => ({ ...r, note: clip(r.note, 60) })) } : null)],
+  ['deferred.problem:80', d => (d.deferred.some(x => x.problem.length > 80) ? { ...d, deferred: d.deferred.map(x => ({ ...x, problem: clip(x.problem, 80) })) } : null)],
+  // The last resort, so the cap is a guarantee: the v1 core and the v2 scalars. Every v2 list goes (rounds, deferred
+  // findings, reviewers, the verification and the integration), and of the validators only the ones that failed stay.
+  ['core', d => ({ ...d, validators: d.validators.filter(v => !v.ok).map(v => ({ name: v.name, ok: v.ok })), rounds: [], verify: null, integration: null, deferred: [] })],
 ];
 
-/** C7: the block cut in a fixed order until its JSON measures at most `max` UTF-8 bytes (it may still not fit). */
-export function fitForgeDoc(doc: ForgeDocV2, max = FORGE_DOC_MAX): { doc: ForgeDocV2; dropped: string[]; bytes: number } {
+/**
+ * C7: the block cut in a fixed order until its JSON measures at most `max` UTF-8 bytes. The last step reduces it to its
+ * core, so `fits` is false only when even that exceeds `max` (the caller then refuses to write it).
+ */
+export function fitForgeDoc(doc: ForgeDocV2, max = FORGE_DOC_MAX): { doc: ForgeDocV2; dropped: string[]; bytes: number; fits: boolean } {
   let cur = doc;
   const dropped: string[] = [];
   for (const [label, cut] of STEPS) {
@@ -192,5 +208,6 @@ export function fitForgeDoc(doc: ForgeDocV2, max = FORGE_DOC_MAX): { doc: ForgeD
     const next = cut(cur);
     if (next) { cur = next; dropped.push(label); }
   }
-  return { doc: cur, dropped, bytes: byteLength(JSON.stringify(cur)) };
+  const bytes = byteLength(JSON.stringify(cur));
+  return { doc: cur, dropped, bytes, fits: bytes <= max };
 }
