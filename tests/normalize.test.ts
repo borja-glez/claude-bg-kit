@@ -199,6 +199,17 @@ describe('normalizeInfinite', () => {
     expect(normalizeInfinite({ active: true, cycle: 2.5, budget: { cycles: 1.5, hours: Infinity } })).toEqual({ active: true, cycle: 0, budget: {}, startedAt: '', lastCycleAt: null });
     expect(normalizeInfinite({ active: true, cycle: 4, budget: 'x' })!.budget).toEqual({});
   });
+  it('keeps a valid coordinator and stop reason, and drops a coordinator with junk dates, reporting it (G-08)', () => {
+    const base = { active: true, cycle: 1, budget: { cycles: 3 }, startedAt: '2026-10-11T09:00:00Z', lastCycleAt: null };
+    const coordinator = { sid: 'main', claude: 's1', seenAt: '2026-10-11T10:00:00.000Z', leaseUntil: '2026-10-11T10:10:00.000Z' };
+    expect(normalizeInfinite({ ...base, coordinator, stopReason: 'budget-cycles' })).toEqual({ ...base, coordinator, stopReason: 'budget-cycles' });
+    expect(normalizeInfinite({ ...base, coordinator: { ...coordinator, sid: null }, stopReason: null })).toEqual({ ...base, coordinator: { ...coordinator, sid: null }, stopReason: null });
+    const got: string[] = [];
+    expect(normalizeInfinite({ ...base, coordinator: { ...coordinator, leaseUntil: 'soon' } }, (f, a) => { got.push(`${f} · ${a}`); })).not.toHaveProperty('coordinator');
+    expect(normalizeInfinite({ ...base, coordinator: { ...coordinator, claude: '../x' } }, (f, a) => { got.push(`${f} · ${a}`); })).not.toHaveProperty('coordinator');
+    expect(got).toEqual(['coordinator · dropped', 'coordinator · dropped']);
+    expect(normalizeInfinite({ ...base, coordinator: null })).toEqual({ ...base, coordinator: null });
+  });
 });
 
 describe('report (H-04, G-03)', () => {

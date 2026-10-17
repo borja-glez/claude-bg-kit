@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { parseRun, startRun, recordCycle, stopReason, saveRun, type RunState } from '../src/forge/run.js';
+import { parseRun, startRun, recordCycle, stopReason, saveRun, endRun, type RunState } from '../src/forge/run.js';
+import { infiniteDocOf } from '../src/forge/infinite-doc.js';
 
 const T0 = new Date('2026-10-11T10:00:00.000Z');
 const ctx = (over: Partial<{ now: Date; stopFile: boolean; approvedPending: number; pendingProposals: number }> = {}) =>
@@ -131,5 +132,22 @@ describe('saveRun', () => {
     mkdirSync(path.join(root, '.forge', 'run.json'), { recursive: true });
     expect(() => saveRun(root, startRun(T0, {}))).toThrow();
     expect(readdirSync(path.join(root, '.forge')).filter(n => n.endsWith('.tmp'))).toEqual([]);
+  });
+});
+
+describe('infiniteDocOf: meta/infinite with its coordinator (G-08)', () => {
+  const now = new Date('2026-10-16T10:00:00.000Z');
+  const base = { ...startRun(new Date('2026-10-16T09:00:00.000Z'), { cycles: 5 }, 10, 'c1'), cycle: 2 };
+  it('a lease of 10 minutes, or the expected sleep plus 5', () => {
+    expect(infiniteDocOf(base, { now, sid: 'main', sleepUntil: null, lastCycleAt: '2026-10-16T09:55:00.000Z' })).toEqual({
+      active: true, cycle: 2, budget: { cycles: 5 }, startedAt: '2026-10-16T09:00:00.000Z', lastCycleAt: '2026-10-16T09:55:00.000Z', stopReason: null,
+      coordinator: { sid: 'main', claude: 'c1', seenAt: '2026-10-16T10:00:00.000Z', leaseUntil: '2026-10-16T10:10:00.000Z' },
+    });
+    expect(infiniteDocOf(base, { now, sid: null, sleepUntil: '2026-10-16T10:20:00.000Z', lastCycleAt: null }).coordinator!.leaseUntil).toBe('2026-10-16T10:25:00.000Z');
+    expect(infiniteDocOf(base, { now, sid: null, sleepUntil: '2026-10-16T09:00:00.000Z', lastCycleAt: null }).coordinator!.leaseUntil).toBe('2026-10-16T10:10:00.000Z');
+  });
+  it('an inactive run says why it stopped; a run of forge 0.15 (no session) has no coordinator', () => {
+    expect(infiniteDocOf(endRun(base, 'budget-cycles'), { now, sid: null, sleepUntil: null, lastCycleAt: null })).toMatchObject({ active: false, stopReason: 'budget-cycles' });
+    expect(infiniteDocOf({ ...base, sessionId: null }, { now, sid: null, sleepUntil: null, lastCycleAt: null }).coordinator).toBeNull();
   });
 });

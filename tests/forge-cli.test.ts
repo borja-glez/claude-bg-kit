@@ -805,6 +805,20 @@ describe('forge infinite', () => {
     expect(reason).toMatch(/Tell the user in their own language\.$/);
     expect(JSON.parse(run(['infinite', 'status'], io).stdout).reply).toBeNull();
   });
+  it('infinite start, cycle and status print meta/infinite with its coordinator: Claude\'s id, its seat once bound, its lease (G-08)', () => {
+    const s = JSON.parse(run(['infinite', 'start', '--cycles', '3'], io).stdout);
+    expect(s.publish.infinite).toEqual({ active: true, cycle: 0, budget: { cycles: 3 }, startedAt: '2026-10-11T10:00:00.000Z', lastCycleAt: null, stopReason: null,
+      coordinator: { sid: null, claude: 's1', seenAt: '2026-10-11T10:00:00.000Z', leaseUntil: '2026-10-11T10:10:00.000Z' } });
+    // The skill binds after the start (bind --via forge-infinite): from then on the seat is known.
+    mkdirSync(path.join(root, '.waypoint', 'demo'), { recursive: true });
+    writeFileSync(path.join(root, '.waypoint', 'demo', 'session.json'), JSON.stringify({ sessionId: 'main' }));
+    writeFileSync(path.join(root, '.waypoint', 'demo', 'bound.json'), JSON.stringify({ sid: 'main', claude: 's1', pid: null, via: 'forge-infinite',
+      since: '2026-10-11T09:59:00.000Z', seenAt: '2026-10-11T09:59:30.000Z', endedAt: null, endReason: null }));
+    const c = JSON.parse(run(['cycle', '--progress', 'yes'], io).stdout);
+    expect(c.publish.infinite).toMatchObject({ cycle: 1, lastCycleAt: '2026-10-11T10:00:00.000Z', coordinator: { sid: 'main', claude: 's1' } });
+    run(['stop'], io);
+    expect(JSON.parse(run(['infinite', 'status'], io).stdout).publish.infinite).toMatchObject({ active: false, stopReason: 'stopped' });
+  });
 });
 
 describe('forge tree', () => {

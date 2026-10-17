@@ -200,20 +200,33 @@ function normalizeLoose(x: unknown, report?: Report): LooseRunTask[] {
   return out;
 }
 
-/** meta/infinite: active only when exactly true, cycle a non-negative integer (else 0), budget kept only when positive. */
-export function normalizeInfinite(x: unknown): InfiniteDoc | null {
+const SAFE_ID = /^[A-Za-z0-9_\-.]{1,120}$/;
+const safeId = (v: unknown): v is string => typeof v === 'string' && SAFE_ID.test(v) && v !== '.' && v !== '..';
+
+/** meta/infinite: active only when exactly true, cycle a non-negative integer (else 0), budget kept only when positive;
+ *  G-08: its coordinator (seat, Claude's id, ISO seenAt and leaseUntil) and its stop reason when the doc carries them. */
+export function normalizeInfinite(x: unknown, report?: Report): InfiniteDoc | null {
   if (!isObj(x)) return null;
   const b: Obj = isObj(x.budget) ? x.budget : {};
   const budget: InfiniteDoc['budget'] = {};
   if (typeof b.cycles === 'number' && Number.isInteger(b.cycles) && b.cycles > 0) budget.cycles = b.cycles;
   if (finite(b.hours) && b.hours > 0) budget.hours = b.hours;
-  return {
+  const out: InfiniteDoc = {
     active: x.active === true,
     cycle: typeof x.cycle === 'number' && Number.isInteger(x.cycle) && x.cycle >= 0 ? x.cycle : 0,
     budget,
     startedAt: isoOrNull(x.startedAt) ?? '',
     lastCycleAt: isoOrNull(x.lastCycleAt),
   };
+  if ('coordinator' in x) {
+    const c = x.coordinator;
+    if (c === null) out.coordinator = null;
+    else if (isObj(c) && safeId(c.claude) && (c.sid === null || safeId(c.sid)) && isoOrNull(c.seenAt) && isoOrNull(c.leaseUntil)) {
+      out.coordinator = { sid: c.sid as string | null, claude: c.claude, seenAt: c.seenAt as string, leaseUntil: c.leaseUntil as string };
+    } else report?.('coordinator', 'dropped', isObj(c) ? 'bad seat, Claude id or dates' : kindOf(c));
+  }
+  if ('stopReason' in x) out.stopReason = typeof x.stopReason === 'string' && x.stopReason ? x.stopReason.slice(0, 80) : null;
+  return out;
 }
 
 // Asset urls from the roadmap's own store: the artifact asset host (https://claude.ai/), or the /_blob/<id> path every

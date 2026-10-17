@@ -29,6 +29,7 @@ import { UsageError } from './errors.js';
 import { swarmCommand, restoringRegenerated, runSetup } from './swarm.js';
 import { reviewCommand } from './review.js';
 import { roadmapCommand } from './roadmap.js';
+import { infinitePublish } from '../infinite-doc.js';
 import type { fitForgeDoc } from '../../lib/roadmap-doc.js';
 import { swarmStep } from './step.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
@@ -1614,7 +1615,7 @@ function runCommand(argv: string[], io: Io): Result {
           rmSync(stopFile(main), { force: true });
           const run: RunState = startRun(io.now(), { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}) }, queueMax, session, locale ?? null);
           saveRun(main, run);
-          return json(run);
+          return json({ ...run, publish: { infinite: infinitePublish(main, run, io.now()) } });
         }
         if (sub === 'status') {
           const runRoot = runRootOf(io.cwd);
@@ -1623,7 +1624,9 @@ function runCommand(argv: string[], io: Io): Result {
           const reason = run?.active ? stopReason(run, stopContext(runRoot, io.now())) : null;
           // §4.6: an active run no session drives (one forge 0.15 started) says so.
           const unbound = !!run?.active && run.sessionId === null;
-          return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run), ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}) });
+          // G-08: meta/infinite as the roadmap takes it, for the skill to send as it is.
+          const publish = run ? { infinite: infinitePublish(mainCheckout(io.cwd), run, io.now()) } : null;
+          return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run), ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}), publish });
         }
         throw new UsageError('usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE]|status>');
       }
@@ -1640,7 +1643,7 @@ function runCommand(argv: string[], io: Io): Result {
         const next = recordCycle(current, { progress: progress === 'yes', ...(error !== undefined ? { error } : {}) });
         saveRun(runRoot, next);
         appendEvent(runRoot, { ts: ts(), kind: 'cycle', cycle: next.cycle, progress: progress === 'yes', ...(next.lastError ? { error: next.lastError } : {}) });
-        return json({ ...next, reply: runReply(runRoot, next) });
+        return json({ ...next, reply: runReply(runRoot, next), publish: { infinite: infinitePublish(mainCheckout(io.cwd), next, io.now()) } });
       }
       case 'stop': {
         // K2-01: forge's run and execution are the main checkout's, wherever this runs from.

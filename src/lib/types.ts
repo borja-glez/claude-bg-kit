@@ -149,6 +149,10 @@ export interface InfiniteDoc {
   budget: { cycles?: number; hours?: number };
   startedAt: string;
   lastCycleAt: string | null;
+  /** G-08: the session that drives the run: its waypoint seat (null until it binds), Claude's id, when the CLI wrote this and its lease. */
+  coordinator?: { sid: string | null; claude: string; seenAt: string; leaseUntil: string } | null;
+  /** G-08: why the run stopped, once it is inactive. */
+  stopReason?: string | null;
 }
 export interface PhaseDoc { id: string; name: string; plan_status: PlanStatus; order: number; tasks: PlanTask[] }
 

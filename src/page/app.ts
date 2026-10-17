@@ -729,7 +729,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
 
   unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data(), reporter('meta/project')('meta/project')); if (mm) { model.meta = mm; rebuild(); } } scheduleData(); }) as never, onErr));
   unsubs.push(db.doc('meta/run').onSnapshot(((s: Snap) => { model.run = s.exists ? normalizeRun(s.data(), reporter('meta/run')('meta/run')) : null; scheduleData(); }) as never, onErr));
-  unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data()) : null; scheduleData(); }) as never, onErr));
+  unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data(), reporter('meta/infinite')('meta/infinite')) : null; scheduleData(); }) as never, onErr));
   unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const rep = reporter('plan'); const p = rows(s).map(r => normalizePhase(r.body, rep(`plan/${r.id}`))).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } scheduleData(); }) as never, onErr));
   unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => { const rep = reporter('state'); model.states = Object.fromEntries(rows(s).map(r => [r.id, normalizeState(r.body, rep(`state/${r.id}`))])) as States; scheduleData(); }) as never, onErr));
   unsubs.push(db.collection('sessions').onSnapshot(((s: QSnap) => { model.sessions = Object.fromEntries(rows(s).map(r => [r.id, normalizeSession(r.body)])) as Record<string, SessionDoc>; scheduleData(); }) as never, onErr));
