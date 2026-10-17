@@ -584,13 +584,14 @@ describe('plugin layout', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     expect(md).toMatch(/^---\r?\nname: run\r?\ndescription: .+\r?\n/);
     expect(md).toContain('`FORGE` below means `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs"`');
-    for (const w of ['FORGE triage', 'FORGE validate', 'FORGE review-prep', 'FORGE review-close', 'FORGE agents', 'FORGE log', 'FORGE last',
+    for (const w of ['FORGE triage', 'FORGE validate', 'FORGE review-prep', 'FORGE review-close', 'FORGE agents', 'FORGE log',
       '## Trivial', '## Small', '## Medium', '## Large', '## Resuming', 'ratchet', 'breaker', 'stalled', 'fresh-stronger', 'never push', 'forge-fable', '--text-file', '--data-file', '<id>-<n>', 'FORGE prep --task <id>-1 --path small --no-baseline', 'absolute path',
       'tier ladder', '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`','`revert`', '`invalid: true`',
       '`failures` of every validator with `ok: false` and no `preexisting` in `validators-<n>.json`', '--baseline .forge/work/<id>/baseline-<n>.json']) expect(md).toContain(w);
     for (const w of ['FORGE verdict', '/waypoint:design']) expect(runRef('large')).toContain(w);
     expect(runRef('execution')).toContain('--base-run');
-    expect(runRef('resuming')).toContain('FORGE last --task <id>-<n>');
+    // FORGE last lives in the resuming reference; the core's Resuming line names what sends you there.
+    for (const w of ['FORGE last --task <id>`', 'FORGE last --task <id>-<n>']) expect(runRef('resuming')).toContain(w);
   });
   it('forge run skill: Execution section with the task state machine and the mode choice', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
@@ -691,7 +692,9 @@ describe('plugin layout', () => {
       'FORGE swarm relaunch', 'FORGE swarm nudge', 'The new session reads <WORK>/handover.md first',
       'An unattended execution never stops to ask']) expect(exec).toContain(s);
     expect(runRef('large')).toContain('--mode sessions');
-    expect(runRef('resuming')).toContain('FORGE swarm takeover --session <SID> --hook-session <CSID> --db DB');
+    // The takeover reads no roadmap listing: the band's rule decides (coordinatorGone).
+    expect(runRef('resuming')).toContain('`FORGE swarm takeover --session <SID> --hook-session <CSID>`');
+    expect(runRef('resuming')).not.toContain('--db DB');
     expect(read('plugins/forge/skills/member/SKILL.md')).toContain('A run member never integrates and never merges');
     for (const s of [runMd, exec]) expect(s).not.toContain('Sessions mode arrives in a later version');
     const manual = runRef('manual-member');
@@ -1339,5 +1342,15 @@ describe('plugin layout', () => {
   it('the end of an execution offers swarm cleanup, and records it in auto (D-03)', () => {
     const exec = runRef('execution');
     for (const w of ['FORGE swarm cleanup --dry-run', 'FORGE swarm cleanup', 'branch-discard', '`kept`']) expect(exec).toContain(w);
+  });
+  it('/forge:run --resume is a section of references/resuming.md, and SKILL.md names it in its Resuming line (2b handoff)', () => {
+    const res = runRef('resuming');
+    for (const w of ['## /forge:run --resume', 'FORGE swarm status', '`closedAt`', '`replaced`', '/forge:stop', '--resume']) expect(res).toContain(w);
+    expect(res).not.toContain('${CLAUDE_');
+    const line = read('plugins/forge/skills/run/SKILL.md').split('\n').find(l => l.startsWith('Read `references/resuming.md`'))!;
+    expect(line).toContain('`/forge:run --resume`');
+    // It binds first, as execution.md step 1 does: a conversation resumed after /clear holds no binding. An ephemeral run binds at its start too.
+    expect(res.slice(res.indexOf('## /forge:run --resume'))).toContain('bind <plan> --via forge-run --claude <CSID>');
+    expect(runRef('ephemeral').split('\n').find(l => l.startsWith('2. **Start.**'))).toContain('bind <plan> --via forge-run --claude <CSID>');
   });
 });

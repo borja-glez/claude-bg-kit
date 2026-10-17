@@ -184,7 +184,10 @@ describe('forge hook live', () => {
     writeMember(root, { sessionId: 's2', role: 'executor', runId: 'r1', task: 'T1', name: null, since: T });
     expect(JSON.parse(hook({ session_id: 's2', hook_event_name: 'SessionStart' }).stdout).hookSpecificOutput.additionalContext)
       .toContain('executor session of T1 in the execution r1 coordinated by main');
-    expect(hook({ session_id: 's9', hook_event_name: 'SessionStart' }).stdout).toBe('');
+    // B-09: another session gets no resume text, only what runs.
+    const other = JSON.parse(hook({ session_id: 's9', hook_event_name: 'SessionStart' }).stdout).hookSpecificOutput.additionalContext as string;
+    expect(other).toContain('coordinated by another session');
+    expect(other).not.toContain('Resume it');
     expect(hook({ session_id: 's1', hook_event_name: 'SubagentStart', agent_id: 'a', agent_type: 'x' }).stdout).toBe('');
   });
   it('SessionStart repeats the person language when the execution or the run knows it', () => {
@@ -300,5 +303,77 @@ describe('forge hook live', () => {
   it('fails open on junk input', () => {
     exec();
     expect(run(['hook', 'live'], { ...io, stdin: '{oops' })).toMatchObject({ code: 0, stdout: '' });
+  });
+  it('a session that does not coordinate the execution is told what runs, and writes no signal (B-09)', () => {
+    exec({ tasks: runningTask });
+    const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    const text = JSON.parse(hook({ session_id: 's2', hook_event_name: 'SessionStart', source: 'startup' }).stdout).hookSpecificOutput.additionalContext as string;
+    expect(text).toContain('forge: execution r1 is running (subagents, 1/3 running), coordinated by another session');
+    expect(text).not.toContain('continue');
+    expect(hook({ session_id: 's2', hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'x' }).stdout).toBe('');
+    expect(existsSync(liveFile(root, 's2'))).toBe(false);
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+  });
+  it('after the coordinator ends with /clear, the new conversation is told it can take it over or stop it (B-09)', () => {
+    exec({ tasks: runningTask });
+    hook({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' });
+    hook({ session_id: 's1', hook_event_name: 'SessionEnd', reason: 'clear' });
+    const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    const text = JSON.parse(hook({ session_id: 's9', hook_event_name: 'SessionStart', source: 'clear' }).stdout).hookSpecificOutput.additionalContext as string;
+    for (const w of ['forge: execution r1 lost its coordinator', 'This session does not coordinate it', '/forge:run --resume', '/forge:stop stops it']) expect(text).toContain(w);
+    expect(text).not.toContain('continue');
+    expect(existsSync(liveFile(root, 's9'))).toBe(false);
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+  });
+  it('a stopped execution nobody closed is offered to another session for 24 hours; its coordinator gets no resume text', () => {
+    exec({ active: false, stopReason: 'stopped', lastStepAt: '2026-10-12T10:00:00.000Z', planned: 3, tasks: { T1: { ...runningTask.T1, status: 'integrated' } } });
+    const text = JSON.parse(hook({ session_id: 's2', hook_event_name: 'SessionStart', source: 'startup' }).stdout).hookSpecificOutput.additionalContext as string;
+    expect(text).toContain('forge: execution r1 stopped (stopped) 2 h ago, with 1/3 tasks integrated, and is not closed');
+    expect(text).toContain('/forge:stop closes it');
+    expect(hook({ session_id: 's1', hook_event_name: 'SessionStart', source: 'resume' }).stdout).toBe('');
+    const later = { ...io, now: () => new Date('2026-10-13T11:00:00.000Z'), stdin: JSON.stringify({ session_id: 's2', hook_event_name: 'SessionStart', source: 'startup' }) };
+    expect(run(['hook', 'live'], later).stdout).toBe('');
+  });
+  it("no implicit binding: a member's or another session's hooks never change who coordinates (B-03, J-03)", () => {
+    // A guard: it passes before and after this plan.
+    exec({ hookSession: 's1' });
+    writeMember(root, { sessionId: 'M1', role: 'executor', runId: 'r1', task: 'T1', name: null, since: T, hookSession: 'm1' });
+    const execFile = path.join(root, '.forge', 'execution.json');
+    const before = readFileSync(execFile, 'utf8');
+    for (const sid of ['m1', 's7']) {
+      for (const ev of ['SessionStart', 'SubagentStart', 'SessionEnd']) hook({ session_id: sid, hook_event_name: ev, source: 'startup', agent_id: 'a1', agent_type: 'x', reason: 'clear' });
+    }
+    expect(readFileSync(execFile, 'utf8')).toBe(before);
+    expect(existsSync(liveFile(root, 's7'))).toBe(false);
+    expect(existsSync(liveFile(root, 'M1'))).toBe(true);
+  });
+  // B-09, M4: a coordinator is gone by the band's and swarm takeover's rule (coordinatorGone): its conversation ended, or
+  // it has been silent for 12 min with no agent, no live binding of its own and no background job of its session.
+  const startText = (sid: string) => JSON.parse(hook({ session_id: sid, hook_event_name: 'SessionStart', source: 'startup' }).stdout).hookSpecificOutput.additionalContext as string;
+  const SILENT_13 = '2026-10-12T11:47:00.000Z';
+  it('a coordinator silent for 13 min, with no live binding and no job, has lost the execution for another session (B-09, M4)', () => {
+    exec({ tasks: runningTask, startedAt: '2026-10-12T11:30:00.000Z', lastStepAt: SILENT_13 });
+    const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    const text = startText('s2');
+    for (const w of ['forge: execution r1 lost its coordinator', 'last moved 13 min ago', '/forge:run --resume takes it over', '/forge:stop stops it']) expect(text).toContain(w);
+    expect(text).not.toContain('continue');
+    expect(existsSync(liveFile(root, 's2'))).toBe(false);
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+  });
+  it('the same silent coordinator with its own live binding, or a live job of its session, still runs it (B-09, M4)', () => {
+    exec({ tasks: runningTask, startedAt: '2026-10-12T11:30:00.000Z', lastStepAt: SILENT_13 });
+    // Its conversation is open: a binding of its own Claude session, live by its lease (any project, any via).
+    const wp = path.join(root, '.waypoint', 'shop');
+    mkdirSync(wp, { recursive: true });
+    const boundFile = path.join(wp, 'bound.json');
+    writeFileSync(boundFile, JSON.stringify({ sid: 'main', claude: 's1', pid: null, via: 'work', since: SILENT_13, seenAt: '2026-10-12T11:58:00.000Z', endedAt: null, endReason: null }));
+    expect(startText('s2')).toContain('forge: execution r1 is running (subagents, 1/3 running), coordinated by another session');
+    // Another conversation's binding says nothing about the coordinator.
+    writeFileSync(boundFile, JSON.stringify({ sid: 'main', claude: 's5', pid: null, via: 'work', since: SILENT_13, seenAt: '2026-10-12T11:58:00.000Z', endedAt: null, endReason: null }));
+    expect(startText('s2')).toContain('forge: execution r1 lost its coordinator');
+    // A background job of its session (.forge/jobs/, C-03) wakes it when it ends.
+    mkdirSync(path.join(root, '.forge', 'jobs'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'jobs', `step-run-${process.pid}.json`), JSON.stringify({ name: `step-run-${process.pid}`, cmd: 'step', task: null, pid: process.pid, startedAt: '2026-10-12T11:50:00.000Z', out: 'x.json', session: 's1' }));
+    expect(startText('s2')).toContain('coordinated by another session');
   });
 });

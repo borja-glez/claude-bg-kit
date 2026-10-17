@@ -1,13 +1,17 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { normalizeLive, type LiveDoc } from '../lib/execution-state.js';
+import { isSafeId, LIVE_STOPPED_MINUTES, normalizeLive, type ExecutionState, type LiveDoc } from '../lib/execution-state.js';
+import { coordinatorGone, lastMovedAt } from '../lib/execution-view.js';
+import { describeViewer } from '../lib/viewer-role.js';
+import { claudeBindings } from '../lib/bound-fs.js';
+import { endReasonOf } from '../lib/bound.js';
 import { readExecution } from './execution.js';
+import { liveJobs } from './jobs.js';
 import { forgeDir } from './ledger.js';
 import { mainCheckout } from './local.js';
 import { memberForHook } from './members.js';
 import { parseRun, readRunText } from './run.js';
 import { endRoute, reopenRoute } from './route.js';
-import { endReasonOf } from '../lib/bound.js';
 import { planLocale, sessionReply } from '../lib/locale.js';
 import type { Io } from './cli/run.js';
 
@@ -29,10 +33,57 @@ export function nextLive(prev: LiveDoc | null, ev: { event: LiveEvent; agentId?:
   return { sessionId: ctx.sessionId, role: ctx.role, runId: ctx.runId, task: ctx.task, event: ev.event, ts: ctx.now, agents, ended };
 }
 
+/** How long ago, in a SessionStart text: minutes under an hour, hours after. */
+function agoText(ms: number): string {
+  return ms < 3600_000 ? `${Math.max(1, Math.round(ms / 60_000))} min` : `${Math.round(ms / 3600_000)} h`;
+}
+
 /**
- * Records this session's local signal when it coordinates an active execution or is a registered member of it; never fails.
- * On a SessionStart (not forced) it returns the SessionStart hook output whose additionalContext tells the coordinator
- * or the member how to resume; in every other case it returns ''.
+ * B-09, M4: run `e` lost its coordinator by the rule the run band and `swarm takeover` decide with (coordinatorGone):
+ * its own signal (.forge/live/<hookSession>.json) ended, or, active, it has been silent for LIVE_STOPPED_MINUTES with no
+ * agent it started still running, no live binding of its own Claude session (in any project, settled by its pid as the
+ * hooks read them) and no background job of its session (.forge/jobs/). A hook id outside the safe rule names no file.
+ * A read that fails counts as a coordinator still there: it never costs a member its signal.
+ */
+function lostCoordinator(main: string, e: ExecutionState, now: number): boolean {
+  try {
+    const hook = isSafeId(e.hookSession) ? e.hookSession : null;
+    let signal: LiveDoc | null = null;
+    if (hook) {
+      try { signal = normalizeLive(JSON.parse(readFileSync(liveFile(main, hook), 'utf8'))); } catch { signal = null; }
+    }
+    const busy = hook !== null && liveJobs(main, new Date(now)).some(j => j.session === hook);
+    return coordinatorGone(e, signal, now, { busy, bindings: hook ? claudeBindings(main, hook, now) : [] });
+  } catch { return false; }
+}
+
+/**
+ * B-09: what a session that does not drive the execution is told at its start (English: the model reads it): a fact,
+ * and a way only if the person asks; never "continue". With the execution still active (it lost its coordinator: its
+ * conversation ended or went silent) /forge:stop stops it; inactive, it closes it (C2).
+ */
+export function notOwnerText(e: ExecutionState, role: 'other-live' | 'previous', now: number): string {
+  if (role === 'other-live') {
+    const running = Object.values(e.tasks).filter(t => t.status === 'running').length;
+    return `forge: execution ${e.runId} is running (${e.mode}, ${running}/${e.parallel} running), coordinated by another session. This session is not part of it.`;
+  }
+  const integrated = Object.values(e.tasks).filter(t => t.status === 'integrated').length;
+  const total = Math.max(e.planned ?? 0, Object.keys(e.tasks).length);
+  const moved = Date.parse(lastMovedAt(e));
+  const when = Number.isFinite(moved) ? `${agoText(Math.max(0, now - moved))} ago` : 'a while ago';
+  const what = e.active
+    ? `lost its coordinator (its conversation ended, or it has been silent for ${LIVE_STOPPED_MINUTES} min or more) and last moved`
+    : `stopped (${e.stopReason ?? 'stopped'})`;
+  return `forge: execution ${e.runId} ${what} ${when}, with ${integrated}/${total} tasks integrated, and is not closed. This session does not coordinate it. If the user asks, /forge:run --resume ${e.active ? 'takes it over' : 'takes it up'} and /forge:stop ${e.active ? 'stops' : 'closes'} it; otherwise it stays as it is.`;
+}
+
+/**
+ * forge's live hook; never fails. A route it cannot write never costs the signal below: on SessionEnd this session's
+ * route records how its conversation ended, and on a SessionStart the same session starting again is live (K1-13).
+ * Then, by the role of this session (B-09, describeViewer): the coordinator of an active execution, or a registered
+ * member of its run, records its local signal and, on a SessionStart (not forced), gets the text to resume it; any other
+ * session gets, on a SessionStart only, one line that says what runs or was left, and never writes a signal. The
+ * execution is bound when it starts (C1): nothing here binds it.
  */
 export function hookLive(io: Io, forced?: LiveEvent): string {
   try {
@@ -42,23 +93,36 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
     const event = forced ?? named;
     if (!sessionId || !event) return '';
     const main = mainCheckout(io.cwd);
-    // K1-13: this session's route records how its conversation ended, whatever forge does with an execution. A route it
-    // cannot write never costs the coordinator's or a member's signal below.
+    // K1-13: this session's route records how its conversation ended, whatever forge does with an execution.
     if (event === 'SessionEnd' && !forced) {
       const reason = endReasonOf(input.reason);
       try { endRoute(main, sessionId, reason === 'released' ? 'other' : reason, io.now().toISOString()); } catch { /* the route is a reminder */ }
     }
     // K1-13: the same session starting again (claude --resume keeps its id) is live: its route is no longer ended.
-    if (event === 'SessionStart' && !forced) {
+    const starting = event === 'SessionStart' && !forced;
+    if (starting) {
       try { reopenRoute(main, sessionId); } catch { /* the route is a reminder */ }
     }
     const exec = readExecution(main);
-    if (!exec?.active) return '';
-    // The execution is bound when it starts (C1): an agent start never binds it. A registered member of this run is
-    // found by its hook id (Claude's session_id), recorded at join; the hook id is not its waypoint SID.
+    if (!exec) return '';
+    const now = io.now().getTime();
+    // Whether the run lost its coordinator (rule 4 or 5) only matters to what another session is told at its start: the
+    // coordinator's files are read then, not on every agent or Stop event.
+    const coordinatorEnded = starting && exec.hookSession !== sessionId && lostCoordinator(main, exec, now);
+    // A registered member of this run is found by its hook id (Claude's session_id), recorded at join; the hook id is not
+    // its waypoint SID (memberForHook, the rule describeViewer applies to the members it is given).
     const found = memberForHook(main, sessionId, exec.runId);
-    const member = exec.hookSession === sessionId ? null : found;
-    if (exec.hookSession !== sessionId && !member) return '';
+    const viewer = describeViewer({ bound: [], execution: exec, members: found ? [found] : [], sessionId, now, coordinatorEnded });
+    if (viewer.subject !== 'execution' || viewer.role !== 'owner') {
+      // B-09: a session that does not drive the execution writes no signal; at its start it is told what runs or was left.
+      if (!starting) return '';
+      const role = viewer.subject === 'execution' ? viewer.role : 'none';
+      if (role !== 'other-live' && role !== 'previous') return '';
+      return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: notOwnerText(exec, role, now) } });
+    }
+    // The coordinator, or a member of its run: its signal and its resume text, while the execution is active.
+    if (!exec.active) return '';
+    const member = viewer.coordinator ? null : viewer.member;
     const role: LiveDoc['role'] = member ? member.role : 'coordinator';
     // A member's signal is keyed by its waypoint SID, the `by` of its public task; the coordinator's by its hook id.
     const signalId = member ? member.sessionId : sessionId;
@@ -71,7 +135,7 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
     mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
     try { writeFileSync(tmp, JSON.stringify(doc)); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
-    if (event === 'SessionStart' && !forced) {
+    if (starting) {
       const running = Object.values(exec.tasks).filter(t => t.status === 'running').length;
       const text = role === 'coordinator'
         ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run → Resume: renew your lease, reconcile each task and keep stepping.`

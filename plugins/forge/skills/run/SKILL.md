@@ -121,4 +121,4 @@ Read `references/ephemeral.md` now and follow it for several independent request
 
 ## Resuming
 
-Read `references/resuming.md` now and follow it to resume a task or an execution (`FORGE last`, `FORGE swarm status`; the SessionStart context says "Resume it with /forge:run → Resume", or `claude --resume`; also «sigue con la ejecución», a takeover).
+Read `references/resuming.md` now and follow it to resume a task or an execution (`/forge:run --resume`, a SessionStart saying "Resume it with /forge:run → Resume" or naming it, `claude --resume`, «sigue con la ejecución», a takeover).
