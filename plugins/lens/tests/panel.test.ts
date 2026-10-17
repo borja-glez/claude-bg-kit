@@ -28,6 +28,15 @@ const BASE_FILES: Record<string, { text: string; mtimeMs: number }> = {
 
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
 
+// Every Box a drawing holds, at any depth.
+function boxesOf(n: unknown, out: { props?: Record<string, unknown> }[] = []): { props?: Record<string, unknown> }[] {
+  if (Array.isArray(n)) { for (const c of n) boxesOf(c, out); return out; }
+  if (!n || typeof n !== 'object') return out;
+  const el = n as { type?: string; props?: Record<string, unknown>; children?: unknown };
+  if (el.type === 'Box') out.push(el);
+  return boxesOf(el.children, out);
+}
+
 // Everything a drawing says, in order: Text strings, Svg alt texts (the desktop's cards) and Button labels.
 async function said(ui: { drawn: () => Promise<unknown> }): Promise<string> {
   const out: string[] = [];
@@ -105,7 +114,7 @@ test('the command opens the pane and shows the newest ledger against its plan', 
     expect(await said(ui)).toContain('docs/superpowers/plans/new.md');
     expect(await said(ui)).toMatch(/Task 3\/9.*2 done.*round 1\/5/);
     expect(await said(ui)).toContain('Task 3: fix round 1/5 (flaky test)');
-    expect(await ui.find({ key: 'close' })).toBeDefined();
+    expect(await ui.find({ key: 'close' })).toBeUndefined();
     await ui.unmount();
   }
   expect(reads).not.toContain(`${ROOT}/.superpowers/sdd/old/progress.md`);
@@ -278,7 +287,7 @@ test('once the pane is closed no panel state is written, and the band reads file
   const reads: string[] = [];
   const written: string[] = [];
   serveFiles(on, reads);
-  servePanes(on);
+  const open = servePanes(on);
   const clock = start(on);
   on('state.set', (_$, e, next) => { written.push(`${e.plugin}.${e.key}`); return next(e); });
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
@@ -287,7 +296,8 @@ test('once the pane is closed no panel state is written, and the band reads file
   expect(reads.length).toBeGreaterThan(0);
   expect(written).toContain('lens.panel');
   const pane = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
-  await pane.press({ key: 'close' });
+  // The test kit cannot raise ui.close: the engine's own ✕ takes the pane away, and the next refresh sees it gone.
+  open.delete(PANE);
   await pane.unmount();
   reads.length = 0;
   written.length = 0;
@@ -498,4 +508,60 @@ test('/clear empties the todos and the subagents of the panel (E-13)', async ($,
   const after = await pane();
   expect(after).not.toContain('Writing the parser');
   expect(after).not.toContain('Explore');
+});
+
+test('inline, the pane draws its cards without a frame and says how many rows it left out; docked, framed and whole (F-01, F-07)', async ($, on) => {
+  serveFiles(on, []);
+  servePanes(on);
+  const clock = start(on);
+  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.tool.call({ tool: 'TodoWrite', todos: Array.from({ length: 6 }, (_, i) => ({ content: `Step ${i}`, status: i === 0 ? 'in_progress' : 'pending', activeForm: `Doing step ${i}` })) });
+  await clock.advance(1000);
+  const inline = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: { ...PANE_PROPS, placement: 'inline' as const, scroll: { offset: 0, bodyRows: 8 } } });
+  expect(await inline.find({ key: 'close' })).toBeUndefined();
+  expect(boxesOf(await inline.drawn()).some(b => b.props?.borderStyle)).toBe(false);
+  expect(await said(inline)).toMatch(/↓ \d+ more · \/lens photo/);
+  await inline.unmount();
+  const docked = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  expect(boxesOf(await docked.drawn()).some(b => b.props?.borderStyle === 'round')).toBe(true);
+  expect(await said(docked)).not.toContain('↓');
+  await docked.unmount();
+});
+
+test('/lens asks for the rows its compact cards take, between 6 and a third of the screen, and 56 columns where it docks (F-01)', async ($, on) => {
+  serveFiles(on, []);
+  const opened: { rows?: number; columns?: number }[] = [];
+  on('ui.open', (_$, e) => { opened.push({ rows: e.rows, columns: e.columns }); return { value: { isPlaced: true as const } }; });
+  on('ui.panes', () => ({ value: [] }));
+  start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  expect(opened.at(-1)?.columns).toBe(56);
+  expect(opened.at(-1)?.rows).toBeGreaterThanOrEqual(6);
+});
+
+test('with fewer rows than the one card it keeps, the pane clips that card to its rows and marks it with «…»', async ($, on) => {
+  serveFiles(on, []);
+  servePanes(on);
+  const clock = start(on);
+  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.tool.call({ tool: 'TodoWrite', todos: Array.from({ length: 6 }, (_, i) => ({ content: `Step ${i}`, status: i === 0 ? 'in_progress' : 'pending', activeForm: `Doing step ${i}` })) });
+  await clock.advance(1000);
+  // Two rows: the kept card's header ending on the marker, then «↓ N more»: two rows, no more.
+  const two = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: { ...PANE_PROPS, placement: 'inline' as const, scroll: { offset: 0, bodyRows: 2 } } });
+  const rows2 = (await said(two)).split(' | ');
+  expect(rows2).toHaveLength(3); // icon and title share the header row
+  expect(rows2[1]!.endsWith('…')).toBe(true);
+  expect(rows2[2]).toMatch(/^↓ \d+ more/);
+  await two.unmount();
+  // Three rows: the header, the marker, «↓ N more».
+  const three = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: { ...PANE_PROPS, placement: 'inline' as const, scroll: { offset: 0, bodyRows: 3 } } });
+  const rows3 = (await said(three)).split(' | ');
+  expect(rows3.slice(-2)[0]).toBe('…');
+  expect(rows3.at(-1)).toMatch(/^↓ \d+ more/);
+  await three.unmount();
 });

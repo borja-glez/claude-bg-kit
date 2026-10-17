@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cardRows, cellsMax, fitCards, fitCells, innerWidth, panelLayout, paneRows } from '../src/lens/layout.js';
+import { cardRows, cellsMax, clipCard, fitCards, fitCells, innerWidth, panelLayout, paneRows } from '../src/lens/layout.js';
 import type { Block, Card, CardId } from '../src/lens/svg.js';
 import type { CellState } from '../src/lens/view.js';
 
@@ -57,5 +57,23 @@ describe('fitCells (F-14)', () => {
     expect(Math.ceil((fit.cells.length * 2 + fit.more!.length + 1) / 36)).toBeLessThanOrEqual(2);
     expect(fitCells(cells.slice(0, 10), 36)).toEqual({ cells: cells.slice(0, 10), more: null });
     expect(innerWidth(panelLayout({ bodyColumns: 40, placement: 'dock' }))).toBe(38);
+  });
+});
+
+describe('clipCard (F-01)', () => {
+  const INLINE = panelLayout({ bodyColumns: 60, placement: 'inline', scroll: { bodyRows: 8 } });
+  const tall = { ...card('todos', Array.from({ length: 6 }, (_, i) => row(`Step ${i}`))), subtitle: 'sub' };
+  it('a card that fits comes back as it is', () => {
+    expect(clipCard(tall, INLINE, 20)).toBe(tall);
+  });
+  it('a tall card is cut to its rows, the last one the marker', () => {
+    for (const rows of [1, 2, 3, 4, 5]) {
+      const clipped = clipCard(tall, INLINE, rows);
+      expect(cardRows(clipped, INLINE), `rows ${rows}`).toBeLessThanOrEqual(rows);
+      const last = clipped.blocks.at(-1);
+      expect(rows === 1 ? clipped.title.endsWith('…') : last).toBeTruthy();
+      if (rows > 1) expect(last).toEqual({ kind: 'text', text: '…', dim: true });
+    }
+    expect(clipCard(tall, INLINE, 2).blocks).toEqual([{ kind: 'text', text: '…', dim: true }]);
   });
 });

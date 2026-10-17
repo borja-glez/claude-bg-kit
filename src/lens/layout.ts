@@ -110,3 +110,26 @@ export function paneRows(estimate: number, viewportRows: number | null): number 
   const want = Number.isFinite(estimate) ? Math.ceil(estimate) + 1 : PANE_ROWS_MIN;
   return Math.max(PANE_ROWS_MIN, Math.min(want, third));
 }
+
+/**
+ * F-01: one card cut to `rows` rows, for the card fitCards keeps whole when the pane has fewer rows than it takes: its
+ * header, then as many blocks as fit, and a one-cell «…» on the last row shown. A card that fits comes back as it is.
+ */
+export function clipCard(card: Card, layout: PanelLayout, rows: number): Card {
+  try {
+    const limit = Math.max(1, Math.floor(rows));
+    if (cardRows(card, layout) <= limit) return card;
+    const marker: Block = { kind: 'text', text: '…', dim: true };
+    // One row: the header alone, its title ending on the marker.
+    if (limit === 1 && !layout.boxed) return { ...card, title: `${card.title}…`, subtitle: undefined, chip: undefined, blocks: [] };
+    const head: Card = { ...card, subtitle: limit >= 3 ? card.subtitle : undefined, blocks: [] };
+    const kept: Block[] = [];
+    for (const b of card.blocks) {
+      if (cardRows({ ...head, blocks: [...kept, b, marker] }, layout) > limit) break;
+      kept.push(b);
+    }
+    return { ...head, blocks: [...kept, marker] };
+  } catch {
+    return card;
+  }
+}

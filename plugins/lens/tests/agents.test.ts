@@ -445,3 +445,24 @@ test('with a Spanish plan the pane speaks Spanish: the tasks in progress, a job 
   expect(text).not.toContain('esperando a 1 subagentes');
   await ui.unmount();
 });
+
+test('the agent the person looks at expands its task and puts it first (F-08)', async ($, on) => {
+  serveFiles(on, {
+    [`${ROOT}/.forge/status/shop__T001.json`]: status('T001', { ts: at(50), lastAt: at(50) }),
+    [`${ROOT}/.forge/status/shop__T002.json`]: status('T002'),
+  });
+  servePanes(on);
+  const panel = panelWrites(on);
+  const agents = { list: [] as unknown[] };
+  const clock = start(on, agents, ['a1']);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.agent.spawn(spawnArgs('forge-task: T001-1 @shop'));
+  agents.list = [{ id: 'a1', type: 'forge:forge-impl', description: 'agent', status: 'running' }];
+  await clock.advance(10_000);
+  expect(panel.last?.activities.filter((a: { expanded: boolean }) => a.expanded).map((a: { task: string }) => a.task)).toEqual(['T002']);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: { ...PANE_PROPS, view: { agentId: 'a1' } } });
+  await clock.advance(2_000);
+  expect(panel.last?.activities[0]).toMatchObject({ task: 'T001', expanded: true });
+  await ui.unmount();
+});

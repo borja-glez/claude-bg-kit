@@ -10,6 +10,7 @@ import { DECISIONS_MAX } from '../lib/decisions.js';
 import { buildCards, cardAlt } from './cards.js';
 import { cardSvg, bandSvg } from './svg.js';
 import { termCard, termBand, type TermUI } from './term.js';
+import { cardRows, clipCard, DOCK_COLUMNS, fitCards, panelLayout, paneRows } from './layout.js';
 import { headline, ratio, usageBandText, PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
@@ -90,6 +91,25 @@ type PanelFiles = {
 // The last model built, kept in module memory for the band (which draws without reading $.state or files).
 let bandModel: PanelModel | null = null;
 let bandJson = '';
+// The last size and screen mode a render of lens saw: the pane's rows (F-01), the Panel button and the status line
+// (§4.6) read them; null until a render says.
+let lastView: { columns: number | null; rows: number | null; fullscreen: boolean | null; maxRows: number | null } =
+  { columns: null, rows: null, fullscreen: null, maxRows: null };
+// F-08: the agent the person looks at in the pane (view.agentId): its task is the one expanded, and the first.
+let focusAgent: string | null = null;
+const viewNumber = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+function noteView(viewport: { columns?: unknown; rows?: unknown; isFullscreen?: unknown } | undefined, maxRows?: unknown): void {
+  if (viewport) {
+    lastView = {
+      ...lastView,
+      columns: viewNumber(viewport.columns) ?? lastView.columns,
+      rows: viewNumber(viewport.rows) ?? lastView.rows,
+      fullscreen: typeof viewport.isFullscreen === 'boolean' ? viewport.isFullscreen : lastView.fullscreen,
+    };
+  }
+  const above = viewNumber(maxRows);
+  if (above !== null) lastView = { ...lastView, maxRows: above };
+}
 // An id that names a folder or file: isSafeId's rule (src/lib/execution-state.ts), up to 120 characters, as forge names them.
 const SAFE_TASK = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/;
 let panelFiles: PanelFiles = {};
@@ -113,6 +133,7 @@ function resetPanel(): void {
   lastJson = '';
   bandModel = null;
   bandJson = '';
+  focusAgent = null;
   statusCache.clear();
   jobCache.clear();
   links = [];
@@ -754,7 +775,7 @@ async function buildPanel($: Engine): Promise<PanelModel> {
   const subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   return buildPanelModel({
     band: roadmap, ...panelFiles, activity: { ...activity, subagents, finished: freshFinished(finished, now) }, now, usage: usageInput(), sessionId,
-    links, ownTasks, wakeAt,
+    links, ownTasks, wakeAt, focusAgent,
     ...(roadmap.locale ? { locale: roadmap.locale } : {}),
   });
 }
@@ -853,6 +874,7 @@ const TEXT = {
   es: {
     panel: 'Panel', panelOpened: 'Panel de progreso abierto.',
     panelWaiting: 'El panel lens está abierto pero aún no se muestra', nothing: 'Nada que mostrar todavía',
+    moreRows: (n: number) => `↓ ${n} más · /lens foto`,
     noTask: 'sin tarea en curso', track: 'frente', decision: 'decisión pendiente',
     sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Ahora', sTodos: 'Pendientes', sSubagents: 'Subagentes',
     sTasks: 'Tareas de Claude Code', fixRound: 'ronda', phase: 'Fase', done: 'hechas', open: 'abiertas', tool: 'herramienta', turn: 'turno',
@@ -873,6 +895,7 @@ const TEXT = {
   en: {
     panel: 'Panel', panelOpened: 'Progress panel opened.',
     panelWaiting: 'The lens panel is open but not shown yet', nothing: 'Nothing to show yet',
+    moreRows: (n: number) => `↓ ${n} more · /lens photo`,
     noTask: 'no task in progress', track: 'track', decision: 'decision pending',
     sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Now', sTodos: 'Todos', sSubagents: 'Subagents',
     sTasks: 'Claude Code tasks', fixRound: 'round', phase: 'Phase', done: 'done', open: 'open', tool: 'tool', turn: 'turn',
@@ -896,12 +919,17 @@ type Texts = (typeof TEXT)[keyof typeof TEXT];
 const textsFor = (locale: string | undefined): Texts => (locale === 'es' ? TEXT.es : TEXT.en);
 const lensTexts = (): Texts => textsFor(roadmap.locale);
 
-// Opens the pane at the person's request; where it is not placed, a toast says why.
+// Opens the pane at the person's request (F-01): inline it asks for the rows its compact cards take (between 6 and a
+// third of the screen), docked for 56 columns; both are requests the engine may not grant. Where it is not placed, a
+// toast says why.
 async function openPanel($: Engine): Promise<boolean> {
   const t = lensTexts();
   let placed = false;
   try {
-    const opened = await $.ui.open({ id: PANE, title: 'lens' });
+    const compact = panelLayout({ bodyColumns: lastView.columns ?? LINE_MAX, placement: 'inline' });
+    let estimate = 0;
+    try { if (bandModel) estimate = buildCards(bandModel, t, 0).reduce((n, card) => n + cardRows(card, compact), 0); } catch { estimate = 0; }
+    const opened = await $.ui.open({ id: PANE, title: 'lens', rows: paneRows(estimate, lastView.rows), columns: DOCK_COLUMNS });
     placed = opened.isPlaced;
     if (!opened.isPlaced) $.ui.toast(`${t.panelWaiting}: ${clip(opened.reason, 200)}`);
   } catch {
@@ -1220,34 +1248,44 @@ export const register: Register = on => {
     return next(e);
   }).catch(($, e, next) => next(e));
 
+  // The pane, as the engine seats it (F-01, F-08): docked from 56 columns in fullscreen, its cards framed; inline,
+  // narrow or outside fullscreen, without a frame (F-07) and, inline, only what fits in its rows, «↓ N more» last. The
+  // engine's own close mark (or ctrl+x x) closes it: ui.close, above, stops the writes. The agent the person looks at
+  // expands its task (F-08).
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     try {
+      noteView(e.viewport);
+      const layout = panelLayout(e.props, e.viewport);
+      if (layout.focusAgent !== focusAgent) {
+        focusAgent = layout.focusAgent;
+        void requestPanelWrite($);
+      }
       const m = await read($, panel);
       const t = m ? textsFor(m.locale) : lensTexts();
-      const cols = Math.max(20, Number(e.props.bodyColumns) || LINE_MAX);
       const nowMs = m?.waypoint?.current?.startedAt ? await $.clock.now() : 0;
-      const cards = m ? buildCards(m, t, nowMs) : [];
       const proposals = (m?.proposals ?? []).filter(p => PROPOSAL_ID.test(p.id));
       const ui = $.ui.resolve(e);
       const { Box, Text, Button } = ui;
       // The desktop (and any surface that draws SVG but is not the terminal) gets SVG cards; the terminal, cells.
       const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null;
-      const W = Math.max(240, Math.min(900, cols * 8 - 8));
-      const drawn = cards.map((card, i) => {
-        if (!Svg) return termCard(ui as TermUI, `card-${i}`, card, cols);
+      const all = m ? buildCards(m, t, nowMs) : [];
+      // The proposals take their own rows: about two for their frame and three for each.
+      const reserve = proposals.length ? 2 + 3 * proposals.length : 0;
+      let fitted = Svg || layout.rows === null ? { cards: all, hidden: 0 } : fitCards(all, { ...layout, rows: Math.max(1, layout.rows - reserve) });
+      if (!Svg && layout.rows !== null && fitted.cards.length) {
+        // fitCards keeps one card whole; where even that one exceeds the rows, it is clipped to them (marker «…»).
+        const room = Math.max(1, layout.rows - reserve - (fitted.hidden ? 1 : 0));
+        const shown = fitted.cards.reduce((n, card) => n + cardRows(card, layout), 0);
+        if (shown > room) fitted = { ...fitted, cards: [clipCard(fitted.cards[0]!, layout, room)] };
+      }
+      const W = Math.max(240, Math.min(900, layout.cols * 8 - 8));
+      const drawn = fitted.cards.map((card, i) => {
+        if (!Svg) return termCard(ui as TermUI, `card-${i}`, card, layout);
         const { source, height } = cardSvg(card, W);
         return <Svg key={`card-${i}`} source={source} alt={cardAlt(card)} width={W} height={height} />;
       });
       return (
         <Box flexDirection="column" rowGap={Svg ? 1 : 0}>
-          <Box flexDirection="row" justifyContent="flex-end">
-            <Button key="close" label="×" role="dismiss" onPress={() => {
-              // The plugin's own close does not reach its own ui.close hook: stop the writes here.
-              paneUp = false;
-              stopPanelTimer();
-              $.ui.close({ id: PANE }).catch(() => undefined);
-            }} />
-          </Box>
           {drawn.length || proposals.length ? drawn : <Text dimColor>{t.nothing}</Text>}
           {proposals.length
             ? (
@@ -1255,7 +1293,7 @@ export const register: Register = on => {
                   <Text bold color={PALETTE.yellow}>{`✧ ${t.proposals} · ${proposals.length}`}</Text>
                   {proposals.map(p => (
                     <Box key={`proposal-${p.id}`} flexDirection="column" marginTop={1}>
-                      <Text bold wrap="truncate-end">{clip(p.title, cols)}</Text>
+                      <Text bold wrap="truncate-end">{clip(p.title, layout.cols)}</Text>
                       <Box flexDirection="row" columnGap={1} flexWrap="wrap">
                         <Text color={PALETTE.lavender}>{`‹${p.category}›`}</Text>
                         <Text color={PALETTE[RISK_HUE[p.risk] ?? 'yellow']}>{`‹${p.risk}›`}</Text>
@@ -1267,6 +1305,7 @@ export const register: Register = on => {
                 </Box>
               )
             : null}
+          {fitted.hidden ? <Text key="more" dimColor>{t.moreRows(fitted.hidden)}</Text> : null}
         </Box>
       );
     } catch {
@@ -1279,6 +1318,7 @@ export const register: Register = on => {
   // The band is one instance per chain: drawing without next(e) hides the bands of the plugins beneath, so ours stacks over them.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e);
+    noteView(e.viewport, e.props.maxRows);
     try {
       if (e.props.hasSurvey || !busy || await waypointDraws($) || await read($, hidden)) return below;
       const ui = $.ui.resolve(e);

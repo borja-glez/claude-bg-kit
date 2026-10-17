@@ -58,6 +58,7 @@ function servePanes(on: On) {
   on('ui.panes', () => ({
     value: [...open].map(id => ({ id, title: 'lens', isShown: true, isFocused: false, isPlaced: true })),
   }));
+  return open;
 }
 
 function start(on: On, agents: unknown[] = []) {
@@ -535,7 +536,7 @@ test("a compaction of the main conversation stops the re-read of the tracking ga
 test('a band read before any run, the pane closed and nothing busy: a run that starts later is named in the next usage write (R2)', async ($, on) => {
   const files: Record<string, string> = { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' };
   serveFiles(on, files);
-  servePanes(on);
+  const open = servePanes(on);
   const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
@@ -543,7 +544,8 @@ test('a band read before any run, the pane closed and nothing busy: a run that s
   // The person opens /lens (the band is read: no run), then closes the pane.
   await $.command.run(RUN);
   const pane = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: { title: 'lens', isFocused: false, bodyColumns: 60, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 30 }, view: {} } });
-  await pane.press({ key: 'close' });
+  // The test kit cannot raise ui.close: the engine's own ✕ takes the pane away, and the next refresh sees it gone.
+  open.delete(PANE);
   await pane.unmount();
   const path = `${ROOT}/.forge/usage/${SESSION}.json`;
   expect(JSON.parse(files[path]!)).toMatchObject({ runKey: null });

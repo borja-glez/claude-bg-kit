@@ -200,13 +200,14 @@ test('a verdict shows its action, never its score (K4-05)', async ($, on) => {
 test('once the pane is closed and nothing is going on, nothing under .forge/ is read', async ($, on) => {
   const touched: string[] = [];
   serveFiles(on, FORGE, touched);
-  servePanes(on);
+  const open = servePanes(on);
   const clock = start(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
   expect(touched).toContain(`${ROOT}/.forge/status.json`);
   const pane = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
-  await pane.press({ key: 'close' });
+  // The test kit cannot raise ui.close: the engine's own ✕ takes the pane away, and the next refresh sees it gone.
+  open.delete(PANE);
   await pane.unmount();
   touched.length = 0;
   await clock.advance(60000);

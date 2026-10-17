@@ -4,6 +4,7 @@
 import type { ElementConstructor, BoxProps, TextProps, ClientProps, RenderElement } from 'claude-code';
 import type { Block, Card } from './svg.js';
 import { PALETTE, STATE_HUE, barParts, type Hue, type CellState } from './view.js';
+import { cellsMax, fitCells, innerWidth, type PanelLayout } from './layout.js';
 
 export type TermUI = {
   Box: ElementConstructor<BoxProps>; Text: ElementConstructor<TextProps>; Client?: ElementConstructor<ClientProps>;
@@ -26,17 +27,27 @@ function bar(ui: TermUI, key: string, r: number, width: number, hue: Hue, moving
   );
 }
 
-function cells(ui: TermUI, key: string, list: CellState[]): RenderElement {
+function cells(ui: TermUI, key: string, list: CellState[], max?: number): RenderElement {
   const { Box, Text, Client } = ui;
-  const colors = list.map(s => hex(STATE_HUE[s]));
-  const glyphs = list.map(s => (s === 'pending' ? '□' : '■'));
-  const active = list.map(s => s === 'active');
-  if (Client && active.some(Boolean)) {
-    return <Client key={key} module="./pulse.js" props={{ kind: 'cells', colors, active, dim: PALETTE.s1, glyphs }} />;
-  }
+  // F-14: at most two rows of boxes around the first active or pending one; the rest summed up after them.
+  const fit = max === undefined ? { cells: list, more: null } : fitCells(list, max);
+  const shown = fit.cells;
+  const inner = fit.more ? `${key}-c` : key;
+  const colors = shown.map(s => hex(STATE_HUE[s]));
+  const glyphs = shown.map(s => (s === 'pending' ? '□' : '■'));
+  const active = shown.map(s => s === 'active');
+  const boxes = Client && active.some(Boolean)
+    ? <Client key={inner} module="./pulse.js" props={{ kind: 'cells', colors, active, dim: PALETTE.s1, glyphs }} />
+    : (
+        <Box key={inner} flexDirection="row" flexWrap="wrap">
+          {shown.map((s, i) => <Text key={`${key}-${i}`} color={colors[i]}>{`${glyphs[i]} `}</Text>)}
+        </Box>
+      );
+  if (!fit.more) return boxes;
   return (
-    <Box key={key} flexDirection="row" flexWrap="wrap">
-      {list.map((s, i) => <Text key={`${key}-${i}`} color={colors[i]}>{`${glyphs[i]} `}</Text>)}
+    <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={1}>
+      {boxes}
+      <Text dimColor>{fit.more}</Text>
     </Box>
   );
 }
@@ -68,7 +79,7 @@ function block(ui: TermUI, key: string, b: Block, inner: number): RenderElement 
         </Box>
       );
     }
-    case 'cells': return cells(ui, key, b.cells);
+    case 'cells': return cells(ui, key, b.cells, cellsMax(inner));
     case 'stages':
       return (
         <Box key={key} flexDirection="row" flexWrap="wrap">
@@ -102,19 +113,40 @@ function block(ui: TermUI, key: string, b: Block, inner: number): RenderElement 
   }
 }
 
-/** One card, `width` columns wide (the frame included). */
-export function termCard(ui: TermUI, key: string, card: Card, width: number): RenderElement {
+/**
+ * One card as the pane is laid out (F-07, F-08): framed in the section's colour where there is room for it (docked from
+ * 56 columns, in fullscreen), else without a frame: its header in the section's colour and its blocks indented.
+ */
+export function termCard(ui: TermUI, key: string, card: Card, layout: PanelLayout): RenderElement {
   const { Box, Text } = ui;
-  const inner = Math.max(6, width - 4);
-  return (
-    <Box key={key} flexDirection="column" borderStyle="round" borderColor={hex(card.hue)} paddingX={1}>
-      <Box flexDirection="row" columnGap={1}>
-        <Box flexShrink={0}><Text color={hex(card.hue)} bold>{card.icon}</Text></Box>
-        <Box flexGrow={1} flexShrink={1} minWidth={0}><Text bold wrap="truncate-end">{card.title}</Text></Box>
-        {card.chip ? <Box flexShrink={0}><Text color={PALETTE.base} backgroundColor={hex(card.chip.hue)} bold>{` ${card.chip.text} `}</Text></Box> : null}
+  const inner = innerWidth(layout);
+  const head = (
+    <Box flexDirection="row" columnGap={1}>
+      <Box flexShrink={0}><Text color={hex(card.hue)} bold>{card.icon}</Text></Box>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
+        {layout.boxed
+          ? <Text bold wrap="truncate-end">{card.title}</Text>
+          : <Text bold color={hex(card.hue)} wrap="truncate-end">{card.title}</Text>}
       </Box>
-      {card.subtitle ? <Text dimColor wrap="truncate-end">{card.subtitle}</Text> : null}
-      {card.blocks.map((b, i) => block(ui, `${key}-${i}`, b, inner))}
+      {card.chip ? <Box flexShrink={0}><Text color={PALETTE.base} backgroundColor={hex(card.chip.hue)} bold>{` ${card.chip.text} `}</Text></Box> : null}
+    </Box>
+  );
+  const body = [
+    ...(card.subtitle ? [<Text key={`${key}-sub`} dimColor wrap="truncate-end">{card.subtitle}</Text>] : []),
+    ...card.blocks.map((b, i) => block(ui, `${key}-${i}`, b, inner)),
+  ];
+  if (layout.boxed) {
+    return (
+      <Box key={key} flexDirection="column" borderStyle="round" borderColor={hex(card.hue)} paddingX={1}>
+        {head}
+        {body}
+      </Box>
+    );
+  }
+  return (
+    <Box key={key} flexDirection="column">
+      {head}
+      <Box flexDirection="column" paddingLeft={2}>{body}</Box>
     </Box>
   );
 }
