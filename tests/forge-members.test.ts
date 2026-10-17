@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalizeMember, readMember, writeMember, listMembers, memberFile, isMemberId, findMemberByHook, memberForHook } from '../src/forge/members.js';
@@ -54,6 +54,32 @@ describe('members', () => {
     expect(memberForHook(root, 's3', 'r2')).toBeNull();
     expect(memberForHook(root, 's4', 'r1')).toBeNull();
     expect(memberForHook(root, '../x', 'r1')).toBeNull();
+  });
+  it("forge reads the member files the band and waypoint's hooks read: the 50 newest (2b carry)", () => {
+    // m0 joined with one id for both (no hook id): a direct lookup by that id would still find it past the newest 50.
+    for (let i = 0; i < 55; i++) {
+      writeMember(root, { sessionId: `m${i}`, role: 'manual', runId: 'r1', task: null, name: null, since: T, hookSession: i === 0 ? null : `h${i}` });
+      const at = new Date(Date.parse(T) + i * 1000);
+      utimesSync(memberFile(root, `m${i}`), at, at);
+    }
+    expect(memberForHook(root, 'h54', 'r1')?.sessionId).toBe('m54');
+    expect(memberForHook(root, 'h5', 'r1')?.sessionId).toBe('m5');
+    for (const old of ['h4', 'h1', 'm0']) expect(memberForHook(root, old, 'r1'), old).toBeNull();
+    const listed = listMembers(root, 'r1').map(m => m.sessionId);
+    expect(listed).toHaveLength(MEMBERS_MAX);
+    expect(listed).toContain('m54');
+    expect(listed).not.toContain('m4');
+    expect(findMemberByHook(root, 'h4', 'r1')).toBeNull();
+  });
+  it('a member file over 8 KiB is no member, for every reader', () => {
+    writeMember(root, { sessionId: 's3', role: 'manual', runId: 'r1', task: null, name: null, since: T, hookSession: 'hook-3' });
+    expect(memberForHook(root, 'hook-3', 'r1')?.sessionId).toBe('s3');
+    // Still valid JSON, padded past FORGE_DOC_MAX_BYTES.
+    writeFileSync(memberFile(root, 's3'), JSON.stringify({ sessionId: 's3', role: 'manual', runId: 'r1', task: null, name: null, since: T, hookSession: 'hook-3', pad: 'x'.repeat(8 * 1024) }));
+    expect(memberForHook(root, 'hook-3', 'r1')).toBeNull();
+    expect(memberForHook(root, 's3', 'r1')).toBeNull();
+    expect(readMember(root, 's3')).toBeNull();
+    expect(listMembers(root, 'r1')).toEqual([]);
   });
 });
 

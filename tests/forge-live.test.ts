@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, readdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
@@ -374,6 +374,36 @@ describe('forge hook live', () => {
     // A background job of its session (.forge/jobs/, C-03) wakes it when it ends.
     mkdirSync(path.join(root, '.forge', 'jobs'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'jobs', `step-run-${process.pid}.json`), JSON.stringify({ name: `step-run-${process.pid}`, cmd: 'step', task: null, pid: process.pid, startedAt: '2026-10-12T11:50:00.000Z', out: 'x.json', session: 's1' }));
+    expect(startText('s2')).toContain('coordinated by another session');
+  });
+  it("a binding of the coordinator whose process is gone is settled as ended: 13 min silent, it lost the execution (B-09, M4)", () => {
+    exec({ tasks: runningTask, startedAt: '2026-10-12T11:30:00.000Z', lastStepAt: SILENT_13 });
+    const wp = path.join(root, '.waypoint', 'shop');
+    mkdirSync(wp, { recursive: true });
+    // Live by its lease, but the pid it recorded is gone: the hooks read it settled by its pid (settleBinding).
+    const bound = (pid: number) => writeFileSync(path.join(wp, 'bound.json'), JSON.stringify({ sid: 'main', claude: 's1', pid, via: 'forge-run', since: SILENT_13, seenAt: '2026-10-12T11:58:00.000Z', endedAt: null, endReason: null }));
+    bound(spawnSync(process.execPath, ['-e', '']).pid!);
+    expect(startText('s2')).toContain('forge: execution r1 lost its coordinator');
+    // The same binding with a process that lives keeps its conversation open.
+    bound(process.pid);
+    expect(startText('s2')).toContain('coordinated by another session');
+  });
+  it('an active run no session is bound to (unbound) has lost its coordinator for another session, however recent its last step (B-09)', () => {
+    exec({ hookSession: null, tasks: runningTask, startedAt: '2026-10-12T11:30:00.000Z', lastStepAt: '2026-10-12T11:58:00.000Z' });
+    const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    const text = startText('s2');
+    for (const w of ['forge: execution r1 lost its coordinator', 'no session is bound to it', '/forge:run --resume takes it over', '/forge:stop stops it']) expect(text).toContain(w);
+    expect(text).not.toContain('coordinated by another session');
+    expect(existsSync(liveFile(root, 's2'))).toBe(false);
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+  });
+  it("the coordinator's signal is read only up to 8 KiB: a bigger one says nothing, as for waypoint's hooks", () => {
+    exec({ tasks: runningTask, startedAt: '2026-10-12T11:30:00.000Z', lastStepAt: '2026-10-12T11:58:00.000Z' });
+    mkdirSync(path.join(root, '.forge', 'live'), { recursive: true });
+    const signal = (pad: string) => writeFileSync(liveFile(root, 's1'), JSON.stringify({ sessionId: 's1', role: 'coordinator', runId: 'r1', task: null, event: 'SessionEnd', ts: '2026-10-12T11:59:00.000Z', agents: [], ended: true, pad }));
+    signal('');
+    expect(startText('s2')).toContain('forge: execution r1 lost its coordinator');
+    signal('x'.repeat(8 * 1024));
     expect(startText('s2')).toContain('coordinated by another session');
   });
 });

@@ -1,8 +1,9 @@
-import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { forgeDir } from './ledger.js';
 // MemberDoc and its normalizer are pure and live in src/lib (waypoint's hooks and describeViewer read them too).
-import { isMemberId, normalizeMember, type MemberDoc } from '../lib/member-doc.js';
+import { isMemberId, newestMemberFiles, normalizeMember, type MemberDoc } from '../lib/member-doc.js';
+import { FORGE_DOC_MAX_BYTES } from '../lib/execution-state.js';
 export { isMemberId, normalizeMember };
 export type { MemberDoc, MemberRole } from '../lib/member-doc.js';
 import { memberOfHook } from '../lib/forge-activity.js';
@@ -10,11 +11,15 @@ import { memberOfHook } from '../lib/forge-activity.js';
 /** What writeMember takes: a member written without a hook id has none. */
 export type MemberInput = Omit<MemberDoc, 'hookSession'> & { hookSession?: string | null };
 export const memberFile = (main: string, sessionId: string) => path.join(main, '.forge', 'members', `${sessionId}.json`);
+const membersDir = (main: string) => path.join(main, '.forge', 'members');
 
+/** A member file larger than FORGE_DOC_MAX_BYTES is no member, for forge as for the band and waypoint's hooks. */
 export function readMember(main: string, sessionId: string): MemberDoc | null {
   if (!isMemberId(sessionId)) return null;
   try {
-    const m = normalizeMember(JSON.parse(readFileSync(memberFile(main, sessionId), 'utf8')));
+    const file = memberFile(main, sessionId);
+    if (statSync(file).size > FORGE_DOC_MAX_BYTES) return null;
+    const m = normalizeMember(JSON.parse(readFileSync(file, 'utf8')));
     return m && m.sessionId === sessionId ? m : null;
   } catch { return null; }
 }
@@ -30,10 +35,25 @@ export function writeMember(main: string, input: MemberInput): void {
   try { writeFileSync(tmp, JSON.stringify(m, null, 2) + '\n'); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
 }
 
+/**
+ * The members forge reads, by the rule of the band and waypoint's hooks (newestMemberFiles): of the `.json` files with a
+ * safe name and at most FORGE_DOC_MAX_BYTES, the MEMBERS_MAX newest. So forge's hooks and theirs give a session the same
+ * role (describeViewer, forgeRoleOf).
+ */
+function newestMembers(main: string): MemberDoc[] {
+  const dir = membersDir(main);
+  let files: { name: string; size: number; mtimeMs: number }[] = [];
+  try {
+    files = readdirSync(dir, { withFileTypes: true }).filter(d => d.isFile() && d.name.endsWith('.json')).flatMap(d => {
+      try { const st = statSync(path.join(dir, d.name)); return [{ name: d.name, size: st.size, mtimeMs: st.mtimeMs }]; } catch { return []; }
+    });
+  } catch { return []; }
+  return newestMemberFiles(files).flatMap(f => { const m = readMember(main, f.name.slice(0, -5)); return m ? [m] : []; });
+}
+
+/** The members of `runId` among the files newestMembers reads. */
 export function listMembers(main: string, runId: string): MemberDoc[] {
-  let names: string[] = [];
-  try { names = readdirSync(path.join(main, '.forge', 'members')).filter(f => f.endsWith('.json')); } catch { return []; }
-  return names.slice(0, 200).map(f => readMember(main, f.slice(0, -5))).filter((m): m is MemberDoc => !!m && m.runId === runId).slice(0, 50);
+  return newestMembers(main).filter(m => m.runId === runId);
 }
 
 /** The member of `runId` whose recorded hook id is `hookSessionId`; null when none. */
@@ -43,12 +63,12 @@ export function findMemberByHook(main: string, hookSessionId: string, runId: str
 }
 
 /**
- * The member of `runId` a hook call comes from: by its recorded hook id, else by a direct lookup for a member whose
- * waypoint SID equals the hook id and that recorded no other hook id (a session that joined with the same id for both).
- * The rule is memberOfHook (src/lib/forge-activity.ts), shared with waypoint's Stop hook.
+ * The member of `runId` a hook call comes from: by its recorded hook id, else the member whose waypoint SID equals the
+ * hook id and that recorded no other hook id (a session that joined with the same id for both). The rule is memberOfHook
+ * (src/lib/forge-activity.ts), over the same files the band and waypoint's hooks read (newestMembers): no other file is
+ * looked up, so forge's hooks and theirs agree on who is a member.
  */
 export function memberForHook(main: string, hookSessionId: string, runId: string): MemberDoc | null {
   if (!isMemberId(hookSessionId)) return null;
-  const direct = readMember(main, hookSessionId);
-  return memberOfHook([...listMembers(main, runId), ...(direct ? [direct] : [])], hookSessionId, runId);
+  return memberOfHook(listMembers(main, runId), hookSessionId, runId);
 }

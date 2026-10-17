@@ -18,9 +18,8 @@ import { LEASE_MINUTES, type Liveness } from '../../lib/coordination.js';
 import { UNBOUND_WARNING } from '../hook.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
 import { coordinatorLiveness } from '../../lib/execution-view.js';
-import { claudeBindings } from '../../lib/bound-fs.js';
-import { liveFile } from '../live.js';
-import { STAGES, normalizePublicTask, normalizeLive, normalizeExecution, isSafeId, isRunBranch, type ExecutionState, type ExecTask, type LiveDoc, type PublicTask } from '../../lib/execution-state.js';
+import { coordinatorInputs } from '../live.js';
+import { STAGES, normalizePublicTask, normalizeExecution, isSafeId, isRunBranch, type ExecutionState, type ExecTask, type PublicTask } from '../../lib/execution-state.js';
 import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
@@ -315,16 +314,12 @@ function memberLaunch(root: string, planPath: string, task: string, e: Execution
  * (.forge/live/<hookSession>.json) ended, or, while its conversation is not open (no live binding of its own in any
  * project, settled by its pid: a crashed one has none), no step, signal, agent or background job of its session
  * (.forge/jobs/, which only this side can read) for LIVE_STOPPED_MINUTES. The roadmap lease does not count: the band
- * cannot read it. A hook id outside the safe rule names no file.
+ * cannot read it. Its inputs are gathered by coordinatorInputs (live.ts), shared with the live hook, so the hook tells
+ * another session the run lost its coordinator exactly when this rule lets it go on.
  */
 function boundLiveness(root: string, e: ExecutionState, now: number): Liveness {
-  const hook = isSafeId(e.hookSession) ? e.hookSession : null;
-  let signal: LiveDoc | null = null;
-  if (hook) {
-    try { signal = normalizeLive(JSON.parse(readFileSync(liveFile(root, hook), 'utf8'))); } catch { signal = null; }
-  }
-  const busy = hook !== null && liveJobs(root, new Date(now)).some(j => j.session === hook);
-  return coordinatorLiveness(e, signal, now, { busy, bindings: hook ? claudeBindings(root, hook, now) : [] });
+  const { signal, activity } = coordinatorInputs(root, e, now);
+  return coordinatorLiveness(e, signal, now, activity);
 }
 
 /** What `tick` and `next` schedule from: the plan, the roadmap listings and the done commits already on the run branch. */

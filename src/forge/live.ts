@@ -1,7 +1,7 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { isSafeId, LIVE_STOPPED_MINUTES, normalizeLive, type ExecutionState, type LiveDoc } from '../lib/execution-state.js';
-import { coordinatorGone, lastMovedAt } from '../lib/execution-view.js';
+import { FORGE_DOC_MAX_BYTES, isSafeId, LIVE_STOPPED_MINUTES, normalizeLive, type ExecutionState, type LiveDoc } from '../lib/execution-state.js';
+import { coordinatorGone, lastMovedAt, type CoordinatorActivity } from '../lib/execution-view.js';
 import { describeViewer } from '../lib/viewer-role.js';
 import { claudeBindings } from '../lib/bound-fs.js';
 import { endReasonOf } from '../lib/bound.js';
@@ -38,29 +38,46 @@ function agoText(ms: number): string {
   return ms < 3600_000 ? `${Math.max(1, Math.round(ms / 60_000))} min` : `${Math.round(ms / 3600_000)} h`;
 }
 
+const readCapped = (file: string, max: number): string | null => {
+  try { return statSync(file).size > max ? null : readFileSync(file, 'utf8'); } catch { return null; }
+};
+
 /**
- * B-09, M4: run `e` lost its coordinator by the rule the run band and `swarm takeover` decide with (coordinatorGone):
- * its own signal (.forge/live/<hookSession>.json) ended, or, active, it has been silent for LIVE_STOPPED_MINUTES with no
- * agent it started still running, no live binding of its own Claude session (in any project, settled by its pid as the
- * hooks read them) and no background job of its session (.forge/jobs/). A hook id outside the safe rule names no file.
- * A read that fails counts as a coordinator still there: it never costs a member its signal.
+ * What the run band's rule (coordinatorLiveness, coordinatorGone) reads of run `e`'s coordinator on forge's side: the
+ * one gathering of `swarm takeover`, `swarm start` resuming and the live hook. Its own signal
+ * (.forge/live/<hookSession>.json, read up to FORGE_DOC_MAX_BYTES as waypoint's hooks read it); the bindings of its
+ * Claude session in every project, any via, settled by their pid (a crashed conversation's binding has ended); and
+ * whether its session runs a background job (.forge/jobs/, C-03), which only forge can tell. A hook id outside the safe
+ * rule names no file: no signal and no activity.
+ */
+export function coordinatorInputs(main: string, e: ExecutionState, now: number): { signal: LiveDoc | null; activity: CoordinatorActivity } {
+  const hook = isSafeId(e.hookSession) ? e.hookSession : null;
+  if (hook === null) return { signal: null, activity: { busy: false, bindings: [] } };
+  let signal: LiveDoc | null = null;
+  try { signal = normalizeLive(JSON.parse(readCapped(liveFile(main, hook), FORGE_DOC_MAX_BYTES) ?? 'null')); } catch { signal = null; }
+  const busy = liveJobs(main, new Date(now)).some(j => j.session === hook);
+  return { signal, activity: { busy, bindings: claudeBindings(main, hook, now) } };
+}
+
+/**
+ * B-09, M4: run `e` lost its coordinator. An active run no session is bound to (`hookSession` null, `unbound`) has none,
+ * as `swarm start` and `swarm takeover` of its coordinator's SID treat it. A bound one by the rule the run band and
+ * `swarm takeover` decide with (coordinatorGone, over coordinatorInputs): its own signal ended, or, active, it has been
+ * silent for LIVE_STOPPED_MINUTES with no agent it started still running, no live binding of its own and no background
+ * job of its session. A read that fails counts as a coordinator still there: it never costs a member its signal.
  */
 function lostCoordinator(main: string, e: ExecutionState, now: number): boolean {
+  if (e.active && e.hookSession === null) return true;
   try {
-    const hook = isSafeId(e.hookSession) ? e.hookSession : null;
-    let signal: LiveDoc | null = null;
-    if (hook) {
-      try { signal = normalizeLive(JSON.parse(readFileSync(liveFile(main, hook), 'utf8'))); } catch { signal = null; }
-    }
-    const busy = hook !== null && liveJobs(main, new Date(now)).some(j => j.session === hook);
-    return coordinatorGone(e, signal, now, { busy, bindings: hook ? claudeBindings(main, hook, now) : [] });
+    const { signal, activity } = coordinatorInputs(main, e, now);
+    return coordinatorGone(e, signal, now, activity);
   } catch { return false; }
 }
 
 /**
  * B-09: what a session that does not drive the execution is told at its start (English: the model reads it): a fact,
  * and a way only if the person asks; never "continue". With the execution still active (it lost its coordinator: its
- * conversation ended or went silent) /forge:stop stops it; inactive, it closes it (C2).
+ * conversation ended or went silent, or no session is bound to it) /forge:stop stops it; inactive, it closes it (C2).
  */
 export function notOwnerText(e: ExecutionState, role: 'other-live' | 'previous', now: number): string {
   if (role === 'other-live') {
@@ -71,9 +88,8 @@ export function notOwnerText(e: ExecutionState, role: 'other-live' | 'previous',
   const total = Math.max(e.planned ?? 0, Object.keys(e.tasks).length);
   const moved = Date.parse(lastMovedAt(e));
   const when = Number.isFinite(moved) ? `${agoText(Math.max(0, now - moved))} ago` : 'a while ago';
-  const what = e.active
-    ? `lost its coordinator (its conversation ended, or it has been silent for ${LIVE_STOPPED_MINUTES} min or more) and last moved`
-    : `stopped (${e.stopReason ?? 'stopped'})`;
+  const why = e.hookSession === null ? 'no session is bound to it' : `its conversation ended, or it has been silent for ${LIVE_STOPPED_MINUTES} min or more`;
+  const what = e.active ? `lost its coordinator (${why}) and last moved` : `stopped (${e.stopReason ?? 'stopped'})`;
   return `forge: execution ${e.runId} ${what} ${when}, with ${integrated}/${total} tasks integrated, and is not closed. This session does not coordinate it. If the user asks, /forge:run --resume ${e.active ? 'takes it over' : 'takes it up'} and /forge:stop ${e.active ? 'stops' : 'closes'} it; otherwise it stays as it is.`;
 }
 
