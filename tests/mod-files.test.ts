@@ -194,6 +194,26 @@ describe('loadBandModel · design', () => {
     expect(await loadBandModel($)).toMatchObject({ mode: 'design', pending: 1 });
     expect(reads).toContain(`${root}/.waypoint/demo-shop/dismissed.json`);
   });
+  it('reads the critiques and dismissed.json of docs/…/design/critiques/ first, and .waypoint/ for a round docs/ lacks (K3-10, Review Focus 1)', async () => {
+    const root = '/repo';
+    const design = readFileSync(new URL('./fixtures/design.md', import.meta.url), 'utf8');
+    const prop = (n: number) => ({ n, category: 'gap', severity: 'major', section: 'riesgos', problem: 'p', change: 'c' });
+    const crit = (round: number, count: number) => JSON.stringify({ round, version: round, scope: 'full', proposals: Array.from({ length: count }, (_, i) => prop(i + 1)) });
+    const files = {
+      [`${root}/docs/waypoint/demo-shop/design.md`]: design,
+      [`${root}/.waypoint/demo-shop/bound.json`]: bound('main', ID, { via: 'design' }),
+      [`${root}/.waypoint/demo-shop/critique-r1.json`]: crit(1, 5),
+      [`${root}/.waypoint/demo-shop/critique-r2.json`]: crit(2, 4),
+      [`${root}/docs/waypoint/demo-shop/design/critiques/r2.json`]: crit(2, 2),
+      [`${root}/docs/waypoint/demo-shop/design/critiques/r3.json`]: crit(3, 1),
+      [`${root}/.waypoint/demo-shop/dismissed.json`]: JSON.stringify({ 1: [1, 2, 3, 4, 5] }),
+      [`${root}/docs/waypoint/demo-shop/design/critiques/dismissed.json`]: JSON.stringify({ 1: [{ n: 1, reason: 'no' }] }),
+    };
+    // Round 1 from .waypoint/ (5, one dismissed by docs/), round 2 from docs/ (2, not the 4 of .waypoint/), round 3 from docs/ (1).
+    const { $, reads } = fake(root, files);
+    expect(await loadBandModel($)).toMatchObject({ mode: 'design', proposals: 1, pending: 7 });
+    expect(reads).not.toContain(`${root}/.waypoint/demo-shop/dismissed.json`);
+  });
 });
 
 describe('loadBandFiles · who looks, and the seats of its project (C3, A-15)', () => {
