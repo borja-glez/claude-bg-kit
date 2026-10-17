@@ -1209,6 +1209,21 @@ describe('forge swarm (execution)', () => {
       expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
       expect(run(['swarm', 'worktree', 'T2', '--member', 'nobody'], wio).code).toBe(2);
     });
+    it('report from a member worktree prints a publish file with an absolute path under that worktree\'s work folder; --claim refuses a status that is not running', () => {
+      const e = readExecution(root)!;
+      const at = NOW.toISOString();
+      saveExecution(root, { ...e, tasks: { T2: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T2', executor: 'sessions', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
+      writeMember(root, { sessionId: 'M2', role: 'executor', runId: e.runId, task: 'T2', name: null, since: at, hookSession: null });
+      const r = out(run(['swarm', 'report', 'T2', '--session', 'M2', '--stage', 'review'], wio));
+      expect(path.isAbsolute(r.publish.file_path)).toBe(true);
+      expect(path.resolve(r.publish.file_path).toLowerCase().startsWith(path.resolve(wt, '.forge', 'work').toLowerCase())).toBe(true);
+      expect(JSON.parse(readFileSync(r.publish.file_path, 'utf8'))).toMatchObject({ forge: { v: 2, stage: 'review' } });
+      for (const status of ['blocked', 'accepted']) {
+        const c = run(['swarm', 'report', 'T2', '--session', 'M2', '--stage', 'review', '--status', status, '--claim'], wio);
+        expect(c.code).toBe(2);
+        expect(c.stderr).toContain('--claim');
+      }
+    });
     it('report writes the public task as the member, keeping since while the stage holds', () => {
       out(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], wio));
       const p = out(run(['swarm', 'report', 'T2', '--session', 'M1', '--stage', 'implement', '--agent', 'forge-impl'], wio));

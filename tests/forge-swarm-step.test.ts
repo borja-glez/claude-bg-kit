@@ -1,12 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, readdirSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { readExecution, saveExecution } from '../src/forge/execution.js';
+import * as ledger from '../src/forge/ledger.js';
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { swarmStep, stepSay } from '../src/forge/cli/step.js';
+
+const spyOrig = ledger.readEvents;
 
 // swarm start binds Claude's session id (C1): io.env is {} and the id comes as a flag.
 const run = (argv: string[], io: Io) =>
@@ -909,6 +912,19 @@ describe('a new execution of the same plan task counts only its own reviews (car
     }
     expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'resumeImplementer' });
     expect(readEvents(root).filter(e => e.kind === 'round' && e.task === 'T1-1').at(-1)).toMatchObject({ round: 1, next: 'resume' });
+  });
+  it('the writes of a step share one read of the ledger: publishOf reads it once for all its tasks', () => {
+    const reads: string[] = [];
+    const spy = vi.spyOn(ledger, 'readEvents').mockImplementation(((root: string) => {
+      if (new Error().stack?.includes('publishOf')) reads.push(root);
+      return spyOrig(root);
+    }) as typeof ledger.readEvents);
+    try {
+      const s = step();
+      expect(s.publish.tasks.length).toBeGreaterThanOrEqual(2);
+      expect(s.publish.tasks.every(x => x.write !== null)).toBe(true);
+    } finally { spy.mockRestore(); }
+    expect(reads).toHaveLength(1);
   });
   it('the publish of a task back from its implementer is the same file roadmap-doc gives (J-15)', () => {
     step();

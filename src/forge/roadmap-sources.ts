@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, s
 import path from 'node:path';
 import { loadConfig } from './config.js';
 import { readExecution, executionTaskFile } from './execution.js';
-import { readEvents, readStatus, readStatuses } from './ledger.js';
+import { readEvents, readStatus, readStatuses, type LedgerEvent } from './ledger.js';
 import { mainCheckout } from './local.js';
 import { eventsOf, projectOf, readWorkDir, type TaskRef } from './task-ref.js';
 import { parseVerifyFile } from './verdict.js';
@@ -21,7 +21,9 @@ export class RoadmapDocError extends Error {
   constructor(readonly code: 2 | 3, message: string) { super(message); this.name = 'RoadmapDocError'; }
 }
 /** `roadmapFit`: a seam for tests, the fit that decides exit 3 (fitForgeDoc by default). */
-export interface DocIo { cwd: string; workdir?: string; now: () => Date; roadmapFit?: typeof fitForgeDoc }
+export interface DocIo { cwd: string; workdir?: string; now: () => Date; roadmapFit?: typeof fitForgeDoc;
+  /** The ledger, read once by a command that publishes several tasks; read here when absent. */
+  events?: LedgerEvent[] }
 export interface GenerateOptions {
   project?: string | null; out?: string | null; assets?: string | null;
   /** Fields the command adds to the same update: the claim of a task, a task done with its commit. */
@@ -138,7 +140,7 @@ export function generateRoadmapDoc(io: DocIo, task: string, opts: GenerateOption
   if (opts.project != null && !isSafeId(opts.project)) throw new RoadmapDocError(2, 'roadmap-doc: --project is not a project id');
   const main = mainCheckout(io.cwd);
   const here = io.workdir ?? io.cwd;
-  const events = readEvents(io.cwd);
+  const events = io.events ?? readEvents(io.cwd);
   const execution = readExecution(main);
   const inRun = !!execution?.tasks[task] && (execution.kind !== 'plan' || opts.project == null || opts.project === execution.project);
   const project = opts.project ?? (inRun && execution!.kind === 'plan' ? execution!.project : projectOf(events, task));

@@ -783,6 +783,21 @@ describe('forge swarm integrate (into the run branch)', () => {
     expect(Object.keys(merged)).toEqual(['forge']);
     expect(merged.forge).toMatchObject({ v: 2, stage: 'done', integration: { sha: r.sha, merged: true, target: 'main' } });
   });
+  it('merge prints one forge-only write per integrated task, and publishErrors for a task whose document cannot be written', () => {
+    accept('T1', 'a.txt', 'a\n');
+    accept('T2', 'b.txt', 'b\n');
+    out(run(['swarm', 'integrate', 'T1'], io));
+    out(run(['swarm', 'integrate', 'T2'], io));
+    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
+    const work = path.join(root, '.forge', 'work', 'shop', 'T2');
+    rmSync(work, { recursive: true, force: true });
+    writeFileSync(work, 'not a folder');
+    const m = out(run(['swarm', 'merge', '--yes'], io));
+    expect(m.result).toBe('merged');
+    expect(m.publish.map((w: { doc_id: string }) => w.doc_id)).toEqual(['T1']);
+    expect(m.publishErrors).toHaveLength(1);
+    expect(m.publishErrors[0]).toMatch(/^T2: /);
+  });
 });
 
 describe('an integration left half-done (D-07)', () => {

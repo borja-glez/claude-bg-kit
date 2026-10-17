@@ -606,10 +606,12 @@ function publishOf(io: Io, e: ExecutionState, started: Set<string>, versions: Ve
     } catch { /* none yet */ }
     return own;
   };
+  // One read of the ledger for every task of the step.
+  const docIo = { ...io, events: readEvents(io.cwd) };
   const mine = Object.entries(e.tasks).filter(([, t]) => t.executor === 'subagents' && (t.status === 'running' || t.status === 'accepted')).map(([task]) => task);
   const tasks = mine.map(task => {
     const claim = started.has(task);
-    const pub = publishFor(io, task, { project: e.project, ...(claim ? { extra: { status: 'in_progress', owner: e.coordinator, claimedAt: iso, startedAt: iso } } : {}) });
+    const pub = publishFor(docIo, task, { project: e.project, ...(claim ? { extra: { status: 'in_progress', owner: e.coordinator, claimedAt: iso, startedAt: iso } } : {}) });
     return {
       task, version: versions.state[task] ?? null, ...(claim ? { claim: true } : {}),
       write: pub.publish, ...(pub.publishError ? { publishError: pub.publishError } : {}),

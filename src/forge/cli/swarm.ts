@@ -879,9 +879,10 @@ function closeEnded(root: string, at: string, by: 'merge' | 'close', deps: LockD
 function mergedPublish(io: Io, e: ExecutionState): { publish: StateWrite[]; publishErrors?: string[] } {
   const publish: StateWrite[] = [];
   const errors: string[] = [];
+  const docIo = { ...io, events: readEvents(io.cwd) };
   for (const [task, t] of Object.entries(readExecution(io.cwd)?.tasks ?? e.tasks)) {
     if (t.status !== 'integrated') continue;
-    const p = publishFor(io, task, { project: e.project, only: ['forge'] });
+    const p = publishFor(docIo, task, { project: e.project, only: ['forge'] });
     if (p.publish) publish.push(p.publish);
     else if (p.publishError) errors.push(`${task}: ${p.publishError}`);
   }
@@ -1008,6 +1009,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       if (!['running', 'accepted', 'blocked'].includes(status)) throw new UsageError('swarm report: --status must be running, accepted or blocked');
       const round = has('round') ? Number(flag('round')) : 0;
       if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError('swarm report: --round must be an integer from 0 to 99');
+      // A claim starts a task: it cannot go with a status that says the task is not running.
+      if (has('claim') && status !== 'running') throw new UsageError('swarm report: --claim starts a task and goes only with --status running');
       let prev: PublicTask | null = null;
       try { prev = normalizePublicTask(JSON.parse(readFileSync(executionTaskFile(main, task), 'utf8'))); } catch { prev = null; }
       // Another session still holding the task's lease owns its public file: never overwrite it.
