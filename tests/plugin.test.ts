@@ -843,7 +843,7 @@ describe('plugin layout', () => {
     const md = read('plugins/forge/skills/member/SKILL.md');
     expect(md).toMatch(/^---\r?\nname: member\r?\ndescription: .+\r?\n/);
     for (const w of ['FORGE swarm join --session <SID> --role executor --task <T> --name wp-<project>-<T> --hook-session ${CLAUDE_SESSION_ID}', '**Claim.**', '**Finish.**',
-      'references/task-steps.md', 'A run member never integrates and never merges', 'FORGE decision add --data-file', 'FORGE swarm report <T> --session <SID>',
+      'references/task-steps.md', 'A run member never integrates and never merges', 'FORGE decision add --session <SID> --data-file', 'FORGE swarm report <T> --session <SID>',
       'session-id <name>', '`<SID>-2`', 'handover.md', 'Edit and Write', '### Manual member', 'forge:run --join']) expect(md).toContain(w);
     expect(Buffer.byteLength(md, 'utf8')).toBeLessThan(15000);
   });
@@ -1439,16 +1439,29 @@ describe('plugin layout', () => {
 
   it('the pin rule lives in one reference that every forge skill sending CLI writes points to (Tasks 10 and 14)', () => {
     const rule = runRef('roadmap-writes');
-    for (const w of ['state', 'sessions', 'meta', 'plan', 'approvals', 'notes', 'runs', 'if_version', 'meta/metrics']) expect(rule, w).toContain(w);
-    for (const f of ['member', 'stop', 'infinite', 'decide']) expect(read(`plugins/forge/skills/${f}/SKILL.md`), f).toContain('references/roadmap-writes.md');
-    for (const f of ['task-steps', 'step', 'execution', 'verify', 'decisions', 'manual-member', 'resuming', 'ephemeral']) {
-      expect(runRef(f), f).toMatch(/roadmap-writes\.md|`publish`|publish\.|roadmap-run/);
+    for (const w of ['`state`', '`sessions`', '`meta`', '`plan`', '`approvals`', '`notes`', '`runs`',
+      'NEWEST version you hold', 'only to create a document', 'On `version_mismatch`, re-read that one document', 'Never address one document twice in one batch', 'Never edit the printed data']) expect(rule, w).toContain(w);
+    // The rule is stated only there: the skills point to the file and do not restate it.
+    for (const f of ['member', 'stop', 'infinite', 'decide']) {
+      const md = read(`plugins/forge/skills/${f}/SKILL.md`);
+      expect(md, f).toContain('references/roadmap-writes.md');
+      expect(md, f).not.toContain('NEWEST version');
+      expect(md, f).not.toContain('pin a write when');
     }
+    for (const f of ['task-steps', 'step', 'execution', 'verify', 'decisions', 'manual-member', 'resuming']) expect(runRef(f), f).toContain('roadmap-writes.md');
     // The coordinator and the member list meta and plan into DB, because waypoint done and block --db need them (C8).
-    expect(runRef('execution')).toMatch(/\bmeta\b[^\n]*\bplan\b/);
-    expect(read('plugins/forge/skills/member/SKILL.md')).toMatch(/`meta`[^\n]*`plan`/);
+    const readLine = runRef('execution').split('\n').find(l => l.startsWith('2. **Read.**'))!;
+    for (const w of ['`meta` and `plan`', 'DB/meta/project.json', 'DB/plan/']) expect(readLine, w).toContain(w);
+    const finish = read('plugins/forge/skills/member/SKILL.md').split('\n').find(l => l.startsWith('2. List `meta` and `plan`'))!;
+    expect(finish).toContain('.waypoint/<project>/dbcache');
+    // The member sends decisions and leases through the printed writes, never by hand.
+    const member = read('plugins/forge/skills/member/SKILL.md');
+    expect(member).toContain('decision add --session <SID>');
+    for (const w of ['decision: {point', 'notes/<EID>` `{ts: NOW, type: "decision"', 'state/T.exec']) expect(member, w).not.toContain(w);
     // decide --reopen prints a delete of the mark before its set (Task 14).
     expect(read('plugins/forge/skills/decide/SKILL.md')).toContain('`approvalDelete`');
+    // The publish after a block batch is pinned to the version that batch returned (task-steps, member).
+    expect(runRef('task-steps')).not.toContain('pinned like any printed write');
   });
 
   it('READMEs describe wave 3a: the status per task, the task line, the tasks in progress and the classic hooks', () => {
