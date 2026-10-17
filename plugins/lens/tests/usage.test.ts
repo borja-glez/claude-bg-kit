@@ -461,3 +461,18 @@ test('a run that is neither active nor touched within 12 hours is over: only thi
   await $.command.run(RUN);
   expect(panel.last?.usage.scope).toBe('session');
 });
+
+test('a resumed session checks /cost against what it spent since the seed, not against the seeded file too (E-12)', async ($, on) => {
+  const seeded = { main: { kind: 'main', description: null, model: 'claude-opus-5-5', effort: null, steps: 3, input: 25_000_000, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 100, unpriced: 0 } };
+  serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: usageFile(SESSION, { loops: seeded }) });
+  servePanes(on);
+  const panel = panelWrites(on);
+  start(on);
+  serveSteps(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
+  await $.command.run(RUN);
+  expect(panel.last?.usage.costUsd).toBeGreaterThan(103.99);
+  expect(panel.last?.usage.officialUsd).toBe(4.1);
+  expect(panel.last?.usage.drift).toBe(false);
+});

@@ -11,7 +11,7 @@ import { cardSvg, bandSvg } from './svg.js';
 import { termCard, termBand, type TermUI } from './term.js';
 import { headline, ratio, usageBandText, PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
-import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, type UsageState } from './usage.js';
+import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunSource, type UsageFile } from './usage-file.js';
 import { addOwnTask, endAgent, knownTasks, linkSpawn, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
 
@@ -409,6 +409,8 @@ const usageFileCache = new Map<string, { size: number; mtimeMs: number; file: Us
 let largeRunsCache: { key: string; at: number; runs: RunSource[] } | null = null;
 // This session's own computed cost when officialUsd was read: the drift check compares the two from one moment.
 let officialOwnUsd: number | null = null;
+// E-12: the cost of this session's own file seeded into the live state on a resume; /cost does not count it.
+let seededUsd = 0;
 
 const ownCostUsd = () => Object.values(usage.loops).reduce((a, l) => a + l.costUsd, 0);
 
@@ -417,6 +419,7 @@ function resetUsage(): void {
   usageStartedAt = null;
   officialUsd = null;
   officialOwnUsd = null;
+  seededUsd = 0;
   lastUsageWrite = 0;
   lastUsageSig = '';
   sessionId = null;
@@ -441,7 +444,10 @@ async function seedFromOwnFile($: Engine, startedAt: number): Promise<void> {
   const where = await usageWhere($);
   if (!SAFE_SESSION.test(where.session)) return;
   const file = parseUsageFile(await readOpt($, join(where.main, '.forge', 'usage', `${where.session}.json`)));
-  if (file && Date.parse(file.startedAt) === startedAt && usage === target && usageStartedAt === startedAt) seedUsage(usage, file);
+  if (file && Date.parse(file.startedAt) === startedAt && usage === target && usageStartedAt === startedAt) {
+    seedUsage(usage, file);
+    seededUsd = Object.values(file.loops).reduce((a, l) => a + l.costUsd, 0);
+  }
 }
 
 // The first start read is adopted (steps counted before it stay); a new one (`/clear`, another session) starts the
@@ -452,13 +458,13 @@ async function syncUsageStart($: Engine): Promise<void> {
     const adopt = usageStartedAt === null;
     usageStartedAt = u.startedAt;
     if (adopt) usage.startedAt = u.startedAt;
-    else usage = newUsage(u.startedAt);
+    else { usage = newUsage(u.startedAt); seededUsd = 0; }
     lastUsageSig = '';
     try { await seedFromOwnFile($, u.startedAt); } catch { /* counted from here */ }
   }
-  // The official cost and the own cost at the same moment, after any reset or seed.
+  // The official cost and the own cost at the same moment, after any reset or seed; E-12: a seeded file's cost is not in /cost.
   officialUsd = u.cost?.usd ?? null;
-  officialOwnUsd = ownCostUsd();
+  officialOwnUsd = ownCostUsd() - seededUsd;
 }
 
 const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
@@ -748,7 +754,7 @@ const TEXT = {
     waitingLbl: 'en espera', cached: 'caché', reviewersLbl: 'revisan',
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
     briefs: 'briefs', cycle: 'ciclo', task: 'Tarea', proposals: 'Propuestas',
-    sUsage: 'Consumo', effort: 'esfuerzo', thisSession: 'esta sesión', active: 'activo', sinceStart: 'desde el inicio', taskTime: 'tarea', run: 'ejecución', gMain: 'Sesión principal', gImpl: 'Implementadores', gReview: 'Revisores', gVerify: 'Verificación', blocked: 'bloqueada', gPlan: 'Planificación y scout', gOther: 'Otros subagentes', tracking: 'Seguimiento', withoutForge: 'Sin forge (estimado)', withoutForgeNote: 'orientativo: en una sola sesión el contexto crecería y costaría más, y no habría revisión', forgeCosts: (usd: string, pct: number) => `forge cuesta +${usd} (+${pct} %)`, forgeSaves: (usd: string) => `forge ahorra −${usd}`, pricesAsOf: 'precios a', drift: 'precios o medición incompletos', various: 'varios', noReview: 'sin revisiones independientes', effortLevel: (e: string) => ({ low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' } as Record<string, string>)[e] ?? e,
+    sUsage: 'Consumo', effort: 'esfuerzo', thisSession: 'esta sesión', active: 'activo', sinceStart: 'desde el inicio', taskTime: 'tarea', run: 'ejecución', gMain: 'Sesión principal', gImpl: 'Implementadores', gReview: 'Revisores', gVerify: 'Verificación', blocked: 'bloqueada', gPlan: 'Planificación y scout', gOther: 'Otros subagentes', tracking: 'Seguimiento', withoutForge: 'Sin forge (estimado)', withoutForgeNote: 'orientativo: en una sola sesión el contexto crecería y costaría más, y no habría revisión; el extremo bajo supone que todo el seguimiento se releía en cada paso', forgeCosts: (usd: string, pct: number) => `forge cuesta +${usd} (+${pct} %)`, forgeSaves: (usd: string) => `forge ahorra −${usd}`, pricesAsOf: 'precios a', drift: 'precios o medición incompletos', various: 'varios', noReview: 'sin revisiones independientes', effortLevel: (e: string) => ({ low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' } as Record<string, string>)[e] ?? e,
   },
   en: {
     panel: 'Panel', panelOpened: 'Progress panel opened.',
@@ -768,7 +774,7 @@ const TEXT = {
     waitingLbl: 'waiting', cached: 'cached', reviewersLbl: 'reviewers',
     pressEnter: 'Command ready in the prompt: press Enter',
     briefs: 'briefs', cycle: 'cycle', task: 'Task', proposals: 'Proposals',
-    sUsage: 'Usage', effort: 'effort', thisSession: 'this session', active: 'active', sinceStart: 'since start', taskTime: 'task', run: 'run', gMain: 'Main session', gImpl: 'Implementers', gReview: 'Reviewers', gVerify: 'Verification', blocked: 'blocked', gPlan: 'Planning and scout', gOther: 'Other subagents', tracking: 'Tracking', withoutForge: 'Without forge (estimate)', withoutForgeNote: 'rough: in one session the context would grow and cost more, with no review', forgeCosts: (usd: string, pct: number) => `forge costs +${usd} (+${pct}%)`, forgeSaves: (usd: string) => `forge saves −${usd}`, pricesAsOf: 'prices as of', drift: 'prices or measurement incomplete', various: 'mixed', noReview: 'no independent review', effortLevel: (e: string) => e,
+    sUsage: 'Usage', effort: 'effort', thisSession: 'this session', active: 'active', sinceStart: 'since start', taskTime: 'task', run: 'run', gMain: 'Main session', gImpl: 'Implementers', gReview: 'Reviewers', gVerify: 'Verification', blocked: 'blocked', gPlan: 'Planning and scout', gOther: 'Other subagents', tracking: 'Tracking', withoutForge: 'Without forge (estimate)', withoutForgeNote: 'rough: in one session the context would grow and cost more, with no review; the low end assumes all the tracking was re-read on every step', forgeCosts: (usd: string, pct: number) => `forge costs +${usd} (+${pct}%)`, forgeSaves: (usd: string) => `forge saves −${usd}`, pricesAsOf: 'prices as of', drift: 'prices or measurement incomplete', various: 'mixed', noReview: 'no independent review', effortLevel: (e: string) => e,
   },
 } as const;
 type Texts = (typeof TEXT)[keyof typeof TEXT];
@@ -831,7 +837,7 @@ export const register: Register = on => {
     // The last usage file, whatever the 30 s pace says, after any write in flight.
     try {
       const u = await $.session.usage();
-      if (u.startedAt === usageStartedAt) { officialUsd = u.cost?.usd ?? null; officialOwnUsd = ownCostUsd(); }
+      if (u.startedAt === usageStartedAt) { officialUsd = u.cost?.usd ?? null; officialOwnUsd = ownCostUsd() - seededUsd; }
     } catch { /* keep the last cost */ }
     try { await writeUsageFile($, true); } catch { /* ignore */ }
     // `/clear` and an in-process resume go on under a new session id without a session.start: the meter starts over
@@ -853,6 +859,12 @@ export const register: Register = on => {
     paneUp = false;
     return next(e);
   });
+
+  // E-08: after a compaction the tracking gathered so far is no longer in context: it is not re-read from then on.
+  on('session.compact', async ($, e, next) => {
+    try { compactUsage(usage); } catch { /* ignore */ }
+    return next(e);
+  }).catch(($, e, next) => next(e));
 
   on('command.run', { command: 'lens' }, async $ => {
     const t = lensTexts();

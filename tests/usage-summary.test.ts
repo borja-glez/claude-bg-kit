@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { newUsage, recordStep, labelLoop, recordTracking } from '../src/lens/usage.js';
+import { newUsage, recordStep, labelLoop, recordTracking, compactUsage } from '../src/lens/usage.js';
 import { summarizeUsage, groupOf } from '../src/lens/usage-summary.js';
 
 const U = (i: number, o: number) => ({ input_tokens: i, output_tokens: o, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 });
@@ -103,5 +103,24 @@ describe('usage summary', () => {
     const r = summarizeUsage(s);
     expect(r.groups.map(g => g.id)).toEqual(['main', 'impl', 'verify']);
     expect(r.withoutForge!.costUsd).toBeCloseTo(8); // main $4 + impl repriced at Opus $4; verify not counted
+  });
+});
+
+describe('summarizeUsage: the tracking re-read (E-08)', () => {
+  const step = (i: number, o: number) => ({ input_tokens: i, output_tokens: o, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 });
+  it('charges the re-read at the main model cache-read price, takes it off the main group and gives the low end without forge', () => {
+    const s = newUsage(1);
+    recordTracking(s, 'forge', 4000);
+    for (let i = 0; i < 3; i++) recordStep(s, { model: 'claude-opus-5-5', usage: step(100_000, 1000) });
+    recordStep(s, { agentId: 'i1', model: 'claude-sonnet-5-5', usage: step(100_000, 1000) });
+    labelLoop(s, 'i1', 'forge:forge-impl');
+    expect(s.tracking.reread).toBe(3000);
+    const u = summarizeUsage(s);
+    expect(u.tracking).toMatchObject({ tokens: 4000 });
+    expect(u.tracking!.costUsd).toBeGreaterThan(summarizeUsage({ ...s, tracking: { ...s.tracking, reread: 0 } }).tracking!.costUsd!);
+    const main = u.groups.find(g => g.id === 'main')!;
+    expect(main.tokens).toBe(3 * 101_000 - 4000);
+    expect(u.withoutForge!.lowUsd).toBeLessThan(u.withoutForge!.costUsd);
+    expect(u.groups.reduce((a, g) => a + (g.costUsd ?? 0), 0) + u.tracking!.costUsd!).toBeCloseTo(u.costUsd);
   });
 });

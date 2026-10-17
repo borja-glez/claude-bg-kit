@@ -231,9 +231,15 @@ export function fmtTokens(n: number, locale: string): string {
   if (n >= 1_000) return `${Math.round(n / 1_000)} k`;
   return String(Math.round(n));
 }
+const usdValue = (n: number, locale: string): string => (Math.round(n * 100) / 100 < 10 ? n.toFixed(2) : n.toFixed(1)).replace('.', dec(locale));
 export function fmtUsd(n: number, locale: string): string {
-  const v = (Math.round(n * 100) / 100 < 10 ? n.toFixed(2) : n.toFixed(1)).replace('.', dec(locale));
+  const v = usdValue(n, locale);
   return locale.startsWith('es') ? `${v} $` : `$${v}`;
+}
+/** E-08: an estimate between two amounts: «3,10–4,20 $», «$3.10–4.20». */
+export function fmtUsdRange(lo: number, hi: number, locale: string): string {
+  const a = usdValue(lo, locale), b = usdValue(hi, locale);
+  return locale.startsWith('es') ? `${a}–${b} $` : `$${a}–${b}`;
 }
 /** «1,84 M tok · 6,20 $» of this session, for the band. */
 export function usageBandText(m: PanelModel): string | null {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { newUsage, recordStep, labelLoop, trackingKind, recordTracking, closeTurn, newTurnClock, startTurn, touchTurn, endTurn, MAIN } from '../src/lens/usage.js';
+import { newUsage, recordStep, labelLoop, trackingKind, recordTracking, compactUsage, closeTurn, newTurnClock, startTurn, touchTurn, endTurn, MAIN } from '../src/lens/usage.js';
 
 const U = (input: number, output: number, cacheRead = 0, cacheWrite = 0) =>
   ({ input_tokens: input, output_tokens: output, cache_read_input_tokens: cacheRead, cache_creation_input_tokens: cacheWrite });
@@ -57,7 +57,7 @@ describe('usage meter', () => {
     const s = newUsage(1);
     recordTracking(s, 'waypoint', 401);
     recordTracking(s, 'forge', 8);
-    expect(s.tracking).toEqual({ waypoint: 101, forge: 2 });
+    expect(s.tracking).toEqual({ waypoint: 101, forge: 2, reread: 0 });
   });
   it('keeps the steps of loops past the cap in one overflow loop', () => {
     const s = newUsage(1);
@@ -68,6 +68,19 @@ describe('usage meter', () => {
     expect(Object.keys(s.loops)).toHaveLength(201);
     expect(s.loops.overflow).toMatchObject({ kind: 'unknown', description: null, steps: 2, input: 10, output: 10 });
     expect(s.loops.late).toBeUndefined();
+  });
+  it('each main step re-reads the tracking gathered since the last compaction; a subagent step does not (E-08)', () => {
+    const s = newUsage(1);
+    recordTracking(s, 'forge', 4000);
+    for (let i = 0; i < 3; i++) recordStep(s, { model: 'claude-opus-5-5', usage: U(1, 1) });
+    recordStep(s, { agentId: 'a1', model: 'claude-opus-5-5', usage: U(1, 1) });
+    expect(s.tracking.reread).toBe(3000);
+    compactUsage(s);
+    recordStep(s, { model: 'claude-opus-5-5', usage: U(1, 1) });
+    expect(s.tracking.reread).toBe(3000);
+    recordTracking(s, 'waypoint', 400);
+    recordStep(s, { model: 'claude-opus-5-5', usage: U(1, 1) });
+    expect(s.tracking.reread).toBe(3100);
   });
 });
 

@@ -8,7 +8,11 @@ export interface UsageLoop {
   input: number; output: number; cacheRead: number; cacheWrite: number; costUsd: number; unpriced: number;
 }
 export interface UsageState {
-  startedAt: number; loops: Record<string, UsageLoop>; tracking: { waypoint: number; forge: number };
+  startedAt: number; loops: Record<string, UsageLoop>;
+  // E-08: `reread` counts the tracking that travelled as cached context on each step of the main loop.
+  tracking: { waypoint: number; forge: number; reread: number };
+  /** E-08: the tracking already gathered when the session was last compacted: it is not re-read after it. */
+  rereadBase: number;
   /** Milliseconds of closed main-agent turns. */
   activeMs: number;
   /** Set by mergeForRun when some session's file had no activeMs (written before it existed). */
@@ -24,7 +28,7 @@ const MAX_LOOPS = 200;
 export const OVERFLOW = 'overflow';
 const n = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : 0);
 
-export const newUsage = (startedAt: number): UsageState => ({ startedAt, loops: {}, tracking: { waypoint: 0, forge: 0 }, activeMs: 0 });
+export const newUsage = (startedAt: number): UsageState => ({ startedAt, loops: {}, tracking: { waypoint: 0, forge: 0, reread: 0 }, rereadBase: 0, activeMs: 0 });
 
 /**
  * The open main turn and the last moment the session showed life (tool start/end, subagent start/stop, a model request,
@@ -74,6 +78,8 @@ export function recordStep(s: UsageState, step: { agentId?: string; model: strin
   loop.model = model;
   loop.effort = effortText(step.effort);
   loop.steps += 1;
+  // E-08: each step of the main loop re-reads, as cached context, the tracking gathered since the last compaction.
+  if ((step.agentId || MAIN) === MAIN) s.tracking.reread += Math.max(0, s.tracking.waypoint + s.tracking.forge - s.rereadBase);
   if (!step.usage) return;
   const t = { input: n(step.usage.input_tokens), output: n(step.usage.output_tokens), cacheRead: n(step.usage.cache_read_input_tokens), cacheWrite: n(step.usage.cache_creation_input_tokens) };
   loop.input += t.input;
@@ -113,4 +119,9 @@ export function trackingKind(tool: string, input: Record<string, unknown>): 'way
 /** About four characters to a token. */
 export function recordTracking(s: UsageState, kind: 'waypoint' | 'forge', chars: number): void {
   s.tracking[kind] += Math.ceil(n(chars) / 4);
+}
+
+/** E-08: after a compaction the tracking gathered so far is no longer in context: it is not re-read from then on. */
+export function compactUsage(s: UsageState): void {
+  s.rereadBase = s.tracking.waypoint + s.tracking.forge;
 }

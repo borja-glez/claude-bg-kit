@@ -8,7 +8,8 @@ export interface UsageSummary {
   tokens: number; costUsd: number; partial: boolean;
   groups: { id: GroupId; model: string | null; effort: string | null; tokens: number; costUsd: number | null; share: number }[];
   tracking: { tokens: number; costUsd: number | null } | null;
-  withoutForge: { costUsd: number; deltaUsd: number; deltaPct: number } | null;
+  // E-08: costUsd assumes the tracking was never re-read; lowUsd also takes off what re-reading it as context cost.
+  withoutForge: { costUsd: number; lowUsd: number; deltaUsd: number; deltaPct: number } | null;
 }
 const ORDER: GroupId[] = ['main', 'impl', 'review', 'verify', 'plan', 'other'];
 
@@ -44,6 +45,9 @@ export function summarizeUsage(s: UsageState): UsageSummary {
   const mainModel = dominant(byGroup.get('main') ?? []);
   const trackTokens = s.tracking.waypoint + s.tracking.forge;
   const trackCost = trackTokens && mainModel ? tokensCost(mainModel, { input: trackTokens, output: 0, cacheRead: 0, cacheWrite: 0 }) : null;
+  // E-08: the tracking gathered so far travels as cached context on each later step of the main loop.
+  const reread = s.tracking.reread ?? 0;
+  const rereadCost = reread && mainModel ? tokensCost(mainModel, { input: 0, output: 0, cacheRead: reread, cacheWrite: 0 }) : null;
   const partial = entries.some(([, l]) => l.unpriced > 0);
   const costOf = (loops: UsageLoop[]): number | null => {
     if (loops.length && loops.every(l => l.unpriced > 0 && l.costUsd === 0)) return null;
@@ -55,9 +59,9 @@ export function summarizeUsage(s: UsageState): UsageSummary {
     const loops = byGroup.get(id)!;
     let tokens = loops.reduce((a, l) => a + tokensOf(l), 0);
     let costUsd = costOf(loops);
-    if (id === 'main' && trackTokens) {
-      tokens = Math.max(0, tokens - trackTokens);
-      if (costUsd !== null && trackCost !== null) costUsd = Math.max(0, costUsd - trackCost);
+    if (id === 'main' && (trackTokens || reread)) {
+      tokens = Math.max(0, tokens - trackTokens - reread);
+      if (costUsd !== null) costUsd = Math.max(0, costUsd - (trackCost ?? 0) - (rereadCost ?? 0));
     }
     const models = new Set(loops.map(l => l.model).filter(Boolean));
     // Only loops that ran a step say anything about effort; a loop without one would read as a second level.
@@ -74,11 +78,11 @@ export function summarizeUsage(s: UsageState): UsageSummary {
     const others = (byGroup.get('other') ?? []).reduce((a, l) => a + l.costUsd, 0);
     const without = Math.max(0, mainCost - (trackCost ?? 0) + repriced + others);
     const deltaUsd = totalCost - without;
-    withoutForge = { costUsd: without, deltaUsd, deltaPct: without > 0 ? Math.round((deltaUsd / without) * 100) || 0 : 0 };
+    withoutForge = { costUsd: without, lowUsd: Math.max(0, without - (rereadCost ?? 0)), deltaUsd, deltaPct: without > 0 ? Math.round((deltaUsd / without) * 100) || 0 : 0 };
   }
   return {
     tokens: totalTokens, costUsd: totalCost, partial, groups,
-    tracking: trackTokens ? { tokens: trackTokens, costUsd: trackCost } : null,
+    tracking: trackTokens || reread ? { tokens: trackTokens + reread, costUsd: trackCost === null && rereadCost === null ? null : (trackCost ?? 0) + (rereadCost ?? 0) } : null,
     withoutForge,
   };
 }

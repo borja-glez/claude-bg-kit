@@ -194,7 +194,7 @@ export type PanelModel = {
     session: { tokens: number; costUsd: number } | null;
     groups: { id: 'main' | 'impl' | 'review' | 'verify' | 'plan' | 'other'; model: string | null; effort?: string | null; tokens: number; costUsd: number | null; share: number }[];
     tracking: { tokens: number; costUsd: number | null } | null;
-    withoutForge: { costUsd: number; deltaUsd: number; deltaPct: number } | null;
+    withoutForge: { costUsd: number; deltaUsd: number; deltaPct: number; lowUsd?: number } | null;
     time?: { activeSeconds: number; activePartial: boolean; sinceStartSeconds: number | null; session: { activeSeconds: number; sinceStartSeconds: number | null } | null };
     pricesAsOf: string;
   } | null;

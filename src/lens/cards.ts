@@ -4,7 +4,7 @@ import type { PanelModel } from './model.js';
 import type { Block, Card } from './svg.js';
 import {
   SECTION_HUE, SECTION_ICON, PATH_HUE, tierOf, stagesFor, forgePhase, forgeDone, roadmapCells, briefCells, todoCells, superpowersCells,
-  ratio, duration, span, short, fmtTokens, fmtUsd, type Hue,
+  ratio, duration, span, short, fmtTokens, fmtUsd, fmtUsdRange, type Hue,
 } from './view.js';
 import { shortModelName } from '../lib/prices.js';
 
@@ -319,7 +319,9 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       // Against a partial total the delta would mislead: only the estimate is shown.
       const diff = u.partial ? t.noReview
         : w.deltaUsd >= 0 ? t.forgeCosts(fmtUsd(w.deltaUsd, loc), w.deltaPct) : t.forgeSaves(fmtUsd(-w.deltaUsd, loc));
-      blocks.push({ kind: 'text', text: `${t.withoutForge}: ~${fmtUsd(w.costUsd, loc)} · ${diff}` });
+      // E-08: with the tracking re-read, a range: its low end takes the re-read off too.
+      const est = w.lowUsd !== undefined && w.lowUsd < w.costUsd - 0.005 ? fmtUsdRange(w.lowUsd, w.costUsd, loc) : fmtUsd(w.costUsd, loc);
+      blocks.push({ kind: 'text', text: `${t.withoutForge}: ~${est} · ${diff}` });
       blocks.push({ kind: 'text', text: t.withoutForgeNote, dim: true });
     }
     blocks.push({ kind: 'text', text: `${t.pricesAsOf} ${u.pricesAsOf}`, dim: true });

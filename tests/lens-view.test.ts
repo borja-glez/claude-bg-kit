@@ -345,6 +345,12 @@ describe('usage partial marks and edges', () => {
     const text = JSON.stringify(buildCards({ ...EMPTY, usage }, T, 0).find(c => c.title === T.sUsage)!.blocks);
     expect(text).toContain('forge saves $1.50');
   });
+  it('without forge, as a range: the low end takes off the re-read tracking (E-08)', () => {
+    const card = buildCards({ ...EMPTY, locale: 'es', usage: { ...U, withoutForge: { costUsd: 4.2, lowUsd: 3.1, deltaUsd: 1, deltaPct: 24 } } }, T, 0).find(c => c.title === T.sUsage)!;
+    expect(cardAlt(card)).toContain('~3,10–4,20 $');
+    const flat = buildCards({ ...EMPTY, usage: { ...U, withoutForge: { costUsd: 4.2, lowUsd: 4.2, deltaUsd: 1, deltaPct: 24 } } }, T, 0).find(c => c.title === T.sUsage)!;
+    expect(cardAlt(flat)).toContain('~$4.20 ·');
+  });
   it('omits the without-forge delta when the shown total is partial', () => {
     const w = { costUsd: 5, deltaUsd: 1.5, deltaPct: 30 };
     const text = JSON.stringify(buildCards({ ...EMPTY, usage: { ...U, partial: true, withoutForge: w } }, T, 0).find(c => c.title === T.sUsage)!.blocks);

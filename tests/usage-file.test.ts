@@ -99,7 +99,7 @@ describe('usage file', () => {
     expect(live.loops.main).toMatchObject({ steps: 2, input: 15, output: 15, model: 'claude-opus-5-5', effort: 'high' });
     expect(live.loops.a1).toMatchObject({ kind: 'forge:forge-impl', description: 'T1' });
     expect(live.loops.a2.kind).toBe('unknown');
-    expect(live.tracking).toEqual({ waypoint: 10, forge: 0 });
+    expect(live.tracking).toEqual({ waypoint: 10, forge: 0, reread: 0 });
     // The file's loops are copies: recording more does not change the parsed file.
     recordStep(live, { model: 'claude-opus-5-5', usage: U(1, 1) });
     expect(file.loops.main.steps).toBe(1);
@@ -134,5 +134,23 @@ describe('usage file', () => {
     const { activeMs: _a, ...noActive } = withActive('s4', 20, 1_000);
     const partial = mergeForRun([other, noActive as typeof other], { session: 's1', state: live }, T0);
     expect(partial).toMatchObject({ activeMs: 65_000, activePartial: true });
+  });
+});
+
+describe('the re-read in the usage file (E-08)', () => {
+  it('round-trips, is summed over the run and seeded on resume; an older file reads it as 0', () => {
+    const s = state(10);
+    recordTracking(s, 'forge', 400);
+    recordStep(s, { model: 'claude-opus-5-5', usage: U(1, 1) });
+    const f = toUsageFile(s, meta('s2', 5));
+    expect(f.trackingReread).toBe(100);
+    expect(f.tracking).toEqual({ waypoint: 0, forge: 100 });
+    expect(parseUsageFile(JSON.stringify(f))).toEqual(f);
+    const { trackingReread: _r, ...old } = f;
+    expect(parseUsageFile(JSON.stringify(old))?.trackingReread).toBeUndefined();
+    const live = newUsage(T0);
+    expect(mergeForRun([f], { session: 's1', state: live }, T0).tracking.reread).toBe(100);
+    seedUsage(live, f);
+    expect(live.tracking.reread).toBe(100);
   });
 });
