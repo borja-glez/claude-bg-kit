@@ -40,17 +40,12 @@ h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:34px;marg
 .bar i{display:block;height:100%;background:var(--cur)}
 .bar.c i{background:var(--done)}
 .bar.over i{background:var(--red)}
-.runs{display:flex;flex-direction:column;gap:10px;margin-top:4px;max-height:280px;overflow:auto}
-.runs>.run{cursor:pointer;padding:6px 8px;border-radius:6px;border:1px solid transparent}
-.runs>.run:hover{border-color:var(--s1);background:var(--base)}
-.runs>.run .t{font-size:17px}
-.events{max-height:300px;overflow:auto}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:8px 0 0}
 .kv dt{color:var(--o1)} .kv dd{margin:0;text-align:right}
 .btn{display:inline-block;font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:.1em;border:1px solid var(--s1);border-radius:4px;padding:3px 8px;margin-top:8px;color:var(--sub1);text-transform:uppercase}
 .btn:hover,.chip:hover{border-color:var(--lavender);color:var(--text)}
 .events{list-style:none;margin:0;padding:0;font-size:13.5px}
-.events li{padding:3px 0;border-bottom:1px solid var(--s0);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.events li{padding:0}
 .ev-done{color:var(--green)} .ev-blocked{color:var(--yellow)} .ev-started,.ev-claimed{color:var(--peach)} .ev-note{color:var(--lavender)} .ev-plan_changed{color:var(--blue)}
 .ok{color:var(--green)} .del{color:var(--red)}
 .tag{font-family:'JetBrains Mono',monospace;font-size:10.5px;padding:1px 6px;border-radius:3px;font-weight:600;background:color-mix(in srgb,currentColor 16%,transparent)}
@@ -66,7 +61,7 @@ h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:34px;marg
 .zoom{margin-left:auto;display:flex;gap:2px;flex-wrap:wrap}
 .zoom button{font-family:'Barlow Condensed',sans-serif;font-size:12px;padding:5px 10px;color:var(--o1);border:1px solid var(--s0);border-radius:3px}
 .zoom button.on{background:var(--lavender);color:var(--crust)}
-.tlw{margin-top:8px;border:1px solid var(--s0);border-radius:10px;background:var(--mantle);max-height:min(calc(72vh / var(--z,1)),960px);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.tlw{margin-top:8px;border:1px solid var(--s0);border-radius:10px;background:var(--mantle);max-height:min(calc(72dvh / var(--z,1)),960px);overflow:auto;overscroll-behavior-x:contain;scrollbar-width:thin}
 .tlw:focus-visible{outline:2px solid var(--lavender);outline-offset:2px}
 .tl{display:grid;grid-template-columns:clamp(150px,28%,340px) minmax(0,1fr)}
 .tl .l{border-right:1px solid var(--s0);min-width:0}
@@ -283,12 +278,12 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .bdn{stroke:var(--now);stroke-width:1.5}
 .lg.bdl-a{background:var(--done)} .lg.bdl-i{background:none;border-top:2px dashed var(--s2);height:0}
 .fct{margin:6px 0 8px;font-size:14px;color:var(--green)}
-.chain{list-style:none;margin:6px 0 0;padding:0;counter-reset:c;max-height:240px;overflow:auto}
+.chain{list-style:none;margin:6px 0 0;padding:0;counter-reset:c}
 .chain li{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:5px;font-size:13px;cursor:pointer;color:var(--sub1)}
 .chain li:hover{background:var(--base)}
 .chain li::before{counter-increment:c;content:counter(c);font:11px 'JetBrains Mono',monospace;color:var(--red);min-width:16px}
 .chain .sd,.tr .sd{flex:0 0 7px;width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
-.zones{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:9px;max-height:280px;overflow:auto}
+.zones{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:9px}
 .zn{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .zn .mono{overflow-wrap:anywhere;color:var(--text)}
 .zb{display:flex;height:6px;border-radius:3px;background:var(--s0);overflow:hidden;margin-top:3px}
@@ -321,7 +316,7 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
   .chipb{flex:0 0 auto;padding:6px 10px}
   .zoom{flex-wrap:nowrap;overflow-x:auto;width:100%;scrollbar-width:none}
   .zoom button{flex:0 0 auto;padding:7px 10px}
-  .tlw{max-height:calc(64vh / var(--z,1))}
+  .tlw{max-height:calc(64dvh / var(--z,1))}
   .tl{grid-template-columns:132px minmax(0,1fr)}
   .tr{font-size:12px;padding:0 6px;gap:5px}
   .tr.tk{padding-left:12px}
@@ -331,7 +326,6 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
   .modal{padding:14px;border-radius:10px}
   .mh{margin:-14px -14px 0;padding:14px 14px 8px}
   .overlay{padding:2vh 8px}
-  .runs>.run .t{font-size:15px}
   /* A narrow axis keeps every other tick label (the grid lines stay). */
   .ticks span:nth-child(even){display:none}
   .sess{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
@@ -374,3 +368,40 @@ section.loose .lt .mono{margin-left:auto}
 .evidence .warn{color:var(--yellow)}
 .dbg{margin-top:18px;font:11px 'JetBrains Mono',monospace;color:var(--sub0)}
 .dbg ul{margin:6px 0 0;padding-left:16px;overflow-wrap:anywhere}
+/* ---- Summary (§4.6.1, §4.6.2) ---- */
+.card.now,.card.next,.card.prog,.card.recent{margin-top:12px}
+.nowt{--nowcols:minmax(0,2.4fr) minmax(0,1.1fr) minmax(0,1fr) minmax(0,.9fr) minmax(0,1.2fr) minmax(0,1.1fr) minmax(0,1.3fr);margin-top:6px}
+.nrh,.nr{display:grid;grid-template-columns:var(--nowcols);gap:2px 10px;align-items:center;width:100%;padding:6px 8px;text-align:left}
+.nrh{font:600 11px 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--o1);border-bottom:1px solid var(--s0)}
+.nr{border-bottom:1px solid var(--s0);border-radius:4px;font:12px 'JetBrains Mono',monospace;color:var(--sub1)}
+button.nr:hover,button.act:hover,.nxb:hover{background:var(--base)}
+button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-visible{outline:2px solid var(--lavender);outline-offset:-2px}
+.nr .c-task{font:600 15px 'Barlow Condensed',sans-serif;color:var(--text);overflow-wrap:anywhere}
+.nr .del{color:var(--red)} .nr .warn{color:var(--yellow)}
+.nr.orphan{border:1px dashed var(--red)}
+.nr.lt{opacity:.85}
+.rh{padding:8px 8px 4px;font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:.06em;color:var(--lavender);overflow-wrap:anywhere}
+.nx{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:2px}
+.nxb{width:100%;text-align:left;padding:5px 8px;border-radius:4px;font-size:13px;color:var(--sub1)}
+.vt{border-collapse:collapse;margin-top:8px;font:12px 'JetBrains Mono',monospace;color:var(--sub0)}
+.vt th,.vt td{padding:2px 14px 2px 0;text-align:left}
+.vt th{font:600 11px 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--o1)}
+.vt tr.cur td{color:var(--lavender);font-weight:600}
+.phs{display:flex;gap:2px;margin-top:10px;flex-wrap:wrap}
+.phseg{position:relative;min-width:46px;height:22px;border-radius:3px;background:var(--s0);overflow:hidden;display:flex;align-items:center;gap:4px;padding:0 5px;font:10.5px 'JetBrains Mono',monospace;color:var(--text);white-space:nowrap}
+.phseg i{position:absolute;inset:0 auto 0 0;background:color-mix(in srgb,var(--done) 45%,transparent)}
+.phseg b{position:relative}
+.phseg.cur{outline:2px solid var(--cur);outline-offset:-2px}
+.act{display:flex;flex-direction:column;gap:1px;width:100%;text-align:left;padding:5px 4px;border-bottom:1px solid var(--s0)}
+.act .l1{display:flex;align-items:baseline;gap:6px;font-size:12px;color:var(--sub0)}
+.act .nums{margin-left:auto;display:inline-grid;grid-template-columns:6ch 6ch;text-align:right;font:11px 'JetBrains Mono',monospace}
+.act .l2{font-size:13px;color:var(--sub1);overflow-wrap:anywhere}
+.sess .sgrid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:6px}
+.sess .more{border:1px dashed var(--s1);border-radius:8px;padding:8px 10px;color:var(--o1);text-align:left}
+.s.silent .dot{color:var(--yellow)}
+@media (max-width:760px){
+  .nrh{display:none}
+  .nr{grid-template-columns:minmax(0,1fr) auto auto auto;grid-template-areas:"task task task task" "stage round val time"}
+  .nr .c-task{grid-area:task} .nr .c-stage{grid-area:stage} .nr .c-round{grid-area:round} .nr .c-val{grid-area:val} .nr .c-time{grid-area:time}
+  .nr .c-agent,.nr .c-who{display:none}
+}

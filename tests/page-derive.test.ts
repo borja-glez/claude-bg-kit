@@ -65,4 +65,15 @@ describe('derive: the derived data once per revision of the data (H-06)', () => 
     renderApp(model(), ui);
     expect(computeMetrics).toHaveBeenCalledTimes(1);
   });
+
+  it('the running tasks by stage and then id, and the sessions alive or silent against the stopped (H-08, G-04)', () => {
+    const exec = (stage: string) => ({ runId: 'r1', mode: 'subagents' as const, by: 'main', stage: stage as never, since: '2026-10-11T11:50:00Z', leaseUntil: '2026-10-11T12:10:00Z' });
+    const m = model({
+      states: { T003: { status: 'in_progress', exec: exec('review') }, T002: { status: 'claimed' }, T001: { status: 'in_progress', exec: exec('implement') } },
+      sessions: { a: { name: 'a', heartbeatAt: '2026-10-11T11:59:00Z', status: 'active' }, b: { name: 'b', heartbeatAt: '2026-10-09T11:59:00Z', status: 'active' }, c: { name: 'c', heartbeatAt: '2026-10-11T11:59:00Z', status: 'idle' } },
+    });
+    const dv = computeDerived(m);
+    expect(dv.running).toEqual(['T001', 'T003', 'T002']);
+    expect(dv.liveSessions).toEqual({ live: ['a'], idle: 2 });
+  });
 });

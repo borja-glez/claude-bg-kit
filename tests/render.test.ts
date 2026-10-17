@@ -247,7 +247,7 @@ describe('sessions keyed by SID (final fix)', () => {
       const html = renderApp(bad, ui({ view }));
       expect(html).not.toContain('NaN');
     }
-    expect(renderApp(bad, ui())).toContain('T002 · latido <span data-rel="hb" data-ts="garbage">—</span>');
+    expect(renderApp(bad, ui())).toContain('+1 inactiva');
   });
 });
 
@@ -677,7 +677,7 @@ describe('execution', () => {
     const mk = (since: string) => {
       const m = base();
       m.states.T002 = { status: 'in_progress', owner: 'main', exec: { runId: 'r1', mode: 'subagents', by: 'main', agent: 'forge-impl-heavy', stage: 'implement', round: 1, since, leaseUntil: new Date(NOW + 5 * 60000).toISOString() } };
-      return renderApp(m, ui());
+      return renderApp(m, ui({ modal: 'T002' }));
     };
     const execOf = (html: string) => { const i = html.indexOf('class="mono exec"'); return html.slice(i, html.indexOf('</div>', i)); };
     expect(execOf(mk(new Date(NOW - 7 * 60000).toISOString()))).toContain('lleva 7 min');
@@ -718,8 +718,9 @@ describe('execution', () => {
       const html = renderApp(m, ui({ view }));
       expect(html).not.toContain('<img src=x');
     }
-    // Task 5: the loose tasks are listed in the runs view (Resumen shows them again in Task 8's «En curso»).
-    expect(renderApp(m, ui({ view: 'runs' }))).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    for (const view of ['summary', 'runs'] as const) {
+      expect(renderApp(m, ui({ view }))).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    }
   });
   it('run pill: active, then silent and stopped by the coordinator lease', () => {
     const m = base();
@@ -910,9 +911,9 @@ describe('the execution of the runs view (H-10)', () => {
     m.run = looseRun();
     expect(renderApp(m, ui({ view: 'runs' }))).not.toMatch(/class="sc slot" data-action/);
   });
-  it('theme.css styles .runs>.run, never a bare .run, and makes plan slots clickable', () => {
+  it('theme.css has no .runs and no bare .run, and makes plan slots clickable (H-07, H-10)', () => {
     expect(CSS).not.toMatch(/(^|[\s,}])\.run[{:\s]/);
-    expect(cssRule(CSS, '.runs>.run')).toContain('cursor:pointer');
+    expect(CSS).not.toContain('.runs');
     expect(cssRule(CSS, '.exec-sec .slot[data-action]')).toContain('cursor:pointer');
     expect(cssRule(CSS, '.seg')).toContain('display:flex');
     expect(CSS).not.toContain('.pips');
@@ -1037,5 +1038,165 @@ describe('the status strip (§4.6, H-22, G-08, G-11, G-14, G-25)', () => {
     // The normalizer keeps only https links; the strip checks it again.
     const evil = { ...base().meta!, links: { design: 'javascript:alert(1)', designVersion: 7 } };
     expect(strip(renderApp({ ...base(), meta: evil }, ui()))).not.toContain('javascript:');
+  });
+});
+
+describe('the summary (§4.6.1, §4.6.2)', () => {
+  const v2 = (over: object = {}) => ({
+    v: 2 as const, path: 'medium' as const, phase: 'review', agent: 'forge-impl', round: 2, cap: 4, brief: 1, stage: 'review' as const,
+    validators: [{ name: 'test', ok: true }, { name: 'lint', ok: true }, { name: 'e2e', ok: true, flaky: true as const }, { name: 'types', ok: false }],
+    rounds: [], verify: null, stages: {}, integration: null, deferred: [], acceptedRound: null, overCap: false, updatedAt: '2026-10-11T11:50:00.000Z', ...over,
+  });
+  const exec = (stage: string, over: object = {}) => ({ runId: 'r1', mode: 'subagents' as const, by: 'main', agent: 'forge-impl-heavy', stage: stage as never, round: 1,
+    since: new Date(NOW - 7 * 60000).toISOString(), leaseUntil: new Date(NOW + 5 * 60000).toISOString(), ...over });
+  const running = (): Model => {
+    const m = base();
+    m.run = runDoc({ slots: [] });
+    m.states = {
+      T001: m.states.T001!,
+      T002: { status: 'in_progress', owner: 'main', startedAt: new Date(NOW - 65 * 60000).toISOString(), exec: exec('verify'), forge: v2() },
+      T003: { status: 'in_progress', owner: 'main', startedAt: new Date(NOW - 30 * 60000).toISOString(), exec: exec('implement'), forge: v2({ overCap: true, round: 5 }) },
+      T004: { status: 'in_progress', owner: 'main', startedAt: new Date(NOW - 10 * 60000).toISOString(), exec: exec('review') },
+    };
+    return m;
+  };
+  const section = (html: string, cls: string) => { const at = html.indexOf(`<section class="${cls}`); return at < 0 ? '' : html.slice(at, html.indexOf('</section>', at)); };
+
+  it('«En curso» has one row per task under a single header of the run, each with stage, round, validators, time and agent (H-08)', () => {
+    const now = section(renderApp(running(), ui()), 'card now');
+    expect(now.match(/<button type="button" class="nr/g)).toHaveLength(3);
+    expect(now.match(/class="rh"/g)).toHaveLength(1);
+    expect(now).toContain('Ejecución r1 · subagentes · 0/3 plazas · coordinadora main · rama forge/run-demo-shop');
+    // By stage: implement, verify, review.
+    expect([...now.matchAll(/data-k="t:(T\d+)"/g)].map(x => x[1])).toEqual(['T003', 'T002', 'T004']);
+    expect(now).toContain('r2/4 · brief 1');
+    expect(now).toMatch(/<span class="del">r5\/4 · brief 1<\/span>/);
+    expect(now).toContain('<span class="ok">✓2</span> <span class="del">✗1</span> <span class="warn">~1</span>');
+    expect(now).toMatch(/<span data-rel="dur" data-ts="[^"]+">7 min<\/span> · <span data-rel="dur" data-ts="[^"]+">1 h 05 min<\/span>/);
+    expect(now).toContain('forge-impl-heavy');
+    expect(now).toContain('implementar');
+    expect(now).not.toMatch(/overflow/);
+  });
+
+  it('the role comes from the session, or else from the run mode: subagents, sessions and manual (H-09)', () => {
+    const m = running();
+    m.states.T002 = { ...m.states.T002!, exec: exec('verify', { mode: 'sessions', by: 'be' }) };
+    m.states.T003 = { ...m.states.T003!, exec: exec('implement', { mode: 'manual', by: 'ana' }) };
+    const now = section(renderApp(m, ui()), 'card now');
+    expect(now).toContain('ejecutora · be');
+    expect(now).toContain('manual · ana');
+    expect(now).toContain('coordinadora · main');
+    m.sessions.be = { name: 'be', heartbeatAt: new Date(NOW).toISOString(), status: 'active', role: 'manual' };
+    expect(section(renderApp(m, ui()), 'card now')).toContain('manual · be');
+    expect(renderApp(m, ui({ modal: 'T002' }))).toMatch(/class="mono exec">[^]*manual · sesiones/);
+  });
+
+  it('a task claimed by a session without forge shows dashes for the stage and the round; old forge blocks still read (Review Focus 1)', () => {
+    const m = base();
+    m.states.T002 = { status: 'claimed', owner: 'main', claimedAt: new Date(NOW - 5 * 60000).toISOString() };
+    m.states.T003 = { status: 'in_progress', owner: 'main', forge: { path: 'medium', phase: 'review', validators: [{ name: 'test', ok: true }, { name: 'lint', ok: null }], round: 2, cap: 4 } };
+    const now = section(renderApp(m, ui()), 'card now');
+    expect(now.match(/<button type="button" class="nr/g)).toHaveLength(2);
+    expect(now).not.toContain('class="rh"');
+    expect(now).toContain('r2/4');
+    expect(now).not.toContain('brief');
+    expect(now).toContain('<span class="ok">✓1</span> <span class="del">✗0</span>');
+    expect(now).toMatch(/c-stage"><span class="dot live-\w+">●<\/span> —/);
+  });
+
+  it('with nothing running it says which free task is next; «Siguiente» lists the first five free ones (H-24)', () => {
+    const m = base();
+    m.states = { T001: m.states.T001! };
+    const html = renderApp(m, ui());
+    expect(section(html, 'card now')).toContain('Nada en curso. La siguiente libre es T002 · API de pedidos');
+    expect([...section(html, 'card next').matchAll(/data-k="nx:(T\d+)"/g)].map(x => x[1])).toEqual(['T002', 'T003']);
+    const all = { ...base(), states: Object.fromEntries(plan.tasks.map(t => [t.id, { status: 'done' as const }])) };
+    expect(section(renderApp(all, ui()), 'card now')).toContain('Nada en curso.');
+    expect(renderApp(all, ui())).not.toContain('class="card next"');
+  });
+
+  it('the loose tasks of an ephemeral run that are running show under its header, without a button', () => {
+    const m = base();
+    m.states = { T001: m.states.T001! };
+    m.run = looseRun();
+    const now = section(renderApp(m, ui()), 'card now');
+    expect(now).toContain('Tareas sueltas loose-1 · subagentes · 1/2 plazas · coordinadora main');
+    expect(now).toContain('<div class="nr lt">');
+    expect(now).toContain('Fix the cart');
+    expect(now).not.toContain('Typo in the README');
+    expect(now).not.toContain('data-id="fix-cart"');
+  });
+
+  it('the progress shows the current version, a table of versions and one segment per phase (G-11, H-27)', () => {
+    const m = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1'] }, { id: '0.2', phases: ['F2'] }] } };
+    const prog = section(renderApp(m, ui()), 'card prog');
+    expect(prog).toContain('<div class="big">v0.1 · 33 %</div>');
+    expect(prog).toContain('<tr class="cur"><td>0.1</td><td>1/3</td><td>33 %</td></tr>');
+    expect(prog).toContain('<tr><td>0.2</td><td>0/3</td><td>0 %</td></tr>');
+    expect(prog.match(/class="phseg/g)).toHaveLength(2);
+    expect(prog).toMatch(/class="phseg ph-in_progress cur"[^>]*><i style="width:33%"><\/i><b>F1<\/b> 33 %/);
+    expect(prog).toContain('Fin previsto');
+  });
+
+  it('the recent activity: two lines, the time with the date when it is not today, the full text in its title (H-21)', () => {
+    const long = 'x'.repeat(300);
+    const m = { ...base(), events: [
+      // At now exactly, so it is today in any time zone; the other is more than a day before.
+      { id: 'e1', ts: '2026-10-11T12:00:00Z', type: 'done' as const, sessionId: 'main', taskId: 'T001', text: 'hoy', add: 3, del: 1 },
+      { id: 'e2', ts: '2026-10-10T09:15:00Z', type: 'note' as const, sessionId: 'ui', text: long },
+    ] };
+    const recent = section(renderApp(m, ui()), 'card recent');
+    expect(recent).toContain('<button type="button" class="act" data-action="open-task" data-id="T001" data-k="e:e1">');
+    expect(recent).toContain(`<span class="tx" title="${long}">${long}</span>`);
+    const times = [...recent.matchAll(/<span class="mono t">([^<]*)<\/span>/g)].map(x => x[1]!);
+    expect(times[0]).toMatch(/^\d\d:\d\d$/);
+    expect(times[1]).toMatch(/10/);
+    expect(times[1]!.length).toBeGreaterThan(5);
+    expect(recent).toContain('<span class="nums"><span class="ok">+3</span><span class="del">−1</span></span>');
+    expect(recent).toContain('<div class="act">');
+    expect(renderApp({ ...base(), events: [], messages: [], notes: [] }, ui())).not.toContain('class="card recent"');
+  });
+
+  it('only the live sessions, and «+N inactivas» that leads to Sesiones (G-04)', () => {
+    const m = base();
+    m.sessions = { a: { name: 'a', heartbeatAt: new Date(NOW).toISOString(), leaseUntil: new Date(NOW + 9 * 60000).toISOString(), status: 'active' },
+      b: { name: 'b', heartbeatAt: new Date(NOW).toISOString(), leaseUntil: new Date(NOW + 9 * 60000).toISOString(), status: 'active' } };
+    for (let i = 0; i < 29; i++) m.sessions[`old${i}`] = { name: `old${i}`, heartbeatAt: '2026-10-01T10:00:00Z', status: 'active' };
+    const sess = section(renderApp(m, ui()), 'sess');
+    expect(sess.match(/<div class="s /g)).toHaveLength(2);
+    expect(sess).toContain('<button type="button" class="more" data-action="view" data-view="sessions">+29 inactivas</button>');
+    expect(renderApp({ ...m, sessions: {} }, ui())).not.toContain('<section class="sess"');
+  });
+
+  it('escapes what the rows carry (Review Focus 5)', () => {
+    const m = running();
+    m.plan = { ...m.plan, tasks: m.plan.tasks.map(t => ({ ...t, title: HOSTILE })) };
+    m.states.T002 = { ...m.states.T002!, exec: exec('verify', { agent: HOSTILE, by: HOSTILE }) };
+    m.events = [{ id: 'h', ts: '2026-10-11T11:00:00Z', type: 'note', sessionId: HOSTILE, taskId: 'T001', text: HOSTILE }];
+    m.sessions[HOSTILE] = { name: HOSTILE, heartbeatAt: new Date(NOW).toISOString(), leaseUntil: new Date(NOW + 60000).toISOString(), status: 'active' };
+    clean(renderApp(m, ui()));
+  });
+});
+
+describe('one scroll for the page and one for the timeline (H-07)', () => {
+  it('no container of the summary scrolls on its own, and .runs and .vcols are not in it', () => {
+    const html = renderApp({ ...base(), run: runDoc() }, ui());
+    expect(html).not.toMatch(/overflow:\s*auto/);
+    expect(html).not.toContain('class="runs"');
+    expect(html).not.toContain('class="vcols"');
+    expect(html).not.toContain('data-scroll-key="events"');
+  });
+  it('theme.css: the timeline contains only its horizontal overscroll; the lists have no scroll of their own', () => {
+    const tlw = cssRule(CSS, '.tlw');
+    expect(tlw).toContain('overscroll-behavior-x:contain');
+    expect(tlw).not.toContain('overscroll-behavior-y');
+    expect(tlw).not.toMatch(/overscroll-behavior:/);
+    expect(tlw).toContain('dvh');
+    for (const sel of ['.events', '.chain', '.zones']) expect(cssRule(CSS, sel), sel).not.toMatch(/max-height|overflow:auto/);
+  });
+  it('on a phone each row of «En curso» is a two-line card with grid areas, without the header', () => {
+    const phone = cssMedia(CSS, '(max-width:760px)');
+    expect(cssRule(phone, '.nr')).toContain('grid-template-areas');
+    expect(cssRule(phone, '.nrh')).toContain('display:none');
   });
 });

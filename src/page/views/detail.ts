@@ -2,7 +2,7 @@
 import { filterNotes } from '../../lib/notes.js';
 import type { TaskState } from '../../lib/types.js';
 import type { Dict } from '../i18n.js';
-import { authorLabel, esc, execLine, fmt, isOrphan, num, pastMs, rel, safeNote, safeStatus, trackTag } from '../html.js';
+import { authorLabel, esc, execLine, fmt, isOrphan, num, pastMs, rel, roleOf, safeNote, safeStatus, trackTag } from '../html.js';
 import type { Model } from '../model.js';
 
 export function renderTaskModal(m: Model, d: Dict, id: string, loc: string): string {
@@ -27,7 +27,7 @@ export function renderTaskModal(m: Model, d: Dict, id: string, loc: string): str
   return `<div class="overlay" data-action="close-modal" data-scroll-key="modal:${esc(t.id)}"><div class="modal" role="dialog" aria-modal="true">
     <div class="mh"><div><span class="k">${esc(t.id)}</span> <span class="t">${esc(t.title)}</span><br>
       <span class="pill st-${status}${isOrphan(m, s) ? ' orphan' : ''}">${esc(isOrphan(m, s) ? d.run.orphan : d.status[status])}</span> <span class="mono">${esc(ph?.name)}${t.category ? ` · ${esc(t.category)}` : ''}</span> ${trackTag(m, t.track)}
-      ${s.exec ? `<div class="mono exec">${execLine(m, d, s.exec)}</div>` : ''}</div>
+      ${s.exec ? `<div class="mono exec">${execLine(m, d, s.exec, roleOf(m, s))}</div>` : ''}</div>
       <div class="mhb"><button class="btn" data-action="close-modal" aria-label="${esc(d.close)}">✕</button></div></div>
     <div class="mgrid"><div>
       ${sec(d.field.period, period + duration)}

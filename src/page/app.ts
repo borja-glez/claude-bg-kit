@@ -825,7 +825,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     const d = dictFor(typeof model.meta?.locale === 'string' ? model.meta.locale : undefined);
     env.root.querySelectorAll<HTMLElement>('[data-rel]').forEach(el => {
       const kind = el.dataset.rel as RelKind;
-      if (kind === 'ago' || kind === 'lasts' || kind === 'hb') el.textContent = relText(d, kind, el.dataset.ts ?? '', model.now);
+      if (kind === 'ago' || kind === 'lasts' || kind === 'hb' || kind === 'dur') el.textContent = relText(d, kind, el.dataset.ts ?? '', model.now);
     });
     if (++ticks % FULL_EVERY === 0) schedule();
   };

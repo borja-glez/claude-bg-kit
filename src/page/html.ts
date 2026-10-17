@@ -28,12 +28,12 @@ export const clip = (t: string, n: number): string => (t.length > n ? `${t.slice
 export const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 
 /** G-01: the kinds of relative text the 30 s tick rewrites in place. */
-export type RelKind = 'ago' | 'lasts' | 'hb';
-/** The text of a relative time: «hace X» (ago, hb) or «lleva N min» (lasts); for a junk or future time, '—' (hb) or ''. */
+export type RelKind = 'ago' | 'lasts' | 'hb' | 'dur';
+/** The text of a relative time: «hace X» (ago, hb), «lleva N min» (lasts) or «2 h 05 min» (dur); for a junk or future time, '—' (hb) or ''. */
 export function relText(d: Dict, kind: RelKind, ts: string, now: number): string {
   const t = pastMs(ts, now);
   if (t === null) return kind === 'hb' ? '—' : '';
-  return kind === 'lasts' ? d.lasts(mins(t, now)) : d.ago(mins(t, now));
+  return kind === 'lasts' ? d.lasts(mins(t, now)) : kind === 'dur' ? d.dur(mins(t, now)) : d.ago(mins(t, now));
 }
 /** A relative time the tick can rewrite: its kind and its timestamp travel with it. */
 export const rel = (d: Dict, kind: RelKind, ts: string, now: number): string =>
@@ -41,11 +41,21 @@ export const rel = (d: Dict, kind: RelKind, ts: string, now: number): string =>
 export const hhmm = (iso: string | undefined) => { const t = iso ? new Date(iso) : null; return t && Number.isFinite(t.getTime()) ? `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` : '—'; };
 export const liveDot = (l: 'alive' | 'silent' | 'stopped') => `<span class="dot live-${l}">●</span>`;
 
+/** H-09: who runs a task: the role its session says, else the run's mode (subagents: the coordinator; sessions: an
+ *  executor; manual: by hand); null without either. */
+export function roleOf(m: Model, st: TaskState): 'coordinator' | 'executor' | 'manual' | null {
+  const sid = st.exec?.by ?? st.owner;
+  const own = sid ? m.sessions[sid]?.role : undefined;
+  if (own) return own;
+  const mode = st.exec?.mode;
+  return mode === 'subagents' ? 'coordinator' : mode === 'sessions' ? 'executor' : mode === 'manual' ? 'manual' : null;
+}
+
 /** The «coordinadora · subagentes · agent · etapa · 7 min» line of a task with an exec block, with its liveness dot. */
-export function execLine(m: Model, d: Dict, exec: NonNullable<TaskState['exec']>): string {
+export function execLine(m: Model, d: Dict, exec: NonNullable<TaskState['exec']>, role: ReturnType<typeof roleOf> = null): string {
   const l = liveness(m.now, exec.leaseUntil);
   const since = pastMs(exec.since, m.now);
-  const parts = [d.run.role.coordinator, d.run.mode[exec.mode] ?? exec.mode, exec.agent, d.run.stage[exec.stage] ?? exec.stage];
+  const parts = [role ? d.run.role[role] : null, d.run.mode[exec.mode] ?? exec.mode, exec.agent, d.run.stage[exec.stage] ?? exec.stage];
   return `${liveDot(l)} ${parts.filter(Boolean).map(p => esc(String(p))).join(' · ')}${since !== null ? ` · ${rel(d, 'lasts', exec.since, m.now)}` : ''}`;
 }
 
