@@ -82,6 +82,20 @@ async function said(ui: { drawn: () => Promise<unknown> }): Promise<string> {
 }
 
 const OUTPUT = (text: string) => ({ command: 'lens', args: '', text, isErrored: false });
+
+// The widest bar a drawing holds: a row Box whose Texts are all bar cells, as term.tsx draws a bar without a Client.
+function widestBar(n: unknown): number {
+  if (Array.isArray(n)) return Math.max(0, ...n.map(widestBar));
+  if (!n || typeof n !== 'object') return 0;
+  const el = n as { type?: string; props?: Record<string, unknown>; children?: unknown };
+  const kids = Array.isArray(el.children) ? el.children : [el.children];
+  const texts = kids.map(k => (k && typeof k === 'object' && (k as { type?: string }).type === 'Text' ? (k as { children?: unknown }).children : null));
+  const cells = texts.map(c => (Array.isArray(c) ? c.join('') : typeof c === 'string' ? c : null));
+  if (el.type === 'Box' && el.props?.flexDirection === 'row' && cells.length && cells.every(c => c !== null && /^[█▏▎▍▌▋▊▉]*$/.test(c))) {
+    return cells.reduce((w, c) => w + [...c!].length, 0);
+  }
+  return widestBar(el.children);
+}
 const SESSION = { cwd: ROOT, surface: 'terminal' as const, isInteractive: true };
 
 test('outside fullscreen /lens leaves a photo: one stamped line, no pane, and its row draws the cards still (steps 2 and 3, F-15)', async ($, on) => {
@@ -179,6 +193,42 @@ test('a photo reads the files once, writes no state, starts no timer, and its ro
     for (const w of widths) expect(w, `width at ${columns} columns`).toBeLessThanOrEqual(columns);
     await row.unmount();
   }
+});
+
+test('a photo is laid out at the transcript width: the screen undocked, narrower beside a docked pane (final review m-2)', async ($, on) => {
+  serveFiles(on);
+  const open = servePanes(on);
+  engineRows(on);
+  const clock = start(on);
+  await $.session.start(SESSION);
+  const shot = (await $.command.run({ ...RUN, args: 'foto' })).text!;
+  const SCREEN = { columns: 160, rows: 40, isFullscreen: true };
+  // Cards without a frame are indented by two: their bar is the row's width less two.
+  const bar = async () => {
+    const row = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: OUTPUT(shot), viewport: SCREEN });
+    const width = widestBar(await row.drawn());
+    await row.unmount();
+    return width;
+  };
+  expect(await bar()).toBe(160 - 2);
+  // lens's pane docked beside the transcript, before any band measured it: the screen less the pane.
+  await $.command.run({ ...RUN, args: 'live' });
+  const pane = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, viewport: SCREEN,
+    props: { title: 'lens', isFocused: false, bodyColumns: 52, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 30 }, view: {} } });
+  await pane.unmount();
+  expect(await bar()).toBe(160 - 56 - 2);
+  open.delete(PANE); // the person closes the pane; the next refresh sees it gone
+  await clock.advance(10_000);
+  expect(await bar()).toBe(160 - 2);
+  // The band measures the transcript's column: beside a docked pane its bodyColumns, plus the engine's five.
+  const band = async (bodyColumns: number) => {
+    const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND_PROPS, bodyColumns }, viewport: SCREEN });
+    await ui.unmount();
+  };
+  await band(99);
+  expect(await bar()).toBe(99 + 5 - 2);
+  await band(155);
+  expect(await bar()).toBe(155 + 5 - 2);
 });
 
 test("outside fullscreen the band's Panel button runs /lens foto (§4.6, step 2)", async ($, on) => {

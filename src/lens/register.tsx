@@ -12,10 +12,10 @@ import { cardSvg, bandSvg, type Card } from './svg.js';
 import { termCard, termBand, type TermUI } from './term.js';
 import { cardRows, clipCard, DOCK_COLUMNS, DOCK_MIN_COLUMNS, fitCards, panelLayout, paneRows } from './layout.js';
 import { bandLevel, controlWidth, DEFAULT_COLUMNS, fitParts, joinParts, partsWidth } from '../mod/band-fit.js';
-import { lensBand } from './lens-band.js';
+import { bandSubject, lensBand } from './lens-band.js';
 import { keepPhoto, lensMode, photoId, photoText } from './photo.js';
 import { clipWidth } from '../lib/text-width.js';
-import { modeLabels, ownActive, spinnerText, statusText, surfaceEvents } from './surfaces.js';
+import { modeLabels, ownBusy, spinnerText, statusText, surfaceEvents } from './surfaces.js';
 import { PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
@@ -96,24 +96,45 @@ type PanelFiles = {
 // The last model built, kept in module memory for the band (which draws without reading $.state or files).
 let bandModel: PanelModel | null = null;
 let bandJson = '';
-// The last size and screen mode a render of lens saw: the pane's rows (F-01), the Panel button and the status line
-// (§4.6) read them; null until a render says.
-let lastView: { columns: number | null; rows: number | null; fullscreen: boolean | null; maxRows: number | null } =
-  { columns: null, rows: null, fullscreen: null, maxRows: null };
+// The last size and screen mode lens's renders saw, kept per surface so one never overwrites another's (final review
+// m-5): the pane's rows (F-01), the status line (§4.6) and the photo's width (m-2) read them; null until a render says.
+// `body` is the band's bodyColumns there (the transcript's column less the engine's five), `docked` whether lens's pane
+// was seated beside that transcript.
+type View = { columns: number | null; rows: number | null; fullscreen: boolean | null; maxRows: number | null; body: number | null; docked: boolean };
+type Viewport = { columns?: unknown; rows?: unknown; isFullscreen?: unknown } | undefined;
+const NO_VIEW: View = { columns: null, rows: null, fullscreen: null, maxRows: null, body: null, docked: false };
+const views = new Map<string, View>();
+const viewOf = (surface: unknown): View => views.get(String(surface)) ?? NO_VIEW;
 // F-08: the agent the person looks at in the pane (view.agentId): its task is the one expanded, and the first.
 let focusAgent: string | null = null;
 const viewNumber = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
-function noteView(viewport: { columns?: unknown; rows?: unknown; isFullscreen?: unknown } | undefined, maxRows?: unknown): void {
-  if (viewport) {
-    lastView = {
-      ...lastView,
-      columns: viewNumber(viewport.columns) ?? lastView.columns,
-      rows: viewNumber(viewport.rows) ?? lastView.rows,
-      fullscreen: typeof viewport.isFullscreen === 'boolean' ? viewport.isFullscreen : lastView.fullscreen,
-    };
-  }
-  const above = viewNumber(maxRows);
-  if (above !== null) lastView = { ...lastView, maxRows: above };
+function noteView(surface: unknown, viewport: Viewport, more: { maxRows?: unknown; body?: unknown; docked?: boolean } = {}): void {
+  const was = viewOf(surface);
+  views.set(String(surface), {
+    columns: viewNumber(viewport?.columns) ?? was.columns,
+    rows: viewNumber(viewport?.rows) ?? was.rows,
+    fullscreen: typeof viewport?.isFullscreen === 'boolean' ? viewport.isFullscreen : was.fullscreen,
+    maxRows: viewNumber(more.maxRows) ?? was.maxRows,
+    body: viewNumber(more.body) ?? was.body,
+    docked: more.docked ?? was.docked,
+  });
+}
+// Final review m-2: a CommandOutput row draws at the transcript's width, which a docked pane narrows. On a surface it is
+// the band's column there and the engine's five (AbovePrompt.bodyColumns, «the transcript's beside a docked Pane»), when
+// measured at this screen width; else the screen less the pane, while lens's is docked beside it; else the screen.
+const BAND_MARK_COLUMNS = 5;
+function transcriptColumns(surface: unknown, viewport: Viewport): number {
+  const screen = viewNumber(viewport?.columns) ?? LINE_MAX;
+  const v = viewOf(surface);
+  if (v.body !== null && v.columns === screen) return Math.min(screen, v.body + BAND_MARK_COLUMNS);
+  if (paneUp && v.docked) return Math.max(1, screen - DOCK_COLUMNS);
+  return screen;
+}
+// A render keeps its surface's view; when that moves the transcript's width, the photos in it are laid out again.
+function noteRender($: Engine, surface: unknown, viewport: Viewport, more: { maxRows?: unknown; body?: unknown; docked?: boolean } = {}): void {
+  const before = transcriptColumns(surface, viewport);
+  noteView(surface, viewport, more);
+  if (photos.size && transcriptColumns(surface, viewport) !== before) $.ui.invalidate('ui.render');
 }
 // F-12: the band's measures: the icon and its gap, the bar's narrowest and widest, the boxes it draws at most.
 const ICON_COLUMNS = 2;
@@ -122,6 +143,30 @@ const BAR_MAX = 36;
 const BAND_CELLS = 16;
 // F-06: whether lens drew its band on the last render, for the hint line's tail outside fullscreen.
 let bandDrawn = false;
+// Final review m-4: whether waypoint's band was drawn at the last render of lens's, and when lens's band then took the
+// site; a × within TAKEOVER_MS of that was meant for waypoint's band (a double tap, a key repeat) and closes nothing.
+let waypointSeen = false;
+let takeoverAt = Number.NEGATIVE_INFINITY;
+const TAKEOVER_MS = 5_000;
+// The subject lens's band was closed for with × (bandSubject): a band about something else is drawn again.
+let hiddenSubject: string | null = null;
+
+// × on lens's band: closed for the subject it shows, unless it came right after the band took the site.
+async function closeBand($: Engine, subject: string): Promise<void> {
+  try {
+    if ((await nowMs($)) - takeoverAt < TAKEOVER_MS) return;
+    hiddenSubject = subject;
+    await update($, hidden, () => true);
+  } catch { /* the band stays */ }
+}
+
+// A model about something else than what the band was closed for opens it again (and so does one after a reload, which
+// forgot the subject): the band never stays closed for a whole session.
+async function releaseBand($: Engine, model: PanelModel): Promise<void> {
+  if (hiddenSubject !== null && hiddenSubject === bandSubject(model)) return;
+  hiddenSubject = null;
+  try { if (await read($, hidden)) await update($, hidden, () => false); } catch { /* the render draws it anyway */ }
+}
 
 // The Panel button: /lens in the form the band measured, run as the person would; left in the prompt where it cannot run.
 function runLens($: Engine, args: 'live' | 'foto'): void {
@@ -156,6 +201,9 @@ function resetPanel(): void {
   bandModel = null;
   bandJson = '';
   focusAgent = null;
+  hiddenSubject = null;
+  waypointSeen = false;
+  takeoverAt = Number.NEGATIVE_INFINITY;
   prevModel = null;
   primed = false;
   toastQueue = [];
@@ -187,13 +235,14 @@ function applyPendingEnd(id: string, now: number): void {
 }
 
 // Open todos, a subagent heard of within the hour (older entries are dropped here), an agent of links still alive, or
-// this session's own forge work: in progress in the last model, or a forge.cjs call heard within 10 minutes (§4.6: the
-// surfaces need the tick reading while it lasts).
+// this session's own forge work: in progress in the last model and moving (final review m-3: a task left in progress for
+// LEFT_OPEN_MS keeps nothing reading), or a forge.cjs call heard within 10 minutes (§4.6: the surfaces need the tick
+// reading while it lasts).
 function isBusy(now: number): boolean {
   activity.subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   const todos = summarizeTodos(activity.todos);
   return todos.total - todos.done > 0 || activity.subagents.length > 0 || links.some(l => l.status !== 'done')
-    || ownActive(bandModel, runRoleOf(roadmap)) || (forgeHeardAt !== null && now - forgeHeardAt < FORGE_HEARD_MS);
+    || ownBusy(bandModel, runRoleOf(roadmap)) || (forgeHeardAt !== null && now - forgeHeardAt < FORGE_HEARD_MS);
 }
 
 // Whether waypoint will draw its own band (and its Panel button): its plugin is installed and its band model for
@@ -820,7 +869,16 @@ function keepBand($: Engine, model: PanelModel): void {
   bandJson = json;
   bandModel = model;
   $.ui.invalidate('ui.render');
+  void releaseBand($, model);
   void updateSurfaces($, model);
+}
+
+// Whether the pane is open, as last seen; a change moves the transcript's width where it docks, so the photos are laid
+// out again (final review m-2).
+function notePane($: Engine, up: boolean): void {
+  if (up === paneUp) return;
+  paneUp = up;
+  if (photos.size) $.ui.invalidate('ui.render');
 }
 
 async function writePanel($: Engine): Promise<void> {
@@ -871,7 +929,7 @@ async function refreshPanel($: Engine): Promise<void> {
   if (panelRefreshing) return;
   panelRefreshing = true;
   try {
-    paneUp = await isPaneOpen($);
+    notePane($, await isPaneOpen($));
     if (!paneUp) stopPanelTimer();
     // With the pane closed the files are still read while there is activity, for the band: at the 30 s tick's pace.
     if (!paneUp && !busy) return;
@@ -977,10 +1035,12 @@ async function openPanel($: Engine): Promise<boolean> {
   const t = lensTexts();
   let placed = false;
   try {
-    const compact = panelLayout({ bodyColumns: lastView.columns ?? LINE_MAX, placement: 'inline' });
+    // The terminal is where the pane may be seated inline: its view sizes the request.
+    const view = viewOf('terminal');
+    const compact = panelLayout({ bodyColumns: view.columns ?? LINE_MAX, placement: 'inline' });
     let estimate = 0;
     try { if (bandModel) estimate = buildCards(bandModel, t, 0).reduce((n, card) => n + cardRows(card, compact), 0); } catch { estimate = 0; }
-    const opened = await $.ui.open({ id: PANE, title: 'lens', rows: paneRows(estimate, lastView.rows), columns: DOCK_COLUMNS });
+    const opened = await $.ui.open({ id: PANE, title: 'lens', rows: paneRows(estimate, view.rows), columns: DOCK_COLUMNS });
     placed = opened.isPlaced;
     if (!opened.isPlaced) $.ui.toast(`${t.panelWaiting}: ${clip(opened.reason, 200)}`);
   } catch {
@@ -1065,9 +1125,11 @@ function clearStatus($: Engine): void {
 // the prompt, while this session has work of its own; set only when it changes), the toasts of what moved since the
 // last model (none for the first one after a start or /clear) and the notification of a run of its own that ended.
 // The status line alone: it depends on the view too, so a render that changes the view runs it again (pure, no reads).
+// It is the terminal's line under the prompt, so the terminal's view decides it, whichever surface drew last (m-5).
 function updateStatus($: Engine, model: PanelModel | null): void {
   try {
-    const show = lastView.fullscreen === false || (lastView.maxRows !== null && lastView.maxRows < 3);
+    const view = viewOf('terminal');
+    const show = view.fullscreen === false || (view.maxRows !== null && view.maxRows < 3);
     const text = show && model ? statusText(model, textsFor(model.locale), runRoleOf(roadmap)) ?? undefined : undefined;
     if (text === lastStatus) return;
     lastStatus = text;
@@ -1194,7 +1256,7 @@ export const register: Register = on => {
       const shot = n === null ? undefined : photos.get(n);
       if (!shot || shot.text !== e.props.text) return next(e);
       const { Box, Text } = $.ui.resolve(e);
-      const layout = panelLayout({ bodyColumns: Number(e.viewport?.columns) || LINE_MAX, placement: 'inline' });
+      const layout = panelLayout({ bodyColumns: transcriptColumns(e.surface, e.viewport), placement: 'inline' });
       return (
         <Box flexDirection="column">
           <Text dimColor>{e.props.text}</Text>
@@ -1210,7 +1272,7 @@ export const register: Register = on => {
   on('ui.close', async ($, e, next) => {
     const closed = await next(e);
     if (e.id === PANE) {
-      paneUp = await isPaneOpen($);
+      notePane($, await isPaneOpen($));
       if (!paneUp) stopPanelTimer();
     }
     return closed;
@@ -1441,7 +1503,7 @@ export const register: Register = on => {
   // expands its task (F-08).
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     try {
-      noteView(e.viewport);
+      noteRender($, e.surface, e.viewport, { docked: e.props.placement === 'dock' });
       updateStatus($, bandModel);
       const layout = panelLayout(e.props, e.viewport);
       if (layout.focusAgent !== focusAgent) {
@@ -1514,15 +1576,24 @@ export const register: Register = on => {
   // The band above the prompt while there is activity and waypoint draws no band of its own (F-16): this session's tasks
   // in progress, or the run going on, with its count, the agents without a task and the spend, fitted to the width as
   // waypoint's band is (F-09, F-12); the bar and the task boxes only where there is room (wide). Its buttons have
-  // letters, drawn plain outside fullscreen (F-06). Drawn from module memory: no clock or file call.
+  // letters, drawn plain outside fullscreen (F-06). Drawn from module memory: no file call, and the clock is read only
+  // when the band takes the site from waypoint's (m-4). Its × closes it for what it is about (bandSubject).
   // The band is one instance per chain: drawing without next(e) hides the bands of the plugins beneath, so ours stacks over them.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e);
-    noteView(e.viewport, e.props.maxRows);
+    noteRender($, e.surface, e.viewport, { maxRows: e.props.maxRows, body: e.props.bodyColumns });
     updateStatus($, bandModel);
     bandDrawn = false;
     try {
-      if (e.props.hasSurvey || !busy || await waypointDraws($) || await read($, hidden)) return below;
+      if (e.props.hasSurvey || !busy) return below;
+      if (await waypointDraws($)) { waypointSeen = true; return below; }
+      if (waypointSeen) {
+        // waypoint's band just went (its × included): a second x within TAKEOVER_MS was meant for it.
+        waypointSeen = false;
+        void nowMs($).then(at => { takeoverAt = at; });
+      }
+      const subject = bandSubject(bandModel);
+      if (await read($, hidden) && hiddenSubject === subject) return below;
       const ui = $.ui.resolve(e);
       const { Box, Button } = ui;
       const t = lensTexts();
@@ -1546,7 +1617,7 @@ export const register: Register = on => {
       const plainProp = plain ? { plain: true as const } : {};
       const buttons = [
         <Button key="panel" label={t.panel} hotkey="p" {...plainProp} onPress={() => { runLens($, form); }} />,
-        <Button key="dismiss" label="×" role="dismiss" hotkey="x" {...plainProp} onPress={() => { update($, hidden, () => true).catch(() => undefined); }} />,
+        <Button key="dismiss" label="×" role="dismiss" hotkey="x" {...plainProp} onPress={() => { void closeBand($, subject); }} />,
       ];
       const icon = SECTION_ICON[shape.section];
       const hue = SECTION_HUE[shape.section];

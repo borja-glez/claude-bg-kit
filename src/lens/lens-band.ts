@@ -28,6 +28,21 @@ export function activityTag(a: Row): string {
 
 export interface LensBand { parts: BandPart[]; section: SectionId; cells: CellState[]; ratio: number; spin: boolean }
 
+/**
+ * Final review m-4: what lens's band is about, which its × closes it for: the tasks it names, the run, the todos (however
+ * they move on), the subagents, or the section and title of its headline (forge's task, the roadmap's project, the
+ * superpowers plan). A band about something else is drawn again.
+ */
+export function bandSubject(m: PanelModel | null): string {
+  const acts = ownInProgress(m);
+  if (acts.length >= 2) return `tasks:${acts.map(a => a.key).join(' ')}`;
+  const head = m ? headline(m) : null;
+  if (!head) return 'agents';
+  if (m?.execution?.active) return `run:${m.execution.runId}`;
+  if (head.section === 'todos' || head.section === 'agents') return head.section;
+  return `${head.section}:${head.title}`;
+}
+
 /** The band's parts, its section (icon and colour), its boxes and their ratio, and whether a spinner shows. */
 export function lensBand(m: PanelModel | null, t: { sSubagents: string; sNow: string }, agentsHeard: number): LensBand {
   const acts = ownInProgress(m);

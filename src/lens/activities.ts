@@ -266,6 +266,9 @@ export function buildActivities(i: ActivityInput): ActivityView {
     const skewed = last - now > FUTURE_SKEW_MS;
     const job = liveJobs.find(j => jobHome.get(j) === key);
     const live = owner === 'own' && !done && !stopped;
+    // Final review m-3: an own task whose status has not moved for LEFT_OPEN_MS still shows, but is idle: on its own it
+    // keeps nothing reading with the pane closed (surfaces.ts, ownBusy).
+    const idle = live && age(last, now) >= LEFT_OPEN_MS;
     const title = i.titles?.[key];
     const slot = slotTasks.has(st.task) && st.project === execProject && !done && !stopped;
     built.push({
@@ -276,6 +279,7 @@ export function buildActivities(i: ActivityInput): ActivityView {
         round: st.reviews?.n ?? st.round, cap: st.reviews?.max ?? st.cap,
         verdict: st.verdict ? { action: st.verdict.action, score: st.verdict.score, round: st.verdict.round, findings: st.verdict.findings } : null,
         ...(st.autonomy === 'auto' ? { autonomy: 'auto' as const } : {}),
+        ...(idle ? { idle: true as const } : {}),
         job: job ? { name: job.cmd, seconds: span(ms(job.startedAt), now, now) } : null,
         seconds: skewed ? null : span(ms(st.taskStartedAt), done || stopped ? ended : now, now),
         agents: live ? mine.map(l => agentOf(l, i.links, i.models, now)) : [],

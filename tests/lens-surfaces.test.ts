@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { modeLabels, ownActive, spinnerText, statusText, surfaceEvents, type SurfaceTexts } from '../src/lens/surfaces.js';
+import { modeLabels, ownActive, ownBusy, spinnerText, statusText, surfaceEvents, type SurfaceTexts } from '../src/lens/surfaces.js';
 import type { PanelModel } from '../src/lens/model.js';
 
 type Row = PanelModel['activities'][number];
@@ -66,5 +66,15 @@ describe('the one-line surfaces of lens (step 4 of §4.6)', () => {
       .toBe('Ejecución parada: sin señal 12 min');
     expect(surfaceEvents(live, { ...EMPTY, execution: EXEC({ active: false, elapsedSeconds: 600 }) }, 'owner', T).ended).toBeNull();
     expect(surfaceEvents(live, { ...EMPTY, execution: EXEC({ active: false }) }, 'other-live', T).ended).toBeNull();
+  });
+  it('an own task left in progress (idle) keeps nothing reading, unless a job or an agent of it is at work; an own active run does (final review m-3)', () => {
+    expect(ownBusy({ ...EMPTY, activities: [ACT()] }, 'none')).toBe(true);
+    expect(ownBusy({ ...EMPTY, activities: [ACT({ idle: true })] }, 'none')).toBe(false);
+    expect(ownActive({ ...EMPTY, activities: [ACT({ idle: true })] }, 'none')).toBe(true);
+    expect(ownBusy({ ...EMPTY, activities: [ACT({ idle: true, job: { name: 'validate', seconds: 5 } })] }, 'none')).toBe(true);
+    const agent = { id: 'a1', type: 'forge:forge-impl', tool: null, seconds: 5, status: 'running' as const, depth: 0 };
+    expect(ownBusy({ ...EMPTY, activities: [ACT({ idle: true, agents: [agent] })] }, 'none')).toBe(true);
+    expect(ownBusy({ ...EMPTY, activities: [ACT({ idle: true })], execution: EXEC() }, 'owner')).toBe(true);
+    expect(ownBusy(null, 'owner')).toBe(false);
   });
 });

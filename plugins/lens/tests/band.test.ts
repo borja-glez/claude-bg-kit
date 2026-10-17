@@ -251,6 +251,63 @@ test('waypoint says whether it draws: a dismissed notice (drawn false) leaves th
   expect(await buttons($)).toEqual([[], []]);
 });
 
+test("an x within 5 s of waypoint's band going does not close lens's band, which took its place; a later one does (final review m-4)", async ($, on) => {
+  serveFiles(on, WAYPOINT_PROJECT);
+  engineBand(on);
+  const clock = start(on);
+  on('command.list', () => ({ value: [WAYPOINT_COMMAND] }));
+  const state = { drawn: true };
+  serveWaypointState(on, state);
+  await $.session.start(SESSION);
+  await $.tool.call(TODOS);
+  const mount = () => $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
+  let ui = await mount();
+  expect(await ui.find({ key: 'panel' })).toBeUndefined();
+  await ui.unmount();
+  // waypoint's × takes its band away; lens's takes the site, and the second x of a double tap lands on it.
+  state.drawn = false;
+  ui = await mount();
+  expect(await ui.find({ key: 'panel' })).toBeDefined();
+  await ui.press({ key: 'dismiss' });
+  await ui.unmount();
+  ui = await mount();
+  expect(await ui.find({ key: 'panel' })).toBeDefined();
+  await clock.advance(5_000);
+  await ui.press({ key: 'dismiss' });
+  await ui.unmount();
+  ui = await mount();
+  expect(await ui.find({ key: 'panel' })).toBeUndefined();
+  await ui.unmount();
+});
+
+test("lens's × closes its band for what it is about: todos that move on keep it closed, a task of this session brings it back (final review m-4)", async ($, on) => {
+  const files: Record<string, { text: string; mtimeMs: number }> = {};
+  serveFiles(on, files);
+  engineBand(on);
+  const clock = start(on);
+  on('command.list', () => ({ value: [] }));
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
+  await $.session.start(SESSION);
+  await $.tool.call(TODOS);
+  await clock.advance(30_000);
+  const mount = () => $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
+  let ui = await mount();
+  await ui.press({ key: 'dismiss' });
+  await ui.unmount();
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'completed', activeForm: 'a' }, { content: 'b', status: 'in_progress', activeForm: 'b' }] });
+  await clock.advance(30_000);
+  ui = await mount();
+  expect(await ui.find({ key: 'panel' })).toBeUndefined();
+  await ui.unmount();
+  files[`${ROOT}/.forge/status/T002.json`] = { text: status('T002'), mtimeMs: NOW };
+  await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T002-1 --path medium', tool_use_id: 'b1' } as never);
+  await clock.advance(30_000);
+  ui = await mount();
+  expect(await ui.find({ key: 'panel' })).toBeDefined();
+  expect(await lineOf(ui)).toContain('T002');
+  await ui.unmount();
+});
+
 test("lens's band names this session's tasks in progress, each as short as a band says it (F-09)", async ($, on) => {
   const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
   const touched = NOW - 60_000;

@@ -185,6 +185,7 @@ export type PanelModel = {
     path: string | null; stage: string | null; round: number | null; cap: number | null;
     verdict: { action: string; score: number | null; round?: number | null; findings?: { critical: number; important: number; minor: number } | null } | null;
     autonomy?: 'auto';
+    idle?: true;
     job: { name: string; seconds: number | null } | null;
     seconds: number | null;
     agents: { id: string; type: string; description?: string; model?: string; effort?: string; tool: string | null; seconds: number | null; status: 'running' | 'waiting'; depth: number }[];

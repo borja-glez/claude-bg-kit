@@ -58,6 +58,17 @@ describe('fitCells (F-14)', () => {
     expect(fitCells(cells.slice(0, 10), 36)).toEqual({ cells: cells.slice(0, 10), more: null });
     expect(innerWidth(panelLayout({ bodyColumns: 40, placement: 'dock' }))).toBe(38);
   });
+  it('a row of boxes that fitCells sums up takes three rows: two of boxes, then its «+N ■ · M □» summary (final review m-1)', () => {
+    const inline = panelLayout({ bodyColumns: 54, placement: 'inline', scroll: { bodyRows: 8 } });
+    expect(innerWidth(inline)).toBe(52);
+    const boxes = (n: number) => card('superpowers', [{ kind: 'cells', cells: Array<CellState>(n).fill('done') }]);
+    expect(cardRows(boxes(26), inline)).toBe(1 + 1);
+    expect(cardRows(boxes(52), inline)).toBe(1 + 2);
+    expect(cardRows(boxes(53), inline)).toBe(1 + 3);
+    expect(cardRows(boxes(60), inline)).toBe(1 + 3);
+    const dock = panelLayout({ bodyColumns: 56, placement: 'dock' });
+    expect(cardRows(boxes(60), dock)).toBe(1 + 3 + 2);
+  });
 });
 
 describe('clipCard (F-01)', () => {

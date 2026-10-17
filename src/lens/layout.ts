@@ -1,5 +1,6 @@
 // F-01, F-08, F-14: how the panel fits where the engine seats it: the pane's layout from its props, the cards that fit
-// in its rows (the rest counted as «↓ N more»), the boxes of a long plan cut to two rows, and the rows to ask for.
+// in its rows (the rest counted as «↓ N more»), the boxes of a long plan cut to two rows and a summary, and the rows to
+// ask for.
 // Pure: register.tsx and term.tsx use it.
 import type { Block, Card, CardId } from './svg.js';
 import type { CellState } from './view.js';
@@ -64,9 +65,15 @@ export function fitCells(cells: readonly CellState[], max: number): { cells: Cel
   return { cells: cells.slice(start, start + size), more: counts.length ? `+${counts.join(' · ')}` : null };
 }
 
+// A row of boxes takes at most two rows; one that fitCells sums up takes one more, since term.tsx draws its summary as
+// the second item of a wrapping row whose first, the boxes, is as wide as the card (final review m-1).
 function blockRows(b: Block, inner: number): number {
   if (b.kind === 'bar') return b.label || b.right ? 2 : 1;
-  if (b.kind === 'cells') return b.cells.length ? Math.min(2, Math.ceil((b.cells.length * 2) / Math.max(2, inner))) : 0;
+  if (b.kind === 'cells') {
+    if (!b.cells.length) return 0;
+    const fit = fitCells(b.cells, cellsMax(inner));
+    return Math.min(2, Math.ceil((fit.cells.length * 2) / Math.max(2, inner))) + (fit.more ? 1 : 0);
+  }
   return 1;
 }
 

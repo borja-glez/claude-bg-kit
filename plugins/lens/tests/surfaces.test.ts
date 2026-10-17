@@ -19,6 +19,7 @@ const status = (task: string, over: object = {}) => JSON.stringify({
 });
 
 // A file system answered from memory: `files` may change between reads; every file was touched a minute ago, with its size.
+// `touched` gets every path read or listed (a status read once is cached, but its folder is listed on each refresh).
 function serveFiles(on: On, files: Record<string, string>, touched: string[] = []) {
   on('session.root', () => ({ value: ROOT }));
   on('session.id', () => ({ value: SESSION_ID }));
@@ -29,6 +30,7 @@ function serveFiles(on: On, files: Record<string, string>, touched: string[] = [
     return f !== undefined ? { value: { kind: 'file' as const, size: f.length, mtimeMs: NOW - 60_000, isLink: false } } : { deny: `ENOENT ${e.path}` };
   });
   on('fs.list', (_$, e) => {
+    touched.push(norm(e.path));
     const prefix = `${norm(e.path)}/`;
     const names = new Map<string, { kind: 'file' | 'dir'; size: number }>();
     for (const [path, text] of Object.entries(files)) {
@@ -268,6 +270,55 @@ test('the forge.cjs call heard keeps the tick reading for 10 minutes, and no lon
   touched.length = 0;
   await clock.advance(90_000);
   expect(touched.filter(p => p.includes('/.forge'))).toEqual([]);
+});
+
+test('an own task left in progress keeps the tick reading only while its status moved within 30 minutes (final review m-3)', async ($, on) => {
+  const touched: string[] = [];
+  serveFiles(on, { [T2]: status('T002', { lastAt: at(1) }) }, touched);
+  servePanes(on);
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
+  const clock = start(on);
+  await $.session.start(SESSION);
+  await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T002-1 --path medium', tool_use_id: 'b1' } as never);
+  await clock.advance(31_000);
+  expect(touched.some(p => p.includes('/.forge')), 'while the call is heard').toBe(true);
+  // Past the 10 minutes of the forge.cjs call, a task that moved 12 minutes ago still keeps it reading.
+  await clock.advance(11 * 60_000);
+  touched.length = 0;
+  await clock.advance(60_000);
+  expect(touched.some(p => p.includes('/.forge')), 'a task that moved 13 minutes ago').toBe(true);
+  // Once its status has not moved for 30 minutes the reads stop, though the task still shows in progress.
+  await clock.advance(20 * 60_000);
+  touched.length = 0;
+  await clock.advance(90_000);
+  expect(touched.filter(p => p.includes('/.forge'))).toEqual([]);
+});
+
+test('each surface keeps its own view: a fullscreen desktop beside a terminal on the main screen does not flip the status line (final review m-5)', async ($, on) => {
+  serveFiles(on, { [T2]: status('T002', { phase: 'review', round: 2 }) });
+  servePanes(on);
+  engineRows(on);
+  const lines: (string | undefined)[] = [];
+  on('ui.status', (_$, e) => { lines.push(e.text); return { value: undefined }; });
+  start(on);
+  await $.session.start(SESSION);
+  await $.command.run(RUN);
+  const draw = async (surface: 'terminal' | 'desktop', isFullscreen: boolean) => {
+    const band = await $.ui.mount({ plugin: 'lens', surface, component: 'AbovePrompt', props: BAND_PROPS, viewport: { columns: 105, rows: 30, isFullscreen } });
+    await band.unmount();
+  };
+  for (let i = 0; i < 3; i++) {
+    await draw('terminal', false);
+    await draw('desktop', true);
+  }
+  expect(lines).toEqual(['lens · T002 review r2']);
+  // The reverse: a terminal in fullscreen beside a surface that says it is not: the terminal's view decides, once.
+  await draw('terminal', true);
+  for (let i = 0; i < 3; i++) {
+    await draw('desktop', false);
+    await draw('terminal', true);
+  }
+  expect(lines).toEqual(['lens · T002 review r2', undefined]);
 });
 
 test('/clear takes the status line away (fix 4)', async ($, on) => {

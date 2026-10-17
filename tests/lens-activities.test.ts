@@ -100,6 +100,17 @@ describe('buildActivities: who owns a task and how long it shows (E-06)', () => 
   });
 });
 
+describe('buildActivities: an own task left in progress (final review m-3)', () => {
+  it('still shows for 24 h, but once its status has not moved for 30 minutes it is idle; a fresh, done or other one is not', () => {
+    const one = (over: Record<string, unknown>, sessionId = 'me') => buildActivities(input({ statuses: [st('A', over)], sessionId })).activities[0];
+    expect(one({ lastAt: ago(29) })).not.toHaveProperty('idle');
+    expect(one({ lastAt: ago(31) })).toMatchObject({ key: 'A', owner: 'own', done: false, idle: true });
+    expect(one({ lastAt: ago(23 * 60) })).toMatchObject({ key: 'A', idle: true });
+    expect(one({ lastAt: ago(14), doneAt: ago(14) })).not.toHaveProperty('idle');
+    expect(one({ session: 'other', lastAt: ago(29) })).not.toHaveProperty('idle');
+  });
+});
+
 describe('buildActivities: a stopped task (forge stop, wave 2)', () => {
   it('phase stopped is stopped, never done, shows 15 minutes, dim, with no stage', () => {
     const one = (min: number) => buildActivities(input({ statuses: [st('S', { phase: 'stopped', doneAt: ago(min), lastAt: ago(min) })] })).activities;

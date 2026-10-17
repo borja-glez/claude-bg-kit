@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { activityTag, lensBand, ownInProgress } from '../src/lens/lens-band.js';
+import { activityTag, bandSubject, lensBand, ownInProgress } from '../src/lens/lens-band.js';
 import { joinParts } from '../src/mod/band-fit.js';
 import type { PanelModel } from '../src/lens/model.js';
 
@@ -43,5 +43,21 @@ describe("lens's band (F-09)", () => {
     expect(activityTag(ACT({ job: { name: 'integrate', seconds: 5 } }))).toBe('T001 int');
     expect(activityTag(ACT({ stage: 'review', round: 3 }))).toBe('T001 rev r3');
     expect(activityTag(ACT({ stage: null }))).toBe('T001');
+  });
+});
+
+describe("what lens's band is about, which its × closes it for (final review m-4)", () => {
+  const todos = { total: 3, done: 1, inProgress: 'Writing tests', next: ['c'], active: ['Writing tests'], cells: 'dap' };
+  it('the tasks it names, the run, the todos, the subagents, or the section and title of its headline', () => {
+    expect(bandSubject({ ...EMPTY, activities: [ACT(), ACT({ key: 'T002', task: 'T002' })] })).toBe('tasks:T001 T002');
+    expect(bandSubject({ ...EMPTY, todos })).toBe('todos');
+    expect(bandSubject(null)).toBe('agents');
+    expect(bandSubject({ ...EMPTY, subagents: [{ id: 'x', type: 'Explore', seconds: 5 }] })).toBe('agents');
+    const sp = { plan: 'docs/plan.md', tasks: 4, done: 1, current: null, stale: false } as unknown as PanelModel['superpowers'];
+    expect(bandSubject({ ...EMPTY, superpowers: sp })).toBe('superpowers:docs/plan.md');
+  });
+  it('stays the same while the todos move on, and changes when the work it is about changes', () => {
+    expect(bandSubject({ ...EMPTY, todos: { ...todos, done: 2, inProgress: 'Fixing the parser' } })).toBe(bandSubject({ ...EMPTY, todos }));
+    expect(bandSubject({ ...EMPTY, activities: [ACT(), ACT({ key: 'T003', task: 'T003' })] })).not.toBe(bandSubject({ ...EMPTY, activities: [ACT(), ACT({ key: 'T002', task: 'T002' })] }));
   });
 });

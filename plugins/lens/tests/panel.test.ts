@@ -50,6 +50,57 @@ function rowsOf(n: unknown): number {
   return inner + (el.props?.borderStyle ? 2 : 0) + (typeof el.props?.marginTop === 'number' ? el.props.marginTop : 0);
 }
 
+type El = { type?: string; props?: Record<string, unknown>; children?: unknown };
+const kidsOf = (el: El): unknown[] => (Array.isArray(el.children) ? el.children : [el.children]).filter(c => c !== null && c !== undefined && c !== false);
+const frameOf = (p: Record<string, unknown> | undefined): number =>
+  Number(p?.paddingLeft ?? 0) + 2 * Number(p?.paddingX ?? 0) + (p?.borderStyle ? 2 : 0);
+// The cells a drawing takes across when nothing wraps: a Text its strings, a row its children and gaps, a column its
+// widest child; a Client its width, or two cells a box. The glyphs drawn here take one cell each.
+function widthOf(n: unknown): number {
+  if (typeof n === 'string') return [...n].length;
+  if (Array.isArray(n)) return n.reduce((w: number, c) => w + widthOf(c), 0);
+  if (!n || typeof n !== 'object') return 0;
+  const el = n as El;
+  if (el.type === 'Client') {
+    const own = el.props?.props as { colors?: unknown[] } | undefined;
+    return typeof el.props?.width === 'number' ? el.props.width : 2 * (own?.colors?.length ?? 0);
+  }
+  if (el.type === 'Button') return [...String(el.props?.label ?? '')].length + 4;
+  if (el.type !== 'Box') return widthOf(el.children);
+  const kids = kidsOf(el);
+  if (el.props?.flexDirection !== 'row') return frameOf(el.props) + Math.max(0, ...kids.map(widthOf));
+  return frameOf(el.props) + kids.reduce((w: number, c) => w + widthOf(c), 0) + Number(el.props?.columnGap ?? 0) * Math.max(0, kids.length - 1);
+}
+// The rows a drawing takes at `width` columns, wrapping as the terminal lays it out: a column sums its children, a row
+// takes its tallest, a wrapping row breaks its children into lines (each as wide as its content, at most the row), a Text
+// that does not truncate wraps; a frame adds two rows and a margin its size.
+function rowsAt(n: unknown, width: number): number {
+  if (Array.isArray(n)) return n.reduce((sum: number, c) => sum + rowsAt(c, width), 0);
+  if (!n || typeof n !== 'object') return 0;
+  const el = n as El;
+  if (el.type === 'Text') return el.props?.wrap === 'truncate-end' ? 1 : Math.max(1, Math.ceil(widthOf(el) / Math.max(1, width)));
+  if (el.type === 'Button') return 1;
+  if (el.type === 'Client') return typeof el.props?.height === 'number' ? el.props.height : Math.max(1, Math.ceil(widthOf(el) / Math.max(1, width)));
+  if (el.type !== 'Box') return rowsAt(el.children, width);
+  const kids = kidsOf(el);
+  const inner = Math.max(1, width - frameOf(el.props));
+  let rows = 0;
+  if (el.props?.flexDirection === 'row' && el.props?.flexWrap === 'wrap') {
+    const gap = Number(el.props?.columnGap ?? 0);
+    let used = -1;
+    let line = 0;
+    for (const kid of kids) {
+      const w = Math.min(widthOf(kid), inner);
+      if (used >= 0 && used + gap + w > inner) { rows += line; used = -1; line = 0; }
+      used = used < 0 ? w : used + gap + w;
+      line = Math.max(line, rowsAt(kid, w));
+    }
+    rows += line;
+  } else if (el.props?.flexDirection === 'row') rows = Math.max(0, ...kids.map(k => rowsAt(k, inner)));
+  else rows = kids.reduce((sum: number, k) => sum + rowsAt(k, inner), 0);
+  return rows + (el.props?.borderStyle ? 2 : 0) + (typeof el.props?.marginTop === 'number' ? el.props.marginTop : 0);
+}
+
 // Everything a drawing says, in order: Text strings, Svg alt texts (the desktop's cards) and Button labels.
 async function said(ui: { drawn: () => Promise<unknown> }): Promise<string> {
   const out: string[] = [];
@@ -583,6 +634,32 @@ test('with fewer rows than the one card it keeps, the pane clips that card to it
   expect(rows3.slice(-2)[0]).toBe('…');
   expect(rows3.at(-1)).toMatch(/^↓ \d+ more/);
   await three.unmount();
+});
+
+test('inline, a card with 53 task boxes or more takes its summary row too, so «↓ N more» stays in view (final review m-1)', async ($, on) => {
+  const BIG = ['# Plan', ...Array.from({ length: 60 }, (_, i) => `### Task ${i + 1}: Step ${i + 1}\n- [ ] do it`)].join('\n');
+  serveFiles(on, [], {
+    [`${ROOT}/.superpowers/sdd/big/progress.md`]: { text: '# SDD ledger — plan: docs/superpowers/plans/big.md\n\n## Progress\nTasks 1-20: complete (abc..def)\nTask 21: fix round 1/3 (flaky)\n', mtimeMs: 9 },
+    [`${ROOT}/docs/superpowers/plans/big.md`]: { text: BIG, mtimeMs: 9 },
+  });
+  servePanes(on);
+  const clock = start(on);
+  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.tool.call({ tool: 'TodoWrite', todos: Array.from({ length: 6 }, (_, i) => ({ content: `Step ${i}`, status: i === 0 ? 'in_progress' : 'pending', activeForm: `Doing step ${i}` })) });
+  await clock.advance(1000);
+  // 54 columns inline: the cards' blocks have 52 cells, two rows of 26 boxes, so the 60 of the plan are summed up.
+  const summed: boolean[] = [];
+  for (const bodyRows of [6, 8, 10, 12, 14]) {
+    const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: { ...PANE_PROPS, bodyColumns: 54, placement: 'inline' as const, scroll: { offset: 0, bodyRows } } });
+    const text = await said(ui);
+    summed.push(/\+\d+ ■/.test(text));
+    expect(rowsAt(await ui.drawn(), 54), `${bodyRows} rows`).toBeLessThanOrEqual(bodyRows);
+    expect(text, `${bodyRows} rows`).toMatch(/↓ \d+ more · \/lens photo$/);
+    await ui.unmount();
+  }
+  expect(summed).toContain(true);
 });
 
 test('inline at one row the pane draws one row: the kept card clipped, its title ending on «…», and no «↓» row (F-01)', async ($, on) => {

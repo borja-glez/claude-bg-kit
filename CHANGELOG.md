@@ -18,7 +18,7 @@ elsewhere and are reconstructed from their READMEs.
 #### Added
 - Band buttons have hotkeys and fit the width; one-row band outside fullscreen; Stop asks for confirmation.
 - The band is a line of parts with a priority, fitted to the cells it has: the least important take a short form and then go, while a pending decision, a silent run and the inbox go last. From 140 columns it is one row with the full buttons, from 90 two rows with short labels; narrower, with fewer than 3 rows above the prompt or outside fullscreen, one row whose buttons fold into ⋯ (`m`).
-- Every button has a letter (`n`, `s`, `l`, `r`, `t`, `p`, `x`; `a`, `e`, `o`, `w`, `i`, `y`, `d` in design; `v`, `j`, `e`, `f`, `c` in a notice), drawn `n: Next` outside fullscreen, where the hint line ends with `ctrl+x tab · band` and Roadmap and Design copy their address.
+- Every button has a letter (`n`, `s`, `l`, `t`, `p`, `x`; `a`, `e`, `o`, `w`, `i`, `y` in design; `v`, `j`, `e`, `f`, `c` in a notice), drawn `n: Next` outside fullscreen, where the hint line ends with `ctrl+x tab · band` and Roadmap (`r`) and Design (`d`) are buttons that copy their address; in fullscreen they stay links, with no letter.
 - The run band shows every slot (up to 12, `+N` for those that do not fit), one integrated count and those waiting to integrate; its model gains `queued`.
 - The band publishes whether it is drawn (`{ plugin: 'waypoint', key: 'drawn' }`), so lens draws its own band when this one is closed.
 
@@ -684,8 +684,8 @@ elsewhere and are reconstructed from their READMEs.
 #### Changed
 - The pane asks for its rows and, inline, draws its cards without a frame and ends with `↓ N more`; its own close row is gone (the engine's mark closes it). The agent you look at expands its task and puts it first.
 - The band names this session's tasks in progress (`T001 impl · T002 rev r2`), fits its width as waypoint's does and draws its bar and boxes only from 140 columns; its buttons have letters (`p`, `x`).
-- A long row of boxes keeps two rows, the rest summed up (`+42 ■ · 12 □`); the execution card counts what is integrated, as the band does.
-- lens draws its band when waypoint's is closed with × or a notice of it was dismissed, and a forge task of this session keeps it reading with no subagent nor todo.
+- A long row of boxes keeps two rows of boxes, the rest summed up on the row below (`+42 ■ · 12 □`); the execution card counts what is integrated, as the band does. A snapshot is laid out at the transcript's width, narrower beside a docked pane.
+- lens draws its band when waypoint's is closed with × or a notice of it was dismissed, and a forge task of this session keeps it reading with no subagent nor todo while it moved in the last 30 minutes. lens's × closes its band for what it shows, and an `x` within 5 seconds of waypoint's band going does not close it.
 - The glyphs are one cell wide: ▲, ✎, ◷ and ►.
 
 ### 0.12.0 — 2026-10-17

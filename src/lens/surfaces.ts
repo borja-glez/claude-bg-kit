@@ -40,6 +40,15 @@ export function ownActive(m: PanelModel | null | undefined, role: Role): boolean
   return !!m && (ownInProgress(m).length > 0 || (role === 'owner' && m.execution?.active === true));
 }
 
+/**
+ * Final review m-3: whether this session's own work keeps lens reading with the pane closed: a task in progress that
+ * moved within LEFT_OPEN_MS (not idle), or that has a job or an agent at work, or a run it owns still active. A task left
+ * in progress longer still shows, but keeps nothing reading every 30 s.
+ */
+export function ownBusy(m: PanelModel | null | undefined, role: Role): boolean {
+  return !!m && (ownInProgress(m).some(a => !a.idle || a.job !== null || a.agents.length > 0) || (role === 'owner' && m.execution?.active === true));
+}
+
 /** The status line, «lens · T002 revisar r2 · 3 subagentes · 1,20 $», fitted to 100 columns; null without work of its own. */
 export function statusText(m: PanelModel | null | undefined, t: SurfaceTexts, role: Role): string | null {
   if (!m || !ownActive(m, role)) return null;
