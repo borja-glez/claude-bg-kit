@@ -7,7 +7,7 @@ const START = /^[-.]+/;
 const END = /[-.]+$/;
 
 export function sessionIdFrom(name: string): string {
-  const mapped = name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(BAD, '-');
+  const mapped = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(BAD, '-');
   const s = mapped.replace(START, '').slice(0, 40).replace(END, '');
   return s || 'main';
 }
