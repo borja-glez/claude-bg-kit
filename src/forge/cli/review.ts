@@ -18,6 +18,7 @@ import { renderThreatModel } from '../threat-model.js';
 import { collectTwins, shadowCommand } from './shadow.js';
 import { restoringRegenerated } from './swarm.js';
 import { mainCheckout } from '../local.js';
+import { loadTrustedConfig } from '../trust.js';
 import { eventsSince, executionHolding } from '../execution.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { noSlot, type Slot } from '../jobs.js';
@@ -201,7 +202,8 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   let baseline: unknown;
   try { baseline = JSON.parse(readFileSync(path.resolve(deps.cwd, baselineArg), 'utf8')); } catch { throw new UsageError('review-prep: --baseline must be the JSON written by forge validate'); }
 
-  const config = loadConfig(deps.repoDir);
+  // I-03: its validators run the config's commands: without the person's trust it exits 2 here, before it writes anything.
+  const config = loadTrustedConfig(deps.repoDir);
   // D-08: only this task's events of its project (ids repeat between plans): --project, else the folder --dir names,
   // else the ledger's attribution.
   const all = readEvents(deps.cwd);
@@ -849,7 +851,8 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   // (C-T5): it then writes no threat model; a baseline run still refuses it (exit 2).
   const noBaseline = args.includes('--no-baseline');
   let config: ForgeConfig | null = null;
-  try { config = loadConfig(deps.repoDir); } catch (e) { if (!noBaseline || !(e instanceof ConfigError)) throw e; }
+  // I-03: an untrusted config is never forgiven (UntrustedCommandsError is no ConfigError): the brief's validate runs it.
+  try { config = loadTrustedConfig(deps.repoDir); } catch (e) { if (!noBaseline || !(e instanceof ConfigError)) throw e; }
   // K4-02: the threat model the brief and the security reviewer read, written from the config (null without one).
   // D-08: without --dir, the task's work folder: its project's, or the older one the ledger still gives it.
   if (flag('dir') === undefined && !isSafeId(id)) throw new UsageError(`prep: --task ${task.slice(0, 80)}: no work folder can be named after its id (letters, digits, _ - . only); pass --dir`);

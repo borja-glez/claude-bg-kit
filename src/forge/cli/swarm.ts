@@ -31,6 +31,7 @@ import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, typ
 import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, proposeSay, VENV_HINT } from '../swarm.js';
 // auth's isForgeBranch (any forge/… branch: merging into it needs no answer) is not cleanup's (task/* and forge/run-*).
 import { checkMergeAuth, checkMofAuth, isForgeBranch as isForgeTarget, mergeAsk, pendingAuth, readAuths, useAuth, writeAuth, type AuthRecord, type MofReason } from '../auth.js';
+import { loadTrustedConfig, noteOnce, trustIn, trustOutput, untrustedFor } from '../trust.js';
 import { PRIOR_MAX, type PriorCommit } from '../brief.js';
 import { attribute, isTask, pickWorkDir, readWorkDir, workDir, workRel } from '../task-ref.js';
 import { forgeBranches, forgeWorktrees, isForgeBranch, pruneRunState, pruneWork } from '../cleanup.js';
@@ -80,7 +81,8 @@ function setupResult(cmd: string, r: ExecResult, timeoutSec: number): NonNullabl
 
 /** Runs the setup in a worktree just created; a failure is reported, never thrown. */
 export function runSetup(deps: SwarmDeps, dir: string, root: string): SetupResult {
-  const config = loadConfig(root);
+  // I-03: swarm.setup runs only with the person's trust (it throws without it); denied: the lockfile's install.
+  const config = loadTrustedConfig(root);
   // Lockfiles are read in the new worktree itself, never in the caller's. A .venv is untracked, so a fresh worktree
   // never has one: that hint looks at the main checkout.
   const wt = deps.at(dir).repo;
@@ -266,6 +268,7 @@ function loadTasksArg(io: Io, file: string | undefined, sub: string): LooseTask[
  * project's run left it otherwise, and it is refused before anything is created.
  */
 function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch: string, project: string | null): { worktree: string; branch: string; base: string | null; setup: SetupResult; resumed: boolean; prior: PriorCommit[]; priorTotal?: number } {
+  loadTrustedConfig(main); // I-03: before any worktree exists, so a retry after the answer still sets it up
   const dir = taskWorktree(main, task);
   const branch = taskBranch(task);
   const g = (args: string[]) => deps.git(['-C', main, ...args]);
@@ -465,6 +468,7 @@ function recoverMerge(at: GitDeps, o: MergeOpts): MergeOutcome | { recovered: { 
  * person's checkout those the config's `generated` names: `restored`.
  */
 function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
+  loadTrustedConfig(o.configRoot); // I-03: before any merge or install moves anything
   // D-07: a merge forge left half-done here, whose process died, is aborted first; anyone else's stops the attempt.
   const recovery = recoverMerge(at, o);
   if (recovery && 'result' in recovery) return recovery;
@@ -640,7 +644,7 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   }
   // What the target detects before the merge: the validators detected only after it are new.
   let detected0: Validator[] | null = null;
-  try { detected0 = detectValidators(at.repo, loadConfig(o.configRoot)); } catch { detected0 = null; }
+  try { detected0 = detectValidators(at.repo, loadTrustedConfig(o.configRoot)); } catch { detected0 = null; }
   // D-07: a stamp that finds merging.json no longer this attempt's (another took it, past its staleAt) stops it.
   const takenOver = (): MergeOutcome => ({ result: 'dirty', detail: 'another integration took over .forge/execution/merging.json', ...withSetup() });
   // What the target's tip already fails is not caused by this merge: validators red there are "preexisting". The tip is
@@ -703,7 +707,8 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   let results: ValidatorResult[];
   let detected: Validator[];
   try {
-    detected = detectValidators(v.repo, loadConfig(o.configRoot));
+    // I-03: the config as the merge left it: commands it brings without the person's trust roll the merge back unrun.
+    detected = detectValidators(v.repo, loadTrustedConfig(o.configRoot));
     // The run worktree as the target (not the person's) or as the final merge's place to validate (inRun).
     const chosen = selectValidators(detected, selection);
     // D-07: in the middle of its own merge the attempt goes on even if the stamp fails (it can only fail past the bound).
@@ -857,7 +862,8 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
     // An ephemeral run integrates into the user's own branch: never into whatever the user switched to since.
     throw new UsageError(`swarm integrate: the main checkout is on ${head ?? '?'}, not ${e.branch} (the branch this ephemeral run started from); switch back to ${e.branch} to integrate ${task}`);
   }
-  const config = loadConfig(io.cwd);
+  // I-03: swarm.setup and the validators run only with the person's trust (exit 2 without it, before any merge).
+  const config = loadTrustedConfig(io.cwd);
   const personal = e.kind !== 'plan';
   // --no-cache: neither read nor write the tree cache (a red result it holds may have been flaky).
   const cache = config.validate.cache && !rest.includes('--no-cache');
@@ -994,7 +1000,8 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   }
   const branch = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
   if (branch !== e.base) return out({ result: 'main-dirty', detail: `the main checkout is on ${branch ?? '?'}, not ${e.base}` });
-  const config = loadConfig(io.cwd);
+  // I-03: before any permission is spent: without the person's trust in the commands, exit 2 with nothing merged.
+  const config = loadTrustedConfig(io.cwd);
   const opts: MergeOpts = {
     message: `forge: merge ${e.branch}`, scope: 'final', timeoutSec: config.validatorTimeoutSec, configRoot: io.cwd,
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'main', setup: config.swarm.setup,
@@ -1228,6 +1235,13 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       if (has('autonomy') && flag('autonomy') !== 'auto' && flag('autonomy') !== 'ask') throw new UsageError('swarm start: --autonomy must be auto or ask');
       const auto = flag('autonomy') === 'auto' ? { autonomy: 'auto' as const } : {};
       const locale = personLocaleArg(rest);
+      // I-03: a run runs the config's commands (swarm.setup, the validators). Without the person's trust for them nothing
+      // moves: exit 3 with `trust`, whose question the coordinator asks before it starts again.
+      const trust = trustIn(io.cwd, config);
+      if (trust.state === 'ask' || trust.state === 'changed') {
+        const out = { started: false, trust: trustOutput(trust, spanish(locale, io.cwd, project), io.cwd, noteOnce(io.cwd, trust.hash!)) };
+        return { code: 3, stdout: `${JSON.stringify(out, null, 2)}\n`, stderr: '' };
+      }
       const base = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
       if (!base || base === 'HEAD') throw new UsageError('swarm start: the main checkout must be on a branch');
       const prev = readExecution(io.cwd);
@@ -1512,6 +1526,19 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
     case 'tick': {
       const e = current();
       if (!e.active) throw new UsageError('swarm tick: the execution is not active');
+      // I-03: without the person's trust for the commands of a config this run would use (the main checkout's, the run
+      // worktree's, those of the task worktrees not integrated yet), nothing of it runs: the run stalls here, and the
+      // first stall over those commands says so (`note`: leave one question note).
+      const untrusted = untrustedFor([io.cwd, ...(e.kind === 'plan' ? [runWorktree(io.cwd)] : []),
+        ...Object.values(e.tasks).filter(t => t.status !== 'integrated' && t.worktree).map(t => t.worktree)]);
+      if (untrusted) {
+        const note = noteOnce(io.cwd, untrusted.trust.hash!);
+        // Only the run this tick read, still active: one stopped or closed meanwhile stays as it is (K2-02).
+        update(cur => (cur?.active && cur.runId === e.runId ? { ...cur, active: false, stopReason: 'stalled', stallReason: 'untrusted-commands', lastStepAt: iso } : null));
+        const trust = trustOutput(untrusted.trust, spanish(e.locale ?? null, io.cwd, e.project), untrusted.dir);
+        // `running` as any tick counts it: agents already at work go on; the run starts and integrates nothing more.
+        return json({ actions: [{ type: 'stalled', reason: 'untrusted-commands', note, trust }], running: Object.values(e.tasks).filter(t => t.status === 'running').length, parallel: e.parallel });
+      }
       // An ephemeral run schedules from its own loose.json and execution: no plan, no roadmap.
       const input = e.kind === 'ephemeral'
         ? (() => {

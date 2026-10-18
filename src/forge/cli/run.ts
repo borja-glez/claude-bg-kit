@@ -44,6 +44,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
 import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJECT_ID, type SurfacePermission } from '../local.js';
+import { commandsAnswer, commandsHash, configCommands, loadTrusted, localTracked, noteOnce, recordTrust, trustIn, trustOutput, UntrustedCommandsError } from '../trust.js';
 import { memberForHook, allMembersOf, memberFile } from '../members.js';
 import { hookLive } from '../live.js';
 import { hookRoute } from '../route-hooks.js';
@@ -658,6 +659,8 @@ interface TriageCore {
   task: string | undefined; project: string | null; result: TriageResult; names: string[]; fresh: string[];
   diff: { base: string; stat: { files: string[]; lines: number }; path: PathName } | null;
   auto: { autonomy?: 'auto' }; review: Record<string, unknown>; output: Record<string, unknown>;
+  /** The language of the announcement: --locale, else the plan's. */
+  locale: AnnounceLocale;
 }
 
 /**
@@ -802,6 +805,7 @@ function triageCore(io: Io, args: string[]): TriageCore {
   return {
     task: flag('task'), project, result, names, fresh, diff, auto, review,
     output: { ...result, catalog, new: fresh, implementer, announce: line, gate, ...auto, ...reviewed, review },
+    locale: locale as AnnounceLocale,
   };
 }
 
@@ -1023,10 +1027,17 @@ function runCommand(argv: string[], io: Io): Result {
         const untracked = (git(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore']) ?? '').trim() ? { untracked: ['.forge/.gitignore'] } : {};
         // D-08: the task's work folder, by project for a plan task (.forge/work/<project>/<id>).
         const work = t.task && isSafeId(t.task) ? { work: workRel({ project: t.project, task: t.task }) } : {};
-        return json({ ...t.output, ...work, ...untracked });
+        // I-03: the commands of the config (of the code checked, --cwd) need the person's trust before forge runs them:
+        // `trust`, with its question in the announcement's language and `note` the first time this hash is asked.
+        const trust = trustIn(repoDir, loadConfig(repoDir));
+        const asked = trust.state === 'ask' || trust.state === 'changed'
+          ? { trust: trustOutput(trust, t.locale === 'es', repoDir, noteOnce(io.cwd, trust.hash!)) } : {};
+        return json({ ...t.output, ...work, ...untracked, ...asked });
       }
       case 'validate': {
-        const config = loadConfig(repoDir);
+        // I-03: the config's commands run only with the person's trust (exit 2 without it); denied: only the detected ones.
+        const { config, state: trustState } = loadTrusted(repoDir);
+        const denied = trustState === 'denied';
         const all = detectValidators(repoReader(repoDir), config);
         const p = flag('path');
         if (p !== undefined && !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`validate: --path must be one of ${PATH_ORDER.join('|')}`);
@@ -1096,6 +1107,7 @@ function runCommand(argv: string[], io: Io): Result {
         const out = json(results, allOk ? 0 : 1);
         if (!list.length) out.stderr = all.length ? 'no validators cover the affected paths\n' : 'no validators detected: add tests or list validators in .forge/config.yaml\n';
         out.stderr += plan.notes.map(n => `${n}\n`).join('');
+        if (denied) out.stderr += 'configCommands: denied — only the validators forge detects ran\n';
         if (restored.length) out.stderr += `restored ${restored.length} tracked file(s) the validators regenerated: ${restored.join(', ')}\n`;
         return out;
       }
@@ -1622,6 +1634,26 @@ function runCommand(argv: string[], io: Io): Result {
       }
       case 'local': {
         const [sub, key, value] = args;
+        // I-03: the answer forge counts (none from a local.yaml that git tracks: localTracked).
+        if (sub === 'get' && key === 'commands') return json(commandsAnswer(io.cwd).commands ?? null);
+        if (sub === 'set' && key === 'commands') {
+          // I-03: the person's answer about the commands of .forge/config.yaml (of the code checked, --cwd). allowed needs
+          // --expect, the hash the question showed, so commands changed since then are never allowed.
+          if (value !== 'allowed' && value !== 'denied' && value !== 'none') throw new UsageError('local set commands: the value must be allowed|denied|none');
+          if (localTracked(io.cwd)) throw new UsageError('local set commands: git tracks .forge/local.yaml, so forge takes no answer from it (it came with the repository): untrack it with git rm --cached .forge/local.yaml and answer again');
+          if (value === 'none') {
+            updateLocal(io.cwd, s => { const next = { ...s }; delete next.commands; return next; });
+            return ok('ok');
+          }
+          const list = configCommands(loadConfig(repoDir));
+          if (!list.length) throw new UsageError('local set commands: .forge/config.yaml defines no commands');
+          const hash = commandsHash(list);
+          const expected = flag('expect');
+          if (value === 'allowed' && expected === undefined) throw new UsageError('local set commands allowed: --expect <hash> is required (the hash FORGE triage printed)');
+          if (expected !== undefined && expected !== hash) throw new UsageError('local set commands: the commands of .forge/config.yaml changed since forge showed them: run FORGE triage again');
+          updateLocal(io.cwd, s => ({ ...s, commands: recordTrust(s.commands, value, list, hash, ts()) }));
+          return ok('ok');
+        }
         if (sub === 'get') {
           const s = readLocal(io.cwd);
           if (key === undefined) return json(s);
@@ -1666,7 +1698,7 @@ function runCommand(argv: string[], io: Io): Result {
           });
           return ok('ok');
         }
-        throw new UsageError('usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed [--expect <hash>]|denied|none | set workflow <w>|none | set autonomy ask|auto|none');
+        throw new UsageError('usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed [--expect <hash>]|denied|none | get commands | set commands allowed --expect <hash>|denied|none | set workflow <w>|none | set autonomy ask|auto|none');
       }
       case 'prefs': {
         const wf = flag('workflow');
@@ -2166,6 +2198,7 @@ function runCommand(argv: string[], io: Io): Result {
         return { code: 2, stdout: '', stderr: `${USAGE}\n` };
     }
   } catch (e) {
+    if (e instanceof UntrustedCommandsError) return { code: 2, stdout: '', stderr: `${e.message}\n` };
     if (e instanceof UsageError || e instanceof ConfigError) return { code: 2, stdout: '', stderr: `${e.message}\n` };
     return { code: 1, stdout: '', stderr: `forge: ${(e as Error).message}\n` };
   }
