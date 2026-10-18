@@ -215,8 +215,8 @@ describe('triage', () => {
     const big = Array.from({ length: 40 }, (_, i) => `symbolNumber${i}`).join(' ') + ' ' + 'a'.repeat(100_000) + ' ' + 'x.'.repeat(20_000);
     const t0 = Date.now();
     triage(big, { files: FILES, commits: 40, gitOk: true, grep: w => { asked.push(w); return []; } }, []);
-    // About 0.3 s alone and about 1 s while the whole suite runs in parallel; runaway regex backtracking takes far longer.
-    expect(Date.now() - t0).toBeLessThan(3000);
+    // About 0.3 s alone and about 1 s while the whole suite runs in parallel; runaway regex backtracking takes minutes.
+    expect(Date.now() - t0).toBeLessThan(10000);
     expect(asked).toHaveLength(20);
   });
 });

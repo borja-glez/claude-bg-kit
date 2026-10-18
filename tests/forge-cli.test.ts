@@ -964,15 +964,17 @@ describe('defaultExec', () => {
   });
   it('times out a hanging command, returns promptly and kills its whole process tree', async () => {
     const marker = path.join(root, 'marker');
-    writeFileSync(path.join(root, 'grandchild.js'), `setTimeout(() => require('fs').writeFileSync(${JSON.stringify(marker)}, 'alive'), 3000);\n`);
-    writeFileSync(path.join(root, 'child.js'), `require('child_process').spawn(process.execPath, [${JSON.stringify(path.join(root, 'grandchild.js'))}], { stdio: 'ignore' });\nsetTimeout(() => {}, 10000);\n`);
+    // I-16: the grandchild writes at 8 s; the command is cut at 1 s and must be back within 6 s; the check waits
+    // 8.5 s more. Seconds of margin on each side, also on a loaded machine.
+    writeFileSync(path.join(root, 'grandchild.js'), `setTimeout(() => require('fs').writeFileSync(${JSON.stringify(marker)}, 'alive'), 8000);\n`);
+    writeFileSync(path.join(root, 'child.js'), `require('child_process').spawn(process.execPath, [${JSON.stringify(path.join(root, 'grandchild.js'))}], { stdio: 'ignore' });\nsetTimeout(() => {}, 20000);\n`);
     const t0 = Date.now();
     const r = defaultExec(root)('node child.js', 1);
     expect(r.timedOut).toBe(true);
-    expect(Date.now() - t0).toBeLessThan(4000);
-    await new Promise(res => setTimeout(res, 3500));
+    expect(Date.now() - t0).toBeLessThan(6000);
+    await new Promise(res => setTimeout(res, 8500));
     expect(existsSync(marker)).toBe(false);
-  }, 15000);
+  }, 25000);
   it('a command that starts with a dash goes to the shell, not to node', () => {
     const r = defaultExec(root)('--help', 30);
     expect(r.code).not.toBe(0);

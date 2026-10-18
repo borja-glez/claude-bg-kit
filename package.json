@@ -5,6 +5,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "test": "vitest run",
+    "test:unit": "vitest run --project unit",
     "typecheck": "tsc --noEmit",
     "typecheck:mod": "tsc -p tsconfig.mod.json",
     "pretypecheck:mod": "node scripts/mod-types.mjs check",
