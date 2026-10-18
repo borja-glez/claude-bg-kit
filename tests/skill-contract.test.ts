@@ -33,22 +33,22 @@ const INDIRECT: Record<Cli, [flag: string, site: string][]> = {
   ],
 };
 // Each command that dispatches on a subcommand, and where the code does it: its file and the two markers around the
-// dispatcher (in run.ts, its entry of COMMANDS and the next one), whose `case 'x':` labels and `sub === 'x'` or
-// `args[0] !== 'x'` tests are the subcommands. forge swarm's are the names of its SUBCOMMANDS (I-12). No waypoint
-// command takes one (its `hook` is cited by no skill).
+// dispatcher (in its module of src/forge/cli/commands/, from its `export const command` to the end of the file: its
+// helpers sit above it), whose `case 'x':` labels and `sub === 'x'` or `args[0] !== 'x'` tests are the subcommands.
+// forge swarm's are the names of its SUBCOMMANDS (I-12). No waypoint command takes one (its `hook` is cited by no skill).
 const DISPATCH: Record<Cli, Record<string, [file: string, from: string, to: string]>> = {
   forge: {
-    authorize: ['src/forge/cli/run.ts', 'authorize: (args, ctx) => {', 'swarm: (args, ctx) =>'],
-    proposals: ['src/forge/cli/run.ts', 'proposals: (args, ctx) => {', 'surfaces: (args, ctx) => {'],
-    surfaces: ['src/forge/cli/run.ts', 'surfaces: (args, ctx) => {', 'setup: (args, ctx) => {'],
-    local: ['src/forge/cli/run.ts', 'local: (args, ctx) => {', 'prefs: (args, ctx) => {'],
+    authorize: ['src/forge/cli/commands/authorize.ts', 'export const command', ''],
+    proposals: ['src/forge/cli/commands/proposals.ts', 'export const command', ''],
+    surfaces: ['src/forge/cli/commands/surfaces.ts', 'export const command', ''],
+    local: ['src/forge/cli/commands/local.ts', 'export const command', ''],
     shadow: ['src/forge/cli/shadow.ts', 'switch (sub) {', 'default:'],
-    tree: ['src/forge/cli/run.ts', 'tree: (args, ctx) => {', 'config: (args, ctx) => {'],
-    config: ['src/forge/cli/run.ts', 'config: (args, ctx) => {', 'infinite: (args, ctx) => {'],
-    infinite: ['src/forge/cli/run.ts', 'infinite: (args, ctx) => {', 'cycle: (args, ctx) => {'],
-    route: ['src/forge/cli/run.ts', 'route: (args, ctx) => {', 'tdd: (args, ctx) => {'],
-    'sp-plan': ['src/forge/cli/run.ts', "'sp-plan': (args, ctx) => {", 'agents: (args, ctx) => {'],
-    decision: ['src/forge/cli/run.ts', 'decision: (args, ctx) => {', 'stats: (args, ctx) => {'],
+    tree: ['src/forge/cli/commands/tree.ts', 'export const command', ''],
+    config: ['src/forge/cli/commands/config.ts', 'export const command', ''],
+    infinite: ['src/forge/cli/commands/infinite.ts', 'export const command', ''],
+    route: ['src/forge/cli/commands/route.ts', 'export const command', ''],
+    'sp-plan': ['src/forge/cli/commands/sp-plan.ts', 'export const command', ''],
+    decision: ['src/forge/cli/commands/decision.ts', 'export const command', ''],
   },
   waypoint: {},
 };
@@ -56,14 +56,14 @@ const DISPATCH: Record<Cli, Record<string, [file: string, from: string, to: stri
 // Each command whose subcommands take a key (`local get|set <key>`), and the dispatcher it is read in: its `key === 'x'`
 // tests are the keys, and a `/^x\.(.+)$/` pattern a key with a name after it (surfaces.<name>).
 const KEYED: Record<Cli, Record<string, [file: string, from: string, to: string]>> = {
-  forge: { local: ['src/forge/cli/run.ts', 'local: (args, ctx) => {', 'prefs: (args, ctx) => {'] },
+  forge: { local: ['src/forge/cli/commands/local.ts', 'export const command', ''] },
   waypoint: {},
 };
 
-/** The text of a dispatcher between its two markers; empty when a marker is gone. */
+/** The text of a dispatcher between its two markers (an empty `to` is the end of the file); empty when a marker is gone. */
 function between(text: string, from: string, to: string): string {
   const at = text.indexOf(from);
-  const end = at < 0 ? -1 : text.indexOf(to, at + from.length);
+  const end = at < 0 ? -1 : to === '' ? text.length : text.indexOf(to, at + from.length);
   return end < 0 ? '' : text.slice(at + from.length, end);
 }
 
