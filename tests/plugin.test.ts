@@ -4,6 +4,9 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ENTRY_KINDS } from '../src/lib/history.js';
+import { renderDecisionsMd } from '../src/forge/decisions.js';
+import { endedReason } from '../src/forge/hook.js';
+import { isPerfTask } from '../src/forge/triage.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { walk } from './helpers/files.js';
 const tmp = useTempDirs();
@@ -300,7 +303,9 @@ describe('plugin layout', () => {
     const md = read('plugins/forge/skills/review/SKILL.md');
     const step4 = md.slice(md.indexOf('4. **Diff and zones.**'), md.indexOf('5. **Brief.**'));
     const step6 = md.slice(md.indexOf('6. **Review.**'), md.indexOf('7. **Report.**'));
-    for (const w of ['`review`', 'FORGE triage --task <id> --text-file .forge/work/<id>/task.txt --base <base>']) expect(step4).toContain(w);
+    for (const w of ['`review`', '`review-perf`', 'FORGE triage --task <id> --text-file .forge/work/<id>/task.txt --base <base>']) expect(step4).toContain(w);
+    // The line step 4 writes into task.txt when the user asks about performance: triage's perf rule must read it as such.
+    expect([...step4.matchAll(/«([^»]+)»/g)].map(m => m[1]).some(isPerfTask), 'a «…» line of step 4 is a perf task for FORGE triage').toBe(true);
     for (const w of ["step-4 triage's `review.reviewers`", "the Agent tool's `effort`", "the Agent tool's `model` when the reviewer's is not null",
       'each as subagent type `forge:<agent>`']) expect(step6).toContain(w);
     expect(step6).not.toContain('agents from `FORGE agents`');
@@ -469,6 +474,9 @@ describe('plugin layout', () => {
     const md = read('plugins/forge/skills/infinite/SKILL.md');
     expect(md).toMatch(/^---\r?\nname: infinite\r?\n/);
     for (const w of ['FORGE infinite start', 'meta/infinite', 'proposals to-task', 'proposals policy', 'forge-scout', 'FORGE cycle', '.forge/stop', 'Never merge into `main` or push', 'forge/infinite-', 'stopReason', 'if_version: PV', 'seen.json', 'never sent through `proposals policy`', 'event-id <SID>', 'MAIN_REPO', 'git merge-base --is-ancestor forge/infinite-', 'blocked-large', 'type: "question"', '--revises', 'no-cycle']) expect(md).toContain(w);
+    // The Stop hook's block that ends a run (src/forge/hook.ts), which the skill tells the session to recognise.
+    const ended = endedReason('<reason>');
+    expect(md).toContain(`\`${ended.slice(0, ended.indexOf(':'))}\``);
     const stop = read('plugins/forge/skills/stop/SKILL.md');
     expect(stop).toMatch(/^---\r?\nname: stop\r?\n/);
     expect(stop).toContain('FORGE stop');
@@ -650,6 +658,10 @@ describe('plugin layout', () => {
   it('run and infinite record decisions with decision add, and every report lists them', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
     for (const s of ['## Decisions', 'FORGE decision add --data-file <f>', 'FORGE decision list --auto', 'references/decisions.md']) expect(run).toContain(s);
+    // The closing section is named as FORGE decision md titles its Spanish file (src/forge/decisions.ts).
+    const title = /^# (.+) · s$/m.exec(renderDecisionsMd([], 's', 'es'))?.[1];
+    expect(title).toBeDefined();
+    expect(run).toContain(`«${title}»`);
     const dec = runRef('decisions');
     for (const s of ['FORGE decision add --data-file <f>', 'FORGE decision md --scope <scope>', 'FORGE decision list --auto --task <id>',
       '«Decisiones automáticas»', '"type": "git-revert"', '"type": "none"', '"resolves"', '`publish`']) expect(dec).toContain(s);
@@ -886,6 +898,10 @@ describe('plugin layout', () => {
         expect(md).toContain(f.endsWith('es.md') ? s.replace(/<task>/g, '<tarea>') : s);
       }
     }
+    // forge:infinite matches the words of FORGE swarm start's error on a run branch that conflicts with its base.
+    const diverged = /swarm start: \$\{branch\} ([a-z ]+) \$\{base\}/.exec(read('src/forge/cli/swarm.ts'))?.[1];
+    expect(diverged).toBeDefined();
+    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain(`"${diverged}"`);
   });
   it('READMEs describe the model by size, ephemeral executions and the member conflict fix round', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
@@ -1266,15 +1282,18 @@ describe('plugin layout', () => {
     const bindAt = ex.indexOf('bind <plan> --via forge-run --claude <CSID>');
     expect(bindAt).toBeGreaterThan(-1);
     expect(bindAt).toBeLessThan(ex.indexOf('FORGE swarm start --project <project> --session <SID>'));
-    // Exit 4 prints no sid: both rebind with --resume, so the run never goes on unbound.
+    // Exit 4 prints no sid: both rebind with --resume, so the run never goes on unbound. The code is the one waypoint bind
+    // returns when an ended conversation left a task on the seat (src/cli/run.ts).
+    const heldTask = /return out\((\d+), \{ previous: prevOf\(cur\), options: \['resume', 'release'\] \}\)/.exec(read('src/cli/run.ts'))?.[1];
+    expect(heldTask).toBeDefined();
     const exBind = ex.slice(bindAt, ex.indexOf('FORGE swarm start --project <project>'));
-    for (const w of ['--second-seat', '--takeover', 'AskUserQuestion', '--resume']) expect(exBind, w).toContain(w);
+    for (const w of ['--second-seat', '--takeover', 'AskUserQuestion', `Exit ${heldTask}`, '--resume']) expect(exBind, w).toContain(w);
     const inf = read('plugins/forge/skills/infinite/SKILL.md');
     const infBind = inf.indexOf('bind <plan> --via forge-infinite --claude <CSID>');
     expect(infBind).toBeGreaterThan(-1);
     expect(infBind).toBeLessThan(inf.indexOf('FORGE infinite start --cycles'));
     const infText = inf.slice(infBind, inf.indexOf('FORGE infinite start --cycles'));
-    for (const w of ['--second-seat', '--resume']) expect(infText, w).toContain(w);
+    for (const w of ['--second-seat', `Exit ${heldTask}`, '--resume']) expect(infText, w).toContain(w);
   });
   it('READMEs describe wave 2a: seats and bindings, the roles, the new commands and SessionEnd', () => {
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
