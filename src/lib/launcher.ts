@@ -3,6 +3,8 @@ export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type Effort = (typeof EFFORTS)[number];
 export const MODELS = ['opus', 'sonnet', 'haiku'] as const;
 export type Model = (typeof MODELS)[number];
+/** A-19: the characters a plan path may have in a composed launch command: no quote, $, backtick, ; or !. */
+export const PLAN_PATH = /^[\w./\\:~@+ -]+$/;
 export interface LaunchSpec { name: string; prompt: string; worktree: string; effort?: Effort; model?: Model }
 const quote = (s: string) => `'${s.split("'").join(`'\\''`)}'`;
 

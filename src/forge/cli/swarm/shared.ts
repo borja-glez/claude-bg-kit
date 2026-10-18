@@ -11,7 +11,7 @@ import type { Liveness } from '../../../lib/coordination.js';
 import { planLocale } from '../../../lib/locale.js';
 import { coordinatorLiveness } from '../../../lib/execution-view.js';
 import { coordinatorInputs } from '../../live.js';
-import { launchCommand, launchRun } from '../../../lib/launcher.js';
+import { launchCommand, launchRun, PLAN_PATH } from '../../../lib/launcher.js';
 import type { ExecutionState } from '../../../lib/execution-state.js';
 import { parsePlan, PlanError } from '../../../lib/plan.js';
 import { readDocs } from '../../../lib/read-docs.js';
@@ -110,9 +110,6 @@ export function addTaskWorktree(deps: SwarmDeps, main: string, task: string, run
   }
   return { worktree: dir, branch, base, setup, resumed: prior.length > 0, prior, ...(total > prior.length ? { priorTotal: total } : {}) };
 }
-
-/** A-19: the plan path a member's prompt carries inside double quotes of a shell command: no quote, $, backtick or ;. */
-const PLAN_PATH = /^[\w./\\:~@+ -]+$/;
 
 /** A-19: refuses, before anything is written, a --plan that cannot go into a member's launch. */
 export function checkPlanPath(sub: string, planPath: string | undefined): void {

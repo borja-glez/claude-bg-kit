@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { launchCommand, launchRun, EFFORTS, MODELS } from '../src/lib/launcher.js';
+import { launchCommand, launchRun, EFFORTS, MODELS, PLAN_PATH } from '../src/lib/launcher.js';
 
 describe('launchRun', () => {
   const x = { name: 'wp-shop-T1', prompt: '/forge:member --plan p.yaml --task T1 — run member of S1: work only T1, then stop', worktree: "/r/it's/task-T1" };
@@ -16,6 +16,10 @@ describe('launchRun', () => {
     expect([...MODELS]).toEqual(['opus', 'sonnet', 'haiku']);
   });
   it('herdr was removed: one launcher and no template (I-18)', async () => {
-    expect(Object.keys(await import('../src/lib/launcher.js')).sort()).toEqual(['EFFORTS', 'MODELS', 'launchCommand', 'launchRun']);
+    expect(Object.keys(await import('../src/lib/launcher.js')).sort()).toEqual(['EFFORTS', 'MODELS', 'PLAN_PATH', 'launchCommand', 'launchRun']);
+  });
+  it('PLAN_PATH, the one rule forge and waypoint share for a plan path in a launch: no quote, $, backtick or ; (A-19)', () => {
+    for (const ok of ['docs/waypoint/p/plan.yaml', 'C:\\w\\plan.yaml', 'my plans/plan.yaml']) expect(PLAN_PATH.test(ok), ok).toBe(true);
+    for (const bad of ['plan$(x).yaml', 'a;b.yaml', 'plan`x`.yaml', 'plan".yaml']) expect(PLAN_PATH.test(bad), bad).toBe(false);
   });
 });

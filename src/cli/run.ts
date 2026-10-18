@@ -22,7 +22,7 @@ import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
 import { isCommitCommand, runHook } from './hooks.js';
-import { launchRun } from '../lib/launcher.js';
+import { launchRun, PLAN_PATH } from '../lib/launcher.js';
 import { PAGE_RULES, declaresAssets, roadmapCapabilities, rulesOf, sharingChangeAsk, sharingChanged, sharingNotice, syncSummary } from '../lib/publish.js';
 import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
 import { TASK_STATUSES } from '../lib/types.js';
@@ -347,7 +347,7 @@ export function run(argv: string[], io: Io): Result {
         // A-19: forge composes the launch of its run members itself (swarm tick and swarm relaunch print it).
         if (args.includes('--task')) return fail('launch --task moved to forge swarm tick: forge composes the launch of its run members', 2);
         // The plan path goes into a shell command: only the safe set.
-        if (args[0] !== undefined && !/^[\w./\\:~@+ -]+$/.test(args[0])) return fail('launch: the plan path may only use letters, digits, spaces and _ . / \\ : ~ @ + -', 2);
+        if (args[0] !== undefined && !PLAN_PATH.test(args[0])) return fail('launch: the plan path may only use letters, digits, spaces and _ . / \\ : ~ @ + -', 2);
         const p = loadPlan();
         const track = args[1];
         if (!p.tracks.some(t => t.id === track)) return fail(`launch: unknown track ${track ?? ''}`);
