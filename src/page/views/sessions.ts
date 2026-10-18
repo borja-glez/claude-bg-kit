@@ -39,7 +39,8 @@ export function renderSessionsView(m: Model, d: Dict, dv: Derived): string {
     const folded = isEnded || !live.length;
     const state = rid === NO_RUN ? '' : rid === active ? d.sessions.running : isEnded ? d.sessions.ended : '';
     const title = `${rid === NO_RUN ? d.sessions.noRun : d.sessions.group(rid)}${state ? ` · ${state}` : ''} · ${d.sessions.count(list.length)}`;
-    const key = esc(rid || '_none');
+    // «Sin ejecución» takes a key a run id can never be (SAFE_ID has no «~»), so a run called «_none» keeps its own fold.
+    const key = esc(rid === NO_RUN ? '~none' : rid);
     const inner = folded || !idle.length
       ? cards(list)
       : `${cards(live)}<details class="sidle" data-k="si:${key}"><summary>${esc(d.liveSess.idle(idle.length))}</summary>${cards(idle)}</details>`;

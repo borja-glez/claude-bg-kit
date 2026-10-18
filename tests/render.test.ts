@@ -2043,11 +2043,25 @@ describe('the sessions view (G-04, G-10, H-23)', () => {
     };
     const html = renderApp(m, ui({ view: 'sessions' }));
     const groups = [...html.matchAll(/<details class="sgrp" data-k="sg:([^"]+)"( open)?>/g)].map(x => `${x[1]}${x[2] ?? ''}`);
-    expect(groups).toEqual(['r1 open', 'r0', '_none open']);
+    expect(groups).toEqual(['r1 open', 'r0', '~none open']);
     expect(html).toContain('Ejecución r1 · en marcha · 1 sesión');
     expect(html).toContain('Ejecución r0 · terminada · 1 sesión');
     expect(html).toContain('Sin ejecución · 2 sesiones');
-    expect(html).toMatch(/<details class="sidle" data-k="si:_none"><summary>\+1 inactiva<\/summary>/);
+    expect(html).toMatch(/<details class="sidle" data-k="si:~none"><summary>\+1 inactiva<\/summary>/);
+  });
+  it('a real run called «_none» and the sessions without a run are two groups with their own keys and folds', () => {
+    const m = base();
+    m.run = runDoc({ runId: '_none' });
+    m.sessions = {
+      main: { name: 'main', heartbeatAt: at(0), leaseUntil: at(5), status: 'active', role: 'coordinator', runId: '_none' },
+      ana: { name: 'ana', heartbeatAt: at(0), leaseUntil: at(5), status: 'active', role: 'manual' },
+      old: { name: 'old', heartbeatAt: '2026-10-01T10:00:00Z', status: 'idle' },
+    };
+    const html = renderApp(m, ui({ view: 'sessions' }));
+    const groups = [...html.matchAll(/<details class="sgrp" data-k="sg:([^"]+)"( open)?>/g)].map(x => `${x[1]}${x[2] ?? ''}`);
+    expect(groups).toEqual(['_none open', '~none open']);
+    const keys = [...html.matchAll(/data-k="((?:sg|si):[^"]+)"/g)].map(x => x[1]);
+    expect(new Set(keys).size).toBe(keys.length);
   });
   it('the coordinator of the active run lists its slots and the free ones, and the values of a card are aligned to the left (H-23)', () => {
     const m = base();
