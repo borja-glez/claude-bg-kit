@@ -7,7 +7,11 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -34,13 +38,13 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 var require_identity = __commonJS({
   "node_modules/yaml/dist/nodes/identity.js"(exports2) {
     "use strict";
-    var ALIAS = Symbol.for("yaml.alias");
-    var DOC = Symbol.for("yaml.document");
-    var MAP = Symbol.for("yaml.map");
-    var PAIR = Symbol.for("yaml.pair");
-    var SCALAR = Symbol.for("yaml.scalar");
-    var SEQ = Symbol.for("yaml.seq");
-    var NODE_TYPE = Symbol.for("yaml.node.type");
+    var ALIAS = /* @__PURE__ */ Symbol.for("yaml.alias");
+    var DOC = /* @__PURE__ */ Symbol.for("yaml.document");
+    var MAP = /* @__PURE__ */ Symbol.for("yaml.map");
+    var PAIR = /* @__PURE__ */ Symbol.for("yaml.pair");
+    var SCALAR = /* @__PURE__ */ Symbol.for("yaml.scalar");
+    var SEQ = /* @__PURE__ */ Symbol.for("yaml.seq");
+    var NODE_TYPE = /* @__PURE__ */ Symbol.for("yaml.node.type");
     var isAlias = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === ALIAS;
     var isDocument = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === DOC;
     var isMap = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
@@ -92,9 +96,9 @@ var require_visit = __commonJS({
   "node_modules/yaml/dist/visit.js"(exports2) {
     "use strict";
     var identity = require_identity();
-    var BREAK = Symbol("break visit");
-    var SKIP = Symbol("skip children");
-    var REMOVE = Symbol("remove node");
+    var BREAK = /* @__PURE__ */ Symbol("break visit");
+    var SKIP = /* @__PURE__ */ Symbol("skip children");
+    var REMOVE = /* @__PURE__ */ Symbol("remove node");
     function visit(node, visitor) {
       const visitor_ = initVisitor(visitor);
       if (identity.isDocument(node)) {
@@ -5557,9 +5561,9 @@ var require_cst_stringify = __commonJS({
 var require_cst_visit = __commonJS({
   "node_modules/yaml/dist/parse/cst-visit.js"(exports2) {
     "use strict";
-    var BREAK = Symbol("break visit");
-    var SKIP = Symbol("skip children");
-    var REMOVE = Symbol("remove item");
+    var BREAK = /* @__PURE__ */ Symbol("break visit");
+    var SKIP = /* @__PURE__ */ Symbol("skip children");
+    var REMOVE = /* @__PURE__ */ Symbol("remove item");
     function visit(cst, visitor) {
       if ("type" in cst && cst.type === "document")
         cst = { start: cst.start, value: cst.value };
@@ -11200,7 +11204,7 @@ ZodNaN.create = (params) => {
     ...processCreateParams(params)
   });
 };
-var BRAND = Symbol("zod_brand");
+var BRAND = /* @__PURE__ */ Symbol("zod_brand");
 var ZodBranded = class extends ZodType {
   _parse(input) {
     const { ctx } = this._processInputParams(input);
@@ -11402,14 +11406,14 @@ var ostring = () => stringType().optional();
 var onumber = () => numberType().optional();
 var oboolean = () => booleanType().optional();
 var coerce = {
-  string: (arg) => ZodString.create({ ...arg, coerce: true }),
-  number: (arg) => ZodNumber.create({ ...arg, coerce: true }),
-  boolean: (arg) => ZodBoolean.create({
+  string: ((arg) => ZodString.create({ ...arg, coerce: true })),
+  number: ((arg) => ZodNumber.create({ ...arg, coerce: true })),
+  boolean: ((arg) => ZodBoolean.create({
     ...arg,
     coerce: true
-  }),
-  bigint: (arg) => ZodBigInt.create({ ...arg, coerce: true }),
-  date: (arg) => ZodDate.create({ ...arg, coerce: true })
+  })),
+  bigint: ((arg) => ZodBigInt.create({ ...arg, coerce: true })),
+  date: ((arg) => ZodDate.create({ ...arg, coerce: true }))
 };
 var NEVER = INVALID;
 
@@ -11479,6 +11483,7 @@ var PlanError = class extends Error {
     this.issues = issues;
     this.name = "PlanError";
   }
+  issues;
 };
 function parsePlan(text) {
   let raw;
@@ -11545,7 +11550,7 @@ function findCycle(plan) {
 var import_node_crypto = require("node:crypto");
 
 // src/lib/waypoint-version.ts
-var WAYPOINT_VERSION = true ? "0.29.0" : "0.0.0";
+var WAYPOINT_VERSION = true ? "0.30.0" : "0.0.0";
 var VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})/;
 var partsOf = (v) => {
   const m = typeof v === "string" ? VERSION.exec(v) : null;
@@ -12161,6 +12166,7 @@ var DesignError = class extends Error {
     this.issues = issues;
     this.name = "DesignError";
   }
+  issues;
 };
 var FM = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?([\s\S]*)$/;
 var BOM = String.fromCharCode(65279);
@@ -12378,6 +12384,7 @@ var CritiqueError = class extends Error {
     this.issues = issues;
     this.name = "CritiqueError";
   }
+  issues;
 };
 function verdictOf(c) {
   return c.proposals.some((p) => p.severity !== "minor") ? "changes" : "ready";
@@ -15578,19 +15585,26 @@ var AUTONOMIES = ["ask", "auto"];
 var PERSON_DOCS = ["README.md", "README.*.md", "**/README.md", "**/README.*.md", "CHANGELOG.md", "**/CHANGELOG.md"];
 var ConfigError = class extends Error {
 };
+var lf = (s) => s.replace(/\r\n/g, "\n");
 var Schema = external_exports.object({
   profile: external_exports.enum(["balanced", "economy", "quality"]).default("balanced"),
   detect: external_exports.boolean().default(true),
   exclude: external_exports.array(external_exports.string().regex(NAME)).default([]),
   validators: external_exports.array(external_exports.object({
     name: external_exports.string().regex(NAME),
-    cmd: external_exports.string().min(1),
+    cmd: external_exports.string().min(1).transform(lf),
     kind: external_exports.string().regex(NAME).optional(),
     affects: external_exports.array(external_exports.string().min(1)).optional(),
     when: external_exports.enum(["always", "medium", "final"]).optional(),
     cache: external_exports.boolean().optional(),
-    affected_cmd: external_exports.string().min(1).max(500).refine((s) => /\{(files|tests|packages)\}/.test(s), { message: "must contain {files}, {tests} or {packages}" }).optional()
-  }).strict()).optional(),
+    affected_cmd: external_exports.string().min(1).max(500).refine((s) => /\{(files|tests|packages)\}/.test(s), { message: "must contain {files}, {tests} or {packages}" }).transform(lf).optional()
+  }).strict()).superRefine((list, ctx) => {
+    const seen = /* @__PURE__ */ new Set();
+    for (const [i, v] of list.entries()) {
+      if (seen.has(v.name)) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: [i, "name"], message: `duplicate name ${v.name}: each validator needs its own name` });
+      seen.add(v.name);
+    }
+  }).optional(),
   verify: external_exports.object({
     limits: external_exports.object({
       checks: external_exports.number().int().min(1).max(20).default(8),
@@ -15628,7 +15642,7 @@ var Schema = external_exports.object({
       effort: external_exports.enum(EFFORTS).default("medium"),
       model: external_exports.enum(MODELS).optional()
     }).strict().default({ effort: "medium" }),
-    setup: external_exports.string().min(1).max(500).optional(),
+    setup: external_exports.string().min(1).max(500).transform(lf).optional(),
     validateJobs: external_exports.number().int().min(1).max(8).default(2)
   }).strict().default({ parallel: 3, launcher: "bg", member: { effort: "medium" }, validateJobs: 2 })
 }).strict();
@@ -15669,7 +15683,8 @@ function run(argv, io) {
   const [cmd, ...args] = argv;
   const flag = (name) => {
     const i = args.indexOf(`--${name}`);
-    return i >= 0 ? args[i + 1] : void 0;
+    const v = i >= 0 ? args[i + 1] : void 0;
+    return v === void 0 || v.startsWith("--") ? void 0 : v;
   };
   const abs = (p) => import_node_path8.default.resolve(io.cwd, p);
   const ok = (stdout) => ({ code: 0, stdout: stdout.endsWith("\n") ? stdout : `${stdout}
@@ -16339,8 +16354,17 @@ warning: artifacts.design is not the design's artifact: set it to ${line(design.
       }
       case "design-snapshot": {
         const file = abs(args[0]);
-        const note = flag("note");
-        if (!note) return fail("design-snapshot: --note is required", 2);
+        if (args.includes("--note-file") && flag("note-file") === void 0) return fail("design-snapshot: --note-file needs a file", 2);
+        if (flag("note") !== void 0 && flag("note-file") !== void 0) return fail("design-snapshot: --note and --note-file are exclusive", 2);
+        let note = flag("note");
+        if (flag("note-file") !== void 0) {
+          try {
+            note = (0, import_node_fs7.readFileSync)(abs(flag("note-file")), "utf8").replace(/[\r\n]+$/, "");
+          } catch {
+            return fail(`design-snapshot: cannot read ${flag("note-file")}`, 2);
+          }
+        }
+        if (!note) return fail("design-snapshot: --note or --note-file is required", 2);
         const text = (0, import_node_fs7.readFileSync)(file, "utf8");
         const d = parseDesign(text);
         const base = import_node_path8.default.join(import_node_path8.default.dirname(file), "design");
