@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { normalizeMeta, normalizePhase, normalizeState, normalizeSession, normalizeEvent, normalizeMessage, normalizeInfinite, normalizeRun, normalizeForgeV1, normalizeMetrics, mergeMetrics } from '../src/page/normalize.js';
 
 describe('normalizeRun / execution fields', () => {
@@ -167,6 +167,20 @@ describe('normalizeSession / normalizeEvent', () => {
     expect(normalizeSession(null)).toMatchObject({ name: '', heartbeatAt: '' });
     expect(normalizeEvent({ ts: 1, type: null, sessionId: 2, text: 5 })).toMatchObject({ ts: '', type: '', sessionId: '', text: '5' });
     expect(normalizeEvent(undefined)).toMatchObject({ ts: '' });
+  });
+  it('keeps a runId only as a run id can be (SAFE_ID), and reports the one it drops, once (final review M1)', () => {
+    expect(normalizeSession({ name: 'a', runId: 'big-20261016T110000000Z' }).runId).toBe('big-20261016T110000000Z');
+    expect(normalizeSession({ name: 'a', runId: '_none' }).runId).toBe('_none');
+    for (const bad of ['~none', 'a:b', 'a b', '', '.', '..', 'x'.repeat(121), 5]) {
+      const report = vi.fn();
+      expect(normalizeSession({ name: 'a', runId: bad }, report).runId, String(bad)).toBeUndefined();
+      expect(report, String(bad)).toHaveBeenCalledTimes(1);
+      expect(report).toHaveBeenCalledWith('runId', 'dropped', expect.any(String));
+    }
+    const none = vi.fn();
+    expect(normalizeSession({ name: 'a' }, none).runId).toBeUndefined();
+    expect(normalizeSession({ name: 'a', runId: null }, none).runId).toBeUndefined();
+    expect(none).not.toHaveBeenCalled();
   });
 });
 

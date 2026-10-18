@@ -2052,25 +2052,39 @@ describe('the sessions view (G-04, G-10, H-23)', () => {
     };
     const html = renderApp(m, ui({ view: 'sessions' }));
     const groups = [...html.matchAll(/<details class="sgrp" data-k="sg:([^"]+)"( open)?>/g)].map(x => `${x[1]}${x[2] ?? ''}`);
-    expect(groups).toEqual(['r1 open', 'r0', '~none open']);
+    expect(groups).toEqual(['r:r1:open open', 'r:r0:folded', 'none:open open']);
     expect(html).toContain('Ejecución r1 · en marcha · 1 sesión');
     expect(html).toContain('Ejecución r0 · terminada · 1 sesión');
     expect(html).toContain('Sin ejecución · 2 sesiones');
-    expect(html).toMatch(/<details class="sidle" data-k="si:~none"><summary>\+1 inactiva<\/summary>/);
+    expect(html).toMatch(/<details class="sidle" data-k="si:none:folded"><summary>\+1 inactiva<\/summary>/);
   });
-  it('a real run called «_none» and the sessions without a run are two groups with their own keys and folds', () => {
+  it('a real run called «_none» or «~none» and the sessions without a run are groups with their own keys and folds (final review M1)', () => {
     const m = base();
     m.run = runDoc({ runId: '_none' });
     m.sessions = {
       main: { name: 'main', heartbeatAt: at(0), leaseUntil: at(5), status: 'active', role: 'coordinator', runId: '_none' },
+      // A model built without normalizeSession (which drops such a runId): its key still cannot be «Sin ejecución»'s.
+      tilde: { name: 'tilde', heartbeatAt: at(0), leaseUntil: at(5), status: 'active', role: 'executor', runId: '~none' },
       ana: { name: 'ana', heartbeatAt: at(0), leaseUntil: at(5), status: 'active', role: 'manual' },
       old: { name: 'old', heartbeatAt: '2026-10-01T10:00:00Z', status: 'idle' },
     };
     const html = renderApp(m, ui({ view: 'sessions' }));
     const groups = [...html.matchAll(/<details class="sgrp" data-k="sg:([^"]+)"( open)?>/g)].map(x => `${x[1]}${x[2] ?? ''}`);
-    expect(groups).toEqual(['_none open', '~none open']);
+    expect(groups).toEqual(['r:_none:open open', 'r:~none:open open', 'none:open open']);
     const keys = [...html.matchAll(/data-k="((?:sg|si):[^"]+)"/g)].map(x => x[1]);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+  it('a group’s default fold is in its key, and a fold the person chose wins over it (final review M2)', () => {
+    const m = base();
+    m.run = null;
+    m.sessions = { old: { name: 'old', heartbeatAt: '2026-10-01T10:00:00Z', status: 'idle' } };
+    const head = (html: string) => /<details class="sgrp" data-k="([^"]+)"( open)?>/.exec(html)!.slice(1, 3).join('');
+    expect(head(renderApp(m, ui({ view: 'sessions' })))).toBe('sg:none:folded');
+    m.sessions.ana = { name: 'ana', heartbeatAt: at(0), leaseUntil: at(5), status: 'active', role: 'manual' };
+    expect(head(renderApp(m, ui({ view: 'sessions' })))).toBe('sg:none:open open');
+    expect(head(renderApp(m, ui({ view: 'sessions', folds: new Map([['sg:none', false]]) })))).toBe('sg:none:open');
+    delete m.sessions.ana;
+    expect(head(renderApp(m, ui({ view: 'sessions', folds: new Map([['sg:none', true]]) })))).toBe('sg:none:folded open');
   });
   it('the coordinator of the active run lists its slots and the free ones, and the values of a card are aligned to the left (H-23)', () => {
     const m = base();

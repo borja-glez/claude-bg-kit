@@ -101,6 +101,9 @@ export interface UiState {
   planOpen?: Set<string>;
   /** G-07: the runs of the history the person opened (by runId). */
   runsOpen?: Set<string>;
+  /** Final review M2: the folds of Sesiones' groups the person chose (sg:r:<run>, sg:none, si:…), open or not; a group
+   *  without one folds as its data says. */
+  folds?: Map<string, boolean>;
   timelineGroup: GroupBy;
   draft: { type: NoteType; text: string };
   answering: string | null;

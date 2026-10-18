@@ -3006,3 +3006,63 @@ describe('the conversation (G-17, H-17)', () => {
     app.stop();
   });
 });
+
+describe('Sesiones folds a group as its data says, unless the person folded or opened it (final review M2)', () => {
+  const at = (min: number) => new Date(NOW + min * 60000).toISOString();
+  const live = (name: string) => ({ name, status: 'active', heartbeatAt: at(-1), leaseUntil: at(9) });
+  const stopped = (name: string) => ({ name, status: 'idle', heartbeatAt: at(-180), leaseUntil: at(-170) });
+  const group = (root: HTMLElement) => root.querySelector('details.sgrp') as HTMLDetailsElement;
+  /** What a click on its summary does: the browser flips the fold, then fires `toggle`. */
+  const flip = (el: HTMLDetailsElement) => { el.open = !el.open; el.dispatchEvent(new Event('toggle')); };
+
+  it('a live session that joins a folded group opens it, and a group whose sessions all stopped folds', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser(), '#v=sessions');
+    f.push('sessions', { a: stopped('A') });
+    await settle();
+    expect(group(root).open).toBe(false);
+    f.push('sessions', { a: stopped('A'), b: live('B') });
+    await settle();
+    expect(group(root).open).toBe(true);
+    expect(group(root).querySelector('summary')!.textContent).toContain('2 sesiones');
+    f.push('sessions', { a: stopped('A'), b: stopped('B') });
+    await settle();
+    expect(group(root).open).toBe(false);
+    app.stop();
+  });
+
+  it('a group the person folded, or opened, stays so whatever the data says next', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser(), '#v=sessions');
+    f.push('sessions', { a: live('A') });
+    await settle();
+    expect(group(root).open).toBe(true);
+    flip(group(root));
+    await settle();
+    expect(group(root).open).toBe(false);
+    f.push('sessions', { a: stopped('A') });
+    await settle();
+    f.push('sessions', { a: stopped('A'), b: live('B') });
+    await settle();
+    expect(group(root).open).toBe(false);
+    flip(group(root));
+    await settle();
+    f.push('sessions', { a: stopped('A'), b: stopped('B') });
+    await settle();
+    expect(group(root).open).toBe(true);
+    app.stop();
+  });
+
+  it('a `toggle` the page’s own painting fires (the fold as the render said it) is not the person’s', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser(), '#v=sessions');
+    f.push('sessions', { a: live('A') });
+    await settle();
+    group(root).dispatchEvent(new Event('toggle'));
+    await settle();
+    f.push('sessions', { a: stopped('A') });
+    await settle();
+    expect(group(root).open).toBe(false);
+    app.stop();
+  });
+});

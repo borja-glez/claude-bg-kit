@@ -189,10 +189,15 @@ export function normalizeForgeV1(x: unknown, report?: Report): ForgeV1 | undefin
   return f;
 }
 
-export function normalizeSession(x: unknown): SessionDoc {
+/** Final review M1: a session's runId is kept only as a run id can be (SAFE_ID, as runs/ checks it), so it never reads as
+ *  anything else (Sesiones groups by it); one that is not is dropped, and reported. */
+export function normalizeSession(x: unknown, report?: Report): SessionDoc {
   const o: Obj = isObj(x) ? x : {};
+  let runId: string | undefined;
+  if (safeId(o.runId)) runId = o.runId;
+  else if (o.runId != null) report?.('runId', 'dropped', typeof o.runId === 'string' ? 'not a run id' : kindOf(o.runId));
   return { ...(o as unknown as SessionDoc), name: str(o.name), heartbeatAt: typeof o.heartbeatAt === 'string' ? o.heartbeatAt : '', currentTask: optStr(o.currentTask), track: optStr(o.track) ?? null, agentName: optStr(o.agentName), branch: optStr(o.branch), worktree: optStr(o.worktree), busyUntil: optStr(o.busyUntil),
-    role: o.role === 'coordinator' || o.role === 'executor' || o.role === 'manual' ? o.role : undefined, runId: optStr(o.runId), leaseUntil: optStr(o.leaseUntil) };
+    role: o.role === 'coordinator' || o.role === 'executor' || o.role === 'manual' ? o.role : undefined, runId, leaseUntil: optStr(o.leaseUntil) };
 }
 
 export function normalizeEvent(x: unknown): EventDoc {

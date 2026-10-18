@@ -46,7 +46,7 @@ export function renderPage(m: Model, ui: UiState, dv: Derived = computeDerived(m
   const body = view === 'plan' ? renderPlanView(m, d, ui, dv)
     : view === 'schedule' ? renderScheduleView(m, d, ui, loc, dv)
     : view === 'runs' ? renderRunsView(m, d, ui, loc, dv)
-    : view === 'sessions' ? renderSessionsView(m, d, dv)
+    : view === 'sessions' ? renderSessionsView(m, d, ui, dv)
     : view === 'talk' ? renderTalkView(m, d, ui, loc)
     : renderSummary(m, d, ui, loc, dv);
   const evidence = ui.modal ? m.states[ui.modal]?.evidence : undefined;

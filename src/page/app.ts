@@ -854,6 +854,21 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     else if (role === 'reason-text') ui.reasonDraft = el.value.slice(0, MAX_PROPOSAL_TEXT);
     else if (role === 'comment-text') ui.commentDraft = el.value.slice(0, MAX_NOTE);
   };
+  // Final review M2: the fold of a group of Sesiones the person chose (a click on its summary, which fires `toggle` once
+  // the browser flipped it) wins over the one its data says. A `toggle` that leaves the group as the render said it is the
+  // page's own painting (a browser fires one for a <details open> it inserts), not the person's. The key reads
+  // <kind>:<group>:<the fold of the data>.
+  const onToggle = (ev: Event) => {
+    const el = ev.target as HTMLDetailsElement | null;
+    const k = el?.tagName === 'DETAILS' ? el.dataset.k ?? '' : '';
+    if (!/^s[gi]:/.test(k)) return;
+    const at = k.lastIndexOf(':');
+    const group = k.slice(0, at);
+    const said = ui.folds?.get(group) ?? k.slice(at + 1) === 'open';
+    if (el!.open === said) return;
+    ui.folds = new Map(ui.folds ?? []).set(group, el!.open);
+    schedule();
+  };
   const onCompStart = () => {
     composing = true;
     if (ceiling !== null) timers.clearTimeout(ceiling);
@@ -1167,6 +1182,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   env.root.addEventListener('compositionstart', onCompStart);
   env.root.addEventListener('compositionend', onCompEnd);
   env.root.addEventListener('focusout', onFocusOut);
+  // `toggle` does not bubble: caught on its way down.
+  env.root.addEventListener('toggle', onToggle, true);
   document.addEventListener('keydown', onKey);
   env.root.addEventListener('wheel', onWheel, { passive: false });
   env.root.addEventListener('pointerdown', onPointerDown);
@@ -1209,6 +1226,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     env.root.removeEventListener('compositionstart', onCompStart);
     env.root.removeEventListener('compositionend', onCompEnd);
     env.root.removeEventListener('focusout', onFocusOut);
+    env.root.removeEventListener('toggle', onToggle, true);
     if (ceiling !== null) { timers.clearTimeout(ceiling); ceiling = null; }
     document.removeEventListener('keydown', onKey);
     env.root.removeEventListener('wheel', onWheel);
@@ -1312,7 +1330,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     }
     changed();
   }) as never, onErr));
-  unsubs.push(db.collection('sessions').onSnapshot(((s: QSnap) => { model.sessions = Object.fromEntries(rows(s).map(r => [r.id, normalizeSession(r.body)])) as Record<string, SessionDoc>; changed(); }) as never, onErr));
+  // Final review M1: a runId that is not a run id is dropped, and listed once per snapshot with ?debug=1.
+  unsubs.push(db.collection('sessions').onSnapshot(((s: QSnap) => { const rep = reporter('sessions'); model.sessions = Object.fromEntries(rows(s).map(r => [r.id, normalizeSession(r.body, rep(`sessions/${r.id}`))])) as Record<string, SessionDoc>; changed(); }) as never, onErr));
   unsubs.push(db.collection('events').orderBy('ts', 'desc').limit(200).onSnapshot(((s: QSnap) => { model.events = rows(s).map(r => ({ ...normalizeEvent(r.body), id: r.id })); changed(); }) as never, onErr));
   unsubs.push(db.collection('messages').orderBy('ts', 'desc').limit(200).onSnapshot(((s: QSnap) => {
     model.messages = rows(s).map(r => ({ m: normalizeMessage(r.body), id: r.id })).filter((r): r is { m: MessageDoc; id: string } => r.m !== null).map(r => ({ ...r.m, id: r.id }));

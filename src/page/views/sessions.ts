@@ -7,13 +7,13 @@ import type { MessageType, PlanTask, RunDoc } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
 import type { Dict } from '../i18n.js';
 import { escalatedSessions, esc, hhmm, labelOf, liveDot, num, pastMs, rel, safeMsgType, safeStatus, trackTag } from '../html.js';
-import type { Model } from '../model.js';
+import type { Model, UiState } from '../model.js';
 
 const MSG_COLOR: Record<MessageType, string> = { overlap_warning: 'mauve', handoff_request: 'peach', delegate: 'teal', reply: 'blue', escalation: 'yellow' };
 /** The group of the sessions that work for no run. */
 const NO_RUN = '';
 
-export function renderSessionsView(m: Model, d: Dict, dv: Derived): string {
+export function renderSessionsView(m: Model, d: Dict, ui: UiState, dv: Derived): string {
   const head = `<header class="hd"><h1>${esc(d.views.sessions)}</h1></header>`;
   const sids = Object.keys(m.sessions);
   // H-24: with no session, when they show up.
@@ -39,12 +39,18 @@ export function renderSessionsView(m: Model, d: Dict, dv: Derived): string {
     const folded = isEnded || !live.length;
     const state = rid === NO_RUN ? '' : rid === active ? d.sessions.running : isEnded ? d.sessions.ended : '';
     const title = `${rid === NO_RUN ? d.sessions.noRun : d.sessions.group(rid)}${state ? ` · ${state}` : ''} · ${d.sessions.count(list.length)}`;
-    // «Sin ejecución» takes a key a run id can never be (SAFE_ID has no «~»), so a run called «_none» keeps its own fold.
-    const key = esc(rid === NO_RUN ? '~none' : rid);
+    // Final review M1: a run and «Sin ejecución» have keys of their own kind (r:<run> and none), so no run id, whatever it
+    // says, takes the other's. M2: the fold the data says is in the key too, so a change of it is a new node the morph does
+    // not keep folded; the fold the person chose (the `toggle` event, app.ts) wins over it.
+    const group = rid === NO_RUN ? 'none' : `r:${rid}`;
+    const fold = (kind: 'sg' | 'si', byData: boolean) => {
+      const open = ui.folds?.get(`${kind}:${group}`) ?? byData;
+      return `data-k="${esc(`${kind}:${group}:${byData ? 'open' : 'folded'}`)}"${open ? ' open' : ''}`;
+    };
     const inner = folded || !idle.length
       ? cards(list)
-      : `${cards(live)}<details class="sidle" data-k="si:${key}"><summary>${esc(d.liveSess.idle(idle.length))}</summary>${cards(idle)}</details>`;
-    return `<details class="sgrp" data-k="sg:${key}"${folded ? '' : ' open'}><summary><span class="lbl">${esc(title)}</span></summary>${inner}</details>`;
+      : `${cards(live)}<details class="sidle" ${fold('si', false)}><summary>${esc(d.liveSess.idle(idle.length))}</summary>${cards(idle)}</details>`;
+    return `<details class="sgrp" ${fold('sg', !folded)}><summary><span class="lbl">${esc(title)}</span></summary>${inner}</details>`;
   }).join('');
   return `${head}<section class="sessions-view">${body}</section>`;
 }
