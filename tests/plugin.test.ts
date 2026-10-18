@@ -917,7 +917,7 @@ describe('plugin layout', () => {
       }
     }
     // forge:infinite matches the words of FORGE swarm start's error on a run branch that conflicts with its base.
-    const diverged = /swarm start: \$\{branch\} ([a-z ]+) \$\{base\}/.exec(read('src/forge/cli/swarm.ts'))?.[1];
+    const diverged = /swarm start: \$\{branch\} ([a-z ]+) \$\{base\}/.exec(read('src/forge/cli/swarm/start.ts'))?.[1];
     expect(diverged).toBeDefined();
     expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain(`"${diverged}"`);
   });
