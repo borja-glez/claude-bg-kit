@@ -2529,7 +2529,7 @@ describe('page --publish-info and the sync line', () => {
   // meta/page carries the roadmap id (the plan's project: known before the first publish) so the approvals warning keys on it
   const pageInfo = () => ({ pageVersion: WP, rules: PAGE_RULES, write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WP, rules: PAGE_RULES, assets: false, roadmap: 'demo-shop', publishedAt: io.now().toISOString() } } });
   const snapshotOf = (file: string) => JSON.parse(readFileSync(file, 'utf8').match(/<script type="application\/json" id="wp-snapshot">([\s\S]*?)<\/script>/)![1]);
-  it('without .forge the roadmap stays shareable and nothing is said', () => {
+  it('without --assets the roadmap stays shareable and nothing is said', () => {
     expect(info()).toEqual({ out: path.join(dir, 'r.html'), capabilities: caps, internal: false, say: null, ...pageInfo() });
     expect(existsSync(path.join(dir, 'r.html'))).toBe(true);
   });
@@ -2555,6 +2555,12 @@ describe('page --publish-info and the sync line', () => {
       return JSON.parse(run(args, io).stdout);
     };
     setArtifact('https://claude.ai/artifact/r1');
+    // First run with a file that lacks assets: the printed capabilities have them and say it changed; the skill writes
+    // them to the file and runs again, and that last run is no change.
+    const first = pub({ assets: true });
+    expect(first).toMatchObject({ capabilities: { ...caps, assets: {} }, internal: true, capabilitiesChanged: true });
+    expect(first.ask).toEqual(expect.any(String));
+    expect(pub({ assets: true }, first.capabilities)).toMatchObject({ capabilitiesChanged: false, ask: null });
     expect(pub({ assets: true }, { ...caps, assets: {} })).toMatchObject({ capabilities: { ...caps, assets: {} }, internal: true, capabilitiesChanged: false, ask: null });
     expect(pub({ assets: false })).toMatchObject({ capabilities: caps, internal: false });
     expect(pub()).toMatchObject({ capabilities: caps, internal: false });
