@@ -1467,6 +1467,15 @@ describe('classic hooks', () => {
       expect(ctx).toContain('project demo-shop');
       expect(ctx).toContain('Open messages: 0');
     });
+    it('counts the open messages that read when another one of the cache is broken (I-14)', () => {
+      setup(); bindAs('A');
+      mkdirSync(wp('dbcache', 'messages'), { recursive: true });
+      writeFileSync(wp('dbcache', 'messages', 'm1.json'), '{oops');
+      writeFileSync(wp('dbcache', 'messages', 'm2.json'), JSON.stringify({ ts: ago(5), from: 'ui', to: 'backend', type: 'reply', text: 'x', status: 'open' }));
+      const r = hook('session-start', { session_id: 'A', source: 'startup' });
+      expect(context(r)).toContain('Open messages: 1');
+      expect(r.stderr).toBe('');
+    });
     it('another live session gets one fact for every source, never the task to continue; a fork says so', () => {
       setup(); bindAs('A'); ownTask('T002');
       for (const source of ['startup', 'resume', 'clear', 'compact', 'fork']) {
@@ -2749,5 +2758,26 @@ describe('sync --db (A-11, A-13, G-13, G-26)', () => {
     list('meta', { project: { planHash: 'old' } });
     const ws2 = JSON.parse(sync('--known', 'known.json').stdout).batches.flat() as { collection: string }[];
     expect(ws2.some(w => w.collection === 'events')).toBe(true);
+  });
+});
+
+describe('listings: a missing --states and unreadable documents (A-06, I-14)', () => {
+  it('next, conflicts and status exit 1 with a --states that does not exist', () => {
+    const cases: [string, string[]][] = [['next', ['--session', 'main']], ['conflicts', ['--session', 'main', '--task', 'T001']], ['status', []]];
+    for (const [cmd, extra] of cases) {
+      expect(run([cmd, 'plan.yaml', '--states', 'missing', ...extra], io), cmd).toMatchObject({ code: 1, stdout: '', stderr: `${cmd}: --states cache missing — list it first\n` });
+    }
+  });
+  it('an unreadable state document is skipped and said on stderr, and the command goes on with exit 0 (Review Focus 1)', () => {
+    mkdirSync(path.join(dir, 'st', 'T004.json'), { recursive: true });
+    writeFileSync(path.join(dir, 'st', 'T001.json'), '{oops');
+    writeFileSync(path.join(dir, 'st', 'T002.json'), '[1]');
+    writeFileSync(path.join(dir, 'st', 'T003.json'), '"x"');
+    writeFileSync(path.join(dir, 'st', 'README.txt'), 'not a document');
+    const r = run(['next', 'plan.yaml', '--states', 'st', '--session', 'main'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout).task.id).toBe('T001');
+    expect(r.stderr.split('\n').filter(Boolean)).toEqual(['T001.json', 'T002.json', 'T003.json', 'T004.json'].map(f => `warning: skipped st/${f} (unreadable)`));
+    expect(run(['status', 'plan.yaml', '--states', 'st'], io).code).toBe(0);
   });
 });

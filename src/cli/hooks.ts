@@ -20,7 +20,9 @@ import { endReasonOf, MAX_PROJECTS, parseBound, type BoundDoc } from '../lib/bou
 import { bindingLive, describeViewer, type Viewer } from '../lib/viewer-role.js';
 import { boundFile, claudeBindings, headOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readSeats, recordBase, settleBinding, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
 import { pickProject, type ProjectEntry } from '../mod/model.js';
-import type { MessageDoc, Plan } from '../lib/types.js';
+import { readDocs } from '../lib/read-docs.js';
+import { normalizeMessage } from '../page/normalize.js';
+import type { Plan } from '../lib/types.js';
 import type { Io } from './run.js';
 
 const SOURCES = ['startup', 'resume', 'clear', 'compact', 'fork'] as const;
@@ -228,13 +230,9 @@ function ownerText(ctx: Ctx, own: { seat: Seat; bound: BoundDoc }, plan: Plan | 
     if (typeof s?.track === 'string' && s.track) track = s.track;
   } catch { track = '-'; }
   const cur = ctx.viewer.task ? plan.tasks.find(t => t.id === ctx.viewer.task) : undefined;
-  let open = 0;
-  try {
-    const dir = path.join(ctx.wp, 'dbcache', 'messages');
-    open = (existsSync(dir) ? readdirSync(dir).filter(f => f.endsWith('.json')) : [])
-      .map(f => JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as MessageDoc)
-      .filter(m => m.to === sid && m.status === 'open').length;
-  } catch { open = 0; }
+  // I-14: a broken message file no longer hides the others; the hook says nothing about it.
+  const open = Object.values(readDocs(path.join(ctx.wp, 'dbcache', 'messages'), normalizeMessage).docs)
+    .filter(m => m.to === sid && m.status === 'open').length;
   const secs = typeof input.seconds_since_last_response === 'number' ? input.seconds_since_last_response : 0;
   const resumed = source === 'resume' && secs >= 3600 ? `Resumed after ${Math.floor(secs / 3600)} h. ` : '';
   return `${resumed}waypoint: project ${ctx.project} has a live roadmap (${plan.artifacts.roadmap ?? 'not published'}). Session ${sid} track ${track}. Current task: ${cur ? `${cur.id} ${cur.title}` : 'none'}. Open messages: ${open}. Use /waypoint:work to continue, /waypoint:status for progress.`;

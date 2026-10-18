@@ -3,7 +3,8 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parsePlan, PlanError, isPlanId } from '../lib/plan.js';
 import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known, type Write } from '../lib/sync.js';
-import { normalizeMeta, normalizePhase } from '../page/normalize.js';
+import { normalizeMessage, normalizeMeta, normalizePhase, sessionDoc, stateDoc } from '../page/normalize.js';
+import { readDocs } from '../lib/read-docs.js';
 import { availableTasks, commitShas } from '../lib/deps.js';
 import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, isIdle, IDLE_MINUTES } from '../lib/coordination.js';
 import { parseDesign, changedSections, designBody, designStatus, DesignError, setDesignStatus } from '../lib/design.js';
@@ -31,7 +32,7 @@ import { BOUND_VIAS, MAX_SEATS, isBoundVia, type BoundDoc } from '../lib/bound.j
 import { boundFile, boundLive, checkoutSid, leftSeatOf, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, settleBinding, writeAtomic, writeBinding } from '../lib/bound-fs.js';
 import { isSafeId } from '../lib/execution-state.js';
 import { loadConfig } from '../forge/config.js';
-import type { Commit, MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState, TaskStatus } from '../lib/types.js';
+import type { Commit, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState, TaskStatus } from '../lib/types.js';
 
 // The classic hooks live in hooks.ts; the tests import isCommitCommand from here.
 export { isCommitCommand };
@@ -50,15 +51,29 @@ export function run(argv: string[], io: Io): Result {
     return v === undefined || v.startsWith('--') ? undefined : v;
   };
   const abs = (p: string) => path.resolve(io.cwd, p);
-  const ok = (stdout: string): Result => ({ code: 0, stdout: stdout.endsWith('\n') ? stdout : `${stdout}\n`, stderr: '' });
-  const fail = (stderr: string, code = 1): Result => ({ code, stdout: '', stderr: `${stderr}\n` });
+  // I-14: the documents this call skipped, said on stderr with any result (the exit code stays as it is).
+  const notes: string[] = [];
+  const ok = (stdout: string, stderr = notes.join('')): Result => ({ code: 0, stdout: stdout.endsWith('\n') ? stdout : `${stdout}\n`, stderr });
+  const fail = (stderr: string, code = 1): Result => ({ code, stdout: '', stderr: `${notes.join('')}${stderr}\n` });
   const loadPlan = () => parsePlan(readFileSync(abs(args[0]), 'utf8'));
-  const docs = <T>(name: string) => readDocs<T>(flag(name) && abs(flag(name)!));
+  // I-14: a listing's documents, normalized; an unreadable one is skipped and said on stderr.
+  const docsIn = <T>(dir: string | undefined, normalize?: (x: unknown) => T | null): Record<string, T> => {
+    if (!dir) return {};
+    const r = readDocs<T>(abs(dir), normalize);
+    for (const f of r.skipped) notes.push(`warning: skipped ${dir.replace(/[\\/]+$/, '')}/${f} (unreadable)\n`);
+    return r.docs;
+  };
+  const docs = <T>(name: string, normalize?: (x: unknown) => T | null) => docsIn<T>(flag(name), normalize);
+  // A-06: a --states listing that is given but missing would make every task look free.
+  const optStates = () => {
+    if (flag('states') && !existsSync(abs(flag('states')!))) throw new CacheError(`${cmd}: --states cache missing — list it first`);
+    return docs('states', stateDoc);
+  };
   // An optional --sessions listing that is given but missing would make every owner look idle.
   const optSessions = () => {
     if (!flag('sessions')) return undefined;
     if (!existsSync(abs(flag('sessions')!))) throw new CacheError(`${cmd}: --sessions cache missing — list it first`);
-    return docs<SessionDoc>('sessions');
+    return docs('sessions', sessionDoc);
   };
   // The runtime plan: the db plan cache (--db <dbcache dir>) when given, else the plan file.
   const loadView = (): { view: PlanView; project: string; version: string } => {
@@ -66,7 +81,7 @@ export function run(argv: string[], io: Io): Result {
     const db = flag('db');
     if (!db) return { view: p, project: p.project, version: p.version };
     const metaFile = path.join(abs(db), 'meta', 'project.json');
-    const phases = Object.values(readDocs<unknown>(path.join(abs(db), 'plan'))).map(d => normalizePhase(d)).filter((x): x is PhaseDoc => !!x);
+    const phases = Object.values(docsIn<unknown>(path.join(abs(db), 'plan'))).map(d => normalizePhase(d)).filter((x): x is PhaseDoc => !!x);
     const meta = existsSync(metaFile) ? normalizeMeta(JSON.parse(readFileSync(metaFile, 'utf8'))) : null;
     if (!meta || !phases.length) throw new CacheError('db plan cache missing — list meta and plan first');
     return { view: planViewFromDocs(meta, phases), project: p.project, version: meta.version || p.version };
@@ -223,7 +238,7 @@ export function run(argv: string[], io: Io): Result {
             }
           }
           listed = jsonFiles(path.join(abs(db), 'state')).map(f => f.slice(0, -5));
-          const metaDocs = readDocs<{ version?: unknown; rules?: unknown; planHash?: unknown }>(path.join(abs(db), 'meta'));
+          const metaDocs = docsIn<{ version?: unknown; rules?: unknown; planHash?: unknown }>(path.join(abs(db), 'meta'));
           const page = metaDocs.page;
           republish = !page || compareVersions(page.version, WAYPOINT_VERSION) < 0 || typeof page.rules !== 'number' || page.rules < PAGE_RULES;
           // A-11 for the documents sync writes itself: one the db holds and known.json does not list could only be
@@ -244,7 +259,7 @@ export function run(argv: string[], io: Io): Result {
           nowIso: now.toISOString(),
           sessionId: session,
           eventId: eventId(now, session, io.rand),
-          states: readDocs<TaskState>(statesDir && abs(statesDir)),
+          states: docsIn(statesDir, stateDoc),
           ...(listed ? { listed } : {}),
           ...(syncedHash ? { planSynced: true } : {}),
         });
@@ -263,7 +278,7 @@ export function run(argv: string[], io: Io): Result {
         if (hasBase && (!base || !BRANCH_RE.test(base))) return fail('next: --base needs a branch name', 2);
         const { view } = loadView();
         const sessions = optSessions();
-        const states = docs<TaskState>('states');
+        const states = optStates();
         const integrated = base ? integratedShas(view, states, base, io.cwd) : undefined;
         const r = pickTask(view, states, { sessionId: session, track: flag('track'), sessions, now: io.now().getTime(), integrated });
         // unblock is only reported when true, as before
@@ -276,7 +291,7 @@ export function run(argv: string[], io: Io): Result {
         if (!session || !task) return fail('conflicts: --session and --task are required', 2);
         const { view } = loadView();
         const sessions = optSessions();
-        return ok(JSON.stringify(conflictsFor(view, docs<TaskState>('states'), task, session, sessions, io.now().getTime())));
+        return ok(JSON.stringify(conflictsFor(view, optStates(), task, session, sessions, io.now().getTime())));
       }
       case 'recover': {
         // Missing listings would make every owner look idle: refuse instead of guessing.
@@ -287,8 +302,8 @@ export function run(argv: string[], io: Io): Result {
         const minutes = Number(flag('minutes') ?? IDLE_MINUTES);
         return ok(JSON.stringify(recoverableTasks(
           view,
-          docs<TaskState>('states'),
-          docs<SessionDoc>('sessions'),
+          docs('states', stateDoc),
+          docs('sessions', sessionDoc),
           io.now().getTime(),
           Number.isFinite(minutes) ? minutes : IDLE_MINUTES,
         )));
@@ -321,10 +336,10 @@ export function run(argv: string[], io: Io): Result {
       case 'inbox': {
         const session = flag('session');
         if (!session) return fail('inbox: --session is required', 2);
-        return ok(JSON.stringify(inboxFor(readDocs<MessageDoc>(flag('messages') && abs(flag('messages')!)), session)));
+        return ok(JSON.stringify(inboxFor(docs('messages', normalizeMessage), session)));
       }
       case 'escalations':
-        return ok(JSON.stringify(escalationCandidates(readDocs<MessageDoc>(flag('messages') && abs(flag('messages')!)))));
+        return ok(JSON.stringify(escalationCandidates(docs('messages', normalizeMessage))));
       case 'launch': {
         // The plan path goes into the launched session's prompt, inside double quotes in a shell command.
         if (args[0] !== undefined && !/^[\w./\\:~@+ -]+$/.test(args[0])) return fail('launch: the plan path may only use letters, digits, spaces and _ . / \\ : ~ @ + -', 2);
@@ -415,8 +430,8 @@ export function run(argv: string[], io: Io): Result {
       }
       case 'status': {
         const { view: p, project, version } = loadView();
-        const states = docs<TaskState>('states');
-        const m = computeMetrics(p, states, io.now().getTime());
+        const states = optStates();
+        const m =computeMetrics(p, states, io.now().getTime());
         const title = (id: string) => `${id} ${p.tasks.find(t => t.id === id)?.title ?? ''}`;
         const lines = [
           `${project} · v${version} · ${m.percent}% (${m.done}/${m.total}) · phases ${m.phasesDone}/${m.phaseCount}`,
@@ -1106,15 +1121,6 @@ function projectOf(file: string, cwd: string): { project: string; plan: string |
   }
   const p = parsePlan(readFileSync(file, 'utf8'));
   return { project: p.project, plan: rel(file), url: p.artifacts.roadmap ?? null };
-}
-
-function readDocs<T = unknown>(dir: string | undefined): Record<string, T> {
-  if (!dir || !existsSync(dir)) return {};
-  return Object.fromEntries(
-    readdirSync(dir)
-      .filter(f => f.endsWith('.json'))
-      .map(f => [f.slice(0, -5), JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as T]),
-  );
 }
 
 /** G-14: the states a `state` listing holds (id → status) and when its newest valid file was written; null with none. */

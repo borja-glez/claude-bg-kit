@@ -1,5 +1,5 @@
 // I-12: the helpers more than one swarm subcommand uses. Each subcommand lives in <name>.ts of this folder.
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { UsageError } from '../errors.js';
 import type { Io } from '../run.js';
@@ -13,7 +13,8 @@ import { coordinatorLiveness } from '../../../lib/execution-view.js';
 import { coordinatorInputs } from '../../live.js';
 import type { ExecutionState } from '../../../lib/execution-state.js';
 import { parsePlan, PlanError } from '../../../lib/plan.js';
-import type { SessionDoc, TaskState } from '../../../lib/types.js';
+import { readDocs } from '../../../lib/read-docs.js';
+import { sessionDoc, stateDoc } from '../../../page/normalize.js';
 import { excludeWorktrees } from '../../../lib/git-info.js';
 import { parseLooseTasks, type LooseTask } from '../../loose.js';
 import { loadTrustedConfig } from '../../trust.js';
@@ -24,14 +25,6 @@ import type { SwarmDeps } from './context.js';
 import { type SetupResult, runSetup } from './setup.js';
 
 export const ID = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
-
-function readDocs<T>(dir: string): Record<string, T> {
-  const out: Record<string, T> = {};
-  for (const f of readdirSync(dir).filter(x => x.endsWith('.json'))) {
-    try { out[f.slice(0, -5)] = JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as T; } catch { /* a corrupt doc is skipped */ }
-  }
-  return out;
-}
 
 /** The worktree that has `branch` checked out, from `git worktree list --porcelain`; null when none. */
 export function worktreeHolding(porcelain: string | null, branch: string): string | null {
@@ -153,8 +146,8 @@ export function readTickInput(io: Io, deps: SwarmDeps, e: ExecutionState, planAr
   const sessionsDir = path.resolve(io.cwd, db, 'sessions');
   // Missing listings would make every task look free: refuse instead.
   if (!existsSync(stateDir) || !existsSync(sessionsDir)) throw new UsageError(`swarm ${sub}: --db must hold the state and sessions listings`);
-  const states = readDocs<TaskState>(stateDir);
-  const sessions = readDocs<SessionDoc>(sessionsDir);
+  const states = readDocs(stateDir, stateDoc).docs;
+  const sessions = readDocs(sessionsDir, sessionDoc).docs;
   const integrated: string[] = [];
   for (const t of plan.tasks) {
     if (states[t.id]?.status !== 'done') continue;

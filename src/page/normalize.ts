@@ -200,6 +200,11 @@ export function normalizeSession(x: unknown, report?: Report): SessionDoc {
     role: o.role === 'coordinator' || o.role === 'executor' || o.role === 'manual' ? o.role : undefined, runId, leaseUntil: optStr(o.leaseUntil) };
 }
 
+/** I-14: a state document of a listing, or null when it is not an object (readDocs skips it and says so). */
+export const stateDoc = (x: unknown): TaskState | null => (isObj(x) ? normalizeState(x) : null);
+/** I-14: a session document of a listing, or null when it is not an object. */
+export const sessionDoc = (x: unknown): SessionDoc | null => (isObj(x) ? normalizeSession(x) : null);
+
 export function normalizeEvent(x: unknown): EventDoc {
   const o: Obj = isObj(x) ? x : {};
   return { ...(o as unknown as EventDoc), ts: typeof o.ts === 'string' ? o.ts : '', type: (typeof o.type === 'string' ? o.type : '') as EventDoc['type'], sessionId: typeof o.sessionId === 'string' ? o.sessionId : '', text: o.text == null ? undefined : str(o.text), taskId: optStr(o.taskId) };
