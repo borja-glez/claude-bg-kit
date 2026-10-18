@@ -1934,6 +1934,29 @@ describe('the runs view (G-07, §4.3, H-24)', () => {
     const keys = [...h.matchAll(/data-k="([^"]+)"/g)].map(x => x[1]);
     expect(keys).toEqual(['run:run-b', 'rt:run-b:T001', 'run:run-a', 'rt:run-a:T001']);
   });
+  it('two runs with one runId are one row, the newest; a run that lists a task twice lists it once, the first: every key once (C19)', () => {
+    const runs = [runSummary({ endedAt: '2026-10-09T11:00:00.000Z', merged: false }),
+      runSummary({ tasks: [{ id: 'T001', status: 'integrated' }, { id: 'T001', status: 'stopped' }, { id: 'T003', status: 'stopped' }] })];
+    const html = renderApp({ ...base(), runs }, ui({ view: 'runs', runsOpen: new Set(['shop-20261010T090000000Z']) }));
+    const h = history(html);
+    expect(h.match(/class="rhi"/g)).toHaveLength(1);
+    expect(h).toContain('<h2 class="lbl">Historial (1)</h2>');
+    expect(h).toContain('1/2 integradas · fusionada en main');
+    expect(h).not.toContain('sin fusionar');
+    expect(h).toContain('<div class="lbl">Tareas (2)</div>');
+    expect(h.match(/data-k="rt:shop-20261010T090000000Z:T001"/g)).toHaveLength(1);
+    expect(h).toContain('data-k="rt:shop-20261010T090000000Z:T001"><span class="k">T001</span> Esquema de pedidos <span class="mono rs-integrated">');
+    const keys = [...html.matchAll(/data-k="([^"]+)"/g)].map(x => x[1]);
+    expect(keys.filter((k, i) => keys.indexOf(k) !== i)).toEqual([]);
+  });
+  it('a task or a run that took under a minute reads «<1 min», as the loose list does', () => {
+    const quick = runSummary({ startedAt: '2026-10-10T11:04:40.000Z', tasks: [{ id: 'T001', status: 'integrated', seconds: 20, rounds: 1 }, { id: 'T003', status: 'integrated', seconds: 45 }] });
+    const h = history(renderApp({ ...base(), runs: [quick] }, ui({ view: 'runs', runsOpen: new Set([quick.runId]) })));
+    expect(h).toMatch(/<span class="mono">[^<]+ · &lt;1 min · 2\/2 integradas/);
+    expect(h).toContain('<span class="mono rs-integrated">integrada · &lt;1 min · 1 ronda</span>');
+    expect(h).toContain('<span class="mono rs-integrated">integrada · &lt;1 min</span>');
+    expect(h).not.toContain('0 min');
+  });
   it('a run of 60 tasks shows its 60 rows only when it is open (Review Focus 2)', () => {
     const tasks = Array.from({ length: 60 }, (_, i) => ({ id: `T${String(i + 1).padStart(3, '0')}`, status: 'integrated' as const, seconds: 600 }));
     const m = { ...base(), runs: [runSummary({ tasks })] };

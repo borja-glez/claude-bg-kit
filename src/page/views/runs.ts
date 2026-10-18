@@ -58,19 +58,35 @@ function renderLoose(m: Model, d: Dict): string {
   return `<section class="loose card"><div class="lbl">${esc(d.run.looseTitle)} (${r.loose.length})</div><ul class="lts">${rows}</ul></section>`;
 }
 
-/** G-07: the runs that ended (runs/), newest first (ties in plain id order); one opens to tell how it ended and each of
- *  its tasks. */
+/** Newest first: by endedAt, then startedAt, then plain id order (C4). The page's subscription keeps the 50 first by it,
+ *  and of two documents with one runId, the first by it. */
+export const byNewestRun = (a: RunSummaryDoc, b: RunSummaryDoc): number =>
+  Date.parse(b.endedAt) - Date.parse(a.endedAt) || Date.parse(b.startedAt) - Date.parse(a.startedAt) || (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0);
+
+/** A run's tasks, each id once (the first wins): a summary that repeats one never gives two rows under one key (C19). */
+function uniqueTasks(r: RunSummaryDoc): RunSummaryDoc['tasks'] {
+  const seen = new Set<string>();
+  return r.tasks.filter(t => !seen.has(t.id) && !!seen.add(t.id));
+}
+
+/** A duration in seconds as the loose list says it: under a minute, «<1 min». */
+const secsText = (d: Dict, secs: number): string => (secs < 60 ? d.runs.underMin : d.dur(secs / 60));
+
+/** G-07: the runs that ended (runs/), newest first, each runId once (the newest; its key must not repeat, C19); one opens
+ *  to tell how it ended and each of its tasks. */
 function renderHistory(m: Model, d: Dict, ui: UiState, loc: string): string {
-  const list = [...(m.runs ?? [])].sort((a, b) => Date.parse(b.endedAt) - Date.parse(a.endedAt) || (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0));
+  const ids = new Set<string>();
+  const list = [...(m.runs ?? [])].sort(byNewestRun).filter(r => !ids.has(r.runId) && !!ids.add(r.runId));
   if (!list.length) return '';
   const open = ui.runsOpen ?? new Set<string>();
   const items = list.map(r => {
     const isOpen = open.has(r.runId);
     const kind = oneOf(RUN_KINDS, r.kind, 'plan');
-    const integrated = r.tasks.filter(t => t.status === 'integrated').length;
+    const tasks = uniqueTasks(r);
+    const integrated = tasks.filter(t => t.status === 'integrated').length;
     const secs = (Date.parse(r.endedAt) - Date.parse(r.startedAt)) / 1000;
-    const parts = [fmt(r.endedAt, loc), Number.isFinite(secs) && secs >= 0 ? d.dur(secs / 60) : '', d.runs.integrated(integrated, r.tasks.length), r.merged ? d.runs.merged(r.target) : d.runs.unmerged(r.branch)].filter(Boolean);
-    return `<li class="rhi" data-k="run:${esc(r.runId)}"><button type="button" class="rhb" data-action="run-toggle" data-id="${esc(r.runId)}" aria-expanded="${isOpen}"><span class="chev" aria-hidden="true">${isOpen ? '⌄' : '›'}</span><span class="rk rk-${kind}">${esc(d.runs.kind[kind])}</span> <span class="k">${esc(r.runId)}</span> <span class="mono">${parts.map(esc).join(' · ')}</span></button>${isOpen ? historyBody(m, d, r) : ''}</li>`;
+    const parts = [fmt(r.endedAt, loc), Number.isFinite(secs) && secs >= 0 ? secsText(d, secs) : '', d.runs.integrated(integrated, tasks.length), r.merged ? d.runs.merged(r.target) : d.runs.unmerged(r.branch)].filter(Boolean);
+    return `<li class="rhi" data-k="run:${esc(r.runId)}"><button type="button" class="rhb" data-action="run-toggle" data-id="${esc(r.runId)}" aria-expanded="${isOpen}"><span class="chev" aria-hidden="true">${isOpen ? '⌄' : '›'}</span><span class="rk rk-${kind}">${esc(d.runs.kind[kind])}</span> <span class="k">${esc(r.runId)}</span> <span class="mono">${parts.map(esc).join(' · ')}</span></button>${isOpen ? historyBody(m, d, r, tasks) : ''}</li>`;
   }).join('');
   return `<section class="card rhist"><h2 class="lbl">${esc(d.runs.history)} (${list.length})</h2><ul class="rhl">${items}</ul></section>`;
 }
@@ -78,7 +94,7 @@ function renderHistory(m: Model, d: Dict, ui: UiState, loc: string): string {
 /** How a run ended, its final review, its deferred findings and decisions, and each task: a plan task opens its detail; a
  *  loose one has none. A task stopped with /forge:stop says so. Each row is keyed by its run too (C19): a task stopped in
  *  one run and integrated in the next is two rows, and morphdom must never take one for the other. */
-function historyBody(m: Model, d: Dict, r: RunSummaryDoc): string {
+function historyBody(m: Model, d: Dict, r: RunSummaryDoc, tasks: RunSummaryDoc['tasks']): string {
   const fr = r.finalReview;
   const mode = r.mode === 'single' ? d.runs.kind.single : labelOf(d.run.mode, r.mode);
   const facts = `<dl class="kv">
@@ -90,13 +106,13 @@ function historyBody(m: Model, d: Dict, r: RunSummaryDoc): string {
     <dt>${esc(d.runs.fields.deferred)}</dt><dd>${num(r.deferred)}</dd>
     <dt>${esc(d.runs.fields.decisions)}</dt><dd>${num(r.decisions)}</dd>
   </dl>`;
-  const rows = r.tasks.map(t => {
+  const rows = tasks.map(t => {
     const task = r.loose ? undefined : m.plan.tasks.find(x => x.id === t.id);
     const status = oneOf(RUN_TASK_STATUSES, t.status, 'queued');
     const label = status === 'stopped' ? d.run.stoppedHint : labelOf(d.run.taskStatus, status);
-    const extra = [t.seconds !== undefined ? d.dur(t.seconds / 60) : '', t.rounds !== undefined ? d.runs.rounds(num(t.rounds)) : '', t.deferred ? d.runs.deferred(num(t.deferred)) : ''].filter(Boolean);
+    const extra = [t.seconds !== undefined ? secsText(d, num(t.seconds)) : '', t.rounds !== undefined ? d.runs.rounds(num(t.rounds)) : '', t.deferred ? d.runs.deferred(num(t.deferred)) : ''].filter(Boolean);
     const inner = `<span class="k">${esc(t.id)}</span> ${esc(t.title ?? task?.title ?? '')} <span class="mono rs-${status}">${esc([label, ...extra].join(' · '))}</span>`;
     return `<li>${task ? `<button type="button" class="rtb" data-action="open-task" data-id="${esc(t.id)}" data-k="rt:${esc(r.runId)}:${esc(t.id)}">${inner}</button>` : `<div class="rtb">${inner}</div>`}</li>`;
   }).join('');
-  return `<div class="rhd">${facts}<div class="lbl">${esc(d.runs.fields.tasks)} (${r.tasks.length})</div><ul class="rtl">${rows}</ul></div>`;
+  return `<div class="rhd">${facts}<div class="lbl">${esc(d.runs.fields.tasks)} (${tasks.length})</div><ul class="rtl">${rows}</ul></div>`;
 }

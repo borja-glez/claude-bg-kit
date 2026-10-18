@@ -12,7 +12,7 @@ import { parseSeen, pruneSeen, seenKey } from './needs.js';
 import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeRunSummary, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import type { RunSummaryDoc } from '../lib/run-summary.js';
 import { decodeView, encodeView, type ViewState } from './urlstate.js';
-import { currentPhaseId, DETAIL_TABS, esc, GROUPS, NOTE_FILTERS, parsePlanFilter, phasesInProgress, planFilterKeys, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, togglePlanFilter, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type View } from './render.js';
+import { byNewestRun, currentPhaseId, DETAIL_TABS, esc, GROUPS, NOTE_FILTERS, parsePlanFilter, phasesInProgress, planFilterKeys, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, togglePlanFilter, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type View } from './render.js';
 
 /**
  * The page's embedded snapshot; G-13 and G-14: the waypoint that built it and the states the last listing saw. The page
@@ -1223,14 +1223,38 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data(), reporter('meta/infinite')('meta/infinite')) : null; changed(); }) as never, onErr));
   // G-07: the runs that ended, newest first, at most 50 (asked of the database and kept so on the page, whatever a runtime
   // serves); one that is not a run summary is dropped and listed with ?debug=1 (§4.11) by the normalizer's own report,
-  // once (C20).
+  // once (C20). The runId is the body's: two documents that say the same one are one run, the newer kept and the other
+  // listed as dropped (its key would repeat, C19). A runtime that refuses the ordered query (the subscription fails, or
+  // orderBy throws) is asked once for the whole collection instead, bounded here the same way, as the marks are.
   const MAX_RUNS = 50;
-  unsubs.push(db.collection('runs').orderBy('endedAt', 'desc').limit(MAX_RUNS).onSnapshot(((s: QSnap) => {
+  const onRuns = (s: QSnap) => {
     const rep = reporter('runs');
-    model.runs = rows(s).map(r => normalizeRunSummary(r.body, rep(`runs/${r.id}`))).filter((x): x is RunSummaryDoc => x !== null)
-      .sort((a, b) => Date.parse(b.endedAt) - Date.parse(a.endedAt) || (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0)).slice(0, MAX_RUNS);
+    const kept = new Map<string, { doc: RunSummaryDoc; path: string }>();
+    for (const r of rows(s)) {
+      const path = `runs/${r.id}`;
+      const doc = normalizeRunSummary(r.body, rep(path));
+      if (!doc) continue;
+      // Of two with one runId, the newer stays (the first on a tie); the other is reported once.
+      const prev = kept.get(doc.runId);
+      if (prev && byNewestRun(doc, prev.doc) >= 0) { rep(path)?.('runId', 'dropped', 'repeated runId'); continue; }
+      if (prev) rep(prev.path)?.('runId', 'dropped', 'repeated runId');
+      kept.set(doc.runId, { doc, path });
+    }
+    model.runs = [...kept.values()].map(x => x.doc).sort(byNewestRun).slice(0, MAX_RUNS);
     changed();
-  }) as never, onErr));
+  };
+  const runsDb = db;
+  let runsUnsub: () => void = () => {};
+  let runsPlain = false;
+  const plainRuns = () => {
+    if (runsPlain) return;
+    runsPlain = true;
+    runsUnsub();
+    try { runsUnsub = runsDb.collection('runs').onSnapshot(onRuns as never, onErr); } catch { onErr(); }
+  };
+  try { runsUnsub = runsDb.collection('runs').orderBy('endedAt', 'desc').limit(MAX_RUNS).onSnapshot(onRuns as never, plainRuns); }
+  catch { plainRuns(); }
+  unsubs.push(() => runsUnsub());
   unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const rep = reporter('plan'); const p = rows(s).map(r => normalizePhase(r.body, rep(`plan/${r.id}`))).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } planSnap = true; settleLink(); changed(); }) as never, onPlanErr));
   unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => {
     const rep = reporter('state');

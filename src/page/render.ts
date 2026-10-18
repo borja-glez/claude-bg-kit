@@ -20,6 +20,7 @@ export * from './model.js';
 export { esc, relText, type RelKind } from './html.js';
 export { GROUPS, openGroups, phasesInProgress, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, VIRTUAL_FROM, virtualRange } from './views/schedule.js';
 export { currentPhaseId, forgeKeysOf, parsePlanFilter, planFilterKeys, planTaskKey, togglePlanFilter } from './views/plan.js';
+export { byNewestRun } from './views/runs.js';
 
 const NAV_ICON: Record<View, string> = { summary: '◉', plan: '▤', schedule: '≡', runs: '▶', sessions: '◎', talk: '✎' };
 

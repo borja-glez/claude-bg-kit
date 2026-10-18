@@ -2724,19 +2724,87 @@ describe('the history of runs/ (G-07)', () => {
     expect(app.ui.runsOpen!.size).toBe(0);
     app.stop();
   });
+  /** 55 runs, r-00 to r-54, each ending an hour after the one before. */
+  const manyRuns = () => Object.fromEntries(Array.from({ length: 55 }, (_, i) => {
+    const runId = `r-${String(i).padStart(2, '0')}`;
+    return [runId, { ...RUN, runId, endedAt: new Date(Date.parse('2026-10-01T00:00:00.000Z') + i * 3600000).toISOString() }];
+  }));
   it('a runtime that serves more than the 50 asked for leaves the page with the 50 newest', async () => {
     const f = fakeDb();
+    const calls: unknown[][] = [];
+    const collection = f.db.collection;
+    f.db.collection = (p: string) => {
+      const q = collection(p);
+      if (p !== 'runs') return q;
+      return { ...q, orderBy: (...a: unknown[]) => { calls.push(['orderBy', ...a]); return { limit: (n: number) => { calls.push(['limit', n]); return q; } }; } } as never;
+    };
     const root = document.createElement('div');
     const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : null) }, snapshot, root, now: () => NOW });
-    const many = Object.fromEntries(Array.from({ length: 55 }, (_, i) => {
-      const runId = `r-${String(i).padStart(2, '0')}`;
-      return [runId, { ...RUN, runId, endedAt: new Date(Date.parse('2026-10-01T00:00:00.000Z') + i * 3600000).toISOString() }];
-    }));
-    f.push('runs', many);
+    expect(calls).toEqual([['orderBy', 'endedAt', 'desc'], ['limit', 50]]);
+    f.push('runs', manyRuns());
     await settle();
     expect(app.model.runs).toHaveLength(50);
     expect([app.model.runs![0]!.runId, app.model.runs![49]!.runId]).toEqual(['r-54', 'r-05']);
     app.stop();
+  });
+  it('a runtime that refuses the ordered query of runs/ falls back once to the whole collection, keeps the newest 50 and stays live (review minor 1)', async () => {
+    for (const refusal of ['throws', 'errors'] as const) {
+      const f = fakeDb();
+      const plain: string[] = [];
+      const collection = f.db.collection;
+      f.db.collection = (p: string) => {
+        const q = collection(p);
+        if (p !== 'runs') return q;
+        return {
+          ...q,
+          orderBy: () => {
+            if (refusal === 'throws') throw new Error('orderBy is not supported');
+            return { limit: () => ({ onSnapshot: (_cb: unknown, err: (e: unknown) => void) => { setTimeout(() => err({ code: 'failed_precondition', message: 'no index' }), 0); return () => {}; } }) };
+          },
+          onSnapshot: (cb: Cb, err: (e: unknown) => void) => { plain.push('plain'); return q.onSnapshot(cb, err); },
+        } as never;
+      };
+      const root = document.createElement('div');
+      const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : null) }, snapshot, root, now: () => NOW });
+      await settle();
+      expect(plain, refusal).toEqual(['plain']);
+      expect(app.model.offline, refusal).toBe(false);
+      expect(root.innerHTML, refusal).toContain('EN VIVO');
+      f.push('runs', manyRuns());
+      await settle();
+      expect(app.model.runs, refusal).toHaveLength(50);
+      expect([app.model.runs![0]!.runId, app.model.runs![49]!.runId], refusal).toEqual(['r-54', 'r-05']);
+      app.stop();
+      expect(f.subs.has('runs'), refusal).toBe(false);
+    }
+  });
+  it('two documents that say one runId are one run, the newer, the other listed once with ?debug=1; a task listed twice is one row: one toggle, every key once (review I1)', async () => {
+    const older = { ...RUN, endedAt: '2026-10-09T11:00:00.000Z', merged: false };
+    const twice = { ...RUN, tasks: [{ id: 'T001', status: 'integrated', seconds: 1500 }, { id: 'T001', status: 'stopped' }] };
+    // Either order in the snapshot: the newer stays.
+    for (const [rows, gone] of [[{ a: twice, b: older }, 'runs/b'], [{ b: older, a: twice }, 'runs/b'], [{ a: older, b: twice }, 'runs/a']] as const) {
+      history.replaceState(null, '', location.pathname);
+      const f = fakeDb();
+      const root = document.createElement('div');
+      document.body.appendChild(root);
+      const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : null) }, snapshot, root, now: () => NOW, debug: true });
+      f.push('runs', rows);
+      click(root, '[data-view="runs"]');
+      await settle();
+      expect(app.model.runs!.map(r => [r.runId, r.merged]), gone).toEqual([[RUN.runId, true]]);
+      const dbg = root.querySelector('.dbg')!.textContent ?? '';
+      expect(dbg, gone).toContain(`${gone} · runId · dropped · repeated runId`);
+      expect(dbg.match(/repeated runId/g), gone).toHaveLength(1);
+      expect(root.querySelectorAll('[data-action="run-toggle"]'), gone).toHaveLength(1);
+      click(root, '[data-action="run-toggle"]');
+      await settle();
+      expect(root.querySelectorAll('.rhist [aria-expanded="true"]'), gone).toHaveLength(1);
+      expect(root.querySelectorAll(`[data-k="rt:${RUN.runId}:T001"]`), gone).toHaveLength(1);
+      const keys = Array.from(root.querySelectorAll('[data-k]')).map(e => e.getAttribute('data-k'));
+      expect(keys.filter((k, i) => keys.indexOf(k) !== i), gone).toEqual([]);
+      app.stop();
+      root.remove();
+    }
   });
   it('a toggle for a run the page did not receive changes nothing', async () => {
     const f = fakeDb();
