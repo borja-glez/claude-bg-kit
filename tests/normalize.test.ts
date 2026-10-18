@@ -134,6 +134,16 @@ describe('normalizePhase', () => {
   it('tolerates missing tasks', () => {
     expect(normalizePhase({ id: 'F1', tasks: 'x' })!.tasks).toEqual([]);
   });
+  it('keeps plan_status to committed or provisional: anything else is committed, the plan’s default, and reported (review T4 I1)', () => {
+    const got: string[] = [];
+    const rep = (field: string, action: string, detail: string) => { got.push(`${field} · ${action} · ${detail}`); };
+    expect(normalizePhase({ id: 'F1', tasks: [], plan_status: 'provisional' }, rep)!.plan_status).toBe('provisional');
+    expect(normalizePhase({ id: 'F1', tasks: [], plan_status: 'committed' }, rep)!.plan_status).toBe('committed');
+    expect(normalizePhase({ id: 'F1', tasks: [] }, rep)!.plan_status).toBe('committed');
+    expect(normalizePhase({ id: 'F1', tasks: [], plan_status: 'x"><img src=x onerror=alert(1)>' }, rep)!.plan_status).toBe('committed');
+    expect(normalizePhase({ id: 'F1', tasks: [], plan_status: 7 }, rep)!.plan_status).toBe('committed');
+    expect(got).toEqual(['plan_status · coerced · string', 'plan_status · coerced · number']);
+  });
 });
 
 describe('normalizeState', () => {

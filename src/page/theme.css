@@ -457,7 +457,9 @@ button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-
 .plh .pv,.plh .c,.pcat .c{font:11px 'JetBrains Mono',monospace;color:var(--o1)}
 .plh .seg{flex:1 1 120px;max-width:260px}
 .plh .c{margin-left:auto}
-.goal{margin:0 10px 8px 26px;font-size:13px;color:var(--sub1);overflow-wrap:anywhere}
+/* An id, a version, a track or a stage of up to 64 characters with no break point wraps instead of widening a 390 px page. */
+.plh .k,.plh .pv,.pr .k,.pr .tag,.pr .fm{min-width:0;overflow-wrap:anywhere}
+.plp .goal{margin:0 10px 8px 26px;font-size:13px;color:var(--sub1);overflow-wrap:anywhere}
 .plt{border-top:1px solid var(--s0);padding:4px 6px 6px}
 .pcat{display:flex;align-items:baseline;gap:6px;margin:8px 4px 2px}
 .pcat .lbl{margin:0;min-width:0;overflow-wrap:anywhere}

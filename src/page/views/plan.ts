@@ -9,10 +9,14 @@ import { phaseName } from '../../lib/timeline.js';
 import type { PlanStatus, PlanTask, TaskState, TaskStatus } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
 import type { Dict } from '../i18n.js';
-import { esc, eviMark, isOrphan, num, safeStatus, trackTag, versionTable } from '../html.js';
+import { esc, eviMark, isOrphan, labelOf, num, safeStatus, trackTag, versionTable } from '../html.js';
 import { PLAN_FORGE_KEYS, PLAN_TASK_KEYS, type Model, type PlanFilter, type PlanForgeKey, type PlanTaskKey, type UiState } from '../model.js';
 
-const PH_ICON: Record<'done' | 'in_progress' | 'committed' | 'provisional', string> = { done: '✓', in_progress: '◉', committed: '▣', provisional: '○' };
+type PhaseState = 'done' | 'in_progress' | 'committed' | 'provisional';
+const PH_ICON: Record<PhaseState, string> = { done: '✓', in_progress: '◉', committed: '▣', provisional: '○' };
+/** A phase's state as its class names take it: one of the four, whatever a phase document said (review T4 I1; the
+ *  normalizer already keeps plan_status to committed or provisional). */
+const phaseState = (s: unknown): PhaseState => (typeof s === 'string' && Object.hasOwn(PH_ICON, s) ? (s as PhaseState) : 'committed');
 const ST_ICON: Record<TaskStatus, string> = { free: '○', claimed: '◎', in_progress: '◉', blocked: '⚠', done: '✓', orphaned: '?' };
 const PHASE_KEYS: readonly PlanStatus[] = ['committed', 'provisional'];
 const NO_FILTER: PlanFilter = { tasks: [], phases: [], forge: [], track: null };
@@ -113,19 +117,29 @@ export function renderPlanView(m: Model, d: Dict, ui: UiState, dv: Derived): str
     .filter(p => !f.phases.length || f.phases.includes(p.plan_status))
     .map(p => { const all = m.plan.tasks.filter(t => t.phase === p.id); return { p, all, shown: filtering ? all.filter(match) : all }; })
     .filter(y => !filtering || y.shown.length);
+  // Review T4 M2: a task whose phase names none of the plan (phase documents out of step) is still listed, last, under
+  // «Sin fase», open and without a fold, so the counters, which go over every task, match what the list can show. It has
+  // no plan status: a filter by the phase's status leaves it out, as it leaves out the phases of the other status.
+  const known = new Set(m.plan.phases.map(p => p.id));
+  const stray = m.plan.tasks.filter(t => !known.has(t.phase));
+  const strayShown = filtering ? stray.filter(match) : stray;
+  const strayGroup = strayShown.length && !f.phases.length
+    ? `<div class="plp" data-k="pl-none"><div class="plh"><span class="pn">${esc(d.plan.noPhase)}</span>${segBar(d, stray.map(t => ({ status: statusOf(m.states, t.id) })))}<span class="c">${num(stray.filter(t => statusOf(m.states, t.id) === 'done').length)}/${num(stray.length)}</span></div><div class="plt">${taskRows(m, d, strayShown, hasCats)}</div></div>`
+    : '';
   const body = phases.map(({ p, all, shown }) => {
     const b = x.byPhase[p.id] ?? { done: 0, total: all.length, status: p.plan_status };
+    const status = phaseState(b.status);
     const isOpen = filtering || open.has(p.id);
     const name = phaseName(p.id, p.name);
     const ver = versionOf.get(p.id);
-    const inner = `<span class="chev" aria-hidden="true">${isOpen ? '⌄' : '›'}</span><span class="k">${esc(p.id)}</span>${name ? ` <span class="pn">${esc(name)}</span>` : ''} <span class="pill ph-${b.status}">${PH_ICON[b.status]} ${esc(d.phaseStatus[b.status])}</span>${ver ? ` <span class="pv">${esc(versionLabel(ver))}</span>` : ''}${segBar(d, all.map(t => ({ status: statusOf(m.states, t.id) })))}<span class="c">${num(b.done)}/${num(b.total)}</span>`;
+    const inner = `<span class="chev" aria-hidden="true">${isOpen ? '⌄' : '›'}</span><span class="k">${esc(p.id)}</span>${name ? ` <span class="pn">${esc(name)}</span>` : ''} <span class="pill ph-${status}">${PH_ICON[status]} ${esc(d.phaseStatus[status])}</span>${ver ? ` <span class="pv">${esc(versionLabel(ver))}</span>` : ''}${segBar(d, all.map(t => ({ status: statusOf(m.states, t.id) })))}<span class="c">${num(b.done)}/${num(b.total)}</span>`;
     const header = filtering
       ? `<div class="plh">${inner}</div>`
       : `<button type="button" class="plh" data-action="plan-phase" data-id="${esc(p.id)}" aria-expanded="${isOpen}">${inner}</button>`;
     const goal = p.goal ? `<p class="goal">${esc(p.goal)}</p>` : '';
     const rows = isOpen && shown.length ? `<div class="plt">${taskRows(m, d, shown, hasCats)}</div>` : '';
-    return `<div class="plp ph-${b.status}" data-k="pl:${esc(p.id)}">${header}${goal}${rows}</div>`;
-  }).join('');
+    return `<div class="plp ph-${status}" data-k="pl:${esc(p.id)}">${header}${goal}${rows}</div>`;
+  }).join('') + strayGroup;
   const folds = filtering ? '' : `<div class="plc"><button type="button" class="f" data-action="plan-all" data-open="1">⌄ ${esc(d.tl.expand)}</button><button type="button" class="f" data-action="plan-all" data-open="0">⌃ ${esc(d.tl.collapse)}</button></div>`;
   const none = `<div class="muted">${esc(d.plan.none)} <button type="button" class="lnk" data-action="plan-clear">${esc(d.plan.clear)}</button></div>`;
   return `${head}<section class="plan">${filters}${folds}<div class="pll">${body || none}</div></section>`;
@@ -167,5 +181,5 @@ function forgeMini(d: Dict, s: TaskState | undefined): string {
   const stage = s?.exec?.stage ?? doc?.stage ?? f?.phase;
   if (!stage) return '';
   const round = f && typeof f.round === 'number' ? ` · r${num(f.round)}${typeof f.cap === 'number' ? `/${num(f.cap)}` : ''}` : '';
-  return `<span class="fm${doc?.overCap ? ' del' : ''}">${esc(`${d.run.stage[stage] ?? stage}${round}`)}</span>`;
+  return `<span class="fm${doc?.overCap ? ' del' : ''}">${esc(`${labelOf(d.run.stage, stage)}${round}`)}</span>`;
 }

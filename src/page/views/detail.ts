@@ -8,7 +8,7 @@ import type { ForgeDocV2 } from '../../lib/roadmap-doc.js';
 import type { ForgeV1, PlanTask, TaskState } from '../../lib/types.js';
 import { globsOverlap } from '../../lib/zones.js';
 import type { Dict } from '../i18n.js';
-import { authorLabel, esc, execLine, fmt, isOrphan, num, oneOf, pastMs, rel, roleOf, safeNote, safeStatus, trackTag } from '../html.js';
+import { authorLabel, esc, execLine, fmt, isOrphan, labelOf, num, oneOf, pastMs, rel, roleOf, safeNote, safeStatus, trackTag } from '../html.js';
 import { DETAIL_TABS, type DetailTab, type Model, type UiState } from '../model.js';
 
 const sec = (label: string, body: string) => `<div class="sec"><div class="lbl">${esc(label)}</div><div>${body}</div></div>`;
@@ -126,8 +126,8 @@ function forgeTab(d: Dict, s: TaskState, doc: ForgeDocV2 | null): string {
 }
 
 function renderForgeV2(d: Dict, f: ForgeDocV2): string {
-  const stages = Object.entries(f.stages).filter(([, secs]) => secs > 0).map(([k, secs]) => `${d.run.stage[k] ?? k} ${d.dur(secs / 60)}`).join(' · ');
-  const head = `<div class="forge mono"><div><b>${esc(d.path[f.path] ?? f.path)}</b> · ${esc(d.run.stage[f.stage] ?? f.stage)} · ${esc(d.inProgress.brief(f.brief))}${typeof f.round === 'number' ? ` · r${num(f.round)}${typeof f.cap === 'number' ? `/${num(f.cap)}` : ''}` : ''}</div>`
+  const stages = Object.entries(f.stages).filter(([, secs]) => secs > 0).map(([k, secs]) => `${labelOf(d.run.stage, k)} ${d.dur(secs / 60)}`).join(' · ');
+  const head = `<div class="forge mono"><div><b>${esc(labelOf(d.path, f.path))}</b> · ${esc(labelOf(d.run.stage, f.stage))} · ${esc(d.inProgress.brief(f.brief))}${typeof f.round === 'number' ? ` · r${num(f.round)}${typeof f.cap === 'number' ? `/${num(f.cap)}` : ''}` : ''}</div>`
     + `${f.agent ? `<div>${esc(d.forge.agent)}: ${esc(f.agent)}</div>` : ''}${stages ? `<div>${esc(d.detail.stages)}: ${esc(stages)}</div>` : ''}`
     + `${f.stage === 'stopped' ? `<div class="warn">${esc(d.run.stoppedHint)}</div>` : ''}</div>`;
   // K4-05: the accepted round, its score only in the title.
@@ -137,7 +137,7 @@ function renderForgeV2(d: Dict, f: ForgeDocV2): string {
   const rounds = f.rounds.length
     ? `<table class="rt"><thead><tr>${(['round', 'action', 'findings', 'reviewers', 'note'] as const).map(k => `<th>${esc(d.detail.roundCols[k])}</th>`).join('')}</tr></thead><tbody>${f.rounds.map(r => {
         const over = typeof f.cap === 'number' && r.brief === f.brief && r.n > f.cap;
-        return `<tr${over ? ' class="over"' : ''}><td>${num(r.brief)}·${num(r.n)}</td><td>${esc(d.action[r.action] ?? r.action)}</td><td>${num(r.findings.critical)} C · ${num(r.findings.important)} I · ${num(r.findings.minor)} m</td><td>${esc(r.reviewers.join(', ') || '—')}</td><td>${esc(r.note)}</td></tr>`;
+        return `<tr${over ? ' class="over"' : ''}><td>${num(r.brief)}·${num(r.n)}</td><td>${esc(labelOf(d.action, r.action))}</td><td>${num(r.findings.critical)} C · ${num(r.findings.important)} I · ${num(r.findings.minor)} m</td><td>${esc(r.reviewers.join(', ') || '—')}</td><td>${esc(r.note)}</td></tr>`;
       }).join('')}</tbody></table>`
     : '—';
   const vals = f.validators.length

@@ -104,8 +104,11 @@ export function normalizePhase(x: unknown, report?: Report): PhaseDoc | null {
     id: x.id,
     name: str(x.name),
     order: typeof x.order === 'number' && Number.isFinite(x.order) ? x.order : 0,
+    // The plan's own default (plan.ts: committed); any other value would reach a class name in the views.
+    plan_status: x.plan_status === 'provisional' ? 'provisional' : 'committed',
     tasks: keepAll(arr(x.tasks), (t): t is Obj => isObj(t) && typeof t.id === 'string' && typeof t.title === 'string', 'tasks', report).map(normalizeTask),
   };
+  if (x.plan_status !== undefined && x.plan_status !== 'committed' && x.plan_status !== 'provisional') report?.('plan_status', 'coerced', kindOf(x.plan_status));
   // G-25: the phase's goal, one clean line of at most 300 code points (carry 8); anything else is dropped and reported.
   const goal = typeof x.goal === 'string' ? cleanText(x.goal, 300) : '';
   if (goal) out.goal = goal;

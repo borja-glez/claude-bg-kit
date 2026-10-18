@@ -3,7 +3,7 @@
 import { liveness, sessionLiveness } from '../../lib/coordination.js';
 import { LOOSE_STATUSES, type RunDoc } from '../../lib/types.js';
 import type { Dict } from '../i18n.js';
-import { esc, liveDot, oneOf, pastMs, rel } from '../html.js';
+import { esc, labelOf, liveDot, oneOf, pastMs, rel } from '../html.js';
 import type { Model } from '../model.js';
 
 export function renderRunsView(m: Model, d: Dict): string {
@@ -24,7 +24,7 @@ function renderRunBlock(m: Model, d: Dict): string {
     const since = pastMs(s.since, m.now);
     const title = task?.title ?? r.loose.find(x => x.id === s.task)?.title ?? '';
     const head = `${liveDot(l)} <span class="pe">${esc(s.task)}</span> ${esc(title)}`;
-    const line = `${esc(d.run.stage[s.stage] ?? s.stage)}${s.agent ? ` · ${esc(s.agent)}` : ''}${since !== null ? ` · ${rel(d, 'lasts', s.since, m.now)}` : ''}`;
+    const line = `${esc(labelOf(d.run.stage, s.stage))}${s.agent ? ` · ${esc(s.agent)}` : ''}${since !== null ? ` · ${rel(d, 'lasts', s.since, m.now)}` : ''}`;
     // G-15: a plan task's slot opens its detail, so it is a button; a loose task has no detail.
     return task
       ? `<button type="button" class="sc slot" data-action="open-task" data-id="${esc(s.task)}" data-k="slot:${esc(s.task)}"><span class="sh">${head}</span><span class="mono">${line}</span></button>`
@@ -49,7 +49,7 @@ function renderLoose(m: Model, d: Dict): string {
   const rows = r.loose.map(t => {
     const status = oneOf(LOOSE_STATUSES, t.status, 'queued');
     const finished = status === 'integrated' || status === 'conflict' || status === 'blocked';
-    const parts = [d.run.looseStatus[status], t.stage ? d.run.stage[t.stage] ?? t.stage : null, t.agent, finished && t.seconds !== undefined ? (t.seconds < 60 ? d.tookUnderMin : d.took(Math.floor(t.seconds / 60))) : null];
+    const parts = [d.run.looseStatus[status], t.stage ? labelOf(d.run.stage, t.stage) : null, t.agent, finished && t.seconds !== undefined ? (t.seconds < 60 ? d.tookUnderMin : d.took(Math.floor(t.seconds / 60))) : null];
     return `<li class="lt st-${status}">${liveDot(l)} <span class="k">${esc(t.id)}</span> <span class="lab">${esc(t.title)}</span> <span class="mono">${parts.filter(Boolean).map(p => esc(String(p))).join(' · ')}</span></li>`;
   }).join('');
   return `<section class="loose card"><div class="lbl">${esc(d.run.looseTitle)} (${r.loose.length})</div><ul class="lts">${rows}</ul></section>`;

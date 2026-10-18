@@ -28,6 +28,9 @@ export const safeNote = (t: unknown): NoteType => ((NOTE_TYPES as readonly strin
 export const oneOf = <T extends string>(list: readonly T[], v: unknown, dflt: T): T => ((list as readonly string[]).includes(v as string) ? (v as T) : dflt);
 export const clip = (t: string, n: number): string => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 export const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+/** The label a map of the dictionary gives a value from the database, else the value itself. Only the map's own keys
+ *  count: a value like `toString` or `constructor` never reads a function off the prototype (review T4 M1). */
+export const labelOf = (map: Readonly<Record<string, string>>, key: string): string => (Object.hasOwn(map, key) ? map[key]! : key);
 
 /** G-01: the kinds of relative text the 30 s tick rewrites in place. */
 export type RelKind = 'ago' | 'lasts' | 'hb' | 'dur';
@@ -57,7 +60,7 @@ export function roleOf(m: Model, st: TaskState): 'coordinator' | 'executor' | 'm
 export function execLine(m: Model, d: Dict, exec: NonNullable<TaskState['exec']>, role: ReturnType<typeof roleOf> = null): string {
   const l = liveness(m.now, exec.leaseUntil);
   const since = pastMs(exec.since, m.now);
-  const parts = [role ? d.run.role[role] : null, d.run.mode[exec.mode] ?? exec.mode, exec.agent, d.run.stage[exec.stage] ?? exec.stage];
+  const parts = [role ? d.run.role[role] : null, labelOf(d.run.mode, exec.mode), exec.agent, labelOf(d.run.stage, exec.stage)];
   return `${liveDot(l)} ${parts.filter(Boolean).map(p => esc(String(p))).join(' · ')}${since !== null ? ` · ${rel(d, 'lasts', exec.since, m.now)}` : ''}`;
 }
 

@@ -9,7 +9,7 @@ import type { Derived } from '../derive.js';
 import type { Dict } from '../i18n.js';
 import { MAX_NOTE } from '../../lib/notes.js';
 import type { Need } from '../needs.js';
-import { authorLabel, escalatedSessions, esc, eviMark, fmt, hhmm, ICON, isOrphan, liveDot, num, pastMs, rel, roleOf, safeNote, safeType, trackTag, versionTable } from '../html.js';
+import { authorLabel, escalatedSessions, esc, eviMark, fmt, hhmm, ICON, isOrphan, labelOf, liveDot, num, pastMs, rel, roleOf, safeNote, safeType, trackTag, versionTable } from '../html.js';
 import type { Model, UiState } from '../model.js';
 
 export function renderSummary(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
@@ -93,7 +93,7 @@ function renderNow(m: Model, d: Dict, dv: Derived): string {
 }
 
 const runHead = (d: Dict, r: RunDoc): string =>
-  (r.kind === 'ephemeral' ? d.inProgress.looseHead : d.inProgress.runHead)(r.runId, d.run.mode[r.mode] ?? r.mode, r.slots.length, r.parallel, r.coordinator, r.branch);
+  (r.kind === 'ephemeral' ? d.inProgress.looseHead : d.inProgress.runHead)(r.runId, labelOf(d.run.mode, r.mode), r.slots.length, r.parallel, r.coordinator, r.branch);
 
 function nowRow(m: Model, d: Dict, t: PlanTask): string {
   const st: TaskState = m.states[t.id] ?? { status: 'in_progress' };
@@ -110,7 +110,7 @@ function nowRow(m: Model, d: Dict, t: PlanTask): string {
   const sid = ex?.by ?? st.owner;
   return `<button type="button" class="nr${orphan ? ' orphan' : ''}" data-action="open-task" data-id="${esc(t.id)}" data-k="t:${esc(t.id)}">`
     + `<span class="c-task"><span class="k">${esc(t.id)}</span> ${esc(t.title)}${orphan ? ` <span class="pill orphan">${esc(d.run.orphan)}</span>` : ''}${eviMark(m, d, t.id)}</span>`
-    + `<span class="c-stage">${liveDot(l)} ${esc(stage ? d.run.stage[stage] ?? stage : '—')}</span>`
+    + `<span class="c-stage">${liveDot(l)} ${esc(stage ? labelOf(d.run.stage, stage) : '—')}</span>`
     + `<span class="c-round">${round}</span>`
     + `<span class="c-val">${validators(st)}</span>`
     + `<span class="c-time">${timeOf(m, d, st)}</span>`
@@ -147,7 +147,7 @@ function looseRow(m: Model, d: Dict, r: RunDoc, x: RunDoc['loose'][number]): str
   const coord = m.sessions[r.coordinator];
   const l = coord ? sessionLiveness(coord, m.now) : 'stopped';
   return `<div class="nr lt"><span class="c-task"><span class="k">${esc(x.id)}</span> ${esc(x.title)}</span>`
-    + `<span class="c-stage">${liveDot(l)} ${esc(x.stage ? d.run.stage[x.stage] ?? x.stage : '—')}</span><span class="c-round">—</span><span class="c-val">—</span><span class="c-time">—</span>`
+    + `<span class="c-stage">${liveDot(l)} ${esc(x.stage ? labelOf(d.run.stage, x.stage) : '—')}</span><span class="c-round">—</span><span class="c-val">—</span><span class="c-time">—</span>`
     + `<span class="c-agent">${esc(x.agent ?? '—')}</span><span class="c-who">${esc(d.run.role.coordinator)} · ${esc(r.coordinator)}</span></div>`;
 }
 

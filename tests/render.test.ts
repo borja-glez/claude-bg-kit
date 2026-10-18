@@ -5,7 +5,7 @@ import { buildDocs } from '../src/lib/sync.js';
 import { dictFor } from '../src/page/i18n.js';
 import { esc, openGroups, parsePlanFilter, phasesInProgress, planFilterKeys, relText, renderApp, timelineSvg, timelineWindow, togglePlanFilter, VIEWS, type Model, type UiState } from '../src/page/render.js';
 import { fitWindow } from '../src/lib/timeline.js';
-import type { MessageDoc, EventType, NoteDoc, PlanTrack, TaskStatus } from '../src/lib/types.js';
+import type { MessageDoc, EventType, NoteDoc, PlanStatus, PlanTrack, TaskStatus } from '../src/lib/types.js';
 import { proposalDigest, type ApprovalDoc, type ProposalDoc } from '../src/lib/proposals.js';
 import { unmarked, unmarkedReason } from '../src/page/html.js';
 
@@ -382,15 +382,64 @@ describe('the plan view (G-09, H-18, G-11)', () => {
   });
 
   it('escapes hostile plan values in the plan view (Review Focus 5)', () => {
-    const h = { ...base(), plan: { ...plan, versions: [{ id: HOSTILE, phases: ['F1'], target: '2026-10-12' }], phases: plan.phases.map(p => ({ ...p, name: HOSTILE, goal: HOSTILE })),
+    const h = { ...base(), plan: { ...plan, versions: [{ id: HOSTILE, phases: ['F1'], target: '2026-10-12' }], phases: plan.phases.map(p => ({ ...p, name: HOSTILE, goal: HOSTILE, plan_status: HOSTILE as PlanStatus })),
       tasks: plan.tasks.map(t => ({ ...t, title: HOSTILE, category: HOSTILE })) } };
-    clean(renderApp(h, ui({ view: 'plan', planOpen: new Set(['F1', 'F2']) })));
+    const html = renderApp(h, ui({ view: 'plan', planOpen: new Set(['F1', 'F2']) }));
+    clean(html);
+    // Review T4 I1: a phase status that is none of the four never reaches a class name; F2 (not started) reads as committed.
+    expect([...html.matchAll(/class="plp ([^"]*)"/g)].map(x => x[1])).toEqual(['ph-in_progress', 'ph-committed']);
+    expect(html).toContain('<span class="pill ph-committed">▣ Comprometida</span>');
+    expect(html).not.toContain('undefined');
+  });
+
+  it('a task whose phase names none of the plan is listed under «Sin fase», so the counts match the rows (review T4 M2)', () => {
+    const m = { ...base(), plan: { ...plan, tasks: [...plan.tasks, { ...plan.tasks[2]!, id: 'T007', title: 'Huérfana', phase: 'F9', depends_on: [] }] } };
+    const html = renderApp(m, ui({ view: 'plan', planOpen: new Set(['F1', 'F2']) }));
+    expect(rowsOf(html)).toEqual(['T001', 'T002', 'T003', 'T004', 'T005', 'T006', 'T007']);
+    expect(html).toContain('<div class="plp" data-k="pl-none"><div class="plh"><span class="pn">Sin fase</span>');
+    const counts = Object.fromEntries([...html.matchAll(/data-action="plan-filter" data-key="(\w+)" aria-pressed="false">[^<]* · (\d+)<\/button>/g)].map(x => [x[1], Number(x[2])]));
+    expect(['free', 'running', 'blocked', 'done', 'unmerged'].reduce((n, k) => n + counts[k]!, 0)).toBe(7);
+    // With the filter Libre, every free task shows, the stray one too: as many rows as the count says.
+    const free = planOf(renderApp(m, ui({ view: 'plan', planFilter: { tasks: ['free'], phases: [], forge: [], track: null } })));
+    expect(rowsOf(free)).toHaveLength(counts.free!);
+    expect(rowsOf(free)).toContain('T007');
+    // A filter by the phase's status leaves it out, as it does the phases of the other status.
+    expect(renderApp(m, ui({ view: 'plan', planFilter: { tasks: [], phases: ['committed'], forge: [], track: null } }))).not.toContain('pl-none');
+  });
+
+  it('a forge stage, action, path or mode named like a property of an object prints as written, never a function (review T4 M1)', () => {
+    const m = base();
+    const exec = { runId: 'r1', mode: 'constructor', by: 'main', stage: 'toString', since: new Date(NOW - 5 * 60000).toISOString(), leaseUntil: new Date(NOW + 5 * 60000).toISOString() } as never;
+    m.states = { ...m.states,
+      T002: { status: 'in_progress', owner: 'main', exec, forge: { path: 'constructor', phase: 'valueOf', verdict: { action: 'hasOwnProperty', score: 0.5 }, round: 1, cap: 4 } },
+      T003: { status: 'in_progress', owner: 'main', forge: { path: 'medium', phase: 'toString', round: 1 } },
+    };
+    m.run = { ...runDoc(), slots: [{ task: 'T002', stage: 'toString' as never, agent: null, by: 'main', since: new Date(NOW - 60000).toISOString() }] };
+    const pages = [
+      ...VIEWS.map(view => renderApp(m, ui({ view, layers: ['forge'], expanded: new Set(['F1']), planOpen: new Set(['F1']) }))),
+      renderApp(m, ui({ modal: 'T002', tab: 'forge' })),
+      renderApp(m, ui({ modal: 'T003', tab: 'forge' })),
+    ];
+    for (const html of pages) {
+      expect(html).not.toContain('[native code]');
+      expect(html).not.toMatch(/function \w*\(/);
+    }
+    expect(renderApp(m, ui({ view: 'plan' }))).toContain('<span class="fm">toString · r1/4</span>');
+    expect(renderApp(m, ui({ view: 'plan' }))).toContain('<span class="fm">toString · r1</span>');
   });
 
   it('theme.css: the board of versions is gone, and a row wraps instead of scrolling (§4.8)', () => {
     expect(CSS).not.toMatch(/\.vcols|\.vcol\{|\.tc\{|\.cat\{|\.vf-/);
     expect(cssRule(CSS, '.pr')).toContain('flex-wrap:wrap');
     expect(cssRule(CSS, '.pfs')).toContain('flex-wrap:wrap');
+    // Review T4 M3: a 64-character id, version, track or stage wraps instead of widening a 390 px page.
+    for (const sel of ['.plh .k', '.plh .pv', '.pr .k', '.pr .tag', '.pr .fm']) {
+      expect(cssRule(CSS, sel), sel).toContain('overflow-wrap:anywhere');
+      expect(cssRule(CSS, sel), sel).toContain('min-width:0');
+    }
+    // Review T4 M4: the goal's rule is Plan's own.
+    expect(cssRule(CSS, '.goal')).toBe('');
+    expect(cssRule(CSS, '.plp .goal')).toContain('overflow-wrap:anywhere');
   });
 });
 

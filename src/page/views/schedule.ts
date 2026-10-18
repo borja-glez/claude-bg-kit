@@ -6,7 +6,7 @@ import { burndown, targetMs, type Burndown, type ZoneHeat } from '../../lib/insi
 import type { TaskStatus } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
 import { dictFor, type Dict } from '../i18n.js';
-import { esc, eviMark, fmt, forecastTitle, trackTag } from '../html.js';
+import { esc, eviMark, fmt, forecastTitle, labelOf, trackTag } from '../html.js';
 import type { Model, TlView, UiState } from '../model.js';
 
 export function renderScheduleView(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
@@ -115,7 +115,7 @@ function forgeBadge(m: Model, d: Dict, id: string): string {
     return ` <span class="fg ok"${title}>${esc(`✓ r${doc.acceptedRound}${counts}`)}</span>`;
   }
   const cls = v?.action === 'accept' ? 'ok' : v?.action === 'redo' ? 'del' : 'warn';
-  const label = v ? d.action[v.action] ?? v.action : doc ? d.run.stage[doc.stage] ?? doc.stage : f.phase;
+  const label = v ? labelOf(d.action, v.action) : doc ? labelOf(d.run.stage, doc.stage) : f.phase;
   return ` <span class="fg ${v ? cls : ''}"${title}>⚒ ${esc(label)}${typeof f.round === 'number' ? ` · r${f.round}${typeof f.cap === 'number' ? `/${f.cap}` : ''}` : ''}</span>`;
 }
 
