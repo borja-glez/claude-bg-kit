@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { checkSpTask, markDone, parseSpPlan, renderSpBrief, sddComplete, SpPlanError } from '../src/lib/sp-plan.js';
 import { run, type Io } from '../src/forge/cli/run.js';
@@ -131,11 +131,11 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
     expect(r.tasks.map((t: { n: number; done: boolean }) => [t.n, t.done])).toEqual([[1, true], [2, false], [3, false]]);
   });
   it('check ticks one task in the file, keeping CRLF, and is idempotent', () => {
-    expect(JSON.parse(run(['sp-plan', 'check', F, '--task', '2'], io).stdout)).toEqual({ task: 2, checked: 2 });
+    expect(JSON.parse(run(['sp-plan', 'check', F, '--task', '2'], io).stdout)).toEqual({ task: 2, checked: 2, recorded: false });
     const text = readFileSync(path.join(root, F), 'utf8');
     expect(text).toContain('- [x] **Step 3: Commit**\r\n');
     expect(text.replace(/\r\n/g, '')).not.toContain('\n');
-    expect(JSON.parse(run(['sp-plan', 'check', F, '--task', '2'], io).stdout)).toEqual({ task: 2, checked: 0 });
+    expect(JSON.parse(run(['sp-plan', 'check', F, '--task', '2'], io).stdout)).toEqual({ task: 2, checked: 0, recorded: false });
   });
   it('refuses an unknown task, a missing --task, a plan without tasks and a missing file, leaving the plan as it was', () => {
     const before = readFileSync(path.join(root, F), 'utf8');
@@ -160,6 +160,34 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
     // A workspace whose marker names another plan is not this plan's.
     writeFileSync(path.join(ws, 'plan-path'), 'docs/other/cart.md\n');
     expect(JSON.parse(run(['sp-plan', 'tasks', F], io).stdout).tasks.map((t: { done: boolean }) => t.done)).toEqual([true, false, false]);
+  });
+  it('check of a task without boxes records it in .forge/sp-done/<slug>.md, and tasks counts it done (D-17)', () => {
+    const P = 'docs/superpowers/plans/no-boxes.md';
+    writeFileSync(path.join(root, P), '# No Boxes\n\n### Task 1: a\n\nDo a.\n\n### Task 2: b\n\n- [ ] step\n');
+    const ledger = path.join(root, '.forge', 'sp-done', 'no-boxes.md');
+    expect(JSON.parse(run(['sp-plan', 'check', P, '--task', '1'], io).stdout)).toEqual({ task: 1, checked: 0, recorded: true });
+    expect(readFileSync(ledger, 'utf8')).toBe(`# SDD ledger — plan: ${P}\nTask 1: complete (forge)\n`);
+    // Once is enough: a second check records nothing new.
+    expect(JSON.parse(run(['sp-plan', 'check', P, '--task', '1'], io).stdout).recorded).toBe(true);
+    expect(readFileSync(ledger, 'utf8')).toBe(`# SDD ledger — plan: ${P}\nTask 1: complete (forge)\n`);
+    expect(readdirSync(path.join(root, '.forge', 'sp-done'))).toEqual(['no-boxes.md']);
+    expect(JSON.parse(run(['sp-plan', 'tasks', P], io).stdout).tasks.map((t: { n: number; done: boolean }) => [t.n, t.done])).toEqual([[1, true], [2, false]]);
+    // A task with boxes is ticked, as before, and not recorded.
+    expect(JSON.parse(run(['sp-plan', 'check', P, '--task', '2'], io).stdout)).toEqual({ task: 2, checked: 1, recorded: false });
+  });
+  it("another plan's record with the same file name is never read as this plan's, nor overwritten (Review Focus 4)", () => {
+    const P = 'docs/superpowers/plans/no-boxes.md';
+    writeFileSync(path.join(root, P), '# No Boxes\n\n### Task 1: a\n\nDo a.\n');
+    const dir = path.join(root, '.forge', 'sp-done');
+    mkdirSync(dir, { recursive: true });
+    const other = '# SDD ledger — plan: docs/other/no-boxes.md\nTask 1: complete (forge)\n';
+    writeFileSync(path.join(dir, 'no-boxes.md'), other);
+    const done = () => JSON.parse(run(['sp-plan', 'tasks', P], io).stdout).tasks.map((t: { done: boolean }) => t.done);
+    expect(done()).toEqual([false]);
+    expect(JSON.parse(run(['sp-plan', 'check', P, '--task', '1'], io).stdout).recorded).toBe(true);
+    expect(readFileSync(path.join(dir, 'no-boxes.md'), 'utf8')).toBe(other);
+    expect(readdirSync(dir).filter(f => /^no-boxes-[0-9a-f]{8}\.md$/.test(f))).toHaveLength(1);
+    expect(done()).toEqual([true]);
   });
   it('brief prints the brief of one task', () => {
     const r = run(['brief', '--superpowers-plan', F, '--task', '2'], io);

@@ -1,7 +1,8 @@
 // superpowers next to forge: whether it is installed for this repository and where (fail-open: anything
 // missing or unreadable means not installed), the path of one of its skills, and the specs and plans it wrote here that
 // forge has not taken yet. Reads only; never touches superpowers' cache.
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseDesign } from '../lib/design.js';
@@ -115,29 +116,59 @@ export function spSkillPath(sp: Superpowers, skill: string): string | null {
 }
 
 /**
- * The tasks of a superpowers plan its own executors recorded as complete, from `<root>/.superpowers/sdd/<slug>[-…]/
- * progress.md` under each root (the repository and its main checkout), where superpowers keeps one workspace per plan.
- * A workspace whose `plan-path` marker names another plan is skipped. Fail-open: nothing readable means none.
+ * The tasks of a superpowers plan recorded as complete under each root (the repository and its main checkout):
+ * - superpowers' own executors: `<root>/.superpowers/sdd/<slug>[-…]/progress.md`, one workspace per plan;
+ * - forge, for a task without checkboxes (D-17, sp-plan check): `<root>/.forge/sp-done/<slug>[-…].md`.
+ * A workspace whose `plan-path` marker names another plan, or a ledger whose first line names another plan, is skipped.
+ * Fail-open: nothing readable means none.
  */
 export function spLedgerDone(roots: string[], planAbs: string): number[] {
   const done = new Set<number>();
   const slug = path.basename(planAbs).replace(/\.md$/i, '');
+  const mine = (name: string) => name === slug || name.startsWith(`${slug}-`);
+  const list = (dir: string) => { try { return readdirSync(dir); } catch { return []; } };
   for (const root of [...new Set(roots.map(r => path.resolve(r)))]) {
     const rel = path.relative(root, planAbs).split(path.sep).join('/');
     if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
     const base = path.join(root, '.superpowers', 'sdd');
-    let names: string[] = [];
-    try { names = readdirSync(base); } catch { continue; }
-    for (const name of names) {
-      if (name !== slug && !name.startsWith(`${slug}-`)) continue;
+    for (const name of list(base).filter(mine)) {
       const dir = path.join(base, name);
       let marker: string | null = null;
       try { marker = readFileSync(path.join(dir, 'plan-path'), 'utf8').trim().replace(/\\/g, '/'); } catch { /* a workspace without a marker */ }
       if (marker !== null && marker !== rel) continue;
       try { for (const n of sddComplete(readFileSync(path.join(dir, 'progress.md'), 'utf8'), rel)) done.add(n); } catch { /* no ledger */ }
     }
+    const forge = path.join(root, '.forge', 'sp-done');
+    for (const name of list(forge).filter(n => n.endsWith('.md') && mine(n.slice(0, -3)))) {
+      try { for (const n of sddComplete(readFileSync(path.join(forge, name), 'utf8'), rel)) done.add(n); } catch { /* unreadable */ }
+    }
   }
   return [...done].sort((a, b) => a - b);
+}
+
+/**
+ * D-17: records `Task <n>: complete (forge)` for the plan at planAbs in <root>/.forge/sp-done/<slug>.md, an SDD ledger
+ * whose first line is `# SDD ledger — plan: <path from root>`, which sddComplete and spLedgerDone read. When that file
+ * is another plan's, it goes to <slug>-<8 hex of the sha1 of the path>.md. The file is replaced through a temporary
+ * file and a rename, so a reader never sees half of it. True when the task is recorded (now or before); false when
+ * the plan is outside root or the record cannot be written.
+ */
+export function recordSpDone(root: string, planAbs: string, n: number): boolean {
+  const rel = path.relative(root, planAbs).split(path.sep).join('/');
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+  const slug = path.basename(planAbs).replace(/\.md$/i, '');
+  const header = `# SDD ledger — plan: ${rel}`;
+  const dir = path.join(root, '.forge', 'sp-done');
+  const read = (f: string) => { try { return readFileSync(f, 'utf8'); } catch { return null; } };
+  const file = [path.join(dir, `${slug}.md`), path.join(dir, `${slug}-${createHash('sha1').update(rel).digest('hex').slice(0, 8)}.md`)]
+    .find(f => { const t = read(f); return t === null || t.split(/\r?\n/)[0].trim() === header; });
+  if (!file) return false;
+  const text = read(file);
+  if (text !== null && sddComplete(text, rel).includes(n)) return true;
+  const next = `${text === null ? `${header}\n` : text.endsWith('\n') ? text : `${text}\n`}Task ${n}: complete (forge)\n`;
+  const tmp = `${file}.${process.pid}.tmp`;
+  try { mkdirSync(dir, { recursive: true }); writeFileSync(tmp, next); renameSync(tmp, file); } catch { return false; } finally { rmSync(tmp, { force: true }); }
+  return true;
 }
 
 /** When git last committed a repo-relative file, in ms, or null when git does not track it. */

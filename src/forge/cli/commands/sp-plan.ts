@@ -2,7 +2,9 @@ import type { Command } from '../context.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { UsageError } from '../errors.js';
-import { checkSpTask, SpPlanError } from '../../../lib/sp-plan.js';
+import { checkSpTask, parseSpPlan, SpPlanError } from '../../../lib/sp-plan.js';
+import { mainCheckout } from '../../local.js';
+import { recordSpDone } from '../../superpowers.js';
 import { spPlanDone, spTaskNumber } from '../shared.js';
 
 export const command: Command = (args, ctx) => {
@@ -17,7 +19,11 @@ export const command: Command = (args, ctx) => {
     const n = spTaskNumber(flag('task'));
     const r = checkSpTask(text, n);
     if (r.checked) writeFileSync(abs, r.text);
-    return json({ task: n, checked: r.checked });
+    // D-17: a task without checkboxes is recorded as complete in forge's own ledger (.forge/sp-done/ of the main
+    // checkout), which sp-plan tasks, the triage and spPlans read; a task with them is ticked as before.
+    const boxes = parseSpPlan(text).tasks.find(t => t.n === n)?.steps ?? 0;
+    const recorded = boxes === 0 && recordSpDone(mainCheckout(io.cwd), abs, n);
+    return json({ task: n, checked: r.checked, recorded });
   } catch (e) {
     if (e instanceof SpPlanError) throw new UsageError(`sp-plan: ${file}: ${e.message}`);
     throw e;
