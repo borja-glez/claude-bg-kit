@@ -81,6 +81,12 @@ const en = {
     none: 'No task matches the filters.',
     empty: 'The plan has no tasks yet: /waypoint:plan creates them.',
   },
+  sessions: {
+    group: (id: string) => `Run ${id}`, noRun: 'Without a run', running: 'running', ended: 'ended',
+    count: (n: number) => pluralIn('en')(n, { one: '# session', other: '# sessions' }),
+    tasks: 'Tasks', slots: 'Slots', free: (n: number) => pluralIn('en')(n, { one: '# free', other: '# free' }),
+    none: 'No sessions yet: they show up when someone works with /waypoint:work or starts /forge:run.',
+  },
   inProgress: {
     title: 'In progress',
     cols: { task: 'Task', stage: 'Stage', round: 'Round', validators: 'Validators', time: 'Time', agent: 'Agent', who: 'Who' },
@@ -170,7 +176,7 @@ const en = {
   forge: { title: 'forge', agent: 'Agent', validators: 'Validators', verdict: 'Verdict', round: 'Round', noResult: 'no result' },
   run: {
     pill: (mode: string, n: number, max: number) => `▶ execution · ${mode} ${n}/${max}`, silentSince: (t: string) => `no signal since ${t}`, stoppedSince: (t: string) => `stopped since ${t}`,
-    title: 'Execution', slots: (n: number, max: number) => `${n}/${max} slots`, coordinator: 'coordinator', free: 'free',
+    slots: (n: number, max: number) => `${n}/${max} slots`,
     role: { coordinator: 'coordinator', executor: 'executor', manual: 'manual' }, orphan: 'No executor', lastSignal: (t: string) => `stopped · last signal ${t}`,
     mode: { subagents: 'subagents', sessions: 'sessions', manual: 'by hand' } as Record<string, string>,
     stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', triage: 'triage', done: 'done', blocked: 'blocked', stopped: 'stopped' } as Record<string, string>,
@@ -181,7 +187,7 @@ const en = {
   },
   infinite: (n: number, max?: number) => `∞ cycle ${n}${max ? `/${max}` : ''}`,
   byTrack: 'By track',
-  needsDecision: 'Needs your decision', threads: 'Threads', noSessions: 'No sessions yet',
+  needsDecision: 'Needs your decision', threads: 'Threads',
   msgType: { overlap_warning: 'overlap warning', handoff_request: 'handoff request', delegate: 'delegation', reply: 'reply', escalation: 'escalation' } as Record<MessageType, string>,
   version: 'Version', phase: 'Phase', of: 'of', tasks: 'tasks', tracks: 'tracks', trackHelp: 'Track: a line of work that moves forward in parallel, with its own session, worktree and branch', tests: 'tests', lastCommit: 'last commit',
   versionNow: 'Version in progress', planVersion: 'plan version',
@@ -265,6 +271,12 @@ const es: Dict = {
     noPhase: 'Sin fase',
     none: 'Ninguna tarea coincide con los filtros.',
     empty: 'El plan aún no tiene tareas: /waypoint:plan las crea.',
+  },
+  sessions: {
+    group: (id: string) => `Ejecución ${id}`, noRun: 'Sin ejecución', running: 'en marcha', ended: 'terminada',
+    count: (n: number) => pluralIn('es')(n, { one: '# sesión', other: '# sesiones' }),
+    tasks: 'Tareas', slots: 'Plazas', free: (n: number) => pluralIn('es')(n, { one: '# libre', other: '# libres' }),
+    none: 'Aún no hay sesiones: aparecen cuando alguien trabaja con /waypoint:work o lanza /forge:run.',
   },
   inProgress: {
     title: 'En curso',
@@ -355,7 +367,7 @@ const es: Dict = {
   forge: { title: 'forge', agent: 'Agente', validators: 'Validadores', verdict: 'Veredicto', round: 'Ronda', noResult: 'sin resultado' },
   run: {
     pill: (mode: string, n: number, max: number) => `▶ ejecución · ${mode} ${n}/${max}`, silentSince: (t: string) => `sin señal desde ${t}`, stoppedSince: (t: string) => `parada desde ${t}`,
-    title: 'Ejecución', slots: (n: number, max: number) => `${n}/${max} plazas`, coordinator: 'coordinadora', free: 'libre',
+    slots: (n: number, max: number) => `${n}/${max} plazas`,
     role: { coordinator: 'coordinadora', executor: 'ejecutora', manual: 'manual' }, orphan: 'Sin ejecutor', lastSignal: (t: string) => `parada · última señal ${t}`,
     mode: { subagents: 'subagentes', sessions: 'sesiones', manual: 'a mano' } as Record<string, string>,
     stage: { brief: 'brief', implement: 'implementar', validate: 'validar', verify: 'verificar', review: 'revisar', verdict: 'veredicto', integrate: 'integrar', triage: 'triaje', done: 'hecha', blocked: 'bloqueada', stopped: 'parada' } as Record<string, string>,
@@ -366,7 +378,7 @@ const es: Dict = {
   },
   infinite: (n: number, max?: number) => `∞ ciclo ${n}${max ? `/${max}` : ''}`,
   byTrack: 'Por frentes',
-  needsDecision: 'Necesita tu decisión', threads: 'Hilos', noSessions: 'Aún no hay sesiones',
+  needsDecision: 'Necesita tu decisión', threads: 'Hilos',
   msgType: { overlap_warning: 'aviso de solape', handoff_request: 'petición de traspaso', delegate: 'delegación', reply: 'respuesta', escalation: 'escalado' },
   version: 'Versión', phase: 'Fase', of: 'de', tasks: 'tareas', tracks: 'frentes', trackHelp: 'Frente: línea de trabajo que avanza en paralelo, con su propia sesión, worktree y rama', tests: 'tests', lastCommit: 'último commit',
   versionNow: 'Versión en curso', planVersion: 'versión del plan',

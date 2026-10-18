@@ -134,7 +134,7 @@ html.wp-modal,html.wp-modal body{overflow:hidden}
 .sc.idle{opacity:.6}
 .sc h3{font-family:'Barlow Condensed',sans-serif;font-size:20px;margin:0;display:flex;align-items:center;gap:8px}
 .sc .dot{color:var(--green)} .sc.idle .dot{color:var(--o0)}
-.sc .kv dd{overflow-wrap:anywhere}
+.sc .kv dd{text-align:left;overflow-wrap:anywhere}
 .pe{color:var(--peach)} .ye{color:var(--yellow)}
 .thread{margin-top:10px;border-top:1px solid var(--s0);padding-top:8px}
 .msg{font-size:11.5px;padding:6px 8px;border-radius:5px;background:var(--base);margin-bottom:5px;border-left:3px solid currentColor;color:var(--sub1);overflow-wrap:anywhere}
@@ -485,3 +485,16 @@ button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-
 .rtb{display:block;width:100%;padding:3px 4px;border-radius:4px;text-align:left;font-size:12.5px;color:var(--sub1);overflow-wrap:anywhere}
 .rs-integrated{color:var(--green)} .rs-blocked,.rs-conflict{color:var(--yellow)} .rs-stopped{color:var(--red)}
 @media (pointer:coarse){.rhb,button.rtb{min-height:40px}}
+
+/* ---- Sessions (§4.6.6; G-04, G-10, H-23) ---- */
+.sgrp{margin-top:12px}
+.sgrp>summary,.sidle>summary{cursor:pointer;padding:4px 0}
+.sgrp>summary .lbl{display:inline;margin:0}
+.sgrp>summary:focus-visible,.sidle>summary:focus-visible{outline:2px solid var(--lavender);outline-offset:2px}
+.sgrp>.sgrid{margin-top:6px}
+.sidle{margin-top:10px}
+.sidle>summary{font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:.08em;color:var(--o1)}
+.stk{display:flex;align-items:baseline;gap:6px;margin-bottom:2px;overflow-wrap:anywhere}
+.slots{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
+.slots .sl{font-size:12px;overflow-wrap:anywhere}
+.slots .sl .mono{display:block}

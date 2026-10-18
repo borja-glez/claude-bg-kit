@@ -2018,3 +2018,68 @@ describe('the runs view (G-07, §4.3, H-24)', () => {
     expect(h).toContain(`data-k="run:${esc(odd.runId)}"`);
   });
 });
+
+describe('the sessions view (G-04, G-10, H-23)', () => {
+  const at = (min: number) => new Date(NOW + min * 60000).toISOString();
+  it('a session lists every task it runs, by its exec or as owner, whatever currentTask says (G-10)', () => {
+    const m = base();
+    const exec = (by: string) => ({ runId: 'r1', mode: 'subagents' as const, by, stage: 'implement' as const, since: at(-5), leaseUntil: at(5) });
+    m.states = { T001: { status: 'in_progress', exec: exec('main') }, T002: { status: 'in_progress', exec: exec('main') }, T003: { status: 'claimed', owner: 'main' }, T004: { status: 'done', owner: 'main' } };
+    m.sessions.main = { ...m.sessions.main, currentTask: 'T005', role: 'coordinator' };
+    const html = renderApp(m, ui({ view: 'sessions' }));
+    expect([...html.matchAll(/data-action="open-task" data-id="(T\d+)" data-k="ts:/g)].map(x => x[1])).toEqual(['T001', 'T002', 'T003']);
+    expect(html).toContain('<div class="stk"><button type="button" class="chip st-in_progress" data-action="open-task" data-id="T001" data-k="ts:main:T001">T001</button> Esquema de pedidos</div>');
+    expect(html).not.toContain('T005');
+  });
+  it('groups the sessions by run: the active one first and open, an ended one folded, «Sin ejecución» last with its stopped sessions folded apart (G-04)', () => {
+    const m = base();
+    m.run = runDoc();
+    m.runs = [runSummary({ runId: 'r0' })];
+    m.sessions = {
+      main: { name: 'main', heartbeatAt: at(0), leaseUntil: at(5), status: 'active', role: 'coordinator', runId: 'r1' },
+      ex0: { name: 'ex0', heartbeatAt: at(-60), leaseUntil: at(-50), status: 'active', role: 'executor', runId: 'r0' },
+      ana: { name: 'ana', heartbeatAt: at(0), leaseUntil: at(5), status: 'active', role: 'manual' },
+      old: { name: 'old', heartbeatAt: '2026-10-01T10:00:00Z', status: 'idle' },
+    };
+    const html = renderApp(m, ui({ view: 'sessions' }));
+    const groups = [...html.matchAll(/<details class="sgrp" data-k="sg:([^"]+)"( open)?>/g)].map(x => `${x[1]}${x[2] ?? ''}`);
+    expect(groups).toEqual(['r1 open', 'r0', '_none open']);
+    expect(html).toContain('Ejecución r1 · en marcha · 1 sesión');
+    expect(html).toContain('Ejecución r0 · terminada · 1 sesión');
+    expect(html).toContain('Sin ejecución · 2 sesiones');
+    expect(html).toMatch(/<details class="sidle" data-k="si:_none"><summary>\+1 inactiva<\/summary>/);
+  });
+  it('the coordinator of the active run lists its slots and the free ones, and the values of a card are aligned to the left (H-23)', () => {
+    const m = base();
+    m.run = runDoc();
+    m.sessions.main = { ...m.sessions.main, role: 'coordinator', runId: 'r1', leaseUntil: at(5) };
+    const html = renderApp(m, ui({ view: 'sessions' }));
+    expect(html).toContain('<dt>Plazas</dt><dd>1/3 plazas · 2 libres<ul class="slots">');
+    expect(html).toMatch(/<li class="sl"><span class="dot live-alive">●<\/span> <button type="button" class="chip st-in_progress" data-action="open-task" data-id="T002" data-k="slot:T002">T002<\/button> API de pedidos <span class="mono">implementar · forge-impl-heavy · <span data-rel="lasts"/);
+    expect(cssRule(CSS, '.sc .kv dd')).toContain('text-align:left');
+  });
+  it('a slot reads its time as a duration; an invalid or future since shows none', () => {
+    const m = base();
+    m.sessions.main = { ...m.sessions.main, role: 'coordinator', leaseUntil: at(5) };
+    const slotOf = (html: string) => { const i = html.indexOf('<li class="sl">'); return html.slice(i, html.indexOf('</li>', i)); };
+    m.run = runDoc();
+    expect(slotOf(renderApp(m, ui({ view: 'sessions' })))).toContain('lleva 7 min');
+    m.run = runDoc({ slots: [{ task: 'T002', stage: 'implement' as const, agent: null, by: 'main', since: at(30) }] });
+    const future = slotOf(renderApp(m, ui({ view: 'sessions' })));
+    expect(future).toContain('T002');
+    expect(future).not.toContain('lleva');
+    m.run = runDoc({ slots: [{ task: 'T002', stage: 'implement' as const, agent: null, by: 'main', since: 'garbage' }] });
+    const junk = slotOf(renderApp(m, ui({ view: 'sessions' })));
+    expect(junk).toContain('T002');
+    expect(junk).not.toContain('lleva');
+    expect(junk).not.toContain('NaN');
+  });
+  it('with no session it says when they show up (H-24)', () => {
+    expect(renderApp({ ...base(), sessions: {} }, ui({ view: 'sessions' }))).toContain('Aún no hay sesiones: aparecen cuando alguien trabaja con /waypoint:work o lanza /forge:run.');
+  });
+  it('escapes a run id and the name of a session (Review Focus 5)', () => {
+    const m = base();
+    m.sessions = { [HOSTILE]: { name: HOSTILE, heartbeatAt: at(0), leaseUntil: at(5), status: 'active', role: 'executor', runId: HOSTILE, branch: HOSTILE } };
+    clean(renderApp(m, ui({ view: 'sessions' })));
+  });
+});
