@@ -398,13 +398,14 @@ export function run(argv: string[], io: Io): Result {
         // claude's output goes to a log in the main checkout: it says why a session did not start.
         if (args.includes('--exec')) {
           const log = path.join(root, '.waypoint', p.project, 'launch', `${name}.log`);
-          mkdirSync(path.dirname(log), { recursive: true });
-          const fd = openSync(log, 'w');
+          let fd: number | undefined;
           try {
+            mkdirSync(path.dirname(log), { recursive: true });
+            fd = openSync(log, 'w');
             (io.spawn ?? nodeSpawn)(command, { cwd: worktree, detached: true, shell: true, windowsHide: true, stdio: ['ignore', fd, fd] }).unref();
           } catch (e) {
             return fail(`launch --exec: ${(e as Error).message}`, 1);
-          } finally { closeSync(fd); }
+          } finally { if (fd !== undefined) closeSync(fd); }
           return ok(JSON.stringify({ launched: true, worktree, branch, name, prompt, log }));
         }
         const done = ok(JSON.stringify({ worktree, branch, name, prompt, command, run: inWorktree }));

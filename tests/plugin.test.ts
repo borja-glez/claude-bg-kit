@@ -1859,7 +1859,7 @@ describe('plugin layout', () => {
     }
     const GIT: Record<string, string[]> = {
       design: ['Bash(git add *)', 'Bash(git commit *)', 'Bash(git status *)', 'Bash(git diff *)', 'Bash(git log *)'],
-      launch: ['Bash(git status *)', 'Bash(git worktree list *)'],
+      launch: ['Bash(git status *)', 'Bash(git worktree list *)', 'Bash(git add *)', 'Bash(git commit *)'],
       plan: ['Bash(git worktree list *)', 'Bash(git add *)', 'Bash(git commit *)', 'Bash(git status *)'],
       work: ['Bash(git status *)', 'Bash(git diff *)', 'Bash(git log *)', 'Bash(git add *)', 'Bash(git commit *)', 'Bash(git rev-parse *)', 'Bash(git symbolic-ref *)',
         'Bash(git worktree list *)', 'Bash(git merge main)', 'Bash(git merge --abort)'],

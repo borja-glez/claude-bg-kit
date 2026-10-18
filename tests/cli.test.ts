@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -381,15 +381,17 @@ describe('multi-session commands', () => {
   describe('launch --exec (A-22)', () => {
     const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
     const init = () => { git('init', '-q', '-b', 'main'); git('add', '.'); git('commit', '-qm', 'init'); };
-    type Call = { command: string; options: { cwd: string; detached: boolean; shell: boolean } };
+    type Call = { command: string; options: unknown };
     it('starts claude --bg itself, detached and in the worktree, and keeps its output in a log', () => {
       init();
       const calls: Call[] = [];
-      const r = run(['launch', 'plan.yaml', 'ui', '--exec'], { ...io, spawn: (command, options) => { calls.push({ command, options }); return { unref: () => undefined }; } });
+      const unref = vi.fn();
+      const r = run(['launch', 'plan.yaml', 'ui', '--exec'], { ...io, spawn: (command, options) => { calls.push({ command, options }); return { unref }; } });
       expect(r.code).toBe(0);
       const out = JSON.parse(r.stdout);
       expect(out).toMatchObject({ launched: true, branch: 'track/ui', name: 'wp-demo-shop-ui', prompt: '/waypoint:work ui' });
-      expect(calls).toEqual([{ command: 'claude --bg --name wp-demo-shop-ui "/waypoint:work ui"', options: expect.objectContaining({ cwd: out.worktree, detached: true, shell: true }) }]);
+      expect(calls).toEqual([{ command: 'claude --bg --name wp-demo-shop-ui "/waypoint:work ui"', options: { cwd: out.worktree, detached: true, shell: true, windowsHide: true, stdio: ['ignore', expect.any(Number), expect.any(Number)] } }]);
+      expect(unref).toHaveBeenCalledTimes(1);
       expect(existsSync(out.worktree)).toBe(true);
       expect(out.log.split(path.sep).join('/')).toMatch(/\/\.waypoint\/demo-shop\/launch\/wp-demo-shop-ui\.log$/);
       expect(existsSync(out.log)).toBe(true);
