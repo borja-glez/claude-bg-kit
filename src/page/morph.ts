@@ -97,7 +97,13 @@ const placeNew = (marked: Element[], root: HTMLElement, next: HTMLElement): Set<
   return placed;
 };
 
-/** The children of `root` become those of `html`. Throws when morphdom does (the caller replaces everything then). */
+/** R2: a stub (sections.ts) stands for the node of the page it was matched with only when that node is the same section:
+ *  its tag, its class and its key. */
+const sameSection = (from: Element, stub: Element): boolean =>
+  from.tagName === stub.tagName && nodeKey(from) === nodeKey(stub) && from.getAttribute('class') === stub.getAttribute('class');
+
+/** The children of `root` become those of `html`. Throws when morphdom does (the caller replaces everything then), and when a
+ *  section's stub found no node of its own in the page (R2): the caller paints the page in full then. */
 export function morphInto(root: HTMLElement, html: string): void {
   // A string would lose all but its first node: morph into a sibling element that holds the whole HTML.
   const next = root.cloneNode(false) as HTMLElement;
@@ -107,10 +113,22 @@ export function morphInto(root: HTMLElement, html: string): void {
   const marked = Array.from(root.querySelectorAll(`${KEYED},${FIELDS}`));
   const dirty = dirtyFields(marked);
   const placed = placeNew(marked, root, next);
+  let lost = false;
   morphdom(root, next, {
     childrenOnly: true,
     getNodeKey: nodeKey,
+    // R2: a stub the page has no node for would paint an empty section.
+    onNodeAdded(node) {
+      if (node.nodeType === 1 && (node as Element).hasAttribute('data-stub')) lost = true;
+      return node;
+    },
     onBeforeElUpdated(from, to) {
+      // R2: a section that did not change since it was painted: its node stays as it is, never parsed nor diffed (what the
+      // 30 s tick rewrote in it included). Matched with another node, the page is painted in full instead.
+      if (to.hasAttribute('data-stub')) {
+        if (!sameSection(from, to)) lost = true;
+        return false;
+      }
       // Placed by placeNew: already the render's node, its stand-in in the render is empty.
       if (placed.delete(from)) return false;
       // `from === f` too: some DOMs (happy-dom) say a node does not contain itself.
@@ -124,4 +142,5 @@ export function morphInto(root: HTMLElement, html: string): void {
     },
   });
   for (const el of placed) el.remove();
+  if (lost) throw new Error('[waypoint] a section stub found no node of its own');
 }

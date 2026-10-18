@@ -12,7 +12,8 @@ import { parseSeen, pruneSeen, seenKey } from './needs.js';
 import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeRunSummary, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import type { RunSummaryDoc } from '../lib/run-summary.js';
 import { decodeView, encodeView, type ViewState } from './urlstate.js';
-import { byNewestRun, currentPhaseId, DETAIL_TABS, esc, GROUPS, parsePlanFilter, phasesInProgress, planFilterKeys, PROPOSAL_FILTERS, relText, renderApp, TALK_FILTERS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, togglePlanFilter, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkFilter, type UiState, type View } from './render.js';
+import { paintSections, stripSections } from './sections.js';
+import { byNewestRun, currentPhaseId, DETAIL_TABS, esc, GROUPS, parsePlanFilter, phasesInProgress, planFilterKeys, PROPOSAL_FILTERS, relText, renderPage, TALK_FILTERS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, togglePlanFilter, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkFilter, type UiState, type View } from './render.js';
 
 /**
  * The page's embedded snapshot; G-13 and G-14: the waypoint that built it and the states the last listing saw. The page
@@ -375,6 +376,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     } catch { return false; }
     return !!el && document.activeElement === el;
   };
+  /** R2: the string of every section the page holds, as it was last painted (sections.ts). */
+  let painted: ReadonlyMap<string, string> = new Map();
   const render = () => {
     scheduled = false;
     if (composing) { deferred = true; return; }
@@ -382,12 +385,20 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       model.now = now();
       // Review Focus 2: a plan snapshot that dropped the open task closes its detail (and unlocks the page).
       if (ui.modal && !model.plan.tasks.some(t => t.id === ui.modal)) { ui.modal = null; ui.shot = null; trailAt = 0; focusBack(); }
-      const html = renderApp(model, ui, derive(model));
+      const full = renderPage(model, ui, derive(model));
+      // R2: a section whose string is the one painted goes as a stub, so the morph neither parses nor diffs it.
+      const sections = new Map<string, string>();
+      const html = paintSections(full, painted, sections);
       const page = document.scrollingElement?.scrollTop ?? 0;
       const focus = takeFocus();
-      // H-06: morphdom touches only the nodes that changed; if it throws, everything is replaced as before.
+      // The arrows and highlights of a hovered task go first: a row's stub is checked against its node's class (R2).
+      dropArrows();
+      // H-06: morphdom touches only the nodes that changed; if it throws (a stub that found no node of its own included),
+      // everything is replaced as before, every section in full.
+      painted = new Map();
       try { morph(env.root, html); }
-      catch (e) { console.error('[waypoint] morph failed', e); replaceAll(html); }
+      catch (e) { console.error('[waypoint] morph failed', e); replaceAll(stripSections(full)); }
+      painted = sections;
       // One focus path, after either: what an action asked to focus wins (§4.7: the active tab on opening, the tab the
       // keys moved to, the gallery, what opened a detail or a screenshot on closing); else the focus goes back to where it
       // was (H-06). After an action it is never left on the body: the open detail's tab, else the view's main element.
@@ -398,7 +409,6 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       const took = !!asked && focusTo(asked);
       if (!took) giveFocus(focus);
       if (asked && !env.root.contains(document.activeElement)) focusTo(ui.modal ? ACTIVE_TAB : 'main');
-      dropArrows();
       if (document.scrollingElement && document.scrollingElement.scrollTop !== page) document.scrollingElement.scrollTop = page;
       // H-17 (C23): what «Ver la decisión» asked to focus, and took it, comes into view; anything else keeps the page's
       // scroll through the morph (above).
@@ -413,6 +423,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       void lookupProfiles();
     } catch (e) {
       console.error('[waypoint] render failed', e);
+      painted = new Map();
       model.offline = true;
       model.connecting = false;
       const d = dictFor(typeof model.meta?.locale === 'string' ? model.meta.locale : undefined);
@@ -1089,8 +1100,10 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   };
   let hoverTask: string | null = null;
   // H-06: after a repaint the arrows point at where the bars were: the layer empties, and the next pointerover (even on
-  // the same task) draws them again. Carry 4: the highlight classes go with them (the render does not carry them).
+  // the same task) draws them again. Carry 4: the highlight classes go with them; R2: taken off here, since a repaint that
+  // skips the timeline (it did not change) no longer takes them off with the render's classes.
   const dropArrows = () => {
+    if (hoverTask !== null) env.root.querySelectorAll('.dep-up,.dep-down,.dep-self').forEach(n => n.classList.remove('dep-up', 'dep-down', 'dep-self'));
     const svg = env.root.querySelector('[data-role="tl-arrows"]');
     if (svg?.firstChild) svg.innerHTML = '';
     hoverTask = null;

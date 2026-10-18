@@ -8,18 +8,20 @@ import type { Derived } from '../derive.js';
 import { dictFor, type Dict } from '../i18n.js';
 import { esc, eviMark, fmt, forecastTitle, labelOf, trackTag } from '../html.js';
 import type { Model, TlView, UiState } from '../model.js';
+import { section } from '../sections.js';
 
 export function renderScheduleView(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
   return `<header class="hd"><h1>${esc(d.views.schedule)}</h1></header>
     ${renderTimeline(m, d, ui, loc, dv)}
-    ${insightsOf(m, d, ui, loc, dv)}`;
+    ${section('insights', insightsOf(m, d, ui, loc, dv))}`;
 }
 
 /**
  * C31 (carry 4b-1): the analysis reads only the data, the burndown's scope and width and the locale, so it is built once
  * per data revision and minute (one Derived of derive(), whose cache has that key), scope, width and locale: a search
  * key, a pan step or «Desplegar todo» repaints the page with the string already built. Keyed by the Derived itself, so a
- * render with a fresh one (computeDerived, as renderApp without one does) always builds it.
+ * render with a fresh one (computeDerived, as renderApp without one does) always builds it. R2: it is a section of the
+ * page, so the same string is not even parsed again.
  */
 const insightsMemo = new WeakMap<Derived, { key: string; html: string }>();
 function insightsOf(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
@@ -151,13 +153,17 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
   const ids = groupIds(m.plan, m.states, groupBy);
   const allOpen = ids.every(id => expanded.has(id));
   const st = (r: { status?: string }) => (r.status && Object.hasOwn(d.status, r.status) ? r.status as TaskStatus : 'free');
+  // R2: each row, on each side, is a section of the page, so a row a search key, a pan step or «Desplegar todo» leaves as
+  // it was is not parsed again. Named by the row (two ids that read the same once cleaned only lose the skip: a stub needs
+  // the very string painted, which carries the row's own key).
+  const rowName = (side: string, r: Row) => `${side}.${r.kind === 'phase' ? 'p' : 't'}.${r.id.replace(/[^\w.]/g, '_')}`;
   const left = painted.map(r => {
     if (r.kind === 'phase') {
       const pct = r.total ? Math.round(((r.done ?? 0) / r.total) * 100) : 0;
-      return `<button type="button" class="tr ph" data-action="toggle-phase" data-id="${esc(r.id)}" data-k="p:${esc(r.id)}" aria-expanded="${expanded.has(r.id)}" title="${esc(r.label)} · ${esc(r.counter)}"><span class="chev">${expanded.has(r.id) ? '⌄' : '›'}</span> <span class="lab">${groupLabel(m, groupBy, r)}</span><span class="mini"><i style="width:${pct}%"></i></span><span class="c">${esc(r.counter)}</span></button>`;
+      return section(rowName('l', r), `<button type="button" class="tr ph" data-action="toggle-phase" data-id="${esc(r.id)}" data-k="p:${esc(r.id)}" aria-expanded="${expanded.has(r.id)}" title="${esc(r.label)} · ${esc(r.counter)}"><span class="chev">${expanded.has(r.id) ? '⌄' : '›'}</span> <span class="lab">${groupLabel(m, groupBy, r)}</span><span class="mini"><i style="width:${pct}%"></i></span><span class="c">${esc(r.counter)}</span></button>`);
     }
     const s = st(r);
-    return `<button type="button" class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" data-k="t:${esc(r.id)}" title="${esc(rowTitle(r.id, r.label, d.status[s]))}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span>${eviMark(m, d, r.id)}${layers.has('forge') ? forgeBadge(m, d, r.id) : ''} ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</button>`;
+    return section(rowName('l', r), `<button type="button" class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" data-k="t:${esc(r.id)}" title="${esc(rowTitle(r.id, r.label, d.status[s]))}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span>${eviMark(m, d, r.id)}${layers.has('forge') ? forgeBadge(m, d, r.id) : ''} ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</button>`);
   }).join('');
   const kindLabel = (k: string) => (k === 'estimate' ? d.legend.estimate : k === 'done' ? d.legend.done : k === 'blocked' ? d.legend.blocked : d.legend.current);
   const right = painted.map(r => {
@@ -172,7 +178,8 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
       const max = b0.left + b0.width <= nowLeft && left < nowLeft ? Math.min(100 - left, nowLeft - left - 0.6) : 100 - left;
       if (max >= 4) label = `<div class="gl" style="left:${left}%;max-width:${max.toFixed(1)}%">${esc(r.label)}${r.durationMin != null ? ` · ${r.durationMin} min` : ''}</div>`;
     }
-    return `<div class="rr${r.kind === 'phase' ? ' ph' : ''}"${task ? ` data-task="${esc(r.id)}"` : ''}>${bars}${label}</div>`;
+    // R2: keyed (b:), so a row's stub is only ever matched with that row's own node.
+    return section(rowName('r', r), `<div class="rr${r.kind === 'phase' ? ' ph' : ''}" data-k="b:${r.kind === 'phase' ? 'p' : 't'}:${esc(r.id)}"${task ? ` data-task="${esc(r.id)}"` : ''}>${bars}${label}</div>`);
   }).join('');
   const tickList = autoTicks(win, 10, tz);
   // H-12: the edge ticks are pinned to their edge, and the one next to the visible now line gives way to it.
@@ -214,10 +221,10 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
     </div>
     <div class="tlw" data-role="timeline" data-scroll-key="timeline" data-rows="${rows.length}"${vr ? ` data-start="${vr.start}" data-end="${vr.end}"` : ''} tabindex="0" aria-label="${esc(d.tl.hint)}">
     <div class="tl">
-      <div class="l"><div class="tr axis"></div>${padTop}${left}${padBottom}</div>
-      <div class="r" data-role="tl-canvas"><div class="ticks">${tickHtml}</div><div class="grid">${grid}</div>${band}${padTop}${right}${padBottom}
+      ${section('tl-labels', `<div class="l"><div class="tr axis"></div>${padTop}${left}${padBottom}</div>`)}
+      ${section('tl-bars', `<div class="r" data-role="tl-canvas"><div class="ticks">${tickHtml}</div><div class="grid">${grid}</div>${band}${padTop}${right}${padBottom}
         ${nowLeft >= 0 && nowLeft <= 100 ? `<div class="now" style="left:${nowLeft}%"><span>${esc(d.now)}</span></div>` : ''}
-        <svg class="arrows" data-role="tl-arrows" data-morph="skip" aria-hidden="true"></svg></div>
+        <svg class="arrows" data-role="tl-arrows" data-morph="skip" aria-hidden="true"></svg></div>`)}
     </div>
     </div>
     ${renderMinimap(m, d, win, dv)}
@@ -250,7 +257,9 @@ function miniBarsOf(m: Model, dv: Derived): MiniBars | null {
 }
 
 /** G-22, H-03: the minimap: one row per phase (per track past 24 phases), compressed over the whole plan, window marked.
- *  A window that reaches past the plan widens the box, and the bars (built over the plan) are scaled into it. */
+ *  A window that reaches past the plan widens the box, and the bars (built over the plan) are scaled into it. R2: the bars
+ *  are a section of the page, always in a <g> of their own inside the one that scales them, so a pan step parses only the
+ *  window drawn over them. */
 function renderMinimap(m: Model, d: Dict, win: Win, dv: Derived): string {
   const mb = miniBarsOf(m, dv);
   if (!mb) return '';
@@ -260,7 +269,7 @@ function renderMinimap(m: Model, d: Dict, win: Win, dv: Derived): string {
   const x = (t: number) => ((t - from) / (to - from)) * 1000;
   // Within a millisecond of the plan's range (a fitted window), the bars are drawn as they were built.
   const inside = range.from - from < 1 && to - range.to < 1;
-  const bars = inside ? mb.bars : `<g transform="translate(${x(range.from).toFixed(3)} 0) scale(${((range.to - range.from) / (to - from)).toFixed(6)} 1)">${mb.bars}</g>`;
+  const bars = `<g${inside ? '' : ` transform="translate(${x(range.from).toFixed(3)} 0) scale(${((range.to - range.from) / (to - from)).toFixed(6)} 1)"`}>${section('mmbars', `<g class="mmb">${mb.bars}</g>`)}</g>`;
   const vx = x(win.from);
   const vw = ((win.to - win.from) / (to - from)) * 1000;
   const nx = x(m.now);

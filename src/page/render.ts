@@ -1,6 +1,7 @@
 // The roadmap page's shell (spec §4.6): the side nav with the six views (a tab bar at the bottom on a phone), the sticky
 // status strip, the open view, and the task detail and the screenshot gallery over them. Pure: model and view state in,
-// one HTML string out. Each view lives in views/<view>.ts; this module re-exports what app.ts and the tests use.
+// one HTML string out (renderPage marks its sections, R2, so app.ts repaints only those that changed). Each view lives in
+// views/<view>.ts; this module re-exports what app.ts and the tests use.
 import { liveness, sessionLiveness } from '../lib/coordination.js';
 import { canDecide, PROPOSAL_STATUSES } from '../lib/proposals.js';
 import { withinRunTtl } from '../lib/run-ttl.js';
@@ -8,6 +9,7 @@ import { computeDerived, type Derived } from './derive.js';
 import { dictFor, type Dict } from './i18n.js';
 import { esc, fmt, forecastTitle, hhmm, num, oneOf, rel } from './html.js';
 import { VIEWS, type Model, type UiState, type View } from './model.js';
+import { section, stripSections } from './sections.js';
 import { renderSummary } from './views/summary.js';
 import { renderPlanView } from './views/plan.js';
 import { renderScheduleView } from './views/schedule.js';
@@ -24,7 +26,14 @@ export { byNewestRun } from './views/runs.js';
 
 const NAV_ICON: Record<View, string> = { summary: '◉', plan: '▤', schedule: '≡', runs: '▶', sessions: '◎', talk: '✎' };
 
+/** The page as one HTML string, every section in full (what the tests read, and what a full replace paints). */
 export function renderApp(m: Model, ui: UiState, dv: Derived = computeDerived(m)): string {
+  return stripSections(renderPage(m, ui, dv));
+}
+
+/** R2: the page with its sections marked (sections.ts): the nav, the strip, the open view (in the schedule, its analysis and
+ *  the minimap's bars too) and the detail. app.ts paints it with paintSections, so a repaint skips what did not change. */
+export function renderPage(m: Model, ui: UiState, dv: Derived = computeDerived(m)): string {
   const d = dictFor(m.meta?.locale);
   const loc = m.meta?.locale ?? 'en';
   const view: View = VIEWS.includes(ui.view) ? ui.view : 'summary';
@@ -42,12 +51,12 @@ export function renderApp(m: Model, ui: UiState, dv: Derived = computeDerived(m)
     : renderSummary(m, d, ui, loc, dv);
   const evidence = ui.modal ? m.states[ui.modal]?.evidence : undefined;
   return `<div class="shell">
-  <nav class="side" aria-label="${esc(d.nav.label)}" data-scroll-key="side"><div class="brand">${esc((m.meta?.name ?? '').toUpperCase())}</div>${nav}
-    <div class="scale"><button type="button" data-action="scale" data-dir="-1" title="${esc(d.tl.smaller)}" aria-label="${esc(d.tl.smaller)}">A−</button><button type="button" data-action="scale" data-dir="1" title="${esc(d.tl.larger)}" aria-label="${esc(d.tl.larger)}">A+</button></div></nav>
+  ${section('nav', `<nav class="side" aria-label="${esc(d.nav.label)}" data-scroll-key="side"><div class="brand">${esc((m.meta?.name ?? '').toUpperCase())}</div>${nav}
+    <div class="scale"><button type="button" data-action="scale" data-dir="-1" title="${esc(d.tl.smaller)}" aria-label="${esc(d.tl.smaller)}">A−</button><button type="button" data-action="scale" data-dir="1" title="${esc(d.tl.larger)}" aria-label="${esc(d.tl.larger)}">A+</button></div></nav>`)}
   <main class="main" tabindex="-1">
-    ${renderStrip(m, d, dv, loc)}${body}${renderDebug(m)}
+    ${section('strip', renderStrip(m, d, dv, loc))}${section('view', `<div class="vw">${body}</div>`)}${renderDebug(m)}
   </main>
-  ${ui.modal ? renderTaskModal(m, d, ui, loc) : ''}
+  ${ui.modal ? section('detail', renderTaskModal(m, d, ui, loc)) : ''}
   ${ui.modal && ui.shot !== null && evidence ? renderLightbox(d, evidence, ui.shot) : ''}
 </div>`;
 }

@@ -1136,7 +1136,7 @@ describe('the execution of the runs view (H-10)', () => {
 
 describe('timeline phases, labels, ticks and minimap (G-21, H-13, H-12, G-22, H-03)', () => {
   const rowOf = (html: string, id: string) => {
-    const at = html.indexOf(`<div class="rr" data-task="${id}">`);
+    const at = html.indexOf(`<div class="rr" data-k="b:t:${id}" data-task="${id}">`);
     const next = html.indexOf('<div class="rr', at + 5);
     return html.slice(at, next < 0 ? undefined : next);
   };
