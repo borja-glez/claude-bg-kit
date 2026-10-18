@@ -80,7 +80,7 @@ export function needsOf(m: Model, pageVersion: string = WAYPOINT_VERSION): Need[
   if (deferred.length) out.push({ kind: 'deferred', findings: deferred.reduce((n, x) => n + x.findings, 0), tasks: deferred.map(({ id, doneAt }) => ({ id, doneAt })) });
   // §4.3: a run that stopped without being closed, within its 24 h.
   const r = m.run;
-  const stop = r && !r.active && !r.closedAt ? HALTS.find(h => h === r.stopReason) : undefined;
+  const stop = r && !r.active && !r.closedAt ? HALTS.find(x => x === r.stopReason) : undefined;
   if (r && stop) {
     if (withinRunTtl(m.now, Date.parse(r.lastStepAt ?? r.startedAt ?? ''))) out.push({ kind: 'stalled', runId: r.runId, reason: r.stallReason ?? null, stop });
   }

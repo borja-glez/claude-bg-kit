@@ -1295,6 +1295,28 @@ describe('the summary (§4.6.1, §4.6.2)', () => {
     expect(now).not.toMatch(/overflow/);
   });
 
+  it('a task a slot of the run holds is the run’s in «En curso» and in Ejecuciones alike, even when its exec does not say the run (final review M5)', () => {
+    const m = running();
+    const since = new Date(NOW - 4 * 60000).toISOString();
+    m.run = runDoc({ slots: [{ task: 'T005', stage: 'implement' as const, agent: 'forge-impl', by: 'main', since }] });
+    // The coordinator wrote the slot before the task's state: no exec yet. T006 runs by hand, outside the run.
+    m.states.T005 = { status: 'in_progress', owner: 'main', startedAt: since };
+    m.states.T006 = { status: 'in_progress', owner: 'ana', startedAt: since };
+    const now = section(renderApp(m, ui()), 'card now');
+    const outside = now.indexOf('Fuera de una ejecución');
+    expect(outside).toBeGreaterThan(0);
+    expect(now.indexOf('data-k="t:T005"')).toBeGreaterThan(0);
+    expect(now.indexOf('data-k="t:T005"')).toBeLessThan(outside);
+    expect(now.indexOf('data-k="t:T006"')).toBeGreaterThan(outside);
+    const runs = section(renderApp(m, ui({ view: 'runs' })), 'card runa');
+    expect([...runs.matchAll(/data-k="t:(T\d+)"/g)].map(x => x[1]).sort()).toEqual(['T002', 'T003', 'T004', 'T005']);
+    // An ephemeral run's slots hold loose ids: a plan task that reads the same is not its.
+    m.run = looseRun({ slots: [{ task: 'T005', stage: 'implement' as const, agent: 'forge-mech', by: 'main', since }] });
+    const loose = section(renderApp(m, ui()), 'card now');
+    expect(loose.indexOf('data-k="t:T005"')).toBeGreaterThan(loose.indexOf('Fuera de una ejecución'));
+    expect(section(renderApp(m, ui({ view: 'runs' })), 'card runa')).not.toContain('data-k="t:T005"');
+  });
+
   it('the role comes from the session, or else from the run mode: subagents, sessions and manual (H-09)', () => {
     const m = running();
     m.states.T002 = { ...m.states.T002!, exec: exec('verify', { mode: 'sessions', by: 'be' }) };
@@ -2440,21 +2462,31 @@ describe('theme.css: the light theme writes its text with its text tokens (H-19)
 describe('toggles say whether they are pressed, folds whether they are open, text boxes what they are for (G-15, H-19)', () => {
   const TOGGLES = ['tgroup', 'tl-status', 'tl-layer', 'zoom', 'fit', 'plan-filter', 'talk-c', 'pfilter'];
   const FOLDS = ['toggle-phase', 'plan-phase', 'run-toggle'];
-  it('in every view', () => {
+  it('in every view, each with the toggles and folds it has (final review M6: a view that stopped drawing one fails)', () => {
     const m = { ...base(), isOwner: true, run: runDoc(), runs: [runSummary()], proposals: [P()], notes: [note({ id: 'q1', type: 'question', text: '¿A o B?' })] };
-    const cases: [View, Partial<UiState>][] = [
-      ...VIEWS.map(v => [v, {}] as [View, Partial<UiState>]),
-      ['talk', { talk: 'proposals', commenting: 'p1', rejecting: 'p1' }],
-      ['schedule', { expanded: new Set(['F1']) }],
-      ['runs', { runsOpen: new Set(['shop-20261010T090000000Z']) }],
+    const SCHEDULE = ['tgroup', 'tl-status', 'tl-layer', 'zoom', 'fit', 'toggle-phase'];
+    const cases: [View, Partial<UiState>, string[]][] = [
+      ['summary', {}, []],
+      ['plan', {}, ['plan-filter', 'plan-phase']],
+      ['schedule', {}, SCHEDULE],
+      ['runs', {}, ['run-toggle']],
+      ['sessions', {}, []],
+      ['talk', {}, ['talk-c']],
+      ['talk', { talk: 'proposals', commenting: 'p1', rejecting: 'p1' }, ['talk-c', 'pfilter']],
+      ['schedule', { expanded: new Set(['F1']) }, SCHEDULE],
+      ['runs', { runsOpen: new Set(['shop-20261010T090000000Z']) }, ['run-toggle']],
     ];
-    for (const [view, over] of cases) {
+    expect(new Set(cases.map(c => c[0]))).toEqual(new Set(VIEWS));
+    for (const [view, over, want] of cases) {
       const html = renderApp(m, ui({ view, answering: 'q1', ...over }));
+      const seen = new Map<string, number>();
       for (const tag of html.match(/<button[^>]*>/g) ?? []) {
         const action = /data-action="([^"]+)"/.exec(tag)?.[1] ?? '';
         if (TOGGLES.includes(action)) expect(tag, `${view}: ${tag}`).toMatch(/aria-pressed="(true|false)"/);
         if (FOLDS.includes(action)) expect(tag, `${view}: ${tag}`).toMatch(/aria-expanded="(true|false)"/);
+        if (TOGGLES.includes(action) || FOLDS.includes(action)) seen.set(action, (seen.get(action) ?? 0) + 1);
       }
+      for (const action of want) expect(seen.get(action) ?? 0, `${view}: ${action}`).toBeGreaterThan(0);
       for (const tag of html.match(/<(textarea|input)\b[^>]*>/g) ?? []) expect(tag, `${view}: ${tag}`).toMatch(/aria-label="[^"]+"/);
     }
   });

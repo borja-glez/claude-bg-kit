@@ -28,6 +28,34 @@ describe('source text', () => {
   });
 });
 
+// The mods' JSX factory is a global called `h`: a local or a parameter with that name shadows it and a render falls back
+// silently. src/mod and src/lens never name one so, and src/page neither (final review M3), so the habit never gets there.
+const H_NAMES = [
+  /\b(?:const|let|var|function|class)\s+h\b/,
+  /(?<![\w$.])h\s*=>/,
+  /[(,]\s*(?:\.\.\.)?h\s*[,:)=?]/,
+];
+const code = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
+
+describe('no local or parameter named h (final review M3)', () => {
+  it('src/page, src/mod and src/lens name none', () => {
+    const hits = ['src/page', 'src/mod', 'src/lens']
+      .flatMap(d => files(path.join(ROOT, d)))
+      .flatMap(f => code(readFileSync(f, 'utf8')).split('\n').map((line, i) => [f, i + 1, line] as const))
+      .filter(([, , line]) => H_NAMES.some(re => re.test(line)))
+      .map(([f, n, line]) => `${path.relative(ROOT, f).split(path.sep).join('/')}:${n}: ${line.trim()}`);
+    expect(hits).toEqual([]);
+  });
+  it('finds each way of naming one', () => {
+    for (const line of ['const h = 1;', 'let h;', 'xs.map(h => h.id)', 'xs.find((h) => h)', 'f(a, h: number) {', 'function f(h = 2) {', '(...h) => h', 'function h() {}']) {
+      expect(H_NAMES.some(re => re.test(code(line))), line).toBe(true);
+    }
+    for (const line of ['const hh = 1;', 'x.h => 1', 'h(App, null)', '// const h = 1', 'const height = 2;', 'return `${n} h`;']) {
+      expect(H_NAMES.some(re => re.test(code(line))), line).toBe(false);
+    }
+  });
+});
+
 function mdFiles(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {

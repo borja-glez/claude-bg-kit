@@ -84,7 +84,7 @@ function renderNow(m: Model, d: Dict, dv: Derived): string {
     const next = availableTasks(m.plan, m.states).find(t => statusOf(m.states, t.id) === 'free');
     return `<section class="card now">${title}<div class="muted">${esc(next ? d.inProgress.nextFree(next.id, next.title) : d.inProgress.nothing)}</div></section>`;
   }
-  const inRun = (t: PlanTask) => !!r && m.states[t.id]?.exec?.runId === r.runId;
+  const inRun = (t: PlanTask) => !!r && isRunTask(m, r, t.id);
   const ofRun = tasks.filter(inRun);
   const others = tasks.filter(t => !inRun(t));
   const head = nowHead(d);
@@ -93,6 +93,12 @@ function renderNow(m: Model, d: Dict, dv: Derived): string {
   if (others.length) groups.push(`${groups.length ? `<div class="rh">${esc(d.inProgress.noRun)}</div>` : ''}${others.map(t => nowRow(m, d, t)).join('')}`);
   return `<section class="card now">${title}<div class="nowt">${head}${groups.join('')}</div></section>`;
 }
+
+/** Final review M5: whether a plan task is the run's, the one rule «En curso» and Ejecuciones share: its exec says the run,
+ *  or one of the run's slots holds it (the coordinator may write the slot before the task's state). An ephemeral run's
+ *  slots hold loose ids, never plan tasks. */
+export const isRunTask = (m: Model, r: RunDoc, id: string): boolean =>
+  m.states[id]?.exec?.runId === r.runId || (r.kind !== 'ephemeral' && r.slots.some(s => s.task === id));
 
 /** The header row of «En curso» (hidden from assistive technology: each row says it all); Ejecuciones reuses it. */
 export const nowHead = (d: Dict): string =>

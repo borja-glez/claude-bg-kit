@@ -10,7 +10,7 @@ import type { Dict } from '../i18n.js';
 import type { Need } from '../needs.js';
 import { esc, fmt, labelOf, liveDot, num, oneOf } from '../html.js';
 import type { Model, UiState } from '../model.js';
-import { looseRow, nowHead, nowRow, runHead } from './summary.js';
+import { isRunTask, looseRow, nowHead, nowRow, runHead } from './summary.js';
 
 /** The kinds of runs/ (run-summary.ts): anything else reads as a run of the plan, in a class name and in its label. */
 const RUN_KINDS = ['plan', 'ephemeral', 'single'] as const;
@@ -29,13 +29,12 @@ function renderStalled(d: Dict, dv: Derived): string {
   return `<div class="warnbox" role="note"><b>${esc(d.needs.stalled[n.stop](n.runId))}</b>${n.reason ? `: ${esc(n.reason)}` : ''}<div class="hint">${esc(d.needs.stalledHint)}</div></div>`;
 }
 
-/** The active run: its header, its tasks (the exec says its runId, or the task holds one of its slots) as rows of «En
- *  curso», and the running loose tasks of an ephemeral one. */
+/** The active run: its header, its tasks (isRunTask, the rule «En curso» uses too) as rows of «En curso», and the running
+ *  loose tasks of an ephemeral one. */
 function renderActive(m: Model, d: Dict, dv: Derived): string {
   const r = m.run && m.run.active ? m.run : null;
   if (!r) return '';
-  const slotted = new Set(r.kind === 'ephemeral' ? [] : r.slots.map(s => s.task));
-  const tasks = dv.running.filter(id => m.states[id]?.exec?.runId === r.runId || slotted.has(id))
+  const tasks = dv.running.filter(id => isRunTask(m, r, id))
     .map(id => m.plan.tasks.find(t => t.id === id)).filter((t): t is PlanTask => !!t);
   const loose = r.kind === 'ephemeral' ? r.loose.filter(x => x.status === 'running') : [];
   const rows = `${tasks.map(t => nowRow(m, d, t)).join('')}${loose.map(x => looseRow(m, d, r, x)).join('')}`;
