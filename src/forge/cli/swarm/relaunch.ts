@@ -6,7 +6,7 @@ import { taskWorktree } from '../../execution.js';
 import { relaunchOrBlock, RELAUNCH_CAP } from '../../schedule.js';
 import { planLocale } from '../../../lib/locale.js';
 import { pickWorkDir, workDir, workRel } from '../../task-ref.js';
-import { loadPlanArg, memberLaunch } from './shared.js';
+import { checkPlanPath, loadPlanArg, memberLaunch } from './shared.js';
 
 export const subcommand: SwarmCommand = (rest, ctx) => {
   const { sub, io, deps, flag, has, json, iso, current, update, taskArg } = ctx;
@@ -30,6 +30,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   }
   const planPath = planArg;
   if (!planPath) throw new UsageError('swarm relaunch: --plan is required');
+  checkPlanPath(sub, planPath);
   // The cap and the reason live in schedule.ts: one rule for the scheduler and this command.
   const verdict = relaunchOrBlock(task, t.attempts);
   if (verdict.type === 'block') {

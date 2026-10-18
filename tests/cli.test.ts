@@ -279,7 +279,7 @@ describe('multi-session commands', () => {
       launch(); // makes the repo
       const r = run(['launch', 'plan.yaml', 'ui', '--swarm', 'main', '--base', 'HEAD'], io);
       expect(r.code).toBe(0);
-      expect(r.stderr).toBe('--swarm is obsolete: forge launches run members with --task\n');
+      expect(r.stderr).toBe('--swarm is obsolete: forge composes the launch of its run members\n');
       expect(JSON.parse(r.stdout).prompt).toBe('/waypoint:work ui');
     });
     it('--swarm refuses --merge, a missing id and an id with shell characters', () => {
@@ -344,55 +344,16 @@ describe('multi-session commands', () => {
     });
   });
 
-  describe('launch --task', () => {
+  describe('launch: forge composes its members, and there is one launcher (A-19, I-18)', () => {
     const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'core.autocrlf=false', ...a], { cwd: dir, encoding: 'utf8' }).trim();
-    const init = () => { git('init', '-q', '-b', 'main'); git('add', '.'); git('commit', '-qm', 'init'); git('branch', 'forge/run-demo-shop'); };
-    const args = ['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--coordinator', 'S1', '--base', 'forge/run-demo-shop'];
-    it('creates task/<T> from the run branch and a forge run member prompt', () => {
+    const init = () => { git('init', '-q', '-b', 'main'); git('add', '.'); git('commit', '-qm', 'init'); };
+    const args = ['launch', 'plan.yaml', 'ui'];
+    it('--task moved to forge swarm tick: exit 2 and nothing is created', () => {
       init();
-      const r = JSON.parse(run(args, io).stdout);
-      expect(r).toMatchObject({ branch: 'task/T001', name: 'wp-demo-shop-T001', runId: 'r1', task: 'T001' });
-      expect(path.resolve(r.worktree).toLowerCase()).toBe(path.resolve(dir, '.claude', 'worktrees', 'task-T001').toLowerCase());
-      expect(r.prompt).toBe('/forge:member --plan plan.yaml --task T001 — run member of S1: work only T001, then stop');
-      expect(r.command).toBe(`claude --bg --name wp-demo-shop-T001 "${r.prompt}"`);
-      expect(git('rev-parse', 'task/T001')).toBe(git('rev-parse', 'forge/run-demo-shop'));
-    });
-    it('--effort and --model go into command and run, before the prompt', () => {
-      init();
-      const r = JSON.parse(run([...args, '--effort', 'medium'], io).stdout);
-      expect(r.command).toBe(`claude --bg --name wp-demo-shop-T001 --effort medium "${r.prompt}"`);
-      expect(r.run).toContain(`&& claude --bg --name wp-demo-shop-T001 --effort medium "${r.prompt}")`);
-      const m = JSON.parse(run([...args, '--effort', 'high', '--model', 'sonnet'], io).stdout);
-      expect(m.command).toBe(`claude --bg --name wp-demo-shop-T001 --effort high --model sonnet "${m.prompt}"`);
-      expect(m.run).toContain(`&& claude --bg --name wp-demo-shop-T001 --effort high --model sonnet "${m.prompt}")`);
-    });
-    it('refuses an --effort or --model outside the closed list with code 2, before any worktree', () => {
-      init();
-      for (const bad of [['--effort', 'extreme'], ['--effort'], ['--model', 'gpt-4'], ['--model', 'sonnet;rm'], ['--model']]) {
-        expect(run([...args, ...bad], io).code).toBe(2);
-      }
+      const r = run(['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--coordinator', 'S1', '--base', 'main'], io);
+      expect(r).toMatchObject({ code: 2, stderr: 'launch --task moved to forge swarm tick: forge composes the launch of its run members\n' });
       expect(existsSync(path.join(dir, '.claude', 'worktrees', 'task-T001'))).toBe(false);
-    });
-    it('reuses an existing task branch with its work (relaunch)', () => {
-      init();
-      git('branch', 'task/T001', 'main');
-      git('checkout', '-q', 'task/T001');
-      writeFileSync(path.join(dir, 'done.txt'), 'x\n'); git('add', 'done.txt'); git('commit', '-qm', 'work');
-      const tip = git('rev-parse', 'HEAD');
-      git('checkout', '-q', 'main');
-      const r = JSON.parse(run(args, io).stdout);
-      expect(existsSync(path.join(r.worktree, 'done.txt'))).toBe(true);
-      expect(git('rev-parse', 'task/T001')).toBe(tip);
-      expect(run(args, io).code).toBe(0);
-    });
-    it('refuses unknown tasks and missing or unsafe flags', () => {
-      init();
-      expect(run(['launch', 'plan.yaml', 'T999', '--task', '--run', 'r1', '--coordinator', 'S1', '--base', 'main'], io).code).toBe(1);
-      expect(run(['launch', 'plan.yaml', 'T001', '--task', '--coordinator', 'S1', '--base', 'main'], io).code).toBe(2);
-      expect(run(['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--base', 'main'], io).code).toBe(2);
-      expect(run(['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--coordinator', 'a"b', '--base', 'main'], io).code).toBe(2);
-      expect(run(['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--coordinator', 'S1'], io).code).toBe(2);
-      expect(run([...args, '--merge'], io).code).toBe(2);
+      expect(git('branch', '--list', 'task/T001')).toBe('');
     });
     it('--launcher bg is the default and the only launcher; herdr was removed and anything else is refused (I-18)', () => {
       init();
@@ -411,11 +372,9 @@ describe('multi-session commands', () => {
     });
     it('refuses a plan path with characters outside the safe set, before anything is created', () => {
       init();
-      for (const bad of ['plan".yaml', 'plan$(x).yaml', 'plan`x`.yaml', 'a;b.yaml']) {
-        expect(run(['launch', bad, 'T001', '--task', '--run', 'r1', '--coordinator', 'S1', '--base', 'forge/run-demo-shop'], io).code).toBe(2);
-      }
-      expect(existsSync(path.join(dir, '.claude', 'worktrees', 'task-T001'))).toBe(false);
-      expect(run(['launch', path.join(dir, 'plan.yaml'), 'T001', '--task', '--run', 'r1', '--coordinator', 'S1', '--base', 'forge/run-demo-shop'], io).code).toBe(0);
+      for (const bad of ['plan".yaml', 'plan$(x).yaml', 'plan`x`.yaml', 'a;b.yaml']) expect(run(['launch', bad, 'ui'], io).code, bad).toBe(2);
+      expect(existsSync(path.join(dir, '.claude', 'worktrees', 'ui'))).toBe(false);
+      expect(run(['launch', path.join(dir, 'plan.yaml'), 'ui'], io).code).toBe(0);
     });
   });
 });

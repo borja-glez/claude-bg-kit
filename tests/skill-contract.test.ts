@@ -12,7 +12,7 @@ type Cli = 'forge' | 'waypoint';
 interface Keys { exact: Set<string>; prefixes: Set<string> }
 interface Vocab { commands: Set<string>; subs: Map<string, Set<string>>; keys: Map<string, Keys>; flags: Set<string> }
 // How the CLIs read a flag: flag('x'), has('x') and the like (READERS), or `--x` itself given to the arguments' own
-// includes() or indexOf(), to waypoint launch's val(), or compared with an argument (`arg !== '--ruling'`: ARGV). A `--x`
+// includes() or indexOf(), or compared with an argument (`arg !== '--ruling'`: ARGV). A `--x`
 // that only an error, a usage text or the arguments of a git call name is read by nothing, so it is no flag. The flags
 // are one pool per CLI, not a table per command: a flag of one command cited on another passes.
 const READERS = [
@@ -21,7 +21,7 @@ const READERS = [
   'posInt', // waypoint: posInt('session-version') in heartbeat and release, posInt('state-version') in release --free
   'idsArg', // forge review-close: idsArg('out-of-model'), idsArg('defer')
 ];
-const ARGV = /(?:\b(?:includes|indexOf|val)\(\s*|[!=]==\s*)['"`]--([a-z][a-z0-9-]*)['"`]/g;
+const ARGV = /(?:\b(?:includes|indexOf)\(\s*|[!=]==\s*)['"`]--([a-z][a-z0-9-]*)['"`]/g;
 // Flags a CLI reads in a way those two patterns do not see (a loop over names), each with the source text that reads it
 // (a test checks it is still there).
 const INDIRECT: Record<Cli, [flag: string, site: string][]> = {
@@ -275,10 +275,10 @@ describe('the skills cite only what the CLIs accept (I-10)', () => {
     }];
     expect(checkCitations(fixture, vocab)).toEqual(['fixture.md: forge swarm nonexistent (no such subcommand)']);
   });
-  it('a --x the CLI only hands to git is no flag of it; one read by idsArg(), val() or a comparison is', () => {
+  it('a --x the CLI only hands to git is no flag of it; one read by idsArg(), indexOf() or a comparison is', () => {
     const fixture = [{
       file: 'fixture.md',
-      text: '`FORGE swarm merge --no-ff`, `FORGE swarm step --ruling T1:fix`, `FORGE review-close --defer F3 --out-of-model F2` and `node "<WP>" launch <plan> <T> --run <runId> --coordinator <SID>`.\n',
+      text: '`FORGE swarm merge --no-ff`, `FORGE swarm step --ruling T1:fix`, `FORGE review-close --defer F3 --out-of-model F2` and `node "<WP>" launch <plan> <track> --base <b> --launcher bg`.\n',
     }];
     expect(checkCitations(fixture, vocab)).toEqual(['fixture.md: forge swarm merge --no-ff']);
   });

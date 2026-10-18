@@ -448,7 +448,7 @@ describe('plugin layout', () => {
       expect(md).toContain('handover.md');
       expect(md).toContain('.forge/members/');
     }
-    expect(read('plugins/waypoint/README.md')).toContain('--task --run');
+    expect(read('plugins/waypoint/README.md')).not.toContain('--task --run');
     expect(read('plugins/lens/README.md')).toContain('manual');
     expect(read('docs/assets/art.mjs')).not.toContain('sessions mode arrives in the next version');
   });
@@ -889,10 +889,10 @@ describe('plugin layout', () => {
     expect(exec).not.toContain('FORGE swarm join --session <SID> --role executor');
     expect(exec).not.toContain('node "<WP>" launch <plan> <T>');
     const start = exec.split('\n').find(l => l.includes('`start {task}` in mode `sessions`'))!;
-    expect(start).toContain('`launch`');
-    expect(start).toContain('node "<WP>" <launch…>');
+    expect(start).toContain('`launch.run`');
     const relaunch = exec.split('\n').find(l => l.includes('`relaunch {task}`'))!;
-    expect(relaunch).toContain('node "<WP>" <launch…>');
+    expect(relaunch).toContain('`launch`');
+    expect(relaunch).not.toContain('node "<WP>"');
   });
   it('members join with their hook session id; sessions starts set the worktree up first; stop reaches only named members of the run', () => {
     const runMd = read('plugins/forge/skills/run/SKILL.md');
@@ -1937,5 +1937,9 @@ describe('plugin layout', () => {
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('--assets');
     const large = runRef('large');
     for (const w of ['FORGE config get evidence', '/waypoint:plan assets']) expect(large, w).toContain(w);
+  });
+  it('the coordinator runs the launch forge composes for a member: no waypoint launch --task and no herdr in the skills (A-19, I-18)', () => {
+    expect(runRef('execution')).toContain('launch.run');
+    for (const f of skillDocs()) for (const w of ['node "<WP>" <launch', '--launcher herdr', '--task --run']) expect(read(f), `${f}: ${w}`).not.toContain(w);
   });
 });

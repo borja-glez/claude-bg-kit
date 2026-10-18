@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, utimesSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, utimesSync, copyFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { run as cli, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
@@ -21,6 +21,7 @@ import { mergingFile } from '../src/forge/merging.js';
 import { STEP_WAIT_SECONDS } from '../src/forge/schedule.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { seedExecution } from './helpers/execution.js';
+import { launchRun } from '../src/lib/launcher.js';
 const tmp = useTempDirs();
 
 // swarm start and takeover bind Claude's session id (C1). The tests run inside Claude Code, which sets
@@ -720,26 +721,57 @@ describe('forge swarm (execution)', () => {
     writeDocs(path.join(root, 'db', 'sessions'), {});
     return out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io)).actions.filter((a: { type: string }) => a.type === 'start');
   };
-  const head = (t: string) => ['launch', 'plan.yaml', t, '--task', '--run', readExecution(root)!.runId, '--coordinator', 'main', '--base', 'forge/run-shop'];
-  it('tick start in sessions carries the waypoint launch with --effort medium by default, and relaunch too', () => {
+  it('tick start and relaunch in sessions carry the launch forge composes: the task worktree, /forge:member and the member flags (A-19)', () => {
     const starts = sessionsStarts();
     expect(starts.length).toBeGreaterThan(0);
-    for (const a of starts) expect(a.launch).toEqual([...head(a.task), '--effort', 'medium']);
-    expect(out(run(['swarm', 'relaunch', starts[0].task, '--plan', 'plan.yaml'], io)).launch).toEqual([...head(starts[0].task), '--effort', 'medium']);
+    const e = readExecution(root)!;
+    for (const a of starts) {
+      const worktree = out(run(['swarm', 'worktree', a.task], io)).worktree;
+      const name = `wp-shop-${a.task}`;
+      const prompt = `/forge:member --plan plan.yaml --task ${a.task} — run member of ${e.coordinator}: work only ${a.task}, then stop`;
+      expect(a.launch).toEqual({
+        worktree, branch: `task/${a.task}`, name, prompt,
+        command: `claude --bg --name ${name} --effort medium "${prompt}"`,
+        run: launchRun({ name, prompt, worktree, effort: 'medium' }),
+      });
+    }
+    expect(out(run(['swarm', 'relaunch', starts[0].task, '--plan', 'plan.yaml'], io)).launch).toEqual(starts[0].launch);
   });
-  it('tick start and relaunch in sessions take the configured effort and model; a swarm.launcher herdr adds no launcher (I-18)', () => {
+  it('the member flags come from swarm.member, and an old swarm.launcher herdr reads as bg with a note (A-19, I-18)', () => {
     writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\nswarm:\n  launcher: herdr\n  member:\n    effort: high\n    model: sonnet\n');
-    const starts = sessionsStarts();
-    expect(starts.length).toBeGreaterThan(0);
-    const tail = ['--effort', 'high', '--model', 'sonnet'];
-    for (const a of starts) expect(a.launch).toEqual([...head(a.task), ...tail]);
-    expect(out(run(['swarm', 'relaunch', starts[0].task, '--plan', 'plan.yaml'], io)).launch).toEqual([...head(starts[0].task), ...tail]);
+    const [a] = sessionsStarts();
+    expect(a.launch.command).toBe(`claude --bg --name wp-shop-${a.task} --effort high --model sonnet "${a.launch.prompt}"`);
+    expect(a.launch.run).toContain(`&& claude --bg --name wp-shop-${a.task} --effort high --model sonnet "`);
+    expect(a.launch.note).toBe('swarm.launcher herdr was removed: the member starts with bg');
+  });
+  it('a --plan path that cannot go into a launch is refused in sessions mode before anything is written (Review Focus 3)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--mode', 'sessions'], io));
+    writeDocs(path.join(root, 'db', 'state'), {});
+    writeDocs(path.join(root, 'db', 'sessions'), {});
+    for (const bad of ['plan$(x).yaml', 'a;b.yaml', 'plan`x`.yaml']) {
+      copyFileSync(path.join(root, 'plan.yaml'), path.join(root, bad));
+      const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+      const r = run(['swarm', 'tick', '--plan', bad, '--db', 'db'], io);
+      expect(r.code, bad).toBe(2);
+      expect(r.stderr).toContain('swarm tick: the plan path may only use');
+      expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+    }
+  });
+  it('relaunch refuses such a --plan too, before it writes the handover note or counts an attempt', () => {
+    sessionsRun();
+    copyFileSync(path.join(root, 'plan.yaml'), path.join(root, 'a;b.yaml'));
+    const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    const r = run(['swarm', 'relaunch', 'T1', '--plan', 'a;b.yaml'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('swarm relaunch: the plan path may only use');
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+    expect(existsSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'handover.md'))).toBe(false);
   });
   it('relaunch counts the attempt, writes the handover note and blocks at the cap', () => {
     sessionsRun();
     const r = out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
     const e = readExecution(root)!;
-    expect(r).toMatchObject({ task: 'T1', attempt: 1, launch: ['launch', 'plan.yaml', 'T1', '--task', '--run', e.runId, '--coordinator', 'main', '--base', 'forge/run-shop', '--effort', 'medium'] });
+    expect(r).toMatchObject({ task: 'T1', attempt: 1, launch: { branch: 'task/T1', name: 'wp-shop-T1', prompt: expect.stringContaining('/forge:member --plan plan.yaml --task T1') } });
     const note = readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'handover.md'), 'utf8');
     expect(note).toContain('# Handover: T1 (attempt 1 of 3)');
     // It names the real brief, in the task worktree, and its own main-checkout path; never a task.json.

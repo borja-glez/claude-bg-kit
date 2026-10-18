@@ -22,7 +22,7 @@ import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
 import { isCommitCommand, runHook } from './hooks.js';
-import { launchRun, EFFORTS, MODELS, type Effort, type Model } from '../lib/launcher.js';
+import { launchRun } from '../lib/launcher.js';
 import { PAGE_RULES, declaresAssets, roadmapCapabilities, rulesOf, sharingChangeAsk, sharingChanged, sharingNotice, syncSummary } from '../lib/publish.js';
 import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
 import { TASK_STATUSES } from '../lib/types.js';
@@ -344,35 +344,14 @@ export function run(argv: string[], io: Io): Result {
       case 'escalations':
         return ok(JSON.stringify(escalationCandidates(docs('messages', normalizeMessage))));
       case 'launch': {
-        // The plan path goes into the launched session's prompt, inside double quotes in a shell command.
+        // A-19: forge composes the launch of its run members itself (swarm tick and swarm relaunch print it).
+        if (args.includes('--task')) return fail('launch --task moved to forge swarm tick: forge composes the launch of its run members', 2);
+        // The plan path goes into a shell command: only the safe set.
         if (args[0] !== undefined && !/^[\w./\\:~@+ -]+$/.test(args[0])) return fail('launch: the plan path may only use letters, digits, spaces and _ . / \\ : ~ @ + -', 2);
         const p = loadPlan();
         const track = args[1];
-        const taskMode = args.includes('--task');
-        if (taskMode) {
-          if (!track || !isPlanId(track) || !p.tasks.some(t => t.id === track)) return fail(`launch: unknown task ${track ?? ''}`);
-        } else if (!p.tracks.some(t => t.id === track)) return fail(`launch: unknown track ${track ?? ''}`);
+        if (!p.tracks.some(t => t.id === track)) return fail(`launch: unknown track ${track ?? ''}`);
         const SAFE_ID = /^[A-Za-z0-9_.~:@+][A-Za-z0-9_\-.~:@+]{0,79}$/;
-        const val = (f: string) => { const i = args.indexOf(f); const v = i >= 0 ? args[i + 1] : undefined; return v && !v.startsWith('--') ? v : undefined; };
-        // A member session's own effort and model: closed lists, so they go into the shell command unquoted.
-        let effort: Effort | undefined, model: Model | undefined;
-        if (taskMode) {
-          if (args.includes('--effort')) {
-            const v = val('--effort');
-            if (!v || !(EFFORTS as readonly string[]).includes(v)) return fail(`launch --task: --effort must be one of ${EFFORTS.join(', ')}`, 2);
-            effort = v as Effort;
-          }
-          if (args.includes('--model')) {
-            const v = val('--model');
-            if (!v || !(MODELS as readonly string[]).includes(v)) return fail(`launch --task: --model must be one of ${MODELS.join(', ')}`, 2);
-            model = v as Model;
-          }
-          const runId = val('--run'), coordinator = val('--coordinator'), taskBase = val('--base');
-          if (!runId || !SAFE_ID.test(runId)) return fail('launch --task: --run needs the execution id', 2);
-          if (!coordinator || !SAFE_ID.test(coordinator)) return fail('launch --task: --coordinator needs the coordinator session id', 2);
-          if (!taskBase || !BRANCH_RE.test(taskBase)) return fail('launch --task: --base needs the run branch', 2);
-          if (args.includes('--merge') || args.includes('--swarm')) return fail('launch --task: the coordinator integrates; --merge and --swarm do not apply', 2);
-        }
         const launcherAt = args.indexOf('--launcher');
         const launcher = launcherAt >= 0 ? args[launcherAt + 1] : 'bg';
         // I-18: one launcher. herdr could never open a pane from the command line and was removed.
@@ -393,28 +372,12 @@ export function run(argv: string[], io: Io): Result {
         const excludeHere = () => excludeWorktrees(a => {
           try { return execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; }
         });
-        if (taskMode) {
-          // Same worktree and branch names as `forge swarm worktree <T>`: every execution mode shares the work of a task.
-          const taskWt = path.join(root, '.claude', 'worktrees', `task-${track}`);
-          const taskBranch = `task/${track}`;
-          const taskName = `wp-${p.project}-${track}`;
-          const taskPrompt = `/forge:member --plan ${args[0]} --task ${track} — run member of ${val('--coordinator')}: work only ${track}, then stop`;
-          const taskFlags = `${effort ? ` --effort ${effort}` : ''}${model ? ` --model ${model}` : ''}`;
-          const taskCommand = `claude --bg --name ${taskName}${taskFlags} "${taskPrompt}"`;
-          const taskRun = launchRun({ name: taskName, prompt: taskPrompt, worktree: taskWt, effort, model });
-          if (!existsSync(taskWt)) {
-            excludeHere();
-            const exists = git('branch', '--list', taskBranch) !== '';
-            git('worktree', 'add', taskWt, ...(exists ? [taskBranch] : ['-b', taskBranch, base!]));
-          }
-          return ok(JSON.stringify({ worktree: taskWt, branch: taskBranch, name: taskName, prompt: taskPrompt, command: taskCommand, run: taskRun, runId: val('--run'), task: track }));
-        }
         const worktree = path.join(root, '.claude', 'worktrees', track!);
         const branch = `track/${track}`;
         const name = `wp-${p.project}-${track}`;
         // J-02: no forge mark. A track of a plan that a forge execution runs joins it as a manual member by itself
         // (/waypoint:work §0.5). --forge and --no-forge are still accepted and do nothing, for skills loaded before 0.20.
-        // J-16: --swarm is obsolete (forge launches run members with --task): it keeps its checks and changes nothing.
+        // J-16: --swarm is obsolete (forge composes the launch of its run members): it keeps its checks and changes nothing.
         const prompt = `/waypoint:work ${track}`
           + (args.includes('--merge') ? ` — the user authorizes merging ${branch} into main at phase close` : '');
         const command = `claude --bg --name ${name} "${prompt}"`;
@@ -427,7 +390,7 @@ export function run(argv: string[], io: Io): Result {
           git('worktree', 'add', worktree, ...(exists ? [branch] : ['-b', branch, ...(base ? [base] : [])]));
         }
         const done = ok(JSON.stringify({ worktree, branch, name, prompt, command, run: inWorktree }));
-        return swarm ? { ...done, stderr: '--swarm is obsolete: forge launches run members with --task\n' } : done;
+        return swarm ? { ...done, stderr: '--swarm is obsolete: forge composes the launch of its run members\n' } : done;
       }
       case 'status': {
         const { view: p, project, version } = loadView();
