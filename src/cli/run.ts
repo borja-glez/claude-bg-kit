@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, statSync, renameSync, openSync, readSync, closeSync } from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { parsePlan, PlanError, isPlanId } from '../lib/plan.js';
 import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known, type Write } from '../lib/sync.js';
 import { normalizeMessage, normalizeMeta, normalizePhase, sessionDoc, stateDoc } from '../page/normalize.js';
@@ -36,7 +36,11 @@ import type { Commit, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState, TaskSt
 // The classic hooks live in hooks.ts; the tests import isCommitCommand from here.
 export { isCommitCommand };
 
-export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined> }
+/** A-22: how launch --exec starts a detached process; tests inject it. */
+export type Spawn = (command: string, options: { cwd: string; detached: true; shell: true; windowsHide: true; stdio: ['ignore', number, number] }) => { unref(): void };
+const nodeSpawn: Spawn = (command, options) => spawn(command, options);
+
+export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined>; spawn?: Spawn }
 type Result = { code: number; stdout: string; stderr: string };
 
 const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
@@ -388,6 +392,20 @@ export function run(argv: string[], io: Io): Result {
           excludeHere();
           const exists = git('branch', '--list', branch) !== '';
           git('worktree', 'add', worktree, ...(exists ? [branch] : ['-b', branch, ...(base ? [base] : [])]));
+        }
+        // A-22: --exec starts the session itself, detached and in the worktree, so the skill needs no claude --bg
+        // permission. With shell: true, Windows finds claude.cmd or claude.exe; the prompt only holds checked ids.
+        // claude's output goes to a log in the main checkout: it says why a session did not start.
+        if (args.includes('--exec')) {
+          const log = path.join(root, '.waypoint', p.project, 'launch', `${name}.log`);
+          mkdirSync(path.dirname(log), { recursive: true });
+          const fd = openSync(log, 'w');
+          try {
+            (io.spawn ?? nodeSpawn)(command, { cwd: worktree, detached: true, shell: true, windowsHide: true, stdio: ['ignore', fd, fd] }).unref();
+          } catch (e) {
+            return fail(`launch --exec: ${(e as Error).message}`, 1);
+          } finally { closeSync(fd); }
+          return ok(JSON.stringify({ launched: true, worktree, branch, name, prompt, log }));
         }
         const done = ok(JSON.stringify({ worktree, branch, name, prompt, command, run: inWorktree }));
         return swarm ? { ...done, stderr: '--swarm is obsolete: forge composes the launch of its run members\n' } : done;

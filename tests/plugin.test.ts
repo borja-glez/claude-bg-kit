@@ -1942,4 +1942,21 @@ describe('plugin layout', () => {
     expect(runRef('execution')).toContain('launch.run');
     for (const f of skillDocs()) for (const w of ['node "<WP>" <launch', '--launcher herdr', '--task --run']) expect(read(f), `${f}: ${w}`).not.toContain(w);
   });
+
+  it('each waypoint skill allows the tools its body names; work may Edit, and launch needs no claude --bg (A-22)', () => {
+    const TOOLS = ['Edit', 'Write', 'Read', 'ArtifactData', 'Artifact', 'Agent', 'SendMessage', 'ListAgents'];
+    const dir = fileURLToPath(new URL('../plugins/waypoint/skills/', import.meta.url));
+    const allowedOf = (text: string) => new Set((text.split(/\r?\n/).find(l => l.startsWith('allowed-tools:')) ?? '')
+      .slice('allowed-tools:'.length).match(/[A-Za-z_]+\([^)]*\)|[A-Za-z_]+/g) ?? []);
+    for (const s of readdirSync(dir).filter(n => existsSync(path.join(dir, n, 'SKILL.md')))) {
+      const text = read(`plugins/waypoint/skills/${s}/SKILL.md`);
+      const body = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+      const allowed = allowedOf(text);
+      expect(TOOLS.filter(t => new RegExp(`\\b${t}\\b`).test(body) && !allowed.has(t)), s).toEqual([]);
+    }
+    expect(allowedOf(read('plugins/waypoint/skills/work/SKILL.md')).has('Edit')).toBe(true);
+    const launch = read('plugins/waypoint/skills/launch/SKILL.md');
+    expect([...allowedOf(launch)].filter(t => t.startsWith('Bash(claude'))).toEqual([]);
+    expect(launch).toContain('--exec');
+  });
 });

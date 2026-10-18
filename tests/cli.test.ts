@@ -377,6 +377,30 @@ describe('multi-session commands', () => {
       expect(run(['launch', path.join(dir, 'plan.yaml'), 'ui'], io).code).toBe(0);
     });
   });
+
+  describe('launch --exec (A-22)', () => {
+    const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+    const init = () => { git('init', '-q', '-b', 'main'); git('add', '.'); git('commit', '-qm', 'init'); };
+    type Call = { command: string; options: { cwd: string; detached: boolean; shell: boolean } };
+    it('starts claude --bg itself, detached and in the worktree, and keeps its output in a log', () => {
+      init();
+      const calls: Call[] = [];
+      const r = run(['launch', 'plan.yaml', 'ui', '--exec'], { ...io, spawn: (command, options) => { calls.push({ command, options }); return { unref: () => undefined }; } });
+      expect(r.code).toBe(0);
+      const out = JSON.parse(r.stdout);
+      expect(out).toMatchObject({ launched: true, branch: 'track/ui', name: 'wp-demo-shop-ui', prompt: '/waypoint:work ui' });
+      expect(calls).toEqual([{ command: 'claude --bg --name wp-demo-shop-ui "/waypoint:work ui"', options: expect.objectContaining({ cwd: out.worktree, detached: true, shell: true }) }]);
+      expect(existsSync(out.worktree)).toBe(true);
+      expect(out.log.split(path.sep).join('/')).toMatch(/\/\.waypoint\/demo-shop\/launch\/wp-demo-shop-ui\.log$/);
+      expect(existsSync(out.log)).toBe(true);
+    });
+    it('says why when the session cannot be started, and leaves the worktree for a retry', () => {
+      init();
+      const r = run(['launch', 'plan.yaml', 'ui', '--exec'], { ...io, spawn: () => { throw new Error('spawn EACCES'); } });
+      expect(r).toMatchObject({ code: 1, stdout: '', stderr: 'launch --exec: spawn EACCES\n' });
+      expect(existsSync(path.join(dir, '.claude', 'worktrees', 'ui'))).toBe(true);
+    });
+  });
 });
 
 describe('final fix: db plan cache, idle owners, recover caches', () => {
