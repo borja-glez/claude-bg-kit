@@ -329,6 +329,21 @@ describe('markPreexisting by test (D-06)', () => {
     expect(markPreexisting([silent], [{ validator: 'test', ok: false, failures: ['FAIL a > one'] }])[0].preexisting).toBeUndefined();
     expect(markPreexisting([silent], [{ validator: 'test', ok: false, failures: [] }])[0].preexisting).toBe(true);
   });
+  it('a crash of the process beside a test the base already failed makes the read unknown, so it is never excused (1a)', () => {
+    const crashes = [
+      'Segmentation fault (core dumped)', 'zsh: segmentation fault  npx vitest run', 'Aborted (core dumped)',
+      'FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory',
+      '<--- Last few GCs --->\nFATAL ERROR: Ineffective mark-compacts near heap limit',
+    ];
+    for (const crash of crashes) expect(failingTests(` FAIL  a.test.ts > one\n${crash}\n`, 'test'), crash).toEqual({ names: ['a.test.ts > one'], known: false });
+    // Without a crash the same output still reads its names.
+    expect(failingTests(' FAIL  a.test.ts > one\n', 'test')).toEqual({ names: ['a.test.ts > one'], known: true });
+    const base = [{ validator: 'test', ok: false, failing: ['a > one'], failingKnown: true, failures: ['FAIL a > one'] }];
+    const now = runValidators([{ name: 'test', cmd: 't', kind: 'test', source: 'detected' }],
+      () => ({ code: 139, output: ' FAIL  a > one\nSegmentation fault (core dumped)\n', ms: 1, timedOut: false }), 60);
+    expect(now[0]).toMatchObject({ failing: ['a > one'], failingKnown: false });
+    expect(markPreexisting(now, base)[0].preexisting).toBeUndefined();
+  });
 });
 
 describe('validators in parallel, retried only with a flaky history (C-12)', () => {

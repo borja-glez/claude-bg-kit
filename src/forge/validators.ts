@@ -218,7 +218,9 @@ export function planAffected(list: Validator[], files: string[], platform: NodeJ
   return { run, skipped, notes };
 }
 
-const FAILURE = /(fail|error|✗|×|assert|panic|exception)/i;
+// The marks of a crash of the process (a segfault, a core dump, V8 out of heap, a fatal error), shared by FAILURE and RUNNER_ERROR.
+const CRASH = 'segmentation fault|core dumped|javascript heap out of memory|fatal error:';
+const FAILURE = new RegExp(`(fail|error|✗|×|assert|panic|exception|${CRASH})`, 'i');
 export function failureLines(output: string): string[] {
   const lines = output.split(/\r?\n/).map(l => l.trimEnd()).filter(l => l.trim());
   const hits = lines.filter(l => FAILURE.test(l));
@@ -237,8 +239,9 @@ const tidy = (s: string) => s.replace(DURATION, '').replace(/\s+/g, ' ').trim().
 const TEST_LINE = [/^\s*FAILED\s+(\S+)/, /^\s*ERROR\s+(\S+::\S+)/, /^\s*--- FAIL:\s+(\S+)/, /^test\s+(\S+)\s+\.\.\.\s+FAILED/, /^\s*Failed\s+(\S+)\s+\[[^\]]+\]\s*$/];
 // Only test runners print these lines; a build's "Failed to compile." is not a test name.
 const TEST_KINDS = new Set(['test', 'e2e', 'other']);
-// A runner-level error that names no test: the names alone cannot say the run is the same as the base's.
-const RUNNER_ERROR = /unhandled (?:errors?|rejections?)|test suite failed to run|error collecting|errors? during collection|^\s*Interrupted:/im;
+// A runner-level error that names no test, or a crash of the process (a segfault, a core dump, V8 out of heap, a fatal
+// error): the names alone cannot say the run is the same as the base's.
+const RUNNER_ERROR = new RegExp(String.raw`unhandled (?:errors?|rejections?)|test suite failed to run|error collecting|errors? during collection|^\s*Interrupted:|${CRASH}`, 'im');
 const VITEST_FAIL = /^\s*FAIL\s+(.+)$/;
 const VITEST_MARK = /^\s*[×✗]\s+(.+)$/;
 const JEST = /^\s*●\s+(.+)$/;
