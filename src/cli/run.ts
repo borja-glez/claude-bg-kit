@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, statSync, renameSync, openSync, readSync, closeSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { isSyncBatch } from '../lib/sync-files.js';
-import { leftoversOf } from './doctor.js';
+import { leftoversOf, removeLeftovers } from './doctor.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { parsePlan, PlanError, isPlanId } from '../lib/plan.js';
 import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known, type Write } from '../lib/sync.js';
@@ -276,12 +276,14 @@ export function run(argv: string[], io: Io): Result {
           return fail(`sync: known.json has no version of ${r.needsList.map(id => `state/${id}`).join(', ')}, which this sync has to write: list state again and write known.json from that listing`, 2);
         }
         // A-24: only this pass's batches stay in --out: the earlier ones go first, and only inside .waypoint/<project>/
-        // (by real path, so a link there that leads elsewhere is not followed).
+        // (by real path, so a link below the project folder that leads elsewhere is not followed; a link that is the
+        // project folder itself, or .waypoint, is followed: sync writes through it anyway and deletes only its own names).
+        // A batch-named entry that is a link goes too, so the write below makes a plain file instead of writing through it.
         const wpDir = path.join(io.cwd, '.waypoint', p.project);
         const own = existsSync(outDir) && existsSync(wpDir) ? path.relative(realpathSync(wpDir), realpathSync(outDir)) : '';
         if (own && !own.startsWith('..') && !path.isAbsolute(own)) {
           for (const d of readdirSync(outDir, { withFileTypes: true })) {
-            if (d.isFile() && isSyncBatch(d.name)) rmSync(path.join(outDir, d.name), { force: true });
+            if ((d.isFile() || d.isSymbolicLink()) && isSyncBatch(d.name)) rmSync(path.join(outDir, d.name), { force: true });
           }
         }
         mkdirSync(outDir, { recursive: true });
@@ -292,10 +294,9 @@ export function run(argv: string[], io: Io): Result {
         // A-24: what older waypoints left under .waypoint/<project>/; --fix deletes it, and never anything else.
         const p = loadPlan();
         const leftovers = leftoversOf(io.cwd, p);
-        const removed: string[] = [];
-        if (args.includes('--fix')) {
-          for (const l of leftovers) { rmSync(path.join(io.cwd, l.path), { recursive: true, force: true }); removed.push(l.path); }
-        }
+        const { removed, failed } = args.includes('--fix') ? removeLeftovers(io.cwd, leftovers) : { removed: [], failed: [] };
+        // `failed` appears only when something could not be deleted, and then the exit code is 1.
+        if (failed.length) return out(1, { project: p.project, leftovers, removed, failed });
         return ok(JSON.stringify({ project: p.project, leftovers, removed }));
       }
       case 'next': {

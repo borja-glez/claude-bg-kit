@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync, readdirSync, symlinkSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync, readdirSync, symlinkSync, lstatSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { removeLeftovers } from '../src/cli/doctor.js';
 import { run, isCommitCommand, type Io } from '../src/cli/run.js';
 import { makesCommits, readForge } from '../src/cli/hooks.js';
 import { describeViewer } from '../src/lib/viewer-role.js';
@@ -2842,6 +2843,8 @@ describe('what older passes and versions leave under .waypoint/<project>/ (A-24)
     const outside = path.join(dir, 'outside');
     put(path.join(outside, 'plan-old.json'));
     put(path.join(outside, 'last-head'));
+    put(path.join(outside, 'fronts', 'a.json'));
+    put(path.join(outside, 'seats', 'x', 'last-head'));
     mkdirSync(wp(), { recursive: true });
     symlinkSync(outside, wp('sync'), 'junction');
     expect(run(['sync', 'plan.yaml', '--out', '.waypoint/demo-shop/sync'], io).code).toBe(0);
@@ -2855,6 +2858,29 @@ describe('what older passes and versions leave under .waypoint/<project>/ (A-24)
     expect(r.leftovers).toEqual([]);
     expect(existsSync(path.join(outside, 'plan-old.json'))).toBe(true);
     expect(existsSync(path.join(outside, 'last-head'))).toBe(true);
+    expect(existsSync(path.join(outside, 'fronts', 'a.json'))).toBe(true);
+    // The project folder itself being a link: doctor lists and removes nothing there.
+    rmSync(wp(), { recursive: true, force: true });
+    symlinkSync(outside, wp(), 'junction');
+    for (const extra of [[], ['--fix']]) {
+      expect(JSON.parse(run(['doctor', 'plan.yaml', ...extra], io).stdout)).toEqual({ project: 'demo-shop', leftovers: [], removed: [] });
+    }
+    expect(existsSync(path.join(outside, 'last-head'))).toBe(true);
+    expect(existsSync(path.join(outside, 'seats', 'x', 'last-head'))).toBe(true);
+  });
+  it('sync does not write through a meta.json that is a link: it replaces the link with a file', (ctx) => {
+    const target = path.join(dir, 'outside.json');
+    put(target, '"untouched"');
+    mkdirSync(wp('sync'), { recursive: true });
+    try { symlinkSync(target, wp('sync', 'meta.json'), 'file'); } catch { ctx.skip(); return; } // file links need privileges on Windows
+    expect(run(['sync', 'plan.yaml', '--out', '.waypoint/demo-shop/sync'], io).code).toBe(0);
+    expect(readFileSync(target, 'utf8')).toBe('"untouched"');
+    expect(lstatSync(wp('sync', 'meta.json')).isFile()).toBe(true);
+  });
+  it('doctor --fix goes on after a deletion that fails, and says which (failed)', () => {
+    const rm = (p: string) => { if (p.endsWith('b')) throw new Error('EBUSY: resource busy'); };
+    const r = removeLeftovers('/root', [{ path: 'a', why: '' }, { path: 'b', why: '' }, { path: 'c', why: '' }], rm);
+    expect(r).toEqual({ removed: ['a', 'c'], failed: [{ path: 'b', error: 'EBUSY: resource busy' }] });
   });
   it('doctor lists what older versions left, --fix deletes only that, and what is still read stays (Review Focus 2)', () => {
     put(wp('last-head'), 'abc\n');

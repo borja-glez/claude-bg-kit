@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, type Dirent } from 'node:fs';
+import { lstatSync, readdirSync, rmSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 import { syncFiles } from '../lib/sync-files.js';
 import type { Plan } from '../lib/types.js';
@@ -15,6 +15,22 @@ const entries = (dir: string): Dirent[] => {
 };
 const isFile = (f: string): boolean => { try { return lstatSync(f).isFile(); } catch { return false; } };
 const isFolder = (f: string): boolean => { try { return lstatSync(f).isDirectory(); } catch { return false; } };
+
+/**
+ * A-24: deletes `leftovers` one by one; one that cannot go (a file held open on Windows: EBUSY, EPERM) is reported in
+ * `failed` and the rest are still tried. `rm` is injectable for the test.
+ */
+export function removeLeftovers(
+  root: string, leftovers: Leftover[], rm: (p: string, o: { recursive: boolean; force: boolean }) => void = rmSync,
+): { removed: string[]; failed: { path: string; error: string }[] } {
+  const removed: string[] = [];
+  const failed: { path: string; error: string }[] = [];
+  for (const l of leftovers) {
+    try { rm(path.join(root, l.path), { recursive: true, force: true }); removed.push(l.path); }
+    catch (e) { failed.push({ path: l.path, error: e instanceof Error ? e.message : String(e) }); }
+  }
+  return { removed, failed };
+}
 
 /**
  * A-24: what older waypoints left under `.waypoint/<project>/` of `root` that nothing reads any more:
