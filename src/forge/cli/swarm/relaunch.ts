@@ -56,7 +56,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     `- Commits on ${t.branch} not yet on ${e.branch}:`, commits, '',
     `- This note: ${note} (main checkout ${io.cwd})`,
     `- Work files of the earlier attempts: ${memberWork} (the brief is brief-<n>.md there, with report-<n>.txt, validators-<n>.json and reviews-<n>-<round>/)`, '',
-    `Resume from ${t.branch} in this worktree: read the brief in ${memberWork} if it exists (else write it as the brief stage says), do not redo a step whose output file is already written, and continue from the last stage.`, '',
+    `Resume from ${t.branch} in this worktree: read the brief in ${memberWork} if it exists (else write it as the brief stage says), `
+      + `do not redo a step whose output file is already written, and continue from the last stage.`, '',
   ].join('\n'));
   update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), attempts: attempt, startedAt: iso, nudgedAt: null, updatedAt: iso } } });
   return json({ task, attempt, note, work: workRel(ref), launch: memberLaunch(io.cwd, planPath, task, e) });

@@ -99,7 +99,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     if (!isRunIdOf(project, runIdFlag)) throw new UsageError(`swarm start: --run-id must be the run id swarm propose printed for ${project} (${project}-<stamp>)`);
     const started = runIdFlag === prev?.runId || readAuths(io.cwd).some(r => r.runId === runIdFlag && (r.kind === 'merge' || r.usedAt !== undefined))
       || readEvents(io.cwd).some(ev => ev.runId === runIdFlag);
-    if (started) throw new UsageError(`swarm start: --run-id ${runIdFlag} is the id of a run that already started (execution.json, an authorization or the ledger names it); run swarm propose again for a new id`);
+    if (started) throw new UsageError(`swarm start: --run-id ${runIdFlag} is the id of a run that already started `
+      + `(execution.json, an authorization or the ledger names it); run swarm propose again for a new id`);
   }
   const runId = runIdFlag !== undefined && !resume ? runIdFlag : runIdOf(project, now);
   if (kind === 'ephemeral') {
@@ -129,7 +130,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     const wt = runWorktree(io.cwd);
     // The run branch gets its own worktree: it can be neither the base (checked out here) nor a branch
     // another worktree holds, or `git worktree add` refuses it.
-    if (branch === base) throw new UsageError(`swarm start: ${branch} is the base branch (checked out in the main checkout); the run branch must be another one (omit --branch for ${runBranch(project)})`);
+    if (branch === base) throw new UsageError(`swarm start: ${branch} is the base branch (checked out in the main checkout); `
+      + `the run branch must be another one (omit --branch for ${runBranch(project)})`);
     const defaultBranch = defaultBranchOf(deps.git);
     if (defaultBranch && branch === defaultBranch) throw new UsageError(`swarm start: ${branch} is the default branch; an execution never integrates into it directly`);
     const holder = worktreeHolding(deps.git(['worktree', 'list', '--porcelain']), branch);
@@ -191,7 +193,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     const v = checkMofAuth(readAuths(io.cwd), { runId: mofRun, target: mergeInto, session: hook, project: resume && prev ? prev.project : project, now: io.now().getTime() });
     if (!v.ok) { mergeRefused = v.reason; mergeNote = v.note ?? null; } else {
       try { useAuth(io.cwd, v.record, iso, mofRun); } catch (err) {
-        throw new Error(`swarm start: the yes ${v.record.authId} to the start question could not be marked used (${err instanceof Error ? err.message : String(err)}); execution.json was not written, run swarm start again`);
+        throw new Error(`swarm start: the yes ${v.record.authId} to the start question could not be marked used (${err instanceof Error ? err.message : String(err)}); `
+          + `execution.json was not written, run swarm start again`);
       }
       mof = true;
     }
@@ -208,7 +211,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   // A task branch already merged into the base is deleted (an ancestor of it: nothing is lost); `swarm worktree`
   // creates it again from the tip of the run's branch when its turn comes, so it sees the work integrated since.
   for (const tb of moves) {
-    if (deps.git(['branch', '-d', tb]) === null) throw new UsageError(`swarm start: cannot delete ${tb}; if a worktree still holds it, run git worktree prune or remove that worktree (git worktree remove)`);
+    if (deps.git(['branch', '-d', tb]) === null) throw new UsageError(`swarm start: cannot delete ${tb}; `
+      + `if a worktree still holds it, run git worktree prune or remove that worktree (git worktree remove)`);
   }
   // Learned notes two tasks append to the same surface are merged by git's union driver, never left as a conflict.
   const attributes = unionLearned(deps);
@@ -224,7 +228,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   // its own).
   if (!resume) pruneRunState(io.cwd, state.runId, { now: now.getTime(), stale: false, dryRun: false });
   const looseOut = kind === 'ephemeral'
-    ? { loose: loose.length, ...(ignoredTasks ? { ignoredTasks: true, message: `the ephemeral run ${state.runId} is resumed with its own ${loose.length} tasks; --tasks was ignored (start a new run for new requests once this one ends)` } : {}) }
+    ? { loose: loose.length, ...(ignoredTasks ? { ignoredTasks: true,
+      message: `the ephemeral run ${state.runId} is resumed with its own ${loose.length} tasks; --tasks was ignored (start a new run for new requests once this one ends)` } : {}) }
     : {};
   const announce = startAnnounce({
     es: spanish(state.locale ?? null, io.cwd, project), kind, resume, runId: state.runId, mode: state.mode, parallel: state.parallel,

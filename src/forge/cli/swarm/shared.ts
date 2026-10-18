@@ -77,7 +77,8 @@ export function loadTasksArg(io: Io, file: string | undefined, sub: string): Loo
  * the ledger holds a phase implement of this plan's `<T>`, or of a `<T>` that names no project (before 2c); another
  * project's run left it otherwise, and it is refused before anything is created.
  */
-export function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch: string, project: string | null): { worktree: string; branch: string; base: string | null; setup: SetupResult; resumed: boolean; prior: PriorCommit[]; priorTotal?: number } {
+export function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch: string,
+  project: string | null): { worktree: string; branch: string; base: string | null; setup: SetupResult; resumed: boolean; prior: PriorCommit[]; priorTotal?: number } {
   loadTrustedConfig(main); // I-03: before any worktree exists, so a retry after the answer still sets it up
   const dir = taskWorktree(main, task);
   const branch = taskBranch(task);

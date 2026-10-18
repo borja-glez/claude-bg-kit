@@ -59,7 +59,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     return { ...cur, tasks: { ...cur.tasks, [task]: next } };
   });
   const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
-  writePublicTask(io.cwd, { task, runId: e.runId, stage: next.stage, status: next.status, agent: next.agent, round: next.round, since: next.stageSince, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: base.executor });
+  writePublicTask(io.cwd, { task, runId: e.runId, stage: next.stage, status: next.status, agent: next.agent, round: next.round, since: next.stageSince,
+    updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: base.executor });
   if (base.stage !== next.stage) appendPhase(io.cwd, { ts: iso, kind: 'phase', task, phase: next.stage, ...(e.kind === 'plan' && isSafeId(e.project) ? { project: e.project } : {}) });
   // J-15: the state/T write of this stage, built by the CLI; --claim adds the claim of a task the coordinator starts.
   // A loose task of an ephemeral run has no state/T.

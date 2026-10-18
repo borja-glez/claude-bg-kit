@@ -31,7 +31,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   if (member.role === 'manual' && member.task !== task) writeMember(main, { ...member, task });
   const since = prev && prev.by === session && prev.stage === stage && prev.runId === e.runId ? prev.since : iso;
   const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
-  const p: PublicTask = { task, runId: e.runId, stage, status, agent: has('no-agent') ? null : (flag('agent') ?? null), round, since, updatedAt: iso, leaseUntil: lease, by: session, mode: member.role === 'executor' ? 'sessions' : 'manual' };
+  const p: PublicTask = { task, runId: e.runId, stage, status, agent: has('no-agent') ? null : (flag('agent') ?? null), round, since, updatedAt: iso,
+    leaseUntil: lease, by: session, mode: member.role === 'executor' ? 'sessions' : 'manual' };
   writePublicTask(main, p);
   // J-15: the state/T write of this report, built by the CLI; --claim adds the member's claim of its task.
   const claimed = has('claim') ? { status: 'in_progress', owner: session, claimedAt: iso, startedAt: iso } : null;

@@ -39,7 +39,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   const publicTasks: Record<string, PublicTask> = {};
   try {
     for (const f of readdirSync(path.join(io.cwd, '.forge', 'execution')).filter(n => n.endsWith('.json')).slice(0, 500)) {
-      try { const p = normalizePublicTask(JSON.parse(readFileSync(path.join(io.cwd, '.forge', 'execution', f), 'utf8'))); if (p && `${p.task}.json` === f) publicTasks[p.task] = p; } catch { /* skip */ }
+      try { const p = normalizePublicTask(JSON.parse(readFileSync(path.join(io.cwd, '.forge', 'execution', f),
+        'utf8'))); if (p && `${p.task}.json` === f) publicTasks[p.task] = p; } catch { /* skip */ }
     }
   } catch { /* none yet */ }
   let agents: BgAgent[] | null = null;

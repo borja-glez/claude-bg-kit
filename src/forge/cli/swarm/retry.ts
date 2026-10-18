@@ -70,11 +70,13 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
       adopted = base;
       return {
         ...cur, ...revive(cur),
-        tasks: { ...cur.tasks, [task]: { ...base, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: base.attempts + 1, nudgedAt: null, finishedAt: iso, updatedAt: iso, stageSince: iso } },
+        tasks: { ...cur.tasks, [task]: { ...base, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: base.attempts + 1,
+          nudgedAt: null, finishedAt: iso, updatedAt: iso, stageSince: iso } },
       };
     });
     clearOwnEnded();
-    writePublicTask(io.cwd, { task, runId: e.runId, stage: 'implement', status: 'running', agent: null, round: adopted.round, since: iso, updatedAt: iso, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString(), by: e.coordinator, mode: 'subagents' });
+    writePublicTask(io.cwd, { task, runId: e.runId, stage: 'implement', status: 'running', agent: null, round: adopted.round, since: iso, updatedAt: iso,
+      leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString(), by: e.coordinator, mode: 'subagents' });
     // D-08: `work`, the task's work folder in the main checkout, where the coordinator writes its brief.
     return json({ task, adopted: true, previous: adopted.executor, worktree, branch: t.branch, work: workRel({ project: e.project, task }) });
   }

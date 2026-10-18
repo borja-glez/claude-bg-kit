@@ -37,6 +37,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   if (liveness !== 'stopped') return json({ took: false, previous, liveness, joinAs: 'manual' });
   update(cur => cur && { ...cur, coordinator: session, hookSession: hook, sleepUntil: null });
   // The user asked this session to go on: their decision, recorded in the decision format (by: user).
-  appendEvent(io.cwd, { ts: iso, kind: 'decision', point: 'takeover', what: 'takeover', chosen: session, why: `the coordinator ${previous} stopped`, by: 'user', weight: 'minor', previous, session, runId: e.runId });
+  appendEvent(io.cwd, { ts: iso, kind: 'decision', point: 'takeover', what: 'takeover', chosen: session, why: `the coordinator ${previous} stopped`, by: 'user',
+    weight: 'minor', previous, session, runId: e.runId });
   return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === 'running').map(([id]) => id) });
 };

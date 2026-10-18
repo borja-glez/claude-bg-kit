@@ -18,7 +18,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   // Final review 7: a plan run's project, which no other plan's leftover task/<T> may pass for; an ephemeral run has none.
   const added = addTaskWorktree(deps, io.cwd, task, e.branch, e.kind === 'plan' ? e.project : null);
   const { worktree: dir, branch } = added;
-  const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: null };
+  const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null,
+    startedAt: iso, stageSince: iso, updatedAt: iso, detail: null };
   update(cur => cur && { ...notEnded(cur), tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), worktree: dir, branch, updatedAt: iso } } });
   return json({ ...added, work: workRel({ project: e.kind === 'plan' ? e.project : null, task }) });
 };

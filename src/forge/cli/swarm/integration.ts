@@ -4,7 +4,10 @@ import { existsSync, lstatSync, readFileSync, rmSync, type Stats } from 'node:fs
 import path from 'node:path';
 import type { Io } from '../run.js';
 import { runWithCache, cleanTree, indexTree, untrackedPaths, cacheGit, checkoutPrefix } from '../../validate-cache.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, validateEvent, failingLabel, type RunOptions, type Scope, type Validator, type ValidatorResult } from '../../validators.js';
+import {
+  detectValidators, selectValidators, runValidators, markPreexisting, blocking, validateEvent, failingLabel,
+  type RunOptions, type Scope, type Validator, type ValidatorResult,
+} from '../../validators.js';
 import { loadConfig } from '../../config.js';
 import { appendEvent } from '../../ledger.js';
 import { noSlot, type Slot } from '../../jobs.js';
@@ -15,7 +18,10 @@ import { rejectedDepsSay, keptFilesSay } from '../../swarm.js';
 import { loadTrustedConfig } from '../../trust.js';
 import { publishFor } from '../../roadmap-sources.js';
 import type { GitDeps, SwarmDeps } from './context.js';
-import { type SetupResult, DEPS_DIR, DEP_FILES, workdirOf, excludeDeps, hasDeps, needsDeps, manifestHash, depsCmd, runInstall, type DepsMemo, memoFile, readMemo, writeMemo, lastLine, nulList, trackedChanges, restoringRegenerated, LOCAL_STATE } from './setup.js';
+import {
+  type SetupResult, DEPS_DIR, DEP_FILES, workdirOf, excludeDeps, hasDeps, needsDeps, manifestHash, depsCmd, runInstall, type DepsMemo, memoFile,
+  readMemo, writeMemo, lastLine, nulList, trackedChanges, restoringRegenerated, LOCAL_STATE,
+} from './setup.js';
 
 type NewValidator = { name: string; cmd: string };
 // setup: the last dependency install of the attempt, when one ran. leftovers: the untracked paths, not ignored, that the
@@ -30,10 +36,12 @@ type Validation = { results: ValidatorResult[]; durationMs: number };
 /** The validator runs of a merge attempt (C4): the target tip's baseline and the merged tree, each when it ran or came from the cache. */
 type Validations = { baseline?: Validation; merged?: Validation };
 type MergeOutcome =
-  | { result: 'merged'; sha: string; preexisting: string[]; newValidators: NewValidator[]; surfacesChanged: string[]; setup?: SetupResult; leftovers?: string[]; restored?: string[]; validations?: Validations; recovered?: { task: string | null; pre: string } }
+  | { result: 'merged'; sha: string; preexisting: string[]; newValidators: NewValidator[]; surfacesChanged: string[]; setup?: SetupResult;
+    leftovers?: string[]; restored?: string[]; validations?: Validations; recovered?: { task: string | null; pre: string } }
   | {
     result: 'dirty' | 'conflict' | 'deps'; detail: string; setup?: SetupResult; leftovers?: string[];
-    restoreSetup?: SetupResult; restoreChanged?: string[]; depsFromRejectedMerge?: true; touchedKept?: string[]; restored?: string[]; validations?: Validations; recovered?: { task: string | null; pre: string };
+    restoreSetup?: SetupResult; restoreChanged?: string[]; depsFromRejectedMerge?: true; touchedKept?: string[]; restored?: string[];
+    validations?: Validations; recovered?: { task: string | null; pre: string };
   };
 
 export interface MergeOpts {
@@ -142,7 +150,8 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   // A validator run through the tree cache (C6), keyed by the tree `tree` gives and the directory `where` runs them in;
   // what it misses runs as before.
   const cachedRun = (where: GitDeps, owned: boolean, list: Validator[], tree: () => string | null): ValidatorResult[] =>
-    runWithCache(list, misses => (misses.length ? (o.slot ?? noSlot) : noSlot)(() => validating(where, owned, () => runValidators(misses, where.exec, o.timeoutSec, { ...o.run, execMany: where.execMany }))), {
+    runWithCache(list,
+      misses => (misses.length ? (o.slot ?? noSlot) : noSlot)(() => validating(where, owned, () => runValidators(misses, where.exec, o.timeoutSec, { ...o.run, execMany: where.execMany }))), {
       main: o.main, git: cacheGit(where.git), dir: o.cache.read || o.cache.write ? checkoutPrefix(where.git) : null, repo: where.repo, generated,
       read: o.cache.read, write: o.cache.write, tree, now: o.now,
     });
@@ -277,7 +286,8 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
     // An install that failed at this HEAD with these manifests and this command fails again: it is not rerun each tick.
     const failed = memo().failed;
     if (cmd && failed && failed.head === pre && failed.manifests === manifests && failed.cmd === cmd) {
-      return { result: 'deps', detail: `could not install its dependencies before merging ${ref}: ${lastLine(failed.setup)} (remembered from the install that failed at ${pre.slice(0, 12)}; it runs again with --retry-deps, or once HEAD, the manifests or swarm.setup change)`, setup: failed.setup };
+      return { result: 'deps', detail: `could not install its dependencies before merging ${ref}: ${lastLine(failed.setup)} `
+        + `(remembered from the install that failed at ${pre.slice(0, 12)}; it runs again with --retry-deps, or once HEAD, the manifests or swarm.setup change)`, setup: failed.setup };
     }
     if (!install()) {
       if (cmd) remember({ ...memo(), failed: { head: pre, manifests, cmd, setup: setup! } });
@@ -285,7 +295,8 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
     }
     if (failed) { const { failed: _gone, ...rest } = memo(); remember(rest); }
     const left = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
-    if (left === null || left.trim() !== '') return { result: 'deps', detail: `the dependency install left changes in the worktree: ${(left ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}`, ...withSetup(), leftovers: leftovers() };
+    if (left === null || left.trim() !== '') return { result: 'deps',
+      detail: `the dependency install left changes in the worktree: ${(left ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}`, ...withSetup(), leftovers: leftovers() };
   }
   // What the target detects before the merge: the validators detected only after it are new.
   let detected0: Validator[] | null = null;
@@ -308,7 +319,8 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
         baseline = results;
       } catch { baseline = []; }
       const left = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
-      if (left === null || left.trim() !== '') return { result: 'dirty', detail: `the validators left changes in the worktree: ${(left ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}`, ...withSetup() };
+      if (left === null || left.trim() !== '') return { result: 'dirty',
+        detail: `the validators left changes in the worktree: ${(left ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}`, ...withSetup() };
     }
   }
   // D-07: the merge phase, so a later attempt tells its own leftover (this ref, from this pre) from someone's.
