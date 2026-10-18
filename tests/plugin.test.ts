@@ -329,7 +329,7 @@ describe('plugin layout', () => {
     const summary = md.slice(md.indexOf('\n## Autonomy\n'), md.indexOf('\n## 1. Triage\n'));
     for (const w of ['FORGE prefs', '/forge:run --auto', 'references/autonomy.md']) expect(summary).toContain(w);
     const auto = runRef('autonomy');
-    for (const w of ['FORGE prefs', '/forge:run --auto', 'FORGE triage --autonomy auto', 'FORGE swarm start --autonomy auto', '«¿Integro la rama de ejecución en `<rama>` al acabar?»',
+    for (const w of ['FORGE prefs', '/forge:run --auto', 'FORGE triage --autonomy auto', 'FORGE swarm start --autonomy auto', 'FORGE authorize merge-on-finish --branch <rama>',
       '--merge-on-finish', '`design-apply`', '`design-approve`', '`plan-confirm`', '`mode`', 'waypoint design-gate', '/waypoint:design approve --auto',
       'forge/run-<project>']) expect(auto).toContain(w);
     for (const w of ['FORGE route stage --stage handed-off', 'FORGE route stage --stage done']) expect(md).toContain(w);
@@ -1857,5 +1857,14 @@ describe('plugin layout', () => {
     expect(JSON.parse(read('plugins/forge/hooks/hooks.json')).hooks.PostToolUse)
       .toEqual([{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" hook answer' }] }]);
     expect(read('plugins/forge/hooks/hooks.json').split('hook answer')).toHaveLength(2);
+  });
+  it('the final merge goes through a recorded answer: authorize merge-on-finish with the run id, and each ask as printed (I-03)', () => {
+    const large = runRef('large');
+    for (const w of ['FORGE authorize merge-on-finish --run <runId>', '"runId"']) expect(large, w).toContain(w);
+    const exec = runRef('execution');
+    for (const w of ['FORGE authorize merge-on-finish --run <runId>', '--run-id <runId>', '`needs-authorization`', 'FORGE swarm merge --yes', '--hook-session <CSID>']) expect(exec, w).toContain(w);
+    expect(runRef('autonomy')).toContain('FORGE authorize merge-on-finish --branch <rama>');
+    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('`needs-authorization`');
+    for (const f of ['large', 'execution', 'autonomy']) expect(runRef(f), f).not.toContain('«Sí, intégrala en');
   });
 });
