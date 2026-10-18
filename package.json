@@ -6,6 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
+    "ci": "node scripts/ci.mjs",
     "typecheck": "tsc --noEmit",
     "typecheck:mod": "tsc -p tsconfig.mod.json",
     "pretypecheck:mod": "node scripts/mod-types.mjs check",

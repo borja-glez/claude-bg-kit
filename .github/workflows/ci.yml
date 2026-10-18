@@ -1,0 +1,48 @@
+# I-05: the checks of `npm run ci`, on Ubuntu and Windows. The engine types (types/claude-code) are not in git, so
+# typecheck:mod is skipped here with a warning. The Claude Code CLI is pinned and bumped by hand.
+# The node20 job loads the committed CLI bundles on the oldest Node the plugins promise (development needs 22.12).
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+jobs:
+  ci:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: git config --global user.name ci && git config --global user.email ci@example.invalid && git config --global core.autocrlf false && git config --global core.longpaths true
+      - run: npm install -g @anthropic-ai/claude-code@2.1.302
+        env:
+          DISABLE_AUTOUPDATER: "1"
+      - run: npm run ci
+        env:
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/claude
+          DISABLE_AUTOUPDATER: "1"
+  node20:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # With no arguments each CLI prints its usage and exits 2: the bundle loaded and ran on Node 20.
+      - shell: bash
+        run: |
+          code=0; node plugins/forge/dist/forge.cjs || code=$?
+          if [ "$code" -ne 2 ]; then echo "forge: expected exit 2, got $code"; exit 1; fi
+          code=0; node plugins/waypoint/dist/waypoint.cjs || code=$?
+          if [ "$code" -ne 2 ]; then echo "waypoint: expected exit 2, got $code"; exit 1; fi
