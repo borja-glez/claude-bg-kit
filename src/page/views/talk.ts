@@ -1,4 +1,4 @@
-// Conversación (spec §4.6.7; G-17, H-17): one composer on top, one row of filters (everything, open questions, decisions,
+// Conversación (G-17, H-17): one composer on top, one row of filters (everything, open questions, decisions,
 // proposals, ideas and debt, mine) and one list where notes and proposals mix by date. A proposal carries its comments
 // (they never show loose), the task it became, its history and the owner's mark; a decision shows its structure; a question
 // a decision resolved shows closed, with a link to that decision. Only the roadmap's owner decides proposals (§4.1): the

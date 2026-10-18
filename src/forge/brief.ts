@@ -6,7 +6,7 @@ export function taskText(task: PlanTask): string {
   return [task.title, task.includes, task.done_when].filter((s): s is string => !!s && !!s.trim()).map(s => s.trim()).join('. ');
 }
 
-/** The line every implementer brief carries with `tdd: superpowers` (spec §4.4). */
+/** The line every implementer brief carries with `tdd: superpowers` */
 export const tddLine = (skillPath: string): string =>
   `TDD: required. Read and follow \`${skillPath}\`. Report the failing run and then the passing run of the new tests.`;
 

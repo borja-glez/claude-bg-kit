@@ -1,4 +1,4 @@
-// forge's routing hooks (spec §5.2). SessionStart (`hook route-session`) puts the routing rule in the session's context;
+// forge's routing hooks. SessionStart (`hook route-session`) puts the routing rule in the session's context;
 // UserPromptSubmit (`hook route-prompt`) reminds a route half done, else hints at forge:route for coding work. Both fail
 // open (any error prints nothing), stay silent where forge already drives the session or the user chose superpowers
 // (or off) in local.yaml, and run no git beyond mainCheckout.
@@ -33,7 +33,7 @@ export function routingRule(superpowers: boolean): string {
 
 export const ROUTE_HINT = 'forge: this looks like coding work. If it is more than a trivial edit, invoke forge:route first, before any other skill.';
 
-// Coding verbs in Spanish and English (spec §5.2; scripts/route-eval calibrates the list).
+// Coding verbs in Spanish and English (scripts/route-eval calibrates the list).
 const VERBS = [
   'crea', 'crear', 'añade', 'añadir', 'agrega', 'agregar', 'implementa', 'implementar', 'arregla', 'arreglar', 'corrige', 'corregir',
   'refactoriza', 'refactorizar', 'monta', 'montar', 'construye', 'construir', 'migra', 'migrar', 'cambia', 'cambiar', 'desarrolla', 'desarrollar',

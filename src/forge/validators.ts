@@ -141,7 +141,7 @@ export function globMatch(glob: string, file: string): boolean {
   return new RegExp(`^${re}$`).test(file.replace(/\\/g, '/'));
 }
 
-// Which validators a run executes (spec §4.2). `when` decides first; otherwise known kinds have their own rule and
+// Which validators a run executes. `when` decides first; otherwise known kinds have their own rule and
 // unknown kinds behave as when: medium. --affected keeps only validators whose `affects` match (or have none).
 export type Scope = { mode: 'affected'; files: string[] } | { mode: 'small' } | { mode: 'heavy'; changed: string[] | null } | { mode: 'final' };
 const KNOWN = new Set(['test', 'lint', 'typecheck', 'other', 'build', 'e2e', 'bench']);

@@ -21,7 +21,7 @@ export const BOUND_LEASE_MS = 5 * 60_000;
 export const BOUND_MAX_BYTES = 4096;
 /** A seat's session.json larger than this is not read, by the CLI and the band alike. */
 export const SESSION_MAX_BYTES = 8 * 1024;
-/** A bound.json found empty or broken is read once more after this long: the band renews it in place (spec §4.10). */
+/** A bound.json found empty or broken is read once more after this long: the band renews it in place. */
 export const BOUND_REREAD_MS = 8;
 /** At most this many documents of a project's state cache (dbcache/state) are read, by name: the seats' open tasks are
  *  the same for the CLI, the hooks and the band. */

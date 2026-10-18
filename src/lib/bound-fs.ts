@@ -34,7 +34,7 @@ function readText(file: string, max: number): string | null {
 /**
  * A bound.json's binding. The band renews one with $.fs.write, which is not atomic: a reader may find the file empty or
  * half written for an instant. A text that is empty or does not parse is read once more after BOUND_REREAD_MS; one
- * still broken is no binding (spec §4.10). A missing file is none at once. The band reads it the same way.
+ * still broken is no binding. A missing file is none at once. The band reads it the same way.
  */
 function readBound(file: string, now?: number): BoundDoc | null {
   const text = readText(file, BOUND_MAX_BYTES);

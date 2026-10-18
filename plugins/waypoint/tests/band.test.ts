@@ -101,7 +101,7 @@ const RUN: WaypointBand = {
 };
 type Notice = Extract<WaypointBand, { mode: 'notice' }>;
 const PREVIOUS: WaypointBand['viewer'] = { role: 'previous', coordinator: false, runId: null };
-// Another live conversation works T002 on the seat main (C3, spec §4.5); notice(over) varies it.
+// Another live conversation works T002 on the seat main (C3); notice(over) varies it.
 const NOTICE: Notice = {
   mode: 'notice', project: 'demo', locale: 'es', kind: 'other-live', subject: 'task', seat: 'main', task: 'T002', title: 'API de pedidos',
   since: '2026-10-11T10:00:00.000Z', runId: null, roadmapUrl: 'https://claude.ai/artifact/roadmap', key: 'task:T002',

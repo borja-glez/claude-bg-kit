@@ -37,7 +37,7 @@ export interface NextRoundInput {
 }
 
 /**
- * The round as the budget counts it: since the design was last reopened (spec §4.9.3: a reopened design goes through
+ * The round as the budget counts it: since the design was last reopened (a reopened design goes through
  * the usual loop again), so the first round after a reopen is round 1. Never below 1, whatever the input.
  * critique-next and critique-check --design both use it, so that they never disagree on a budget.
  */

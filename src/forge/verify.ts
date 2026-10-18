@@ -1,4 +1,4 @@
-// The rule for tool verification (spec §5.1): never on Trivial or Small unless the task asks; on Medium and Large a
+// The rule for tool verification: never on Trivial or Small unless the task asks; on Medium and Large a
 // surface is a candidate when the diff touches its `affects`, or always when it has none. Permission comes from
 // local.yaml (denied drops the surface; unknown asks; an allowance covers its hash, see hashMatches). Missing and
 // unknown tools are reported, never a reason to drop.

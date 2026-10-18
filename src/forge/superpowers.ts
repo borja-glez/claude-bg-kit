@@ -1,4 +1,4 @@
-// superpowers next to forge (spec §4.1): whether it is installed for this repository and where (fail-open: anything
+// superpowers next to forge: whether it is installed for this repository and where (fail-open: anything
 // missing or unreadable means not installed), the path of one of its skills, and the specs and plans it wrote here that
 // forge has not taken yet. Reads only; never touches superpowers' cache.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';

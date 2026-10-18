@@ -1,4 +1,4 @@
-// Ejecuciones (spec §4.6.5, §4.3; G-07): the active run (its header, its tasks as rows of «En curso» and the loose tasks
+// Ejecuciones (G-07): the active run (its header, its tasks as rows of «En curso» and the loose tasks
 // of an ephemeral one), a stalled one (its banner, with the command that resumes or closes it) and the history of runs/,
 // newest first, each folded until opened (a run of 60 tasks is a lot of rows). Nothing here writes: the roadmap stays
 // read-only, and its slots are listed on the coordinator's card in Sesiones.
@@ -41,7 +41,7 @@ function renderActive(m: Model, d: Dict, dv: Derived): string {
   return `<section class="card runa"><h2 class="lbl">${esc(d.runs.active)}</h2><div class="nowt">${nowHead(d)}<div class="rh">${esc(runHead(d, r))}</div>${rows || `<div class="muted">${esc(d.runs.waiting)}</div>`}</div></section>`;
 }
 
-/** The loose tasks of an active ephemeral run (spec §4.4). They are not plan tasks: no progress, filters, timeline or orphans. */
+/** The loose tasks of an active ephemeral run. They are not plan tasks: no progress, filters, timeline or orphans. */
 function renderLoose(m: Model, d: Dict): string {
   const r = m.run;
   if (!r || !r.active || r.kind !== 'ephemeral' || !r.loose.length) return '';

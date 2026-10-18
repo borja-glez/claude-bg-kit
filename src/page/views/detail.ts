@@ -1,4 +1,4 @@
-// The task detail (spec §4.7): a dialog over the page, full screen up to 760 px, with four tabs on the ARIA pattern:
+// The task detail: a dialog over the page, full screen up to 760 px, with four tabs on the ARIA pattern:
 // Resumen, Definición, Forge (only with forge data or evidence) and Conversación (with a count). Every panel is rendered,
 // the inactive ones hidden, so a link to a tab opens at once. app.ts gives it its URL, its keys and its focus.
 import { filterNotes, MAX_NOTE } from '../../lib/notes.js';

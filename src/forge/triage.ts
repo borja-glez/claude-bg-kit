@@ -40,7 +40,7 @@ const LARGE = [/\b(architecture|redesign|rewrite|subsystem|new (project|app|serv
 // A rename spreads past the file it names: never Trivial.
 const RENAME = [/\brenam/i, /(?<![\p{L}\p{N}_])renombr/iu];
 
-// Mechanical work (spec §4.3): rename, move, bump, regenerate, typos, translations, fixtures, changelog, a given patch.
+// Mechanical work: rename, move, bump, regenerate, typos, translations, fixtures, changelog, a given patch.
 // move / typo / patch only count in mechanical-only phrasings: a bare one appears in prose about real logic changes.
 const MECHANICAL = [
   /\b(renam\w*|bump\w*|regenerat\w*|translat\w*|fixtures?|changelog)\b/i,
@@ -96,7 +96,7 @@ export type ImplRole = 'mech' | 'impl-light' | 'impl' | 'impl-high' | 'impl-heav
 /** Who implements a task of this size: `self` = the session itself (Trivial alone); `role` null with self false = Large (design first). */
 export interface Implementer { role: ImplRole | null; self: boolean; why: string }
 
-/** Model by size (spec §2): Trivial alone is the session's; Small is always delegated; in a batch a Trivial goes to mech. */
+/** Model by size: Trivial alone is the session's; Small is always delegated; in a batch a Trivial goes to mech. */
 // A plan task (`plan`): the coordinator never edits task code, so a Trivial goes to mech; a Large one was already
 // designed and planned, so it goes to impl as a Medium one does, and to impl-high only on a sensitive zone.
 // impl-heavy (xhigh) is kept for the last attempt of a review loop (`nextImplementer` in loop.ts).

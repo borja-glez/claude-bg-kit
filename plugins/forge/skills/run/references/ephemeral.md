@@ -2,7 +2,7 @@
 
 Read from forge:run (`### Ephemeral execution` in `SKILL.md`). `FORGE` and the Medium steps cited here mean what that skill says. `<WORK>` is a loose task's work folder, `.forge/work/<T>` (the `work` that `FORGE swarm worktree` prints).
 
-Parallelism outside a plan (spec §4.4): the same scheduler and the `subagents` executor, with no waypoint plan, integrated **into the current branch** one task at a time.
+Parallelism outside a plan: the same scheduler and the `subagents` executor, with no waypoint plan, integrated **into the current branch** one task at a time.
 
 **When.** A message with several requests ("haz A, B y C"): split them, write each one's text to `.forge/work/<id>/task.txt` and run `FORGE triage --task <id> --text-file .forge/work/<id>/task.txt --batch` for each. A Large one leaves the batch and follows `references/large.md` after it. Also a Medium task whose briefs can run in parallel (`## Medium` step 2 in `SKILL.md`). If only one task is left after the split and the triage, there is no ephemeral execution: it is a normal task.
 

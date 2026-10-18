@@ -53,7 +53,7 @@ export interface RunDoc {
   /** Wave 4: when the run started, its last step, why it stalled (at most 200 characters) and when it was closed (C2). */
   startedAt?: string; lastStepAt?: string; stallReason?: string; closedAt?: string;
 }
-/** The most requests one ephemeral run takes (spec §4.4); src/forge/loose.ts re-exports it. */
+/** The most requests one ephemeral run takes; src/forge/loose.ts re-exports it. */
 export const LOOSE_MAX_TASKS = 20;
 export type LooseStatus = 'queued' | 'running' | 'integrated' | 'conflict' | 'blocked';
 export const LOOSE_STATUSES: readonly LooseStatus[] = ['queued', 'running', 'integrated', 'conflict', 'blocked'];

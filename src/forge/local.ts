@@ -62,7 +62,7 @@ export function readLocal(root: string): LocalState {
       }
     }
   }
-  // workflow and autonomy (spec §5.4): a value that is not one of theirs is ignored, so config.yaml or `ask` decides.
+  // workflow and autonomy: a value that is not one of theirs is ignored, so config.yaml or `ask` decides.
   const { workflow, autonomy, ...rest } = o;
   return {
     ...rest, surfaces, known: names(o.known), proposed: names(o.proposed),

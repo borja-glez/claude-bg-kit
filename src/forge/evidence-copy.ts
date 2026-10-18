@@ -5,7 +5,7 @@ import path from 'node:path';
 import { samePath } from '../lib/worktree.js';
 import { ledgerRoot } from './ledger.js';
 
-/** What one call copies at most (spec §4.7). */
+/** What one call copies at most. */
 export const EVIDENCE_COPY_MAX = 50 * 1024 * 1024;
 /** The files one walk lists at most: past it the walk stops, and says so (`truncated`). */
 export const EVIDENCE_FILES_MAX = 5000;

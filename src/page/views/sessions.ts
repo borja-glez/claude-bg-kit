@@ -1,4 +1,4 @@
-// Sesiones (spec §4.6.6; G-04, G-10, H-23): the sessions grouped by the run they work for, the active run first and
+// Sesiones (G-04, G-10, H-23): the sessions grouped by the run they work for, the active run first and
 // «Sin ejecución» last. A group whose run ended, or whose sessions all stopped, starts folded; in a live group the
 // stopped ones fold apart. Each card lists every task its session runs (G-10), its heartbeat, zones and threads, with its
 // values aligned to the left; the coordinator of the active run also lists its slots and the free ones (H-23).

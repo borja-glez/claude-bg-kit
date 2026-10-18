@@ -1,4 +1,4 @@
-// The page's model and view state: what renderApp reads, the six views (spec §4.6) and the allowed values of each filter.
+// The page's model and view state: what renderApp reads, the six views and the allowed values of each filter.
 // Types and constants only; every view renders from these.
 import type { EventDoc, InfiniteDoc, MessageDoc, MetaDoc, NoteDoc, NoteType, PlanStatus, PlanView, RunDoc, SessionDoc, States } from '../lib/types.js';
 import type { GroupBy, Zoom } from '../lib/timeline.js';

@@ -1,5 +1,5 @@
-// The page's state in the URL hash, so a link opens the same thing (spec §4.6, H-25): the view, the conversation's
-// filter (§4.6.7), the plan's filter (H-18), the open task and its tab, and in the schedule its grouping, zoom (a preset or a
+// The page's state in the URL hash, so a link opens the same thing (H-25): the view, the conversation's
+// filter, the plan's filter (H-18), the open task and its tab, and in the schedule its grouping, zoom (a preset or a
 // free span and pan), open groups, status filter, search and layers. Only what is set is written; links of before wave 4
 // still open the right view.
 import { clampPan, clampSpan, type Zoom } from '../lib/timeline.js';

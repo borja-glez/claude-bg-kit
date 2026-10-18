@@ -1,4 +1,4 @@
-// forge's preferences (spec §5.4): who does a coding request (`workflow`) and whether forge asks at its gates
+// forge's preferences: who does a coding request (`workflow`) and whether forge asks at its gates
 // (`autonomy`). What the request says wins, then .forge/local.yaml (personal), then .forge/config.yaml (the team's), then
 // `ask`.
 import { AUTONOMIES, WORKFLOWS, type Autonomy, type ForgeConfig, type Workflow } from './config.js';

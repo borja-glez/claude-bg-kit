@@ -8,7 +8,7 @@ import { renderDecisionsMd } from '../src/forge/decisions.js';
 import { endedReason } from '../src/forge/hook.js';
 import { isPerfTask } from '../src/forge/triage.js';
 import { useTempDirs } from './helpers/tmp.js';
-import { walk } from './helpers/files.js';
+import { walk, units } from './helpers/files.js';
 const tmp = useTempDirs();
 
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
@@ -1769,5 +1769,59 @@ describe('plugin layout', () => {
     expect(files).toBeGreaterThanOrEqual(3);
     expect(read('plugins/waypoint/skills/design/SKILL.md')).toContain('--note-file LOCAL/snapshot-note.txt');
     expect(read('plugins/forge/skills/decisions/SKILL.md')).toContain('--note-file .forge/work/decisions/snapshot-note.txt');
+  });
+  it('no file of src/ or of the skills cites a spec section: the specs are local and git ignores them (I-09)', () => {
+    const files = [...walk('src').filter(f => /\.(ts|tsx|css|html)$/.test(f)), ...skillDocs()];
+    expect(files.filter(f => read(f).includes('spec §'))).toEqual([]);
+  });
+  it("the Agents table of the forge READMEs has the model and the effort of each agent's frontmatter (I-09)", () => {
+    const EFFORT_ES: Record<string, string> = { bajo: 'low', medio: 'medium', alto: 'high', 'muy alto': 'xhigh', 'máximo': 'max' };
+    const agents = readdirSync(new URL('../plugins/forge/agents/', import.meta.url)).filter(f => f.endsWith('.md')).map(f => f.slice(0, -3));
+    const front = (a: string) => {
+      const fm = read(`plugins/forge/agents/${a}.md`).split(/^---$/m)[1] ?? '';
+      const get = (k: string) => new RegExp(`^${k}:\\s*(\\S+)`, 'm').exec(fm)?.[1];
+      return { model: get('model'), effort: get('effort') };
+    };
+    for (const [f, heading, es] of [['plugins/forge/README.md', '## Agents', false], ['plugins/forge/README.es.md', '## Agentes', true]] as const) {
+      const md = read(f);
+      const table = md.slice(md.indexOf(`${heading}\n`)).split(/\n\n/)[1] ?? '';
+      const rows = table.split('\n').filter(l => l.startsWith('| `forge-')).map(l => l.split('|').map(c => c.trim()));
+      expect(rows.length, f).toBeGreaterThanOrEqual(12);
+      for (const [, name, model, effort] of rows) {
+        const a = name.replace(/`/g, '');
+        expect(agents, `${f}: ${a}`).toContain(a);
+        const fm = front(a);
+        expect(model.toLowerCase(), `${f}: ${a} model`).toBe(fm.model);
+        const word = effort.replace(/\s*\(.*\)$/, '').trim();
+        expect(es ? EFFORT_ES[word] : word, `${f}: ${a} effort`).toBe(fm.effort);
+      }
+      for (const a of agents) expect(table, `${f}: ${a}`).toContain(`\`${a}\``);
+    }
+  });
+  it('every /waypoint:<skill> and /forge:<skill> the READMEs cite is a skill of that plugin (A-20)', () => {
+    const readmes = ['README.md', 'README.es.md', ...['waypoint', 'forge', 'lens'].flatMap(p => [`plugins/${p}/README.md`, `plugins/${p}/README.es.md`])];
+    let cited = 0;
+    for (const f of readmes) {
+      for (const m of read(f).matchAll(/\/(waypoint|forge):([a-z][a-z-]*)/g)) {
+        cited++;
+        expect(existsSync(new URL(`../plugins/${m[1]}/skills/${m[2]}/SKILL.md`, import.meta.url)), `${f}: /${m[1]}:${m[2]}`).toBe(true);
+      }
+    }
+    expect(cited).toBeGreaterThan(50);
+  });
+  it('every git commit a skill cites names its paths (-- <paths>) or takes its message from a file (-F), and waypoint:plan commits its files alone (A-16)', () => {
+    let cited = 0;
+    for (const f of skillDocs()) {
+      for (const s of units(read(f))) {
+        // A commit command (with -m or -F), not a mention such as «never `git commit --amend`».
+        if (!/\bgit (?:-C \S+ )?commit\b.* -[mF] /.test(s)) continue;
+        cited++;
+        expect(s, f).toMatch(/ -- \S| -F \S/);
+      }
+    }
+    expect(cited).toBeGreaterThanOrEqual(5);
+    const plan = read('plugins/waypoint/skills/plan/SKILL.md');
+    expect(plan).toContain('git commit -m "Update waypoint plan" -- docs/waypoint/<project>/plan.yaml');
+    expect(plan).toContain('-- docs/waypoint/<project>/design.md');
   });
 });

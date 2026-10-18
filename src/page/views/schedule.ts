@@ -1,4 +1,4 @@
-// Cronograma (spec §4.6.4). In 4b, the timeline and the analysis of the old Tracking view; Task 6 virtualizes its rows,
+// Cronograma. In 4b, the timeline and the analysis of the old Tracking view; Task 6 virtualizes its rows,
 // and 4c adds «Ajustar», the one forecast, the burndown against the version target and the aggregated zones.
 import { autoTicks, fitWindow, groupIds, layoutRows, NONE_GROUP, phaseLabel, phaseName, planRange, SPAN, windowAt, windowFor, type GroupBy, type Row, type Win, type Zoom } from '../../lib/timeline.js';
 import { statusOf } from '../../lib/deps.js';

@@ -36,7 +36,7 @@ export interface ExecutionState {
   tasks: Record<string, ExecTask>;
   /** How many tasks the run plans in all (the plan's, or the loose file's), so the total is not just those started. */
   planned?: number;
-  /** Started in auto mode (spec §5.5): the coordinator keeps deciding alone when it resumes. */
+  /** Started in auto mode: the coordinator keeps deciding alone when it resumes. */
   autonomy?: 'auto';
   /** The language the person writes in (`swarm start --locale`), repeated to the coordinator at each wake. */
   locale?: string;

@@ -1,4 +1,4 @@
-// Plan (spec §4.6.3; G-09, H-18, G-11): the plan as a vertical list of foldable phases, the one in progress open. A phase
+// Plan (G-09,H-18, G-11): the plan as a vertical list of foldable phases, the one in progress open. A phase
 // says its state, its version, a bar of its tasks by state, its counts and its goal; a task is a row button with its
 // state, track, forge summary and evidence, grouped by category only when the plan has categories. The filters go by task
 // state (the five add up to the plan), by the phase's plan status, by forge (deferred findings, over the cap) and by

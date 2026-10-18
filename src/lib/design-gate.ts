@@ -1,4 +1,4 @@
-// The approval gate of auto mode (spec §5.5): from a design's changelog and its critiques, whether it can be approved
+// The approval gate of auto mode: from a design's changelog and its critiques, whether it can be approved
 // without asking, and what the next critic must not raise again. Pure and deterministic, with no Node imports (the
 // band's mod uses it too); the waypoint CLI reads the files.
 import { entryKind, type ChangelogEntry } from './history.js';

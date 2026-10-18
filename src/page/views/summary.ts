@@ -1,4 +1,4 @@
-// Resumen (spec §4.6.1, §4.6.2): what needs the person («Te necesita», on top), what is running now, what comes next, how
+// Resumen: what needs the person («Te necesita», on top), what is running now, what comes next, how
 // far each version and phase is, what happened lately and which sessions are alive. A section shows only when it has
 // something, except «En curso», which with nothing running says which free task is next.
 import { availableTasks, statusOf } from '../../lib/deps.js';

@@ -78,7 +78,7 @@ type SeatFiles = Pick<BandFiles, 'session' | 'bindings' | 'seatSessions'>;
 
 /**
  * A bound.json's text, read as the CLI's readBound reads it: the band's own renewal writes it in place, so a text that
- * is empty or does not read as a binding is read once more after BOUND_REREAD_MS (spec §4.10). One still broken is
+ * is empty or does not read as a binding is read once more after BOUND_REREAD_MS. One still broken is
  * left as it is, and seatsOf finds no binding in it.
  */
 async function readBoundText($: Engine, path: string, now: number): Promise<string | undefined> {
@@ -288,7 +288,7 @@ export async function loadBandModel($: Engine): Promise<BandModel> {
  * of $.session.id() for its own seat that has not ended moves its seenAt to now when RENEW_MS or more passed since its
  * last renewal. It is read again just before the write and must still pass that rule, so an end, a release or a
  * takeover written meanwhile is never undone, an ended binding is never reopened, and a renewal the hooks made
- * meanwhile is not repeated (spec §4.10). Only the newest of them in each project is renewed (M5), no other binding is
+ * meanwhile is not repeated. Only the newest of them in each project is renewed (M5), no other binding is
  * touched, and a write the engine refuses is left for the next tick. Returns how many it renewed.
  */
 export async function renewBindings($: Engine): Promise<number> {

@@ -1,4 +1,4 @@
-// The roadmap page's shell (spec §4.6): the side nav with the six views (a tab bar at the bottom on a phone), the sticky
+// The roadmap page's shell: the side nav with the six views (a tab bar at the bottom on a phone), the sticky
 // status strip, the open view, and the task detail and the screenshot gallery over them. Pure: model and view state in,
 // one HTML string out (renderPage marks its sections, R2, so app.ts repaints only those that changed). Each view lives in
 // views/<view>.ts; this module re-exports what app.ts and the tests use.

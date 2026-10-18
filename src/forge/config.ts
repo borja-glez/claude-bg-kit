@@ -8,7 +8,7 @@ export type Profile = 'balanced' | 'economy' | 'quality';
 export const ROLES = ['impl-heavy', 'impl-high', 'impl', 'impl-light', 'mech', 'review-correctness', 'review-security', 'review-perf', 'review-final', 'verify'] as const;
 export type Role = (typeof ROLES)[number];
 export const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
-/** Who does a coding request (spec §5.4): ask, forge, superpowers, superpowers designing or planning and forge building,
+/** Who does a coding request: ask, forge, superpowers, superpowers designing or planning and forge building,
  *  or `off` (no forge: the routing hooks stay silent; the route option `none`, saved). */
 export const WORKFLOWS = ['ask', 'forge', 'superpowers', 'superpowers-design', 'superpowers-plan', 'off'] as const;
 export type Workflow = (typeof WORKFLOWS)[number];

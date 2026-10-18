@@ -29,7 +29,7 @@ export type ForgeStatus = {
   // C5: who reviews the brief in progress (phase review, wave 1), emptied by the next phase implement; and the review
   // count, n of max, of the last verdict or round event that says it. Empty / null in an older status.
   reviewers: string[]; reviews: { n: number; max: number } | null;
-  // The task runs in auto mode (spec §5.5); absent otherwise.
+  // The task runs in auto mode; absent otherwise.
   autonomy?: 'auto';
 };
 

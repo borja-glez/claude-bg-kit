@@ -15,7 +15,7 @@ export const PREVIOUS_OFFER_MS = 24 * 3600_000;
 export type ViewerRole = 'owner' | 'other-live' | 'previous' | 'none';
 
 export interface ViewerInput {
-  /** The bindings of the project: the checkout's seat and its extra seats (spec §9, D1). */
+  /** The bindings of the project: the checkout's seat and its extra seats (D1). */
   bound: BoundDoc | readonly BoundDoc[] | null;
   /** The execution this roadmap is about: the project's plan run, or the checkout's ephemeral one. */
   execution: ExecutionState | null;
@@ -41,7 +41,7 @@ const newest = (list: readonly BoundDoc[], at: (b: BoundDoc) => number): BoundDo
   list.reduce<BoundDoc | null>((best, b) => (!best || at(b) > at(best) ? b : best), null);
 
 /**
- * C3: what the session `sessionId` is to this roadmap and its execution, by the rules of spec §4.2, the first that
+ * C3: what the session `sessionId` is to this roadmap and its execution, by the rules below, the first that
  * holds: 1 the coordinator of a visible execution, 2 a member of its run, 3 its own binding (ended or not: the same
  * conversation resumed), 4 an active execution of another session, 5 one that ended or whose coordinator's
  * conversation ended, 6 another live binding, 7 a binding that ended or lapsed within PREVIOUS_OFFER_MS (the newest

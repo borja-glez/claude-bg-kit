@@ -36,7 +36,7 @@ export interface BandFiles {
   now?: number;
 }
 // In work mode `cells` holds one letter per task of the track (or of the plan), in plan order: d done, a active,
-// b blocked, p pending. A notice (spec §4.5) is what a conversation that is not the owner sees: another live one works
+// b blocked, p pending. A notice is what a conversation that is not the owner sees: another live one works
 // the roadmap or coordinates a run (kind other-live), or an earlier one left a task, a draft or a run behind (kind
 // previous); its key names the subject for a dismissal: task:<T>, run:<runId>, design:<project> or seat:<sid>.
 // Every variant carries `viewer`, the role of the conversation that looks (C3): lens reads it from here. build.mjs
@@ -225,7 +225,7 @@ export function executionViewer(f: BandFiles): BandViewer {
 }
 
 /**
- * The band of the conversation `f.sessionId` for this project (spec §4.5). Its role (describeViewer over the seats'
+ * The band of the conversation `f.sessionId` for this project. Its role (describeViewer over the seats'
  * bindings, the execution, its members and the seats' tasks in progress) picks the band: the coordinator sees the run,
  * whole until it is closed; a member of it, its own task with the run's line (B-06); the owner of a seat, its work band,
  * or the draft it is bound to (K3-13); anyone else, a notice when there is something to say. Every band carries the
@@ -315,7 +315,7 @@ function noticeModel(project: string, f: BandFiles, plan: Plan | null, v: Viewer
     if (b.via === 'design') return { ...base, subject: 'design', seat: b.sid, task: null, title: null, runId: null, key: `design:${project}` };
     return { ...base, subject: 'task', seat: b.sid, task: v.task, title: titleOf(v.task), runId: null, key: v.task ? `task:${v.task}` : `seat:${b.sid}` };
   }
-  // Something to take up (spec §4.2): the draft of a design binding, else the seat's task in progress.
+  // Something to take up: the draft of a design binding, else the seat's task in progress.
   if (b.via === 'design') return isDraft(f) ? { ...base, subject: 'design', seat: b.sid, task: null, title: null, runId: null, key: `design:${project}` } : null;
   if (!v.task || !plan) return null;
   return { ...base, subject: 'task', seat: b.sid, task: v.task, title: titleOf(v.task), runId: null, key: `task:${v.task}` };

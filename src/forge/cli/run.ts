@@ -433,7 +433,7 @@ const committedAt = (io: Io, dir: string) => {
 const declinedSpecs = (s: Record<string, unknown>): string[] =>
   Array.isArray(s.declinedSpecs) ? s.declinedSpecs.filter((x): x is string => typeof x === 'string').slice(0, 200) : [];
 
-// tdd: superpowers (spec §4.4): the line implementer briefs carry, null when off or when superpowers or its TDD skill is missing.
+// tdd: superpowers: the line implementer briefs carry, null when off or when superpowers or its TDD skill is missing.
 function tddFor(io: Io, dir: string) {
   const { tdd } = loadConfig(dir);
   const sp = superpowersOf(io, dir);
@@ -1935,7 +1935,7 @@ function runCommand(argv: string[], io: Io): Result {
           writeRoute(root, doc);
           // Routes nobody wrote for a week are neither reminded nor carried: they go, never this session's own.
           pruneRoutes(root, owner, io.now().getTime());
-          // The route is a decision like any other: by the user when asked, by auto mode otherwise (spec §5.5).
+          // The route is a decision like any other: by the user when asked, by auto mode otherwise.
           const exec = readExecution(root);
           const { n } = addDecision(root, {
             point: 'route', what: `route of ${task}`, chosen: doc.chosen, why, by,

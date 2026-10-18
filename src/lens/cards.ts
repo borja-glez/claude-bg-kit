@@ -173,7 +173,7 @@ function tasksCard(m: PanelModel, rows: ActivityRow[], t: CardTexts): Card {
   const f = m.forge;
   for (const a of rows) {
     blocks.push(activityRow(a, t));
-    // Another session's row in progress is drawn without agents or detail (spec §4.3), even when it is the expanded one.
+    // Another session's row in progress is drawn without agents or detail, even when it is the expanded one.
     if (a.owner === 'own' && !a.done && !a.stopped) for (const g of a.agents) blocks.push(agentRow(g, t));
     if (a.expanded && f && a.owner !== 'other') blocks.push(...forgeBlocks(m, f, t, a.agents.length > 0));
   }

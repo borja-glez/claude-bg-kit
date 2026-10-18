@@ -1,4 +1,4 @@
-// forge:route's choices (spec §5.3): the options for a coding request and the recommended one, and .forge/route/<session>.json,
+// forge:route's choices: the options for a coding request and the recommended one, and .forge/route/<session>.json,
 // the route a session chose while superpowers designs or plans and forge builds (the prompt hook reminds it).
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
