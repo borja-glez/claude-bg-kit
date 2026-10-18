@@ -1912,4 +1912,17 @@ describe('plugin layout', () => {
       for (const w of ['local get commands | set commands allowed --expect', 'authorize merge-on-finish', 'hook answer', '`affected_cmd`', 'settings.local.json', 'Bash(*forge.cjs* hook *)']) expect(read(f), `${f}: ${w}`).toContain(w);
     }
   });
+  it('a run stalled on untrusted commands: trust.md takes the stalled action, step 7 sends there, and a task step stopped by them goes to the coordinator (I-03)', () => {
+    const trust = runRef('trust');
+    // The stalled action as swarm tick prints it, and the new start: no run id, no merge on finish (both spent).
+    for (const w of ['`stalled`', '`reason: untrusted-commands`', '`FORGE swarm start`', '`--run-id`', '`--merge-on-finish`', '`needs-authorization`']) expect(trust, w).toContain(w);
+    const exec = runRef('execution');
+    const step7 = exec.slice(exec.indexOf('7. **End.**'), exec.indexOf('### Requests during an execution'));
+    for (const w of ['`reason: untrusted-commands`', '`references/trust.md`']) expect(step7, w).toContain(w);
+    // The section the member and trust.md point to is task-steps' own.
+    const label = '**Commands not trusted.**';
+    expect(runRef('task-steps')).toContain(label);
+    expect(read('plugins/forge/skills/member/SKILL.md')).toContain(label);
+    for (const w of ['FORGE prep', 'FORGE validate', 'FORGE review-prep', 'FORGE local set commands']) expect(runRef('task-steps').split(label)[1], w).toContain(w);
+  });
 });
