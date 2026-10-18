@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { startRun, recordCycle } from '../src/forge/run.js';
 import { decideStop, decideExecutionStop } from '../src/forge/hook.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
+import { run } from '../src/forge/cli/run.js';
+import { authDir, readAuths, writeAuth, type AuthRecord } from '../src/forge/auth.js';
+import { useTempDirs } from './helpers/tmp.js';
+import { hookAnswerInput } from './helpers/hook-answer.js';
 
 const T0 = new Date('2026-10-11T10:00:00.000Z');
 const ctx = (over: Partial<{ now: Date; stopFile: boolean; approvedPending: number; pendingProposals: number; ledgerEvents: number }> = {}) =>
@@ -161,5 +167,150 @@ describe("decideExecutionStop and the agents' leases (D-15)", () => {
     expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask('forge-impl', '2026-10-12T11:00:00.000Z') }), ctx({ T1: '2026-10-12T15:00:00.000Z' })).block).toBe(false);
     // A task without an agent holds nothing back, whatever its lease.
     expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask(null, '2026-10-12T11:58:00.000Z') }), ctx({ T1: '2026-10-12T12:45:00.000Z' })).block).toBe(true);
+  });
+});
+
+describe('hook answer (I-03)', () => {
+  const tmp = useTempDirs();
+  const NOW = new Date('2026-10-16T10:00:00.000Z');
+  const Q = 'Do I merge forge/run-shop into main? [merge-shop-r1-ab12]';
+  const rec = (over: Partial<AuthRecord> = {}): AuthRecord => ({
+    authId: 'merge-shop-r1-ab12', kind: 'merge', runId: 'shop-r1', target: 'main', question: Q, yes: 'Yes, merge it', createdAt: NOW.toISOString(), session: 's1', ...over,
+  });
+  const hook = (root: string, stdin: unknown) =>
+    run(['hook', 'answer'], { cwd: root, now: () => NOW, env: {}, stdin: typeof stdin === 'string' ? stdin : JSON.stringify(stdin) });
+  const input = (root: string, answers: Record<string, string> | null, questions = [Q], session = 's1', extra?: Record<string, unknown>) =>
+    hookAnswerInput({ cwd: root, answers, questions, session, extra });
+  const files = (root: string) => readdirSync(authDir(root)).sort().map(f => readFileSync(path.join(authDir(root), f), 'utf8'));
+  const SILENT = { code: 0, stdout: '', stderr: '' };
+
+  it('records the yes label of the question asked word for word, with when and by whom, and prints nothing', () => {
+    const root = tmp('forge-answer-');
+    writeAuth(root, rec());
+    expect(hook(root, input(root, { [Q]: 'Yes, merge it' }))).toEqual(SILENT);
+    expect(readAuths(root)).toEqual([{ ...rec(), answer: 'yes', answeredAt: NOW.toISOString(), answeredBy: 's1' }]);
+  });
+  it("the no, or the person's own text (Other), is a no", () => {
+    for (const a of ['No', 'sí, pero mañana']) {
+      const root = tmp('forge-answer-');
+      writeAuth(root, rec());
+      hook(root, input(root, { [Q]: a }));
+      expect(readAuths(root)[0], a).toMatchObject({ answer: 'no', answeredBy: 's1' });
+    }
+  });
+  it('only the yes label itself is a yes: another case, other spacing, more words or another yes label is a no', () => {
+    const root = tmp('forge-answer-');
+    for (const a of ['yes, merge it', 'Yes, merge it ', ' Yes, merge it', 'Yes,  merge it', `Yes,${String.fromCharCode(160)}merge it`, 'Yes, merge it, No',
+      'Yes, merge it into main', 'Sí, intégrala', '']) {
+      writeAuth(root, rec());
+      hook(root, input(root, { [Q]: a }));
+      expect(readAuths(root)[0], JSON.stringify(a)).toMatchObject({ answer: 'no', answeredBy: 's1' });
+    }
+  });
+  it('is silent and writes nothing with junk stdin, without records, with a question that differs, and on an answered record', () => {
+    const root = tmp('forge-answer-');
+    expect(hook(root, 'not json')).toEqual(SILENT);
+    expect(hook(root, input(root, { [Q]: 'Yes, merge it' }))).toEqual(SILENT);
+    expect(existsSync(authDir(root))).toBe(false);
+    writeAuth(root, rec());
+    const before = files(root);
+    const other = Q.replace('main?', 'main ?');
+    const variants = [`${Q} `, ` ${Q}`, Q.replace('Do I', 'Do  I'), Q.replace('Do I', `Do${String.fromCharCode(160)}I`), Q.toLowerCase(), Q.replace(' [merge-shop-r1-ab12]', '')];
+    for (const stdin of ['', 'null', '[]', JSON.stringify({ tool_input: { questions: 'x' } }), input(root, { [`${Q} `]: 'Yes, merge it' }, [`${Q} `]), input(root, { [other]: 'Yes, merge it' }, [other]),
+      ...variants.map(v => input(root, { [v]: 'Yes, merge it' }, [v])),
+      input(root, { 'Mode?': 'Yes, merge it' }, ['Mode?', Q]), input(root, { [Q]: 'Yes, merge it' }, ['Mode?']), input(root, {}, [Q])]) {
+      expect(hook(root, stdin)).toEqual(SILENT);
+    }
+    expect(files(root)).toEqual(before);
+    hook(root, input(root, { [Q]: 'No' }));
+    const answered = files(root);
+    hook(root, input(root, { [Q]: 'Yes, merge it' }));
+    expect(files(root)).toEqual(answered);
+  });
+  it('answers only after AskUserQuestion ran: another tool or another hook event records nothing', () => {
+    const root = tmp('forge-answer-');
+    writeAuth(root, rec());
+    const before = files(root);
+    for (const extra of [{ tool_name: 'mcp__x__AskUserQuestion' }, { tool_name: 'Bash' }, { tool_name: undefined }, { hook_event_name: 'PreToolUse' }, { hook_event_name: undefined }]) {
+      expect(hook(root, input(root, { [Q]: 'Yes, merge it' }, [Q], 's1', extra)), JSON.stringify(extra)).toEqual(SILENT);
+    }
+    expect(files(root)).toEqual(before);
+  });
+  it('with two questions in one AskUserQuestion it records only the one that matches a pending record', () => {
+    const root = tmp('forge-answer-');
+    writeAuth(root, rec());
+    hook(root, input(root, { 'Mode?': 'Secuencial', [Q]: 'Yes, merge it' }, ['Mode?', Q]));
+    expect(readAuths(root)).toHaveLength(1);
+    expect(readAuths(root)[0].answer).toBe('yes');
+  });
+  it('with two questions, each record takes the answer to its own question: the yes label given to another question is not its yes', () => {
+    const root = tmp('forge-answer-');
+    writeAuth(root, rec());
+    hook(root, input(root, { 'Mode?': 'Yes, merge it', [Q]: 'No' }, ['Mode?', Q]));
+    expect(readAuths(root)[0].answer).toBe('no');
+    const Q2 = 'Do I merge forge/run-shop into main? [merge-shop-r1-cd34]';
+    writeAuth(root, rec());
+    writeAuth(root, rec({ authId: 'merge-shop-r1-cd34', question: Q2 }));
+    hook(root, input(root, { [Q]: 'No', [Q2]: 'Yes, merge it' }, [Q, Q2]));
+    expect(readAuths(root).map(r => [r.authId, r.answer])).toEqual([['merge-shop-r1-ab12', 'no'], ['merge-shop-r1-cd34', 'yes']]);
+  });
+  it('a corrupt record, or one whose file name is not its authId, is ignored and left as it is', () => {
+    const root = tmp('forge-answer-');
+    mkdirSync(authDir(root), { recursive: true });
+    writeFileSync(path.join(authDir(root), 'merge-shop-r1-zz99.json'), '{ broken');
+    writeFileSync(path.join(authDir(root), 'merge-shop-r1-yy88.json'), JSON.stringify(rec()));
+    expect(readAuths(root)).toEqual([]);
+    hook(root, input(root, { [Q]: 'Yes, merge it' }));
+    expect(readFileSync(path.join(authDir(root), 'merge-shop-r1-yy88.json'), 'utf8')).toBe(JSON.stringify(rec()));
+    expect(readdirSync(authDir(root)).sort()).toEqual(['merge-shop-r1-yy88.json', 'merge-shop-r1-zz99.json']);
+  });
+  it('a bad file beside a pending record neither stops its answer nor decides it', () => {
+    const root = tmp('forge-answer-');
+    writeAuth(root, rec());
+    const dir = authDir(root);
+    // A copy under another name whose yes label is "No": it is not the record, so "No" stays a no.
+    const forged = JSON.stringify(rec({ yes: 'No' }));
+    writeFileSync(path.join(dir, 'merge-shop-r1-yy88.json'), forged);
+    writeFileSync(path.join(dir, 'merge-shop-r1-zz99.json'), '{ broken');
+    hook(root, input(root, { [Q]: 'No' }));
+    expect(readAuths(root)).toEqual([{ ...rec(), answer: 'no', answeredAt: NOW.toISOString(), answeredBy: 's1' }]);
+    expect(readFileSync(path.join(dir, 'merge-shop-r1-yy88.json'), 'utf8')).toBe(forged);
+    expect(readFileSync(path.join(dir, 'merge-shop-r1-zz99.json'), 'utf8')).toBe('{ broken');
+    expect(readdirSync(dir).sort()).toEqual(['merge-shop-r1-ab12.json', 'merge-shop-r1-yy88.json', 'merge-shop-r1-zz99.json']);
+  });
+  it('reads the answer from the transcript when the hook input carries none', () => {
+    const root = tmp('forge-answer-');
+    writeAuth(root, rec());
+    const transcript = path.join(root, 't.jsonl');
+    writeFileSync(transcript, `${JSON.stringify({ type: 'user', toolUseResult: { questions: [{ question: Q }], answers: { [Q]: 'Yes, merge it' }, annotations: {} } })}\n`);
+    hook(root, { ...input(root, null), transcript_path: transcript });
+    expect(readAuths(root)[0].answer).toBe('yes');
+  });
+  it('in the transcript only the result of this AskUserQuestion counts, and only from a .jsonl file given by its full path', () => {
+    const root = tmp('forge-answer-');
+    writeAuth(root, rec());
+    const line = (id: string | null, result: Record<string, unknown>) => JSON.stringify({
+      type: 'user', ...(id ? { message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'x' }] } } : {}), toolUseResult: result,
+    });
+    const yes = { questions: [{ question: Q }], answers: { [Q]: 'Yes, merge it' }, annotations: {} };
+    const transcript = path.join(root, 't.jsonl');
+    const before = files(root);
+    // An earlier call answered yes; the result of this one is not in the transcript yet.
+    writeFileSync(transcript, `${line('toolu_old', yes)}\n`);
+    hook(root, { ...input(root, null), transcript_path: transcript, tool_use_id: 'toolu_new' });
+    // A result of another tool that carries `answers`.
+    writeFileSync(transcript, `${line(null, { answers: { [Q]: 'Yes, merge it' } })}\n`);
+    hook(root, { ...input(root, null), transcript_path: transcript });
+    // The right lines, but not in a .jsonl file given by its full path.
+    writeFileSync(path.join(root, 't.txt'), `${line(null, yes)}\n`);
+    mkdirSync(path.join(root, 'd.jsonl'));
+    for (const p of [path.join(root, 't.txt'), path.relative(process.cwd(), transcript), path.join(root, 'd.jsonl'), path.join(root, 'none.jsonl'), 7]) {
+      hook(root, { ...input(root, null), transcript_path: p });
+    }
+    expect(files(root)).toEqual(before);
+    // This call's result decides, wherever it is: here before the earlier one.
+    writeFileSync(transcript, `${line('toolu_new', { ...yes, answers: { [Q]: 'No' } })}\n${line('toolu_old', yes)}\n`);
+    hook(root, { ...input(root, null), transcript_path: transcript, tool_use_id: 'toolu_new' });
+    expect(readAuths(root)[0]).toMatchObject({ answer: 'no', answeredBy: 's1' });
   });
 });

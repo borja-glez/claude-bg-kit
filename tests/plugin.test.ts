@@ -1853,4 +1853,9 @@ describe('plugin layout', () => {
       expect(tools.some(t => t.includes('git -C')), s).toBe(false);
     }
   });
+  it('forge hooks: answer on PostToolUse for AskUserQuestion, and only there (I-03)', () => {
+    expect(JSON.parse(read('plugins/forge/hooks/hooks.json')).hooks.PostToolUse)
+      .toEqual([{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" hook answer' }] }]);
+    expect(read('plugins/forge/hooks/hooks.json').split('hook answer')).toHaveLength(2);
+  });
 });

@@ -46,6 +46,7 @@ import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJEC
 import { memberForHook, allMembersOf, memberFile } from '../members.js';
 import { hookLive } from '../live.js';
 import { hookRoute } from '../route-hooks.js';
+import { hookAnswer } from '../auth.js';
 import { liveJobs, noSlot, slotFor, withJob, writeJsonAtomic, type Slot } from '../jobs.js';
 import { sleepSync } from '../pid.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, permissionHash, hashMatches, LEARNED_HEADINGS, type Surface } from '../surfaces.js';
@@ -1690,7 +1691,7 @@ function runCommand(argv: string[], io: Io): Result {
         });
       case 'hook': {
         const which = args[0];
-        const out = which === 'stop' ? hookStop(io) : which === 'live' ? hookLive(io)
+        const out = which === 'stop' ? hookStop(io) : which === 'answer' ? hookAnswer(io) : which === 'live' ? hookLive(io)
           : which === 'route-session' ? hookRoute(io, 'session') : which === 'route-prompt' ? hookRoute(io, 'prompt') : '';
         return { code: 0, stdout: out, stderr: '' };
       }
