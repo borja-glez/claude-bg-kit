@@ -168,33 +168,45 @@ function checkCitations(files: { file: string; text: string }[], vocab: Record<C
 }
 
 /** The entries of a README's CLI reference (`## CLI reference` or `## Referencia de la CLI`): the code that starts each
- *  bullet, and in a table the code of each row's last cell outside parentheses (an aside such as `(with \`removed\`)`
- *  names a field). Only an entry that starts with a lowercase word is a command. */
-function referenceEntries(text: string): string[] {
+ *  bullet (`lead`) and every other code span of that bullet whose first word `isCommand` says is one of the CLI's (a span
+ *  such as `affects` or `.forge/loose.json` names a field or a file); in a table, the code of each row's last cell outside
+ *  parentheses (an aside such as `(with \`removed\`)` names a field). Only an entry that starts with a lowercase word is a
+ *  command. */
+function referenceEntries(text: string, isCommand: (word: string) => boolean = () => true): { entry: string; lead: boolean }[] {
   const at = text.search(/^## (?:CLI reference|Referencia de la CLI)\s*$/m);
   if (at < 0) return [];
   const next = text.slice(at + 3).search(/^## /m);
   const section = next < 0 ? text.slice(at) : text.slice(at, at + 3 + next);
-  const out: string[] = [];
+  const out: { entry: string; lead: boolean }[] = [];
+  const first = (e: string) => /^[a-z][a-z0-9-]*/.exec(e)?.[0];
   for (const { text: line, code } of fenced(section).lines) {
     if (code) continue;
-    const bullet = /^\s*- `([^`]+)`/.exec(line);
-    if (bullet) { out.push(bullet[1]); continue; }
+    if (/^\s*- `[^`]+`/.test(line)) {
+      [...line.matchAll(/`([^`]+)`/g)].forEach((m, i) => {
+        const w = first(m[1]);
+        if (w && (i === 0 || isCommand(w))) out.push({ entry: m[1], lead: i === 0 });
+      });
+      continue;
+    }
     if (!line.startsWith('|') || /^\|\s*-/.test(line)) continue;
     const cells = line.split(/(?<!\\)\|/).map(c => c.trim()).filter(Boolean);
     let depth = 0;
     for (const part of (cells.at(-1) ?? '').split(/(`[^`]*`)/)) {
-      if (part.startsWith('`') && part.endsWith('`') && part.length > 1) { if (depth === 0) out.push(part.slice(1, -1).replace(/\\\|/g, '|')); continue; }
+      if (part.startsWith('`') && part.endsWith('`') && part.length > 1) {
+        const e = part.slice(1, -1).replace(/\\\|/g, '|');
+        if (depth === 0 && first(e)) out.push({ entry: e, lead: true });
+        continue;
+      }
       for (const ch of part) depth += ch === '(' ? 1 : ch === ')' && depth > 0 ? -1 : 0;
     }
   }
-  return out.filter(e => /^[a-z]/.test(e));
+  return out;
 }
 
 /** Each entry of a README CLI reference that names a command, subcommand, key or flag its CLI does not know. Within an
  *  entry `|` separates alternatives, so all of it is checked. */
 function checkReference(file: string, cli: Cli, text: string, v: Vocab): string[] {
-  return referenceEntries(text).flatMap(e => {
+  return referenceEntries(text, w => v.commands.has(w)).flatMap(({ entry: e }) => {
     const cmd = /^[a-z][a-z0-9-]*/.exec(e)![0];
     return checkOne(v, file, cli, cmd, e.slice(cmd.length));
   });
@@ -306,18 +318,23 @@ describe('the README CLI references name only what the CLIs accept (I-10)', () =
   ];
   it('every entry of the forge and waypoint CLI references, English and Spanish, is a command of its CLI with its subcommands, keys and flags', () => {
     for (const [file, cli] of READMES) {
-      const entries = referenceEntries(readSrc(file));
-      expect(entries.length, file).toBeGreaterThan(cli === 'forge' ? 60 : 30);
+      const entries = referenceEntries(readSrc(file), w => vocab[cli].commands.has(w));
+      expect(entries.filter(e => e.lead).length, file).toBeGreaterThan(cli === 'forge' ? 60 : 30);
       expect(checkReference(file, cli, readSrc(file), vocab[cli])).toEqual([]);
     }
-    const en = (cli: string) => referenceEntries(readSrc(`plugins/${cli}/README.md`)).map(e => e.split(' ')[0]);
-    const es = (cli: string) => referenceEntries(readSrc(`plugins/${cli}/README.es.md`)).map(e => e.split(' ')[0]);
-    for (const cli of ['forge', 'waypoint']) expect(es(cli), cli).toEqual(en(cli));
+    // re-review N3: a bullet's later spans that cite a command are read too.
+    const later = referenceEntries(readSrc('plugins/forge/README.md'), w => vocab.forge.commands.has(w)).filter(e => !e.lead).map(e => e.entry);
+    expect(later).toEqual(expect.arrayContaining(['swarm nudge <task> [--plan p]', 'tree check --task id --base sha [--cwd d]']));
+    expect(later.length).toBeGreaterThan(40);
+    const leads = (f: string) => referenceEntries(readSrc(f)).filter(e => e.lead).map(e => e.entry.split(' ')[0]);
+    for (const cli of ['forge', 'waypoint']) expect(leads(`plugins/${cli}/README.es.md`), cli).toEqual(leads(`plugins/${cli}/README.md`));
   });
   it('an entry that names a subcommand, a command or a flag the CLI does not have fails', () => {
-    const md = '# x\n\n## CLI reference\n\n- `swarm frobnicate [--plan p]` - x\n- `swarm merge [--yes]` - y\n- `frobnicate` - z\n- `.forge/loose.json` - a file\n- `validate --no-such`\n\n## Next\n\n- `swarm nope`\n';
+    const md = '# x\n\n## CLI reference\n\n- `swarm frobnicate [--plan p]` - x\n- `swarm merge [--yes]` - y\n- `frobnicate` - z\n- `.forge/loose.json` - a file\n- `validate --no-such`\n'
+      + '- `swarm sleep <s>` - then `swarm nudj <task>` and `tree check --bogus`; `affects` and `--out <file>` are no commands\n\n## Next\n\n- `swarm nope`\n';
     expect(checkReference('fixture.md', 'forge', md, vocab.forge)).toEqual([
       'fixture.md: forge swarm frobnicate (no such subcommand)', 'fixture.md: forge frobnicate (no such command)', 'fixture.md: forge validate --no-such',
+      'fixture.md: forge swarm nudj (no such subcommand)', 'fixture.md: forge tree check --bogus',
     ]);
     const table = '## Referencia de la CLI\n\n| Grupo | Comandos |\n| --- | --- |\n| Trabajo | `next [--base <b>]` (con `waiting_on`), `frobnicate`, `design-gate <d>` |\n';
     expect(checkReference('fixture.md', 'waypoint', table, vocab.waypoint)).toEqual(['fixture.md: waypoint frobnicate (no such command)']);
