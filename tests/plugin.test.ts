@@ -235,6 +235,14 @@ describe('plugin layout', () => {
       expect(first, p).toBe(JSON.parse(read(`plugins/${p}/.claude-plugin/plugin.json`)).version);
     }
   });
+  it('versions: the manifests are the only source; the root package.json has none, and the waypoint bundles carry its manifest version (I-10)', () => {
+    expect(JSON.parse(read('package.json')).version).toBeUndefined();
+    const v = JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version as string;
+    const built = (f: string) => [...read(f).matchAll(/"(\d+\.\d+\.\d+)"/g)].map(m => m[1]);
+    // build.mjs defines __WAYPOINT_VERSION__: the CLI and the page template are the bundles that read it.
+    expect(/WAYPOINT_VERSION = (?:true \? )?"([^"]+)"/.exec(read('plugins/waypoint/dist/waypoint.cjs'))?.[1]).toBe(v);
+    expect(built('plugins/waypoint/assets/roadmap.template.html')).toContain(v);
+  });
   it('READMEs in Spanish and English tell the cost changes', () => {
     for (const lang of ['', '.es']) {
       const all = ['README', 'plugins/forge/README', 'plugins/waypoint/README', 'plugins/lens/README'].map((f) => read(`${f}${lang}.md`)).join('\n');
@@ -713,7 +721,7 @@ describe('plugin layout', () => {
     const runMd = read('plugins/forge/skills/run/SKILL.md');
     for (const s of ['**Run members.**', '### Unattended', '### Manual member', 'FORGE decision add --data-file', 'references/manual-member.md']) expect(runMd).toContain(s);
     const exec = runRef('execution');
-    for (const s of ['### Requests during an execution', '### Unattended', 'list the background sessions with ListAgents',
+    for (const s of ['### Requests during an execution', '### Unattended', 'ListAgents',
       'FORGE swarm relaunch', 'FORGE swarm nudge', 'The new session reads <WORK>/handover.md first']) expect(exec).toContain(s);
     expect(runRef('large')).toContain('--mode sessions');
     // The takeover reads no roadmap listing: the band's rule decides (coordinatorGone).
