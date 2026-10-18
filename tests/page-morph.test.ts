@@ -208,7 +208,7 @@ describe('morph keys (review M2)', () => {
     m.notes = [...m.notes, { id: 'na', ts: '2026-10-16T10:00:00.000Z', type: 'idea', author: 'session:main', text: 'una', taskId: 'T121' }, { id: 'nb', ts: '2026-10-16T10:05:00.000Z', type: 'idea', author: 'session:main', text: 'otra', taskId: 'T121' }];
     m.proposals = [...m.proposals, { ...m.proposals[0]!, id: 'p2', evidence: 'más' }];
     const all = new Set(m.plan.phases.map(p => p.id));
-    const base = { zoom: '1d' as const, offset: 0, expanded: all, modal: 'T121', search: '', shot: null, versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set<string>(), noteFilter: 'all' as const, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', layers: ['critical', 'forge'] };
+    const base = { zoom: '1d' as const, offset: 0, expanded: all, planOpen: all, modal: 'T121', search: '', shot: null, noteFilter: 'all' as const, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', layers: ['critical', 'forge'] };
     for (const [view, talk] of [...VIEWS.map(v => [v, 'notes'] as const), ['talk', 'proposals'] as const]) {
       const box = document.createElement('div');
       box.innerHTML = renderApp(m, { ...base, view, talk } as UiState);
@@ -346,7 +346,7 @@ describe('morphInto (H-06)', () => {
   it('the live state of the fields is read once per morph, not once per unchanged node (carry 4)', () => {
     const m = bigModel();
     const all = new Set(m.plan.phases.map(p => p.id));
-    const ui = { zoom: '1d' as const, offset: 0, expanded: all, modal: null, search: '', view: 'schedule' as const, shot: null, versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set<string>(), noteFilter: 'all' as const, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '' } as UiState;
+    const ui = { zoom: '1d' as const, offset: 0, expanded: all, modal: null, search: '', view: 'schedule' as const, shot: null, noteFilter: 'all' as const, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '' } as UiState;
     const root = mount(renderApp(m, ui));
     // One row's title changes: every other row, card and section is equal to its render.
     const changed = { ...m, plan: { ...m.plan, tasks: m.plan.tasks.map(t => (t.id === 'T030' ? { ...t, title: 'otro título' } : t)) } };

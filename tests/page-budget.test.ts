@@ -1,11 +1,11 @@
 // H-06: what the page paints with the plan of 343 tasks, measured without a browser (spec §4.5, §6.2).
 import { describe, it, expect } from 'vitest';
 import { renderApp, type UiState } from '../src/page/render.js';
-import { BIG_NOW, bigModel, bigPlan, bigSnapshot, harnessHtml } from './fixtures/big-plan.js';
+import { BIG_NOW, BIG_TASKS, bigModel, bigPlan, bigSnapshot, harnessHtml } from './fixtures/big-plan.js';
 
 const ui = (over: Partial<UiState> = {}): UiState => ({
   zoom: '1d', offset: 0, expanded: new Set(), modal: null, search: '', view: 'summary', shot: null,
-  versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set(), noteFilter: 'all', timelineGroup: 'phase',
+  noteFilter: 'all', timelineGroup: 'phase',
   draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
   proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', ...over,
 });
@@ -86,5 +86,12 @@ describe('the page with the plan of 343 tasks (H-06)', () => {
     expect(html.match(/<\/script/g)).toHaveLength(3);
     expect(html).not.toContain('<img');
     expect(JSON.parse(html.match(/id="wp-snapshot">([\s\S]*?)<\/script>/)![1]!).phases[0].tasks[0].title).toBe(evil);
+  });
+
+  it('the plan measures less than 40 KB with the phase in progress open, and less than 120 KB with every phase open', () => {
+    expect(kb(renderApp(bigModel(), ui({ view: 'plan' })))).toBeLessThan(40);
+    const all = renderApp(bigModel(), ui({ view: 'plan', planOpen: allPhases() }));
+    expect((all.match(/class="pr"/g) ?? []).length).toBe(BIG_TASKS);
+    expect(kb(all)).toBeLessThan(120);
   });
 });

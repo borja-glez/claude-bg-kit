@@ -70,6 +70,14 @@ export function bigStates(now = BIG_NOW): Record<string, TaskState> {
       },
     };
   });
+  // A done task whose integration is not merged yet, with two deferred findings: Plan's «Sin fusionar» and «Aplazados».
+  const t118 = out[taskId(118)]!;
+  out[taskId(118)] = { ...t118, forge: {
+    v: 2, path: 'medium', phase: 'done', agent: 'forge-impl', round: 2, cap: 4, brief: 1, stage: 'done', validators: [{ name: 'test', ok: true }],
+    rounds: [{ brief: 1, n: 2, action: 'accept', note: 'listo', findings: { critical: 0, important: 0, minor: 2, deferred: 2 }, reviewers: ['correctness'], at: t118.doneAt! }],
+    verify: null, stages: { implement: 1200 }, integration: { branch: 'forge/run-big', sha: 'abc1234', merged: false, target: 'main' },
+    deferred: [{ file: 'src/mod9/part2/x.ts', line: 12, problem: 'falta un índice' }, { problem: 'n+1 en el listado' }], acceptedRound: 2, overCap: false, updatedAt: t118.doneAt!,
+  } };
   out[taskId(DONE + 4)] = { status: 'claimed', owner: 'ana', claimedAt: at(now, -20) };
   out[taskId(DONE + 10)] = { status: 'blocked', blockedBy: ['external'], blockedReason: 'Espera las credenciales del proveedor de pagos' };
   out[taskId(DONE + 11)] = { status: 'blocked', blockedBy: [taskId(DONE + 10)] };

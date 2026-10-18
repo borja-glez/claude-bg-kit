@@ -67,7 +67,7 @@ describe('the texts of the page (G-19, G-20, H-20)', () => {
   it('the names: Agente, Hecha, Retirada del plan, Sin ejecutor and Libre', () => {
     const es = dictFor('es'), en = dictFor('en');
     expect([es.field.agent, en.field.agent]).toEqual(['Agente', 'Agent']);
-    expect([es.status.done, es.legend.done, es.vfilter.done]).toEqual(['Hecha', 'Hecha', 'Hecha']);
+    expect([es.status.done, es.legend.done, es.plan.task.done]).toEqual(['Hecha', 'Hecha', 'Hecha']);
     expect([es.status.orphaned, en.status.orphaned]).toEqual(['Retirada del plan', 'Removed from plan']);
     expect([es.run.orphan, en.run.orphan]).toEqual(['Sin ejecutor', 'No executor']);
     expect([es.status.free, es.tl.pending, en.tl.pending]).toEqual(['Libre', 'Libre', 'Free']);

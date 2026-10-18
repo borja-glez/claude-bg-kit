@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs } from '../src/lib/sync.js';
 import { dictFor } from '../src/page/i18n.js';
-import { esc, openGroups, phasesInProgress, relText, renderApp, timelineSvg, timelineWindow, VIEWS, type Model, type UiState } from '../src/page/render.js';
+import { esc, openGroups, parsePlanFilter, phasesInProgress, planFilterKeys, relText, renderApp, timelineSvg, timelineWindow, togglePlanFilter, VIEWS, type Model, type UiState } from '../src/page/render.js';
 import { fitWindow } from '../src/lib/timeline.js';
 import type { MessageDoc, EventType, NoteDoc, PlanTrack, TaskStatus } from '../src/lib/types.js';
 import { proposalDigest, type ApprovalDoc, type ProposalDoc } from '../src/lib/proposals.js';
@@ -32,7 +32,7 @@ const base = (): Model => ({
 });
 const ui = (over: Partial<UiState> = {}): UiState => ({
   zoom: '1d', offset: 0, expanded: new Set(), modal: null, search: '', view: 'summary',
-  versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set(), noteFilter: 'all', timelineGroup: 'phase',
+  noteFilter: 'all', timelineGroup: 'phase',
   draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
   proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', shot: null, ...over,
 });
@@ -262,59 +262,144 @@ const clean = (html: string) => {
   expect(html).not.toContain('onclick=');
 };
 
-describe('versions view', () => {
-  it('renders columns, categories, task cards and a no-version column in es', () => {
-    const m = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1'] }], tasks: plan.tasks.map((t, i) => ({ ...t, category: i % 2 ? 'api' : 'ui' })) } };
+describe('the plan view (G-09, H-18, G-11)', () => {
+  const v2done = (merged: boolean, over: object = {}) => ({ v: 2 as const, path: 'medium' as const, phase: 'done', validators: [], brief: 1, stage: 'done' as const, rounds: [], verify: null, stages: {},
+    integration: { branch: 'forge/run-x', sha: 'abc1234', merged, target: 'main' }, deferred: [], acceptedRound: 1, overCap: false, updatedAt: '2026-10-11T10:20:00.000Z', ...over });
+  const planOf = (html: string) => html.slice(html.indexOf('<section class="plan">'));
+  const rowsOf = (html: string) => [...html.matchAll(/class="pr" data-action="open-task" data-id="(T\d+)"/g)].map(x => x[1]);
+
+  it('is a vertical list of phases with the one in progress open, each with its state, version, bar, counts and goal', () => {
+    const m = { ...base(), plan: { ...plan, phases: plan.phases.map(p => (p.id === 'F2' ? { ...p, goal: 'cobrar <b>' } : { ...p, name: `${p.id} · ${p.name}` })) } };
     const html = renderApp(m, ui({ view: 'plan' }));
     expect(html).toContain('<h1>Plan</h1>');
-    expect(html).toContain('Versión 0.1');
-    expect(html).toContain('Sin versión');
-    expect(html).toContain('Fase 1');
-    expect(html).toContain('Fase 2');
-    expect(html).toContain('data-action="toggle-cat"');
-    // Carry 9: the category toggles are buttons of their own type, never a form's submit.
-    expect(html).toMatch(/<button type="button" class="cat" data-action="toggle-cat"/);
-    expect(html).not.toMatch(/<button class="cat"/);
-    expect(html).toContain('data-action="open-task" data-id="T002"');
-    expect(html).toContain('data-action="vfilter"');
-    expect(html).toContain('data-action="vtrack"');
-    expect(html).toContain('Desplegar categorías');
-    expect(html).toContain('Hecha · 1');
-    expect(html).toContain('Provisional · 3');
+    expect(html).toContain('<button type="button" class="plh" data-action="plan-phase" data-id="F1" aria-expanded="true">');
+    expect(html).toContain('data-action="plan-phase" data-id="F2" aria-expanded="false"');
+    expect(html).toContain('<span class="k">F1</span> <span class="pn">Base</span>');
+    expect(html).not.toContain('F1 · F1');
+    expect(html).toMatch(/<span class="pill ph-in_progress">◉ En curso<\/span> <span class="pv">v0\.1<\/span><span class="seg" role="img"/);
+    expect(html).toContain('<span class="c">1/3</span>');
+    expect(html).toContain('<p class="goal">cobrar &lt;b&gt;</p>');
+    expect(rowsOf(html)).toEqual(['T001', 'T002', 'T003']);
+    expect(rowsOf(renderApp(m, ui({ view: 'plan', planOpen: new Set(['F1', 'F2']) })))).toEqual(['T001', 'T002', 'T003', 'T004', 'T005', 'T006']);
+    expect(rowsOf(renderApp(m, ui({ view: 'plan', planOpen: new Set() })))).toEqual([]);
   });
-  it('filters by task status, phase status and track and hides collapsed categories', () => {
-    const html = renderApp(base(), ui({ view: 'plan', versionFilter: { statuses: ['done'], phaseStatuses: [], track: null } }));
-    expect(html).toContain('data-id="T001"');
-    expect(html).not.toContain('data-id="T003"');
-    const byTrack = renderApp(base(), ui({ view: 'plan', versionFilter: { statuses: [], phaseStatuses: [], track: 'ui' } }));
-    expect(byTrack).toContain('data-id="T003"');
-    expect(byTrack).not.toContain('data-id="T001"');
-    const byPhase = renderApp(base(), ui({ view: 'plan', versionFilter: { statuses: [], phaseStatuses: ['provisional'], track: null } }));
-    expect(byPhase).toContain('data-id="T004"');
-    expect(byPhase).not.toContain('data-id="T001"');
-    const cats = { ...base(), plan: { ...plan, tasks: plan.tasks.map(t => ({ ...t, category: 'api' })) } };
-    const collapsed = renderApp(cats, ui({ view: 'plan', collapsed: new Set(['F1|api']) }));
-    expect(collapsed).not.toContain('data-action="open-task" data-id="T001"');
-    expect(collapsed).toContain('data-action="open-task" data-id="T004"');
-  });
-  it('draws a proportional segmented bar per category, in status order, and no pips (H-02)', () => {
-    const m = { ...base(), plan: { ...plan, tasks: plan.tasks.map(t => ({ ...t, category: 'api' })) } };
-    m.states = { ...m.states, T003: { status: 'claimed' }, T004: { status: 'blocked' } };
-    const html = renderApp(m, ui({ view: 'plan' }));
-    const seg = html.slice(html.indexOf('<span class="seg"'), html.indexOf('</span>', html.indexOf('<span class="seg"')));
-    expect(seg).toMatch(/^<span class="seg" role="img" aria-label="[^"]+">/);
-    expect([...seg.matchAll(/<i class="st-(\w+)" style="flex-grow:(\d+)">/g)].map(x => `${x[1]}:${x[2]}`)).toEqual(['done:1', 'in_progress:2']);
-    expect(html).not.toContain('pips');
-  });
-  it('a column whose only category is «—» lists its tasks without a category button (H-02)', () => {
-    const html = renderApp(base(), ui({ view: 'plan' }));
-    expect(html).not.toContain('data-action="toggle-cat"');
-    expect(html).toContain('data-action="open-task" data-id="T001"');
-  });
-  it('escapes hostile plan values in the versions view', () => {
+
+  it('a row is a button with its state, track, forge summary and evidence; «hecha · sin fusionar» and «Sin ejecutor» when they apply', () => {
     const m = base();
-    const h = { ...m, plan: { ...plan, versions: [{ id: HOSTILE, phases: ['F1'] }], tasks: plan.tasks.map(t => ({ ...t, title: HOSTILE, category: HOSTILE })) } };
-    clean(renderApp(h, ui({ view: 'plan' })));
+    m.states = { ...m.states,
+      T001: { ...m.states.T001!, forge: v2done(false), evidence: { surfaces: ['web'], result: 'fail', passed: 0, total: 1, shots: [] } },
+      T002: { status: 'in_progress', owner: 'main', forge: { path: 'medium', phase: 'verify', round: 2, cap: 4 },
+        exec: { runId: 'r1', mode: 'subagents', by: 'main', stage: 'verify', since: new Date(NOW - 5 * 60000).toISOString(), leaseUntil: new Date(NOW + 5 * 60000).toISOString() } },
+      T003: { status: 'in_progress', exec: { runId: 'r1', mode: 'subagents', by: 'main', stage: 'implement', since: new Date(NOW - 60 * 60000).toISOString(), leaseUntil: new Date(NOW - 30 * 60000).toISOString() } },
+    };
+    const html = renderApp(m, ui({ view: 'plan' }));
+    expect(html).toContain('<button type="button" class="pr" data-action="open-task" data-id="T001" data-k="t:T001"><span class="st st-done">✓ hecha · sin fusionar</span><span class="k">T001</span><span class="tt">Esquema de pedidos</span><span class="tag c-blue">Backend</span>');
+    expect(html).toContain('class="evi del"');
+    expect(html).toContain('<span class="fm">verificar · r2/4</span>');
+    expect(html).toContain('<span class="st st-in_progress orphan">◉ Sin ejecutor</span>');
+  });
+
+  it('without categories in the plan nothing is grouped; with them, each phase groups its tasks by category, the uncategorized last (G-09)', () => {
+    expect(renderApp(base(), ui({ view: 'plan' }))).not.toContain('class="pcat"');
+    const cats = { ...base(), plan: { ...plan, tasks: plan.tasks.map((t, i) => (i === 0 ? t : { ...t, category: i % 2 ? 'api' : 'ui' })) } };
+    const html = renderApp(cats, ui({ view: 'plan' }));
+    expect([...html.matchAll(/<div class="pcat"><span class="lbl">([^<]+)<\/span> <span class="c">(\d+)<\/span><\/div>/g)].map(x => `${x[1]}:${x[2]}`)).toEqual(['api:1', 'ui:1', 'Sin categoría:1']);
+  });
+
+  it('the task filters add up to the plan, «Libre» names the free state, and the phase and forge ones count their own (H-18)', () => {
+    const m = base();
+    m.states = { T001: { status: 'done', forge: v2done(true) }, T002: { status: 'in_progress', owner: 'main' }, T003: { status: 'blocked', blockedBy: ['external'] },
+      T005: { status: 'done', forge: v2done(false, { deferred: [{ problem: 'falta un índice' }], overCap: true }) } };
+    const html = renderApp(m, ui({ view: 'plan' }));
+    const counts = Object.fromEntries([...html.matchAll(/data-action="plan-filter" data-key="(\w+)" aria-pressed="false">[^<]* · (\d+)<\/button>/g)].map(x => [x[1], Number(x[2])]));
+    expect(counts).toEqual({ free: 2, running: 1, blocked: 1, done: 1, unmerged: 1, committed: 1, provisional: 1, deferred: 1, overcap: 1 });
+    expect(['free', 'running', 'blocked', 'done', 'unmerged'].reduce((n, k) => n + counts[k]!, 0)).toBe(plan.tasks.length);
+    expect(html).toContain('>Libre · 2</button>');
+    expect(html).toContain('>Sin fusionar · 1</button>');
+    expect(html).toContain('>Sobre el tope · 1</button>');
+  });
+
+  it('a filter shows only the phases with a match, all open and without folds; none at all says so, with a way out', () => {
+    const m = base();
+    m.states = { ...m.states, T005: { status: 'done', forge: v2done(false, { deferred: [{ problem: 'p' }] }) } };
+    const free = planOf(renderApp(m, ui({ view: 'plan', planFilter: { tasks: ['free'], phases: [], forge: [], track: null } })));
+    expect(rowsOf(free)).toEqual(['T003', 'T004', 'T006']);
+    expect(free).toContain('<div class="plh">');
+    expect(free).not.toContain('data-action="plan-phase"');
+    expect(free).not.toContain('data-action="plan-all"');
+    expect(rowsOf(planOf(renderApp(m, ui({ view: 'plan', planFilter: { tasks: [], phases: [], forge: ['deferred'], track: null } }))))).toEqual(['T005']);
+    expect(rowsOf(planOf(renderApp(m, ui({ view: 'plan', planFilter: { tasks: [], phases: [], forge: [], track: 'ui' } }))))).toEqual(['T003', 'T005']);
+    const provisional = planOf(renderApp(m, ui({ view: 'plan', planFilter: { tasks: [], phases: ['provisional'], forge: [], track: null }, planOpen: new Set(['F2']) })));
+    expect(provisional).not.toContain('data-id="F1"');
+    expect(rowsOf(provisional)).toEqual(['T004', 'T005', 'T006']);
+    const nothing = planOf(renderApp(m, ui({ view: 'plan', planFilter: { tasks: ['blocked'], phases: [], forge: [], track: null } })));
+    expect(nothing).toContain('Ninguna tarea coincide con los filtros.');
+    expect(nothing).toContain('data-action="plan-clear"');
+  });
+
+  it('an unknown track filters nothing, and the plan heads with its table of versions, with the targets when any has one (G-11, Review Focus 3)', () => {
+    const html = renderApp(base(), ui({ view: 'plan', planFilter: { tasks: [], phases: [], forge: [], track: 'nope' } }));
+    expect(rowsOf(html)).toEqual(['T001', 'T002', 'T003']);
+    expect(html).toContain('<tr class="cur"><td>0.1</td><td>1/6</td><td>17 %</td></tr>');
+    const withTarget = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1', 'F2'], target: '2026-11-30' }] } };
+    expect(renderApp(withTarget, ui({ view: 'plan' }))).toContain('<th>Objetivo</th></tr></thead><tbody><tr class="cur"><td>0.1</td><td>1/6</td><td>17 %</td><td>2026-11-30</td></tr>');
+  });
+
+  it('a phase in no version has no version pill, its tasks count in the filters, and neither the table of versions nor the current version takes it (carry 4b-5)', () => {
+    const m = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1'] }] } };
+    m.states = { ...m.states, T002: { status: 'done' }, T003: { status: 'done' } };
+    const html = renderApp(m, ui({ view: 'plan' }));
+    const phases = planOf(html).split('<div class="plp').slice(1);
+    expect(phases).toHaveLength(2);
+    expect(phases[0]).toContain('<span class="pv">v0.1</span>');
+    expect(phases[1]).toContain('data-k="pl:F2"');
+    expect(phases[1]).not.toContain('class="pv"');
+    // F1 is done: F2, in no version, is the phase in progress, open with its rows.
+    expect(phases[1]).toContain('data-id="F2" aria-expanded="true"');
+    expect(rowsOf(html)).toEqual(['T004', 'T005', 'T006']);
+    const counts = Object.fromEntries([...html.matchAll(/data-action="plan-filter" data-key="(\w+)" aria-pressed="false">[^<]* · (\d+)<\/button>/g)].map(x => [x[1], Number(x[2])]));
+    expect([counts.done, counts.free]).toEqual([3, 3]);
+    expect(['free', 'running', 'blocked', 'done', 'unmerged'].reduce((n, k) => n + counts[k]!, 0)).toBe(plan.tasks.length);
+    // The table has its one version, done, and no row for the phase outside it; the current version stays 0.1.
+    expect(html).toContain('<tbody><tr class="cur"><td>0.1</td><td>3/3</td><td>100 %</td></tr></tbody>');
+    expect(html).not.toContain('Sin versión');
+    expect(html).toContain('>v0.1 · 100 %</span>');
+  });
+
+  it('parsePlanFilter keeps the known keys once and a track; togglePlanFilter puts one in or out; nothing known is no filter (Review Focus 3)', () => {
+    expect(parsePlanFilter(['evil', 'free', 'free', 'tr:ui', 'deferred', 'committed'])).toEqual({ tasks: ['free'], phases: ['committed'], forge: ['deferred'], track: 'ui' });
+    expect(parsePlanFilter(['evil', 'tr:a/b'])).toBeUndefined();
+    expect(planFilterKeys(parsePlanFilter(['tr:ui', 'overcap', 'running']))).toEqual(['running', 'overcap', 'tr:ui']);
+    expect(togglePlanFilter(undefined, 'blocked')).toEqual({ tasks: ['blocked'], phases: [], forge: [], track: null });
+    expect(togglePlanFilter({ tasks: ['blocked'], phases: [], forge: [], track: null }, 'blocked')).toBeUndefined();
+    expect(togglePlanFilter(undefined, 'nope')).toBeUndefined();
+  });
+
+  it('with no task at all it says how the plan gets them (H-24, Review Focus 1)', () => {
+    const html = renderApp({ ...base(), plan: { ...plan, phases: [], tasks: [], versions: [] }, states: {} }, ui({ view: 'plan' }));
+    expect(html).toContain('El plan aún no tiene tareas: /waypoint:plan las crea.');
+    expect(html).not.toContain('NaN');
+  });
+
+  it('escapes hostile plan values in the plan view (Review Focus 5)', () => {
+    const h = { ...base(), plan: { ...plan, versions: [{ id: HOSTILE, phases: ['F1'], target: '2026-10-12' }], phases: plan.phases.map(p => ({ ...p, name: HOSTILE, goal: HOSTILE })),
+      tasks: plan.tasks.map(t => ({ ...t, title: HOSTILE, category: HOSTILE })) } };
+    clean(renderApp(h, ui({ view: 'plan', planOpen: new Set(['F1', 'F2']) })));
+  });
+
+  it('theme.css: the board of versions is gone, and a row wraps instead of scrolling (§4.8)', () => {
+    expect(CSS).not.toMatch(/\.vcols|\.vcol\{|\.tc\{|\.cat\{|\.vf-/);
+    expect(cssRule(CSS, '.pr')).toContain('flex-wrap:wrap');
+    expect(cssRule(CSS, '.pfs')).toContain('flex-wrap:wrap');
+  });
+});
+
+describe('«Te necesita» leads to the plan on the deferred findings (G-24, H-18)', () => {
+  it('its link opens Plan with the Aplazados filter', () => {
+    const m = base();
+    m.states = { ...m.states, T001: { status: 'done', doneAt: new Date(NOW - 60 * 60000).toISOString(), forge: { v: 2, path: 'medium', phase: 'done', validators: [], brief: 1, stage: 'done', rounds: [], verify: null, stages: {},
+      integration: { branch: 'forge/run-x', sha: 'abc1234', merged: false, target: 'main' }, deferred: [{ problem: 'falta un índice' }], acceptedRound: 1, overCap: false, updatedAt: new Date(NOW - 60 * 60000).toISOString() } } };
+    expect(renderApp(m, ui())).toContain('<button type="button" class="lnk" data-action="view" data-view="plan" data-pf="deferred">Ver el plan</button>');
   });
 });
 
@@ -909,7 +994,7 @@ describe('scroll keys and relative times (G-01)', () => {
     }
     const schedule = keys(renderApp(m, ui({ view: 'schedule', modal: 'T002' })));
     for (const k of ['side', 'timeline', 'chips:status', 'chips:layers', 'zoom', 'chain', 'modal:T002']) expect(schedule).toContain(k);
-    expect(keys(renderApp(m, ui({ view: 'plan' })))).toContain('vcols');
+    expect(keys(renderApp(m, ui({ view: 'plan' })))).not.toContain('vcols');
     expect(keys(renderApp(m, ui({ view: 'talk', talk: 'proposals' })))).toEqual(expect.arrayContaining(['evid:p1', 'evid:p2']));
   });
   it('relText is what the tick writes, and rel marks the text with its kind and time', () => {
@@ -1641,7 +1726,7 @@ describe('everything that opens a task is a button (G-15, H-19)', () => {
     expect(html).toContain('<button type="button" class="tr ph" data-action="toggle-phase" data-id="F1" data-k="p:F1" aria-expanded="true"');
     expect(html).toContain('data-id="F2" data-k="p:F2" aria-expanded="false"');
     expect(renderApp(base(), ui({ view: 'schedule' }))).toMatch(/<li><button type="button" class="cpl" data-action="open-task" data-id="T00\d" data-k="cp:T00\d">/);
-    expect(renderApp(base(), ui({ view: 'plan' }))).toContain('<button type="button" class="tc" data-action="open-task" data-id="T001" data-k="t:T001">');
+    expect(renderApp(base(), ui({ view: 'plan' }))).toContain('<button type="button" class="pr" data-action="open-task" data-id="T001" data-k="t:T001">');
   });
   it('theme.css: a row button fills its line and is aligned to the left, with a visible focus', () => {
     expect(cssRule(CSS, '.tr')).toContain('width:100%');
@@ -1685,7 +1770,7 @@ describe('form fields (Close b)', () => {
     ];
     const fields = pages.flatMap(h => [...h.matchAll(/<(?:input|textarea|select)\b[^>]*>/g)].map(x => x[0]));
     for (const role of ['search', 'note-text', 'answer-text', 'reason-text', 'comment-text']) expect(fields.filter(f => f.includes(`data-role="${role}"`)).length, role).toBeGreaterThan(0);
-    for (const action of ['note-type', 'burn-scope', 'vtrack']) expect(fields.filter(f => f.includes(`data-action="${action}"`)).length, action).toBeGreaterThan(0);
+    for (const action of ['note-type', 'burn-scope', 'plan-track']) expect(fields.filter(f => f.includes(`data-action="${action}"`)).length, action).toBeGreaterThan(0);
     expect(fields.filter(f => !/\sname="[\w-]+"/.test(f))).toEqual([]);
   });
 });

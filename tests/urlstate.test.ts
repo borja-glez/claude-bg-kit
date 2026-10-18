@@ -51,4 +51,10 @@ describe('view state in the URL (§4.6, H-25)', () => {
     expect(decodeView('#v=schedule&z=1d')).toEqual({ view: 'schedule', zoom: '1d' });
     expect(decodeView('#v=schedule&o=<b>')).toEqual({ view: 'schedule', open: [] });
   });
+  it('the plan writes its filter as pf=, only in the plan (H-18)', () => {
+    expect(encodeView({ view: 'plan', pf: ['free', 'deferred', 'tr:ui'] })).toBe('#v=plan&pf=free%2Cdeferred%2Ctr%3Aui');
+    expect(encodeView({ view: 'summary', pf: ['free'] })).toBe('');
+    expect(decodeView('#v=plan&pf=free,deferred,tr:ui')).toEqual({ view: 'plan', pf: ['free', 'deferred', 'tr:ui'] });
+    expect(decodeView(encodeView({ view: 'plan', pf: ['running'] }))).toEqual({ view: 'plan', pf: ['running'] });
+  });
 });

@@ -1,6 +1,7 @@
 // The page's state in the URL hash, so a link opens the same thing (spec §4.6, H-25): the view, the kind of the
-// conversation, the open task and its tab, and in the schedule its grouping, zoom (a preset or a free span and pan), open
-// groups, status filter, search and layers. Only what is set is written; links of before wave 4 still open the right view.
+// conversation, the plan's filter (H-18), the open task and its tab, and in the schedule its grouping, zoom (a preset or a
+// free span and pan), open groups, status filter, search and layers. Only what is set is written; links of before wave 4
+// still open the right view.
 import { clampPan, clampSpan, type Zoom } from '../lib/timeline.js';
 
 export interface ViewState {
@@ -8,6 +9,7 @@ export interface ViewState {
   open?: string[]; status?: string[]; q?: string; layers?: string[]; debug?: boolean;
   /** H-25: the task whose detail is open (`t`) and its tab (`tt`); the kind of the conversation view (`c`). */
   task?: string; tab?: string; c?: string;
+  /** H-18: the plan's filter keys (pf=). */ pf?: string[];
 }
 
 const ZOOMS: readonly string[] = ['6h', '1d', '3d', '1w', '1m'];
@@ -24,6 +26,7 @@ export function encodeView(v: ViewState): string {
   const p = new URLSearchParams();
   if (v.view && v.view !== 'summary') p.set('v', v.view);
   if (v.view === 'talk' && v.c && v.c !== 'notes') p.set('c', v.c);
+  if (v.view === 'plan' && v.pf?.length) p.set('pf', v.pf.join(','));
   if (v.view === 'schedule') {
     if (v.group && v.group !== 'phase') p.set('g', v.group);
     if (v.span) { p.set('s', String(Math.round(v.span / 60000))); if (v.pan) p.set('p', String(Math.round(v.pan / 60000))); }
@@ -70,6 +73,7 @@ export function decodeView(hash: string): ViewState {
   const q = p.get('q');
   if (q) out.q = q.slice(0, 100);
   out.layers = list(p.get('l'), 10);
+  out.pf = list(p.get('pf'), 20);
   const t = p.get('t');
   if (t && ID.test(t)) out.task = t;
   const tt = p.get('tt');

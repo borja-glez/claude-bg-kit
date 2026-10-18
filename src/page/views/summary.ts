@@ -9,7 +9,7 @@ import type { Derived } from '../derive.js';
 import type { Dict } from '../i18n.js';
 import { MAX_NOTE } from '../../lib/notes.js';
 import type { Need } from '../needs.js';
-import { authorLabel, escalatedSessions, esc, eviMark, fmt, hhmm, ICON, isOrphan, liveDot, num, pastMs, rel, roleOf, safeNote, safeType, trackTag } from '../html.js';
+import { authorLabel, escalatedSessions, esc, eviMark, fmt, hhmm, ICON, isOrphan, liveDot, num, pastMs, rel, roleOf, safeNote, safeType, trackTag, versionTable } from '../html.js';
 import type { Model, UiState } from '../model.js';
 
 export function renderSummary(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
@@ -40,7 +40,8 @@ function renderNeeds(m: Model, d: Dict, ui: UiState, dv: Derived): string {
     if (n.kind === 'changed') return `<b>${esc(d.needs.changed(n.count))}</b> ${go('talk', d.needs.seeProposals, 'proposals')}`;
     if (n.kind === 'escalation') return `<b>${esc(`${n.message.from} → ${n.message.to}`)}</b>: ${esc(n.message.text)}${hint(d.needs.escalation(n.message.to))}`;
     if (n.kind === 'external') return `<b>${esc(d.needs.external)}</b> ${task(n.task, k)} ${esc(n.title)} — ${esc(n.reason ?? d.needs.noReason)}${hint(d.needs.unblock(n.task))}`;
-    if (n.kind === 'deferred') return `<b>${esc(d.needs.deferred(n.findings, n.tasks.length))}</b> ${go('plan', d.needs.seePlan)} <button type="button" class="btn" data-action="seen-deferred" data-ids="${esc(n.tasks.map(t => t.id).join(' '))}">${esc(d.needs.seen)}</button>`;
+    // H-18: the link opens Plan with the Aplazados filter.
+    if (n.kind === 'deferred') return `<b>${esc(d.needs.deferred(n.findings, n.tasks.length))}</b> <button type="button" class="lnk" data-action="view" data-view="plan" data-pf="deferred">${esc(d.needs.seePlan)}</button> <button type="button" class="btn" data-action="seen-deferred" data-ids="${esc(n.tasks.map(t => t.id).join(' '))}">${esc(d.needs.seen)}</button>`;
     // Carry 7: the stall reason goes inside the bold line with the run (the brief had it after); kept, the line reads whole.
     if (n.kind === 'stalled') return `<b>${esc(d.needs.stalled(n.runId) + (n.reason ? `: ${n.reason}` : ''))}</b> ${go('runs', d.needs.seeRuns)}${hint(d.needs.stalledHint)}`;
     if (n.kind === 'infinite') return `<b>${esc(d.needs.infinite(hhmm(n.since)))}</b>${hint(d.needs.infiniteHint)}`;
@@ -163,12 +164,7 @@ function renderProgress(m: Model, d: Dict, dv: Derived, loc: string): string {
   const x = dv.metrics;
   const cur = x.currentVersion;
   const big = cur && x.byVersion[cur] ? `${esc(versionLabel(cur))} · ${x.byVersion[cur]!.percent} %` : `${x.percent} %`;
-  const versions = m.plan.versions.length
-    ? `<table class="vt"><thead><tr><th>${esc(d.version)}</th><th>${esc(d.tasks)}</th><th>%</th></tr></thead><tbody>${m.plan.versions.map(v => {
-        const b = x.byVersion[v.id] ?? { done: 0, total: 0, percent: 0 };
-        return `<tr${v.id === cur ? ' class="cur"' : ''}><td>${esc(v.id)}</td><td>${b.done}/${b.total}</td><td>${b.percent} %</td></tr>`;
-      }).join('')}</tbody></table>`
-    : '';
+  const versions = versionTable(m, d, x);
   const current = m.plan.phases.findIndex(p => x.byPhase[p.id]?.status !== 'done');
   const phases = m.plan.phases.length
     ? `<div class="phs">${m.plan.phases.map((p, i) => {

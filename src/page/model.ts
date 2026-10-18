@@ -1,6 +1,6 @@
 // The page's model and view state: what renderApp reads, the six views (spec §4.6) and the allowed values of each filter.
 // Types and constants only; every view renders from these.
-import type { EventDoc, InfiniteDoc, MessageDoc, MetaDoc, NoteDoc, NoteType, PlanStatus, PlanView, RunDoc, SessionDoc, States, TaskStatus } from '../lib/types.js';
+import type { EventDoc, InfiniteDoc, MessageDoc, MetaDoc, NoteDoc, NoteType, PlanStatus, PlanView, RunDoc, SessionDoc, States } from '../lib/types.js';
 import type { GroupBy, Zoom } from '../lib/timeline.js';
 import type { NoteFilter } from '../lib/notes.js';
 import { PROPOSAL_CATEGORIES, PROPOSAL_RISKS, type ApprovalDoc, type ProposalCategory, type ProposalDoc, type ProposalRisk, type ProposalStatus } from '../lib/proposals.js';
@@ -56,8 +56,15 @@ export const TALK_KINDS: readonly TalkKind[] = ['notes', 'proposals'];
 /** The four tabs of the task detail (§4.7); forge shows only with forge data or evidence. */
 export type DetailTab = 'summary' | 'definition' | 'forge' | 'talk';
 export const DETAIL_TABS: readonly DetailTab[] = ['summary', 'definition', 'forge', 'talk'];
-export type VFilterKey = 'done' | 'in_progress' | 'blocked' | 'committed' | 'provisional';
-export const VFILTER_KEYS: readonly VFilterKey[] = ['done', 'in_progress', 'blocked', 'committed', 'provisional'];
+/** H-18: where a task stands for the plan's filters; the five add up to the plan. */
+export type PlanTaskKey = 'free' | 'running' | 'blocked' | 'done' | 'unmerged';
+export const PLAN_TASK_KEYS: readonly PlanTaskKey[] = ['free', 'running', 'blocked', 'done', 'unmerged'];
+/** H-18: the forge marks the plan filters by: deferred findings and rounds over the cap. */
+export type PlanForgeKey = 'deferred' | 'overcap';
+export const PLAN_FORGE_KEYS: readonly PlanForgeKey[] = ['deferred', 'overcap'];
+/** H-18: the plan's filters, by task, by the phase's plan status, by forge and by track. Within a group any matches;
+ *  across groups all must. */
+export interface PlanFilter { tasks: PlanTaskKey[]; phases: PlanStatus[]; forge: PlanForgeKey[]; track: string | null }
 export const NOTE_FILTERS: readonly NoteFilter[] = ['all', 'decision', 'idea', 'debt', 'open', 'mine'];
 
 /** H-06: what the timeline's viewport shows, as rows: the first visible one and how many fit. Proportions of its scroll,
@@ -87,10 +94,10 @@ export interface UiState {
   width?: number;
   /** H-06: the timeline's viewport, from its last scroll; undefined until the first one, and after leaving the schedule. */
   tl?: TlView;
-  /** Empty arrays = no filter. phaseStatuses filters columns by phase plan status. */
-  versionFilter: { statuses: TaskStatus[]; phaseStatuses: PlanStatus[]; track: string | null };
-  /** Collapsed version categories, keyed 'phaseId|category'. */
-  collapsed: Set<string>;
+  /** H-18: the plan's filters (pf= in the URL); undefined is none. */
+  planFilter?: PlanFilter;
+  /** The plan's open phases; undefined is the default, the phase in progress. */
+  planOpen?: Set<string>;
   noteFilter: NoteFilter;
   timelineGroup: GroupBy;
   draft: { type: NoteType; text: string };

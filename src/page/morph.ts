@@ -12,9 +12,9 @@ const KEYED = '[id],[data-k],[data-scroll-key]';
 type Field = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 const isField = (el: Element): el is Field => el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
 
-/** The key morphdom matches nodes by: the id, data-k (t:<task> and p:<group> rows of the timeline, n:<note> and
- *  pr:<proposal> cards), else data-scroll-key (modal:<task>, evid:<proposal>, vcols…). A keyed node is never reused for
- *  another item, so a focus or a scroll never moves to what a different item now shows. */
+/** The key morphdom matches nodes by: the id, data-k (t:<task> and p:<group> rows of the timeline, pl:<phase> of the
+ *  plan, n:<note> and pr:<proposal> cards), else data-scroll-key (modal:<task>, evid:<proposal>, side…). A keyed node is
+ *  never reused for another item, so a focus or a scroll never moves to what a different item now shows. */
 export const nodeKey = (node: Node): string | undefined => {
   if (node.nodeType !== 1) return undefined;
   const el = node as Element;

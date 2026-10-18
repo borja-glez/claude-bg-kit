@@ -668,12 +668,12 @@ describe('notes', () => {
     app.stop();
   });
 
-  it('switches views, filters, timeline group and version filters', async () => {
-    history.replaceState(null, '', '#v=schedule');
+  it('switches views, plan filters and folds, and the timeline group', async () => {
     const root = document.createElement('div');
     document.body.appendChild(root);
-    // A plan with categories: one with only «—» has no category buttons (H-02).
+    // A plan with categories: each phase groups its tasks by them (G-09).
     const withCats = buildDocs({ ...plan, tasks: plan.tasks.map(t => ({ ...t, category: 'api' })) }, '2026-10-11T09:00:00Z');
+    history.replaceState(null, '', '#v=schedule');
     const app = await start({ claude: null, snapshot: withCats, root, now: () => NOW });
     click(root, '[data-action="tgroup"][data-group="track"]');
     await flush();
@@ -682,34 +682,36 @@ describe('notes', () => {
     click(root, '[data-view="plan"]');
     await flush();
     expect(app.ui.view).toBe('plan');
-    click(root, '[data-action="vfilter"][data-key="done"]');
+    expect(root.innerHTML).toContain('class="pcat"');
+    click(root, '[data-action="plan-filter"][data-key="free"]');
     await flush();
-    expect(app.ui.versionFilter.statuses).toEqual(['done']);
-    click(root, '[data-action="vfilter"][data-key="done"]');
+    expect(app.ui.planFilter).toEqual({ tasks: ['free'], phases: [], forge: [], track: null });
+    expect(location.hash).toBe('#v=plan&pf=free');
+    click(root, '[data-action="plan-filter"][data-key="free"]');
     await flush();
-    expect(app.ui.versionFilter.statuses).toEqual([]);
-    click(root, '[data-action="vfilter"][data-key="provisional"]');
+    expect(app.ui.planFilter).toBeUndefined();
+    click(root, '[data-action="plan-filter"][data-key="provisional"]');
     await flush();
-    expect(app.ui.versionFilter.phaseStatuses).toEqual(['provisional']);
-    const tsel = root.querySelector('[data-action="vtrack"]') as HTMLSelectElement;
+    expect(app.ui.planFilter!.phases).toEqual(['provisional']);
+    const tsel = root.querySelector('[data-action="plan-track"]') as HTMLSelectElement;
     tsel.value = 'ui';
     tsel.dispatchEvent(new Event('change', { bubbles: true }));
     await flush();
-    expect(app.ui.versionFilter.track).toBe('ui');
-    click(root, '[data-action="collapse-all"]');
+    expect(app.ui.planFilter!.track).toBe('ui');
+    expect(decodeView(location.hash).pf).toEqual(['provisional', 'tr:ui']);
+    (root.querySelector('[data-action="plan-clear"]') as HTMLElement).focus();
+    click(root, '[data-action="plan-clear"]');
     await flush();
-    expect(app.ui.collapsed.size).toBeGreaterThan(0);
-    click(root, '[data-action="expand-all"]');
+    expect(app.ui.planFilter).toBeUndefined();
+    // The clear button is gone with the filters: the focus goes to the view, not to the body.
+    expect(root.querySelector('[data-action="plan-clear"]')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('main'));
+    click(root, '[data-action="plan-all"][data-open="1"]');
     await flush();
-    expect(app.ui.collapsed.size).toBe(0);
-    click(root, '[data-action="toggle-cat"]');
+    expect([...app.ui.planOpen!].sort()).toEqual(['F1', 'F2']);
+    click(root, '[data-action="plan-phase"][data-id="F2"]');
     await flush();
-    expect(app.ui.collapsed.size).toBe(1);
-    click(root, '[data-view="talk"]');
-    await flush();
-    click(root, '[data-action="nfilter"][data-filter="open"]');
-    await flush();
-    expect(app.ui.noteFilter).toBe('open');
+    expect([...app.ui.planOpen!]).toEqual(['F1']);
     app.stop();
   });
 
@@ -1393,13 +1395,18 @@ describe('scroll, tick and live repaints (G-01, H-06)', () => {
     const { root, app } = await boot(f, fakeUser());
     click(root, '[data-view="plan"]');
     await settle();
-    const before = root.querySelector('[data-scroll-key="vcols"]') as HTMLElement;
-    before.scrollLeft = 900;
+    // Plan is a vertical list without a scroll of its own (G-09): the side bar is the keyed container that scrolls here,
+    // and the phase in progress is the same node after the snapshot.
+    const before = root.querySelector('[data-scroll-key="side"]') as HTMLElement;
+    const phase = root.querySelector('[data-k="pl:F1"]');
+    before.scrollTop = 900;
     f.push('state', { T001: { status: 'done' } });
     await settle();
-    const after = root.querySelector('[data-scroll-key="vcols"]') as HTMLElement;
+    const after = root.querySelector('[data-scroll-key="side"]') as HTMLElement;
     expect(after).toBe(before);
-    expect(after.scrollLeft).toBe(900);
+    expect(after.scrollTop).toBe(900);
+    expect(phase).not.toBeNull();
+    expect(root.querySelector('[data-k="pl:F1"]')).toBe(phase);
     app.stop();
   });
   it('with the modal open a snapshot repaints it at once and keeps the overlay and its scroll (H-06)', async () => {
@@ -2662,5 +2669,26 @@ describe('the burndown at its real width (H-26)', () => {
     expect(app.ui.width).toBe(900);
     app.stop();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('the plan in the URL (H-18, G-24)', () => {
+  it('pf= in the address sets the filter, and the link of «Te necesita» opens Plan on the deferred findings', async () => {
+    const one = await boot(fakeDb(), fakeUser(), '#v=plan&pf=free,evil,tr:ui');
+    expect(one.app.ui.planFilter).toEqual({ tasks: ['free'], phases: [], forge: [], track: 'ui' });
+    one.app.stop();
+    // The second page opens on the summary, where «Te necesita» is: not on the plan the first one left in the address.
+    history.replaceState(null, '', location.pathname);
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('state', { T001: { status: 'done', doneAt: '2026-10-11T11:00:00.000Z', forge: { v: 2, path: 'medium', phase: 'done', validators: [], brief: 1, stage: 'done', rounds: [], verify: null, stages: {},
+      integration: { branch: 'forge/run-x', sha: 'abc1234', merged: false, target: 'main' }, deferred: [{ problem: 'falta un índice' }], acceptedRound: 1, overCap: false, updatedAt: '2026-10-11T11:00:00.000Z' } } });
+    await settle();
+    click(root, '[data-action="view"][data-view="plan"][data-pf="deferred"]');
+    await settle();
+    expect([app.ui.view, app.ui.planFilter?.forge]).toEqual(['plan', ['deferred']]);
+    expect(location.hash).toBe('#v=plan&pf=deferred');
+    expect(root.innerHTML).toContain('data-id="T001"');
+    app.stop();
   });
 });

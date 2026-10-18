@@ -2,6 +2,7 @@
 // shared database are untrusted: whatever lands in an attribute or a lookup is whitelisted here.
 import { escalationCandidates, liveness } from '../lib/coordination.js';
 import type { ForecastEnd } from '../lib/insights.js';
+import type { Metrics } from '../lib/metrics.js';
 import { NOTE_TYPES } from '../lib/notes.js';
 import { ownerCheck, type ApprovalDoc, type ProposalDoc } from '../lib/proposals.js';
 import { TRACK_COLORS, type EventType, type MessageType, type NoteType, type TaskState, type TaskStatus } from '../lib/types.js';
@@ -123,4 +124,15 @@ export function escalatedSessions(m: Model): Set<string> {
   for (const c of escalationCandidates(byId)) c.sessions.forEach(s => out.add(s));
   for (const g of m.messages) if (g.type === 'escalation' && g.status === 'open') { out.add(g.from); out.add(g.to); }
   return out;
+}
+
+/** G-11: every version with its tasks done and its percent, the current one marked, and its target when any version has
+ *  one; '' without versions. Resumen and Plan show it. */
+export function versionTable(m: Model, d: Dict, x: Metrics): string {
+  if (!m.plan.versions.length) return '';
+  const targets = m.plan.versions.some(v => v.target);
+  return `<table class="vt"><thead><tr><th>${esc(d.version)}</th><th>${esc(d.tasks)}</th><th>%</th>${targets ? `<th>${esc(d.plan.target)}</th>` : ''}</tr></thead><tbody>${m.plan.versions.map(v => {
+    const b = x.byVersion[v.id] ?? { done: 0, total: 0, percent: 0 };
+    return `<tr${v.id === x.currentVersion ? ' class="cur"' : ''}><td>${esc(v.id)}</td><td>${b.done}/${b.total}</td><td>${b.percent} %</td>${targets ? `<td>${esc(v.target ?? '—')}</td>` : ''}</tr>`;
+  }).join('')}</tbody></table>`;
 }

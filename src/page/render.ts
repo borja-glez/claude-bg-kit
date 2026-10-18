@@ -19,7 +19,7 @@ import { renderLightbox, renderTaskModal } from './views/detail.js';
 export * from './model.js';
 export { esc, relText, type RelKind } from './html.js';
 export { GROUPS, openGroups, phasesInProgress, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, VIRTUAL_FROM, virtualRange } from './views/schedule.js';
-export { categoryKeys, vfilterActive, vfilterStatuses } from './views/plan.js';
+export { currentPhaseId, forgeKeysOf, parsePlanFilter, planFilterKeys, planTaskKey, togglePlanFilter } from './views/plan.js';
 
 const NAV_ICON: Record<View, string> = { summary: '◉', plan: '▤', schedule: '≡', runs: '▶', sessions: '◎', talk: '✎' };
 
@@ -33,7 +33,7 @@ export function renderApp(m: Model, ui: UiState, dv: Derived = computeDerived(m)
     const badge = v === 'talk' ? openProposals : 0;
     return `<button type="button" class="nav${on ? ' on' : ''}" data-action="view" data-view="${v}"${on ? ' aria-current="page"' : ''} aria-label="${esc(d.views[v])}${badge ? ` (${badge})` : ''}"><b aria-hidden="true">${NAV_ICON[v]}</b><span class="nl" aria-hidden="true">${esc(d.views[v])}</span><span class="ns" aria-hidden="true">${esc(d.navShort[v])}</span>${badge > 0 ? `<span class="badge" aria-hidden="true">${badge}</span>` : ''}</button>`;
   }).join('');
-  const body = view === 'plan' ? renderPlanView(m, d, ui)
+  const body = view === 'plan' ? renderPlanView(m, d, ui, dv)
     : view === 'schedule' ? renderScheduleView(m, d, ui, loc, dv)
     : view === 'runs' ? renderRunsView(m, d)
     : view === 'sessions' ? renderSessionsView(m, d, dv)

@@ -34,7 +34,7 @@ const staticSel = (s: string): string => s.replace(/::?[\w-]+(\([^)]*\))?/g, '')
 
 const ui = (over: Partial<UiState> = {}): UiState => ({
   zoom: '1d', offset: 0, expanded: new Set(), modal: null, search: '', view: 'summary', shot: null,
-  versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set(), noteFilter: 'all', timelineGroup: 'phase',
+  noteFilter: 'all', timelineGroup: 'phase',
   draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
   proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', ...over,
 } as UiState);
@@ -69,9 +69,11 @@ describe('theme.css on the page (review M4, carry 10a)', () => {
     { cls: 't', uses: ['.mh', '.recent'] }, // the detail's title; the time of an activity entry
     { cls: 'lt', uses: ['section.loose', '.card.now'] }, // a loose task in Runs; a loose task's row in «En curso»
     { cls: 'hint', uses: ['.legend', '.needs'] }, // the timeline's key hint; a hint of «Te necesita»
-    { cls: 'ph', uses: ['.tl', '.vcols'] }, // a phase row of the timeline; the heading of a phase column of Plan
     { cls: 'lab', uses: ['.tl', 'section.loose'] }, // a row's label in the timeline; a loose task's title
     { cls: 'zt', uses: ['.dpanel', '.zones'] }, // a zone touched in the detail; the touched part of a zone's bar
+    { cls: 'pn', uses: ['.tl', 'section.plan'] }, // a phase's name in a timeline row; in a phase's header of Plan
+    { cls: 'chev', uses: ['.tl', 'section.plan'] }, // the fold mark of a timeline group; of a phase of Plan
+    { cls: 'c', uses: ['.tl', 'section.plan', '.sessions-view'] }, // a timeline counter; Plan's counts; a session's bar
   ];
 
   it('a rule for a class two components share reaches only one of them', () => {
@@ -100,7 +102,7 @@ describe('theme.css on the page (review M4, carry 10a)', () => {
     const ringed = (el: Element) => rings.some(s => { try { return el.matches(s); } catch { return false; } });
     const buttons = Array.from(box.querySelectorAll('button[data-action="open-task"]'));
     const kinds = new Set(buttons.map(b => b.className.split(' ')[0]));
-    for (const k of ['tr', 'nr', 'nxb', 'act', 'cpl', 'tc', 'sc', 'chip']) expect(kinds.has(k), k).toBe(true);
+    for (const k of ['tr', 'nr', 'nxb', 'act', 'cpl', 'pr', 'sc', 'chip']) expect(kinds.has(k), k).toBe(true);
     const bare = new Set(buttons.filter(b => !ringed(b)).map(b => b.className));
     box.remove();
     expect([...bare]).toEqual([]);

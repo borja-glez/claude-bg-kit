@@ -11,7 +11,7 @@ import { morphInto } from './morph.js';
 import { parseSeen, pruneSeen, seenKey } from './needs.js';
 import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import { decodeView, encodeView, type ViewState } from './urlstate.js';
-import { categoryKeys, DETAIL_TABS, esc, GROUPS, NOTE_FILTERS, phasesInProgress, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type VFilterKey, type View } from './render.js';
+import { currentPhaseId, DETAIL_TABS, esc, GROUPS, NOTE_FILTERS, parsePlanFilter, phasesInProgress, planFilterKeys, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, togglePlanFilter, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type View } from './render.js';
 
 /**
  * The page's embedded snapshot; G-13 and G-14: the waypoint that built it and the states the last listing saw. The page
@@ -76,7 +76,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   const morph = env.morph ?? morphInto;
   const ui: UiState = {
     zoom: '1d', offset: 0, expanded: new Set(), modal: null, shot: null, search: '', view: 'summary', talk: 'notes', fit: true, autoOpen: true,
-    versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set(), noteFilter: 'all', timelineGroup: 'phase',
+    noteFilter: 'all', timelineGroup: 'phase',
     draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
     proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '',
   };
@@ -193,6 +193,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       ui.layers = (v.layers ?? []).filter(x => (TL_LAYERS as readonly string[]).includes(x));
       ui.search = v.q ?? '';
     }
+    // H-18: a plan URL carries its filter (pf=); one without it has none.
+    if (ui.view === 'plan') ui.planFilter = parsePlanFilter(v.pf);
     if (v.debug) model.debug = true;
   };
   let lastHash = '';
@@ -213,7 +215,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   /** Set with pushNext by opening a detail: the entry that render pushes goes into the trail. */
   let pushDetail = false;
   // A pending link (review I2) stays in the URL: the render does not rewrite its t and tt away.
-  const viewState = (): ViewState => ({ view: ui.view, c: ui.talk, group: ui.timelineGroup, zoom: ui.fit ? undefined : ui.zoom, span: ui.fit ? undefined : ui.span, pan: ui.fit ? undefined : ui.pan, open: ui.autoOpen ? undefined : [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, task: ui.modal ?? linked?.task, tab: ui.modal ? ui.tab : linked?.tab, debug: model.debug });
+  const viewState = (): ViewState => ({ view: ui.view, c: ui.talk, group: ui.timelineGroup, zoom: ui.fit ? undefined : ui.zoom, span: ui.fit ? undefined : ui.span, pan: ui.fit ? undefined : ui.pan, open: ui.autoOpen ? undefined : [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, task: ui.modal ?? linked?.task, tab: ui.modal ? ui.tab : linked?.tab, pf: planFilterKeys(ui.planFilter), debug: model.debug });
   /** What a view state says without the detail (t, tt), as the URL writes it. */
   const viewPart = (s: ViewState): string => encodeView({ ...s, task: undefined, tab: undefined });
   const openDetail = (id: string, from: HTMLElement): boolean => {
@@ -659,8 +661,6 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     }
   };
 
-  const toggle = <T>(list: T[], items: T[]): T[] => (items.every(i => list.includes(i)) ? list.filter(x => !items.includes(x)) : [...list, ...items.filter(i => !list.includes(i))]);
-
   const onClick = (ev: Event) => {
     const el = (ev.target as HTMLElement).closest('[data-action]') as HTMLElement | null;
     if (!el) return;
@@ -706,6 +706,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       if (ui.view !== 'schedule') ui.tl = undefined;
       const c = el.dataset.c as TalkKind | undefined;
       if (ui.view === 'talk' && c && TALK_KINDS.includes(c)) ui.talk = c;
+      // H-18: a link may carry the plan's filter («Te necesita» opens it on the deferred findings).
+      const pf = el.dataset.pf;
+      if (ui.view === 'plan' && pf !== undefined) ui.planFilter = parsePlanFilter(pf.split(','));
       // A link inside the detail closes it: the view it opens takes the focus (the link is gone with the detail).
       if (ui.modal) { ui.modal = null; ui.shot = null; trailAt = 0; opener = null; focusNext = 'main'; }
       linked = null;
@@ -733,16 +736,19 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       if (action === 'tl-status') ui.statuses = [...cur]; else ui.layers = [...cur];
     }
     else if (action === 'export') { void exportTimeline(el.dataset.format === 'png' ? 'png' : 'svg'); return; }
-    else if (action === 'vfilter') {
-      const k = el.dataset.key as VFilterKey;
-      if (!VFILTER_KEYS.includes(k)) return;
-      const f = ui.versionFilter;
-      if (k === 'committed' || k === 'provisional') f.phaseStatuses = toggle(f.phaseStatuses, [k]);
-      else f.statuses = toggle<TaskStatus>(f.statuses, vfilterStatuses(k));
+    // H-18: the plan's filters (pf=, rewritten in place) and its folds.
+    else if (action === 'plan-filter') { ui.planFilter = togglePlanFilter(ui.planFilter, el.dataset.key ?? ''); }
+    // The button goes with the filters it clears: the focus goes to the view, never to the body.
+    else if (action === 'plan-clear') { ui.planFilter = undefined; focusNext = 'main'; }
+    else if (action === 'plan-phase') {
+      const id = el.dataset.id ?? '';
+      if (!model.plan.phases.some(p => p.id === id)) return;
+      const cur = currentPhaseId(model);
+      const open = new Set(ui.planOpen ?? (cur ? [cur] : []));
+      open.has(id) ? open.delete(id) : open.add(id);
+      ui.planOpen = open;
     }
-    else if (action === 'toggle-cat') { const k = el.dataset.key ?? ''; ui.collapsed.has(k) ? ui.collapsed.delete(k) : ui.collapsed.add(k); }
-    else if (action === 'expand-all') { ui.collapsed.clear(); }
-    else if (action === 'collapse-all') { ui.collapsed = new Set(categoryKeys(model.plan)); }
+    else if (action === 'plan-all') { ui.planOpen = el.dataset.open === '1' ? new Set(model.plan.phases.map(p => p.id)) : new Set(); }
     else if (action === 'nfilter') { const k = el.dataset.filter as UiState['noteFilter']; if (!NOTE_FILTERS.includes(k)) return; ui.noteFilter = k; }
     else if (action === 'answer-open') { ui.answering = el.dataset.id ?? null; ui.answerDraft = ''; ui.notice = null; }
     // G-24: [Visto] marks the deferred findings of the listed tasks as seen, in this browser only.
@@ -778,7 +784,10 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   const onChange = (ev: Event) => {
     const el = ev.target as HTMLSelectElement;
     const action = el.dataset?.action;
-    if (action === 'vtrack') { ui.versionFilter.track = el.value || null; }
+    if (action === 'plan-track') {
+      const rest = planFilterKeys(ui.planFilter).filter(k => !k.startsWith('tr:'));
+      ui.planFilter = parsePlanFilter(el.value ? [...rest, `tr:${el.value}`] : rest);
+    }
     else if (action === 'burn-scope') { ui.burnScope = /^(?:[vp]:[\w.-]{1,64})?$/.test(el.value) ? el.value : ''; }
     else if (action === 'note-type') { if (!(NOTE_TYPES as string[]).includes(el.value)) return; ui.draft.type = el.value as NoteType; }
     else return;
