@@ -196,13 +196,40 @@ Las skills ejecutan la CLI como `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" 
 
 ## Permisos
 
-Opcionales; añádelos a `permissions.allow` en `~/.claude/settings.json` para que la skill de trabajo no pregunte en cada llamada:
+Opcionales; añádelos a `permissions` en `~/.claude/settings.json` para que la skill de trabajo no pregunte en cada llamada:
 
 ```json
-{ "permissions": { "allow": ["Bash(node *waypoint.cjs*)", "ArtifactData", "Bash(git *)"] } }
+{
+  "permissions": {
+    "allow": [
+      "Bash(node *waypoint.cjs*)",
+      "ArtifactData",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git rev-parse *)",
+      "Bash(git merge-base *)",
+      "Bash(git ls-files *)",
+      "Bash(git worktree list *)",
+      "Bash(git branch --show-current)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(git -c *)"
+    ]
+  }
+}
 ```
 
-`ArtifactData` es el nombre con el que las skills de este plugin llaman a la herramienta. Si Claude Code la muestra con otro nombre (por ejemplo `mcp__…__ArtifactData`), usa ese.
+`ArtifactData` es el nombre con el que las skills de este plugin llaman a la herramienta. Si Claude Code la muestra con otro nombre (por ejemplo `mcp__…__ArtifactData`), usa ese. `deny` manda sobre cualquier `allow`, también sobre el `allowed-tools` de una skill, y cada skill declara solo los comandos git que ejecuta.
+
+- **`git -C <dir> …` queda fuera a propósito**, así que Claude Code la pregunta: la skill de trabajo la usa para actuar sobre el checkout principal desde un worktree (la delegación, la fusión de una fase), y esa pregunta es tu decisión sobre una fusión en él.
+- **Con forge**, `"Bash(node *forge.cjs*)"` deja que se ejecute sin que Claude Code pregunte; ponlo en `.claude/settings.local.json` de los proyectos en los que confías, no en tu `~/.claude/settings.json` (forge pregunta él mismo antes de ejecutar los comandos de `.forge/config.yaml`). Para que también te pregunte antes de cada integración final, añade `"ask": ["Bash(node *forge.cjs* swarm merge*)"]`.
 
 ## Desarrollo
 

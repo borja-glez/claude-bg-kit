@@ -99,22 +99,41 @@ Restart Claude Code after installing or updating a plugin.
 <details>
 <summary><b>Recommended permissions</b> (optional, so routine calls do not prompt)</summary>
 
-Add to `permissions.allow` in `~/.claude/settings.json`:
+Add to `permissions` in `~/.claude/settings.json`:
 
 ```json
 {
   "permissions": {
     "allow": [
       "Bash(node *waypoint.cjs*)",
-      "Bash(node *forge.cjs*)",
       "ArtifactData",
-      "Bash(git *)"
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git rev-parse *)",
+      "Bash(git merge-base *)",
+      "Bash(git ls-files *)",
+      "Bash(git worktree list *)",
+      "Bash(git branch --show-current)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(git -c *)"
     ]
   }
 }
 ```
 
-If Claude Code lists `ArtifactData` under another name (for example `mcp__…__ArtifactData`), use that name. Each entry lets Claude run that tool without asking; leave out any you prefer to approve by hand.
+If Claude Code lists `ArtifactData` under another name (for example `mcp__…__ArtifactData`), use that name. Each `allow` entry lets Claude run that tool without asking; leave out any you prefer to approve by hand. `deny` wins over every `allow`, also over a skill's `allowed-tools`.
+
+- **`git -C <dir> …` is left out on purpose**, so Claude Code asks for it: the waypoint skills use it to act on the main checkout from a worktree (the delegation, the phase merge), and that question is your say on a merge into it. A `deny` such as `Bash(git * push *)` would also block a commit whose message says «push», so it is not there.
+- **forge.** `"Bash(node *forge.cjs*)"` in `allow` lets forge run without Claude Code asking. forge asks you itself before it runs the commands of `.forge/config.yaml` (your trust is tied to their hash), but put that entry in `.claude/settings.local.json` of the projects you trust, not in your `~/.claude/settings.json`.
+- **Every final merge asked by Claude Code too** (optional): add `"ask": ["Bash(node *forge.cjs* swarm merge*)"]` next to `allow`. `ask` wins over `allow`.
 
 </details>
 

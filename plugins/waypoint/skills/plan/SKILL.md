@@ -1,7 +1,7 @@
 ---
 name: plan
 description: Use to create or update a waypoint plan (docs/waypoint/<project>/plan.yaml) and publish/sync its live roadmap artifact. Triggers: "/waypoint:plan", "create the roadmap", "sync the roadmap", after a design is approved, or when plan.yaml was edited.
-allowed-tools: Bash(node *waypoint.cjs*) Bash(git *) ArtifactData Artifact Read Write Edit
+allowed-tools: Bash(node *waypoint.cjs*) Bash(git worktree list *) Bash(git add *) Bash(git commit *) Bash(git status *) ArtifactData Artifact Read Write Edit
 ---
 
 # waypoint: plan → live roadmap

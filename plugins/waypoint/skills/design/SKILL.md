@@ -1,7 +1,7 @@
 ---
 name: design
 description: Use to create a design document for a very large task and improve it in rounds with a critic, then approve it to create the plan. Triggers: "/waypoint:design", "mejora el diseño", "otra ronda", "aplica las propuestas", "reescribe el diseño", "aprobar diseño", "importa el spec", "parte del spec".
-allowed-tools: Bash(node *waypoint.cjs*) Bash(git *) Agent Artifact Read Write Edit
+allowed-tools: Bash(node *waypoint.cjs*) Bash(git add *) Bash(git commit *) Bash(git status *) Bash(git diff *) Bash(git log *) Agent Artifact Read Write Edit
 ---
 
 # waypoint: design document → critique rounds → approved design

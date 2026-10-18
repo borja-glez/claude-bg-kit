@@ -99,22 +99,41 @@ Reinicia Claude Code después de instalar o actualizar un plugin.
 <details>
 <summary><b>Permisos recomendados</b> (opcionales, para que las llamadas rutinarias no pregunten)</summary>
 
-Añádelos a `permissions.allow` en `~/.claude/settings.json`:
+Añádelos a `permissions` en `~/.claude/settings.json`:
 
 ```json
 {
   "permissions": {
     "allow": [
       "Bash(node *waypoint.cjs*)",
-      "Bash(node *forge.cjs*)",
       "ArtifactData",
-      "Bash(git *)"
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git rev-parse *)",
+      "Bash(git merge-base *)",
+      "Bash(git ls-files *)",
+      "Bash(git worktree list *)",
+      "Bash(git branch --show-current)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(git -c *)"
     ]
   }
 }
 ```
 
-Si Claude Code muestra `ArtifactData` con otro nombre (por ejemplo `mcp__…__ArtifactData`), usa ese. Cada entrada deja que Claude use esa herramienta sin preguntar; quita las que prefieras aprobar a mano.
+Si Claude Code muestra `ArtifactData` con otro nombre (por ejemplo `mcp__…__ArtifactData`), usa ese. Cada entrada de `allow` deja que Claude use esa herramienta sin preguntar; quita las que prefieras aprobar a mano. `deny` manda sobre cualquier `allow`, también sobre el `allowed-tools` de una skill.
+
+- **`git -C <dir> …` queda fuera a propósito**, así que Claude Code la pregunta: las skills de waypoint la usan para actuar sobre el checkout principal desde un worktree (la delegación, la fusión de una fase), y esa pregunta es tu decisión sobre una fusión en él. Un `deny` como `Bash(git * push *)` bloquearía también un commit cuyo mensaje diga «push», por eso no está.
+- **forge.** `"Bash(node *forge.cjs*)"` en `allow` deja que forge se ejecute sin que Claude Code pregunte. forge te pregunta él mismo antes de ejecutar los comandos de `.forge/config.yaml` (tu confianza va ligada a su hash), pero pon esa entrada en `.claude/settings.local.json` de los proyectos en los que confías, no en tu `~/.claude/settings.json`.
+- **Que Claude Code pregunte también cada integración final** (opcional): añade `"ask": ["Bash(node *forge.cjs* swarm merge*)"]` junto a `allow`. `ask` manda sobre `allow`.
 
 </details>
 

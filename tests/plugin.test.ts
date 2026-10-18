@@ -42,6 +42,8 @@ const skillDocs = (): string[] => ['forge', 'waypoint'].flatMap(p => readdirSync
   const refs = has('references/') ? readdirSync(new URL(`../${dir}/references/`, import.meta.url)).filter(r => r.endsWith('.md')).map(r => `${dir}/references/${r}`) : [];
   return [...(has('SKILL.md') ? [`${dir}/SKILL.md`] : []), ...refs];
 }));
+/** The eight READMEs: the repository's and each plugin's, in English and in Spanish. */
+const readmes = ['README.md', 'README.es.md', ...['waypoint', 'forge', 'lens'].flatMap(p => [`plugins/${p}/README.md`, `plugins/${p}/README.es.md`])];
 
 describe('plugin layout', () => {
   it('marketplace bg-kit lists waypoint, lens and forge', () => {
@@ -107,7 +109,7 @@ describe('plugin layout', () => {
   });
   it('README documents the band, hooks and recommended permissions', () => {
     const md = read('plugins/waypoint/README.md');
-    for (const w of ['## The band', '## Hooks', '## Permissions', 'pending-commits.jsonl', 'Bash(node *waypoint.cjs*)', 'Bash(git *)', 'ArtifactData']) expect(md).toContain(w);
+    for (const w of ['## The band', '## Hooks', '## Permissions', 'pending-commits.jsonl', 'Bash(node *waypoint.cjs*)', 'Bash(git status *)', 'ArtifactData']) expect(md).toContain(w);
   });
   it('forge run skill drives the Large path through waypoint', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
@@ -1799,7 +1801,6 @@ describe('plugin layout', () => {
     }
   });
   it('every /waypoint:<skill> and /forge:<skill> the READMEs cite is a skill of that plugin (A-20)', () => {
-    const readmes = ['README.md', 'README.es.md', ...['waypoint', 'forge', 'lens'].flatMap(p => [`plugins/${p}/README.md`, `plugins/${p}/README.es.md`])];
     let cited = 0;
     for (const f of readmes) {
       for (const m of read(f).matchAll(/\/(waypoint|forge):([a-z][a-z-]*)/g)) {
@@ -1823,5 +1824,33 @@ describe('plugin layout', () => {
     const plan = read('plugins/waypoint/skills/plan/SKILL.md');
     expect(plan).toContain('git commit -m "Update waypoint plan" -- docs/waypoint/<project>/plan.yaml');
     expect(plan).toContain('-- docs/waypoint/<project>/design.md');
+  });
+  it('git in the permissions: no Bash(git *) anywhere, a narrow allow and a deny in each README, and each waypoint skill with its own git list (I-03)', () => {
+    for (const f of [...readmes, ...skillDocs()]) expect(read(f), f).not.toContain('Bash(git *)');
+    const ALLOW = ['Bash(git status *)', 'Bash(git diff *)', 'Bash(git log *)', 'Bash(git show *)', 'Bash(git rev-parse *)', 'Bash(git merge-base *)', 'Bash(git ls-files *)',
+      'Bash(git worktree list *)', 'Bash(git branch --show-current)', 'Bash(git add *)', 'Bash(git commit *)'];
+    const DENY = ['Bash(git push *)', 'Bash(git reset --hard *)', 'Bash(git clean *)', 'Bash(git -c *)'];
+    for (const f of ['README.md', 'README.es.md', 'plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
+      const md = read(f);
+      const block = [...md.matchAll(/```json\r?\n([\s\S]*?)```/g)].map(m => m[1]).find(b => b.includes('"permissions"'));
+      expect(block, f).toBeDefined();
+      const p = JSON.parse(block!).permissions as { allow: string[]; deny: string[] };
+      expect(p.allow.filter(a => a.startsWith('Bash(git')), f).toEqual(ALLOW);
+      expect(p.deny, f).toEqual(DENY);
+      for (const w of ['git -C', 'Bash(node *forge.cjs*)', '.claude/settings.local.json', '"ask": ["Bash(node *forge.cjs* swarm merge*)"]']) expect(md, `${f}: ${w}`).toContain(w);
+    }
+    const GIT: Record<string, string[]> = {
+      design: ['Bash(git add *)', 'Bash(git commit *)', 'Bash(git status *)', 'Bash(git diff *)', 'Bash(git log *)'],
+      launch: ['Bash(git status *)', 'Bash(git worktree list *)'],
+      plan: ['Bash(git worktree list *)', 'Bash(git add *)', 'Bash(git commit *)', 'Bash(git status *)'],
+      work: ['Bash(git status *)', 'Bash(git diff *)', 'Bash(git log *)', 'Bash(git add *)', 'Bash(git commit *)', 'Bash(git rev-parse *)', 'Bash(git symbolic-ref *)',
+        'Bash(git worktree list *)', 'Bash(git merge main)', 'Bash(git merge --abort)'],
+    };
+    for (const [s, want] of Object.entries(GIT)) {
+      const line = read(`plugins/waypoint/skills/${s}/SKILL.md`).split(/\r?\n/).find(l => l.startsWith('allowed-tools:'))!;
+      const tools = line.slice('allowed-tools:'.length).match(/[A-Za-z_]+\([^)]*\)|[A-Za-z_]+/g) ?? [];
+      expect(tools.filter(t => t.startsWith('Bash(git')), s).toEqual(want);
+      expect(tools.some(t => t.includes('git -C')), s).toBe(false);
+    }
   });
 });

@@ -196,13 +196,40 @@ The skills run the CLI as `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" <comma
 
 ## Permissions
 
-Optional; add them to `permissions.allow` in `~/.claude/settings.json` so the work skill runs without a prompt for each call:
+Optional; add them to `permissions` in `~/.claude/settings.json` so the work skill runs without a prompt for each call:
 
 ```json
-{ "permissions": { "allow": ["Bash(node *waypoint.cjs*)", "ArtifactData", "Bash(git *)"] } }
+{
+  "permissions": {
+    "allow": [
+      "Bash(node *waypoint.cjs*)",
+      "ArtifactData",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git rev-parse *)",
+      "Bash(git merge-base *)",
+      "Bash(git ls-files *)",
+      "Bash(git worktree list *)",
+      "Bash(git branch --show-current)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(git -c *)"
+    ]
+  }
+}
 ```
 
-`ArtifactData` is the tool name as this plugin's skills call it. If Claude Code lists it under another name (for example `mcp__…__ArtifactData`), use that name.
+`ArtifactData` is the tool name as this plugin's skills call it. If Claude Code lists it under another name (for example `mcp__…__ArtifactData`), use that name. `deny` wins over every `allow`, also over a skill's `allowed-tools`, and each skill lists only the git commands it runs.
+
+- **`git -C <dir> …` is left out on purpose**, so Claude Code asks for it: the work skill uses it to act on the main checkout from a worktree (the delegation, the phase merge), and that question is your say on a merge into it.
+- **With forge**, `"Bash(node *forge.cjs*)"` lets it run without Claude Code asking; put it in `.claude/settings.local.json` of the projects you trust, not in your `~/.claude/settings.json` (forge asks itself before it runs the commands of `.forge/config.yaml`). To be asked before every final merge too, add `"ask": ["Bash(node *forge.cjs* swarm merge*)"]`.
 
 ## Develop
 

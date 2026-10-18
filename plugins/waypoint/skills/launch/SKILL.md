@@ -1,7 +1,7 @@
 ---
 name: launch
 description: Use to start another Claude Code session on a waypoint track in its own git worktree, in the background. Triggers: "/waypoint:launch <track>", "lanza una sesión en el frente X", "lanza una sesión en la pista X", "launch a session for track X".
-allowed-tools: Bash(node *waypoint.cjs*) Bash(git *) Bash(claude --bg *) ArtifactData ListAgents Read
+allowed-tools: Bash(node *waypoint.cjs*) Bash(git status *) Bash(git worktree list *) Bash(claude --bg *) ArtifactData ListAgents Read
 ---
 
 # waypoint: launch a session on a track
