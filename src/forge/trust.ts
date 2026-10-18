@@ -152,18 +152,30 @@ function withTrust(config: ForgeConfig, t: Trust): ForgeConfig {
 /** A config whose commands may run: as it is when trusted (or without commands), without them when denied; else it throws. */
 export const trustedConfig = (config: ForgeConfig, record: Pick<TrustRecord, 'commands'>): ForgeConfig => withTrust(config, trustOf(config, record));
 
+/** Where the answer for `dir` is kept, or why nothing is: `no-repo` when git says `dir` is in no repository, `git-failed`
+ *  when git could not tell (it refused to run there, timed out, or is missing). */
+export type TrustPlace = { file: string } | { file: null; why: 'no-repo' | 'git-failed' };
+
 /**
  * The file that keeps the answer for the repository `dir` is in: <git common dir>/forge/trust.json, one for the main
  * checkout and its worktrees. Git keeps its own directory out of every checkout (also through the aliases of `.git`), so
- * no clone or pull writes it. Null outside a git repository, or when git cannot say (then nothing is kept).
+ * no clone or pull writes it. None outside a git repository, or when git cannot say (then nothing is kept), and why.
+ * git speaks English here (LC_ALL=C), so its «not a git repository» can be told from a refusal.
  */
-export function trustFile(dir: string): string | null {
+export function trustPlace(dir: string): TrustPlace {
   let common: string;
   try {
-    common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: dir, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
-  } catch { return null; }
-  return common ? path.join(path.resolve(dir, common), 'forge', 'trust.json') : null;
+    common = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: dir, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, LC_ALL: 'C', LANGUAGE: 'C' },
+    }).trim();
+  } catch (e) {
+    return { file: null, why: /not a git repository/i.test(String((e as { stderr?: unknown }).stderr ?? '')) ? 'no-repo' : 'git-failed' };
+  }
+  return common ? { file: path.join(path.resolve(dir, common), 'forge', 'trust.json') } : { file: null, why: 'git-failed' };
 }
+
+/** trustPlace's file: null outside a git repository or when git cannot say. */
+export const trustFile = (dir: string): string | null => trustPlace(dir).file;
 
 /** A commands record as written; anything malformed counts as no answer (forge asks again). A denied hash is never in
  *  `allowed`; an allowed one always is. */
@@ -193,16 +205,18 @@ function readAt(file: string | null): TrustRecord {
 /** The answer kept for the repository `dir` is in (trustFile); nothing outside a git repository. */
 export const readTrust = (dir: string): TrustRecord => readAt(trustFile(dir));
 
-/** Changes the record of the repository `dir` is in, written atomically; false outside a git repository (nothing kept). */
-export function updateTrust(dir: string, fn: (r: TrustRecord) => TrustRecord): boolean {
-  const file = trustFile(dir);
-  if (!file) return false;
+/** Changes the record of the repository `dir` is in, written atomically; outside a git repository, or when git cannot
+ *  say where it is, nothing is kept and it says why. */
+export function updateTrust(dir: string, fn: (r: TrustRecord) => TrustRecord): { ok: true } | { ok: false; why: 'no-repo' | 'git-failed' } {
+  const place = trustPlace(dir);
+  if (place.file === null) return { ok: false, why: place.why };
+  const file = place.file;
   const next = fn(readAt(file));
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`);
   renameSync(tmp, file);
-  return true;
+  return { ok: true };
 }
 
 /** The trust in a config of `dir`; the answer is read only when the config has commands. */

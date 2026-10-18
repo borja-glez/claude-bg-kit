@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { parseConfig } from '../src/forge/config.js';
 import { readExecution, runWorktree, saveExecution, taskWorktree } from '../src/forge/execution.js';
-import { assumeTrustedForTests, commandsHash, configCommands, readTrust, trustAsk, trustFile, trustOf } from '../src/forge/trust.js';
+import { assumeTrustedForTests, commandsHash, configCommands, readTrust, trustAsk, trustFile, trustOf, trustPlace } from '../src/forge/trust.js';
 import type { ExecTask } from '../src/lib/execution-state.js';
 import { walk } from './helpers/files.js';
 import { hookAnswerStdin } from './helpers/hook-answer.js';
@@ -246,6 +246,21 @@ describe('where the answer lives (I-03)', () => {
     expect(set.stderr).toContain('is not in a git repository, so forge keeps no answer for it and asks each time');
     expect(out(run(['triage', '--task', 't1', 'fix the button'], at)).trust).toMatchObject({ state: 'ask', note: true });
     expect(run(['validate', '--all'], at).code).toBe(2);
+    expect(ran).toEqual([]);
+  });
+  it('in a repository git refuses to read, local set commands says git could not tell where the repository is, not that there is none (carry 8)', () => {
+    const dir = tmp('forge-trust-gitfail-');
+    git(dir, 'init', '-q');
+    // A repository format git does not know: it refuses to run there.
+    git(dir, 'config', 'core.repositoryformatversion', '99');
+    config(dir, UNIT);
+    expect(trustPlace(dir)).toEqual({ file: null, why: 'git-failed' });
+    expect(trustPlace(tmp('forge-trust-nogit-'))).toEqual({ file: null, why: 'no-repo' });
+    expect(trustPlace(root)).toEqual({ file: path.join(root, '.git', 'forge', 'trust.json') });
+    const set = run(['local', 'set', 'commands', 'allowed', '--expect', commandsHash(configCommands(parseConfig(UNIT)))], { cwd: dir, git: defaultGit(dir) });
+    expect(set.code).toBe(2);
+    expect(set.stderr).toContain(`git could not tell where the repository of ${dir} is, so forge keeps no answer for it and asks each time`);
+    expect(set.stderr).not.toContain('is not in a git repository');
     expect(ran).toEqual([]);
   });
 });

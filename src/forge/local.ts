@@ -1,8 +1,8 @@
 // .forge/local.yaml: what forge knows about this machine (surface permissions, validators already announced, drafts
 // already proposed, workflow, autonomy), and .forge/learned.jsonl: the lines `surfaces learn` appended to a surface.
 // Both live in the main checkout, so every worktree of the repository shares them (outside git: the directory itself).
-// .forge/.gitignore keeps them out of git; committing one anyway is the committer's call. local.yaml is read leniently,
-// written atomically, unknown keys kept.
+// .forge/.gitignore keeps them out of git; one committed anyway grants no surface (localTracked). local.yaml is read
+// leniently, written atomically, unknown keys kept.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -40,6 +40,28 @@ export function mainCheckout(root: string): string {
 }
 
 export const localFile = (root: string) => path.join(mainCheckout(root), '.forge', 'local.yaml');
+
+/**
+ * Whether git tracks forge's file `.forge/<name>` in the main checkout of `root` (in any letter case), or `.forge` itself
+ * as a link or a submodule: then a repository ships it, and what it says is the repository's, not the person's. False
+ * when git cannot say (outside a repository: a copy without git is the directory's own). The same rule keeps the trust
+ * in the commands outside every checkout (trust.ts).
+ */
+export function localTracked(root: string, name: 'local.yaml' | 'learned.jsonl'): boolean {
+  let listed: string;
+  try {
+    listed = execFileSync('git', ['ls-files', '-z', '--', ':(top,icase).forge'], {
+      cwd: mainCheckout(root), encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true,
+    });
+  } catch { return false; }
+  return listed.split('\0').some(f => { const l = f.toLowerCase(); return l === '.forge' || l === `.forge/${name}`; });
+}
+
+/** The surface permissions that grant: those of local.yaml, none while git tracks it (a repository could ship an
+ *  «allowed» one). `s`: local.yaml as already read. */
+export function surfacePermissions(root: string, s: Pick<LocalState, 'surfaces'> = readLocal(root)): LocalState['surfaces'] {
+  return Object.keys(s.surfaces).length && localTracked(root, 'local.yaml') ? {} : s.surfaces;
+}
 
 const names = (x: unknown): string[] =>
   Array.isArray(x) ? [...new Set(x.filter((s): s is string => typeof s === 'string' && NAME.test(s)))] : [];
@@ -104,11 +126,13 @@ export function recordLearned(root: string, surface: string, lines: string[], ts
   }
 }
 
-/** The recorded digests per surface; a missing file or a bad line counts as nothing recorded. */
+/** The recorded digests per surface; a missing file or a bad line counts as nothing recorded, and so does a file git
+ *  tracks (a repository could ship digests that take its own lines out of a surface the person allowed). */
 export function readLearned(root: string): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
   let text = '';
   try { text = readFileSync(learnedFile(root), 'utf8'); } catch { return out; }
+  if (text.trim() && localTracked(root, 'learned.jsonl')) return out;
   for (const line of text.split('\n')) {
     let r: unknown;
     try { r = JSON.parse(line); } catch { continue; }

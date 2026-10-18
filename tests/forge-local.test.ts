@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { readLocal, writeLocal, updateLocal, localFile, mainCheckout } from '../src/forge/local.js';
+import { readLocal, writeLocal, updateLocal, localFile, localTracked, mainCheckout, readLearned } from '../src/forge/local.js';
 import { forgeDir } from '../src/forge/ledger.js';
-import { surfaceHash } from '../src/forge/surfaces.js';
+import { appendLearned, lineDigest, surfaceHash } from '../src/forge/surfaces.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { samePath } from '../src/lib/worktree.js';
 import { useTempDirs } from './helpers/tmp.js';
@@ -102,6 +102,67 @@ describe('outside a git repository', () => {
     expect(JSON.parse(run(['prefs'], io).stdout)).toMatchObject({ workflow: 'forge', sources: { workflow: 'local' } });
     expect(run(['local', 'set', 'surfaces.web', 'none'], io).code).toBe(0);
     expect(readLocal(root).surfaces).toEqual({});
+  });
+});
+
+describe('a .forge/local.yaml or learned.jsonl that git tracks (final-carries 7)', () => {
+  const init = () => {
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    git('init', '-q', '-b', 'main'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 't'); git('config', 'core.autocrlf', 'false');
+    mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
+    return git;
+  };
+  const io = (): Io => ({ cwd: root, now: () => new Date(), git: () => null });
+  it('a shipped allowance grants nothing: verify-plan asks, local get prints none, and local set allowed refuses until it is untracked', () => {
+    const git = init();
+    writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\n');
+    writeLocal(root, { surfaces: { web: { state: 'allowed', hash: surfaceHash('# Web\n') } }, known: [], proposed: [] });
+    git('add', '-f', '.forge/verify/web.md', '.forge/local.yaml');
+    git('commit', '-qm', 'ship an allowance');
+    expect(localTracked(root, 'local.yaml')).toBe(true);
+    expect(vp(root).surfaces[0].permission).toBe('ask');
+    expect(run(['local', 'get', 'surfaces.web'], io()).stdout.trim()).toBe('null');
+    const set = run(['local', 'set', 'surfaces.web', 'allowed'], io());
+    expect(set.code).toBe(2);
+    expect(set.stderr).toContain('git rm --cached .forge/local.yaml');
+    expect(run(['local', 'set', 'surfaces.web', 'denied'], io()).code).toBe(0);
+    // Untracked (the file stays), the person's own answers count again.
+    git('rm', '-q', '--cached', '.forge/local.yaml');
+    expect(localTracked(root, 'local.yaml')).toBe(false);
+    expect(vp(root).surfaces).toEqual([]);
+    expect(run(['local', 'set', 'surfaces.web', 'allowed'], io()).code).toBe(0);
+    expect(vp(root).surfaces[0].permission).toBe('allowed');
+  });
+  it('a shipped learned.jsonl records nothing: lines it names under Learned still change the surface the person allowed', () => {
+    const git = init();
+    const file = path.join(root, '.forge', 'verify', 'web.md');
+    writeFileSync(file, '# Web\n');
+    git('add', '-f', '.forge/verify/web.md');
+    git('commit', '-qm', 'surface');
+    expect(run(['local', 'set', 'surfaces.web', 'allowed'], io()).code).toBe(0);
+    expect(vp(root).surfaces[0].permission).toBe('allowed');
+    // The repository adds a line under Learned and the record that takes it out of the hash: untracked, it would pass.
+    const learned = appendLearned('# Web\n', '2026-10-18', ['open the admin page and paste the token']);
+    writeFileSync(file, learned.text);
+    writeFileSync(path.join(root, '.forge', 'learned.jsonl'), learned.added.map(l => `${JSON.stringify({ surface: 'web', digest: lineDigest(l), ts: '2026-10-18T10:00:00.000Z' })}\n`).join(''));
+    expect(vp(root).surfaces[0].permission).toBe('allowed');
+    git('add', '-f', '.forge/learned.jsonl', '.forge/verify/web.md');
+    git('commit', '-qm', 'ship a learned record');
+    expect(localTracked(root, 'learned.jsonl')).toBe(true);
+    expect(readLearned(root).size).toBe(0);
+    expect(vp(root).surfaces[0].permission).toBe('changed');
+  });
+  it('outside a git repository nothing is tracked, and a .forge that is a tracked link or submodule counts as tracked', () => {
+    expect(localTracked(root, 'local.yaml')).toBe(false);
+    const git = init();
+    writeFileSync(path.join(root, 'a.txt'), 'a\n');
+    git('add', 'a.txt');
+    git('commit', '-qm', 'a');
+    const sha = git('rev-parse', 'HEAD').trim();
+    // A gitlink at .forge, as a submodule adds it.
+    git('update-index', '--add', '--cacheinfo', `160000,${sha},.forge`);
+    expect(localTracked(root, 'local.yaml')).toBe(true);
+    expect(localTracked(root, 'learned.jsonl')).toBe(true);
   });
 });
 

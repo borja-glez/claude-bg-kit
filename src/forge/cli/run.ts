@@ -43,7 +43,7 @@ import { computeStats, renderStats, type PlanStates } from '../stats.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, planAffected, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
-import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJECT_ID, type SurfacePermission } from '../local.js';
+import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, localTracked, surfacePermissions, OBJECT_ID, type SurfacePermission } from '../local.js';
 import { commandsHash, configCommands, loadTrusted, noteOnce, readTrust, recordTrust, trustIn, trustOutput, updateTrust, UntrustedCommandsError } from '../trust.js';
 import { memberForHook, allMembersOf, memberFile } from '../members.js';
 import { hookLive } from '../live.js';
@@ -626,7 +626,7 @@ function learnSurface(io: Io, dir: string, name: string, notes: string[], headin
   const before = readFileSync(file, 'utf8');
   // Only a surface allowed as it is now records what it appends (and local.yaml is never touched), so learning on a
   // changed or never allowed surface cannot make it allowed: its new lines are just more unknown text.
-  const cur = readLocal(io.cwd).surfaces[name];
+  const cur = surfacePermissions(io.cwd)[name];
   const allowed = cur?.state === 'allowed' && hashMatches(cur.hash, permissionHash(before, readLearned(io.cwd).get(name)));
   const at = io.now().toISOString();
   const r = appendLearned(before, at.slice(0, 10), notes, heading);
@@ -1605,7 +1605,9 @@ function runCommand(argv: string[], io: Io): Result {
         const diff = git(['diff', '--name-only', `${base}..HEAD`]);
         // The surfaces of the code checked (--cwd: a task's worktree), the permissions of this machine.
         const surfaces = readSurfaces(repoDir, readLearned(io.cwd));
-        const local = readLocal(io.cwd);
+        // A local.yaml git tracks grants no surface (final-carries 7).
+        const read = readLocal(io.cwd);
+        const local = { ...read, surfaces: surfacePermissions(io.cwd, read) };
         let inventory: Set<string> | null = null;
         const plan = verifyPlan({
           path: p, asked: has('asked'),
@@ -1641,7 +1643,12 @@ function runCommand(argv: string[], io: Io): Result {
           // allowed needs --expect, the hash the question showed, so commands changed since then are never allowed.
           if (value !== 'allowed' && value !== 'denied' && value !== 'none') throw new UsageError('local set commands: the value must be allowed|denied|none');
           const kept = (fn: Parameters<typeof updateTrust>[1]) => {
-            if (!updateTrust(repoDir, fn)) throw new UsageError(`local set commands: ${repoDir} is not in a git repository, so forge keeps no answer for it and asks each time`);
+            const r = updateTrust(repoDir, fn);
+            if (!r.ok) {
+              throw new UsageError(r.why === 'no-repo'
+                ? `local set commands: ${repoDir} is not in a git repository, so forge keeps no answer for it and asks each time`
+                : `local set commands: git could not tell where the repository of ${repoDir} is, so forge keeps no answer for it and asks each time`);
+            }
             return ok('ok');
           };
           if (value === 'none') return kept(({ commands: _gone, ...r }) => r);
@@ -1658,7 +1665,7 @@ function runCommand(argv: string[], io: Io): Result {
           if (key === undefined) return json(s);
           const m = /^surfaces\.(.+)$/.exec(key);
           if (!m) throw new UsageError('local get: the path must be surfaces.<name>');
-          return json(s.surfaces[m[1]] ?? null);
+          return json(surfacePermissions(io.cwd, s)[m[1]] ?? null);
         }
         if (sub === 'set' && (key === 'workflow' || key === 'autonomy')) {
           if (value === 'none') {
@@ -1680,6 +1687,10 @@ function runCommand(argv: string[], io: Io): Result {
           if (has('expect') && !expected) throw new UsageError('local set: --expect needs the hash verify-plan gave');
           const surface = readSurfaces(repoDir, readLearned(io.cwd)).find(x => x.name === m[1]);
           if (value === 'allowed' && !surface) throw new UsageError(`local set: .forge/verify/${m[1]}.md does not exist`);
+          // final-carries 7: a local.yaml git tracks grants no surface, so an allowance written there would ask forever.
+          if (value === 'allowed' && localTracked(io.cwd, 'local.yaml')) {
+            throw new UsageError('local set: git tracks .forge/local.yaml, so a permission in it grants nothing: untrack it with git rm --cached .forge/local.yaml (the file stays) and answer again');
+          }
           if (value === 'allowed' && expected !== undefined && expected !== surface!.hash) {
             throw new UsageError(`local set: .forge/verify/${m[1]}.md changed since verify-plan showed it: run verify-plan again`);
           }
