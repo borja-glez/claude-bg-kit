@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { codeUnits, fenced, units, walk } from './helpers/files.js';
+import { SUBCOMMANDS } from '../src/forge/cli/swarm.js';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const sources = (dir: string) => walk(path.join(repo, dir)).filter(f => /\.tsx?$/.test(f)).map(f => readFileSync(f, 'utf8')).join('\n');
@@ -32,22 +33,22 @@ const INDIRECT: Record<Cli, [flag: string, site: string][]> = {
   ],
 };
 // Each command that dispatches on a subcommand, and where the code does it: its file and the two markers around the
-// dispatcher, whose `case 'x':` labels and `sub === 'x'` or `args[0] !== 'x'` tests are the subcommands. No waypoint
+// dispatcher (in run.ts, its entry of COMMANDS and the next one), whose `case 'x':` labels and `sub === 'x'` or
+// `args[0] !== 'x'` tests are the subcommands. forge swarm's are the names of its SUBCOMMANDS (I-12). No waypoint
 // command takes one (its `hook` is cited by no skill).
 const DISPATCH: Record<Cli, Record<string, [file: string, from: string, to: string]>> = {
   forge: {
-    authorize: ['src/forge/cli/run.ts', "case 'authorize': {", "case 'swarm':"],
-    swarm: ['src/forge/cli/swarm.ts', 'switch (sub) {', 'usage: forge swarm <'],
-    proposals: ['src/forge/cli/run.ts', "case 'proposals': {", "case 'surfaces': {"],
-    surfaces: ['src/forge/cli/run.ts', "case 'surfaces': {", "case 'setup': {"],
-    local: ['src/forge/cli/run.ts', "case 'local': {", "case 'prefs': {"],
+    authorize: ['src/forge/cli/run.ts', 'authorize: (args, ctx) => {', 'swarm: (args, ctx) =>'],
+    proposals: ['src/forge/cli/run.ts', 'proposals: (args, ctx) => {', 'surfaces: (args, ctx) => {'],
+    surfaces: ['src/forge/cli/run.ts', 'surfaces: (args, ctx) => {', 'setup: (args, ctx) => {'],
+    local: ['src/forge/cli/run.ts', 'local: (args, ctx) => {', 'prefs: (args, ctx) => {'],
     shadow: ['src/forge/cli/shadow.ts', 'switch (sub) {', 'default:'],
-    tree: ['src/forge/cli/run.ts', "case 'tree': {", "case 'config': {"],
-    config: ['src/forge/cli/run.ts', "case 'config': {", "case 'infinite': {"],
-    infinite: ['src/forge/cli/run.ts', "case 'infinite': {", "case 'cycle': {"],
-    route: ['src/forge/cli/run.ts', "case 'route': {", "case 'tdd':"],
-    'sp-plan': ['src/forge/cli/run.ts', "case 'sp-plan': {", "case 'agents': {"],
-    decision: ['src/forge/cli/run.ts', "case 'decision': {", "case 'stats': {"],
+    tree: ['src/forge/cli/run.ts', 'tree: (args, ctx) => {', 'config: (args, ctx) => {'],
+    config: ['src/forge/cli/run.ts', 'config: (args, ctx) => {', 'infinite: (args, ctx) => {'],
+    infinite: ['src/forge/cli/run.ts', 'infinite: (args, ctx) => {', 'cycle: (args, ctx) => {'],
+    route: ['src/forge/cli/run.ts', 'route: (args, ctx) => {', 'tdd: (args, ctx) => {'],
+    'sp-plan': ['src/forge/cli/run.ts', "'sp-plan': (args, ctx) => {", 'agents: (args, ctx) => {'],
+    decision: ['src/forge/cli/run.ts', 'decision: (args, ctx) => {', 'stats: (args, ctx) => {'],
   },
   waypoint: {},
 };
@@ -55,7 +56,7 @@ const DISPATCH: Record<Cli, Record<string, [file: string, from: string, to: stri
 // Each command whose subcommands take a key (`local get|set <key>`), and the dispatcher it is read in: its `key === 'x'`
 // tests are the keys, and a `/^x\.(.+)$/` pattern a key with a name after it (surfaces.<name>).
 const KEYED: Record<Cli, Record<string, [file: string, from: string, to: string]>> = {
-  forge: { local: ['src/forge/cli/run.ts', "case 'local': {", "case 'prefs': {"] },
+  forge: { local: ['src/forge/cli/run.ts', 'local: (args, ctx) => {', 'prefs: (args, ctx) => {'] },
   waypoint: {},
 };
 
@@ -87,6 +88,7 @@ function vocabOf(cli: Cli, text: string, read: (file: string) => string): Vocab 
   const flags = new Set(INDIRECT[cli].map(([f]) => f));
   for (const f of readFlags(text)) flags.add(f);
   const subs = new Map(Object.entries(DISPATCH[cli]).map(([cmd, [file, from, to]]) => [cmd, subsOf(read(file), from, to)]));
+  if (cli === 'forge') subs.set('swarm', new Set(Object.keys(SUBCOMMANDS)));
   const keys = new Map(Object.entries(KEYED[cli]).map(([cmd, [file, from, to]]) => [cmd, keysOf(read(file), from, to)]));
   return { commands: new Set(usage ? usage[1].split('|') : []), subs, keys, flags };
 }
@@ -227,7 +229,7 @@ describe('the skills cite only what the CLIs accept (I-10)', () => {
     expect(vocab.waypoint.commands.has('design-snapshot')).toBe(true);
   });
   it('each dispatcher of forge has its subcommands, and it is a command of the usage line', () => {
-    expect([...vocab.forge.subs.keys()].sort()).toEqual(Object.keys(DISPATCH.forge).sort());
+    expect([...vocab.forge.subs.keys()].sort()).toEqual([...Object.keys(DISPATCH.forge), 'swarm'].sort());
     for (const [cmd, subs] of vocab.forge.subs) {
       expect(vocab.forge.commands.has(cmd), cmd).toBe(true);
       expect(subs.size, cmd).toBeGreaterThan(0);

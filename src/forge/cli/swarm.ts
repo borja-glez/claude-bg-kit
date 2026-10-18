@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { UsageError } from './errors.js';
 import type { ExecResult, Io } from './run.js';
 import { runWithCache, cleanTree, indexTree, untrackedPaths, cacheGit, checkoutPrefix } from '../validate-cache.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, runOptions, validateEvent, failingLabel, type ExecMany, type RepoReader, type RunOptions, type Scope, type Validator, type ValidatorResult } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, runOptions, validateEvent, failingLabel, type RepoReader, type RunOptions, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { loadConfig } from '../config.js';
 import { stopFile, parseRun, readRunText } from '../run.js';
 import { isLocale } from '../../lib/forge-run.js';
@@ -40,10 +40,9 @@ import { cleanText } from '../../lib/forge-status.js';
 import { publishFor, startedEvent, type StateWrite } from '../roadmap-sources.js';
 import { runDocOf } from '../run-doc.js';
 import { finalVerdictOf, roadmapRun } from '../roadmap-run.js';
-
-export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; repo: RepoReader }
-export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
-type Result = { code: number; stdout: string; stderr: string };
+import type { Result } from './context.js';
+import { swarmCtx, type GitDeps, type SwarmCommand, type SwarmDeps } from './swarm/context.js';
+export type { GitDeps, SwarmDeps };
 
 const ID = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
 const MAX_SLEEP_S = 900;
@@ -1085,33 +1084,824 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   return r.result === 'merged' ? merged({ result: 'merged', sha: r.sha, preexisting: r.preexisting, ...extras, ...mergedPublish(io, e) }) : out({ result: 'conflict', detail: r.detail, ...extras });
 }
 
+const SWARM_USAGE = 'usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--run-id R] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO] [--claim]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--hook-session ID] [--locale es|en] [--retry-deps]|retry <T> [--adopt] [--hook-session ID]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO] [--claim]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID>';
+
+const relaunch: SwarmCommand = (rest, ctx) => {
+  const { sub, io, deps, flag, has, json, iso, current, update, taskArg } = ctx;
+  const task = taskArg();
+  const e = current();
+  const t = e.tasks[task];
+  if (!t || t.status !== 'running' || t.executor !== 'sessions') throw new UsageError(`swarm ${sub}: ${task} is not a running sessions task`);
+  const planArg = flag('plan');
+  if (has('plan') && (!planArg || planArg.startsWith('-'))) throw new UsageError(`swarm ${sub}: --plan needs a file`);
+  if (planArg) {
+    const isFile = (() => { try { return statSync(path.resolve(io.cwd, planArg)).isFile(); } catch { return false; } })();
+    if (planArg.startsWith('-') || !isFile) throw new UsageError(`swarm ${sub}: --plan ${planArg} is not a plan file`);
+  }
+  if (sub === 'nudge') {
+    // The text (and so the plan) is read before anything is saved.
+    const es = (planArg ? loadPlanArg(io, planArg, 'nudge').locale : planLocale(io.cwd, e.project)) === 'es';
+    const text = es ? `[forge run] ${task}: continúa con ${t.stage}; si estás bloqueado, márcalo como bloqueado`
+      : `[forge run] ${task}: continue with ${t.stage}; if you are blocked, mark it blocked`;
+    update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), nudgedAt: iso } } });
+    return json({ task, name: `wp-${e.project}-${task}`, text });
+  }
+  const planPath = planArg;
+  if (!planPath) throw new UsageError('swarm relaunch: --plan is required');
+  // The cap and the reason live in schedule.ts: one rule for the scheduler and this command.
+  const verdict = relaunchOrBlock(task, t.attempts);
+  if (verdict.type === 'block') {
+    update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), status: 'blocked', detail: verdict.reason, updatedAt: iso, finishedAt: iso } } });
+    return json({ task, blocked: true, reason: verdict.reason });
+  }
+  const attempt = verdict.attempt;
+  const log = deps.git(['log', '--oneline', '-n', '20', `${e.branch}..${t.branch}`])?.trim();
+  const commits = log ? log.split(/\r?\n/).map(l => `  - ${l}`).join('\n') : '  - none';
+  // D-08: the task's work folder, by project; the note goes to the main checkout's, the member works in its worktree's.
+  const ref = { project: e.kind === 'plan' ? e.project : null, task };
+  const note = path.join(workDir(io.cwd, ref), 'handover.md');
+  // A run member keeps its work files (brief-<n>.md, report-<n>.txt, validators-<n>.json, reviews-<n>-<round>/)
+  // in .forge/work/<project>/<T>/ of its own task worktree, where it runs; only this note lives in the main checkout.
+  // A member started before D-08 has them in the older .forge/work/<T>/ there: the folder with its brief is named.
+  const memberRoot = t.worktree || taskWorktree(io.cwd, task);
+  const memberWork = pickWorkDir(workDir(memberRoot, ref), workDir(memberRoot, { project: null, task }));
+  mkdirSync(path.dirname(note), { recursive: true });
+  writeFileSync(note, [
+    `# Handover: ${task} (attempt ${attempt} of ${RELAUNCH_CAP + 1})`, '',
+    `- Run: ${e.runId} · coordinator ${e.coordinator} · run branch ${e.branch}`,
+    `- Last stage: ${t.stage} · round ${t.round} · agent ${t.agent ?? 'none'} · since ${t.stageSince}`,
+    `- Detail: ${t.detail ?? 'none'}`,
+    `- Commits on ${t.branch} not yet on ${e.branch}:`, commits, '',
+    `- This note: ${note} (main checkout ${io.cwd})`,
+    `- Work files of the earlier attempts: ${memberWork} (the brief is brief-<n>.md there, with report-<n>.txt, validators-<n>.json and reviews-<n>-<round>/)`, '',
+    `Resume from ${t.branch} in this worktree: read the brief in ${memberWork} if it exists (else write it as the brief stage says), do not redo a step whose output file is already written, and continue from the last stage.`, '',
+  ].join('\n'));
+  update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), attempts: attempt, startedAt: iso, nudgedAt: null, updatedAt: iso } } });
+  return json({ task, attempt, note, work: workRel(ref), launch: memberLaunch(io.cwd, planPath, task, e) });
+};
+
+/** I-12: every swarm subcommand by its name (the names of SWARM_USAGE). */
+export const SUBCOMMANDS: Readonly<Record<string, SwarmCommand>> = {
+  join: (rest, ctx) => {
+    const { io, flag, json, iso, memberCtx } = ctx;
+    const { main, e, session } = memberCtx(false);
+    if (session === e.coordinator || session === e.hookSession) throw new UsageError(`swarm join: ${session} coordinates this execution`);
+    const role = flag('role');
+    if (role !== 'executor' && role !== 'manual') throw new UsageError('swarm join: --role must be executor or manual');
+    const task = flag('task') ?? null;
+    if (task !== null && !isPlanId(task)) throw new UsageError('swarm join: --task is not a task id');
+    if (role === 'executor' && !task) throw new UsageError('swarm join: an executor needs --task');
+    // Claude's own session id, the one its hooks receive: the hooks find the member by it (C1: the flag, else
+    // CLAUDE_CODE_SESSION_ID). A flag without a value, or an unsubstituted `${CLAUDE_SESSION_ID}`, counts as absent.
+    const given = flag('hook-session');
+    const id = claudeSessionId(given, io.env ?? process.env);
+    // A rejoin without one keeps the hook id this member recorded in the same run.
+    const before = readMember(main, session);
+    const hookSession = id ?? (before?.runId === e.runId ? before.hookSession : null);
+    // No usable id does not stop the join: the member works without its own live signal, and the output says why.
+    const warning = id !== null ? null
+      : given ? `--hook-session ${given.slice(0, 130)} is not a usable session id (letters, digits, _ - .; max 120): joined without a live signal`
+        : hookSession === null ? 'no Claude session id (--hook-session or CLAUDE_CODE_SESSION_ID): joined without a live signal' : null;
+    if (hookSession !== null && hookSession === e.hookSession) throw new UsageError(`swarm join: ${hookSession} coordinates this execution`);
+    writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag('name') ?? null, since: iso, hookSession });
+    return json({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project, ...(warning ? { warning } : {}) });
+  },
+  report: (rest, ctx) => {
+    const { io, flag, has, json, now, iso, taskArg, memberCtx } = ctx;
+    const task = taskArg();
+    const { main, e, session, m } = memberCtx(true);
+    const member = m!;
+    if (member.role === 'executor' && member.task !== task) throw new UsageError(`swarm report: ${session} executes ${member.task}, not ${task}`);
+    const stage = flag('stage') as Stage | undefined;
+    if (!stage || !STAGES.includes(stage)) throw new UsageError(`swarm report: --stage must be one of ${STAGES.join('|')}`);
+    const status = (flag('status') ?? 'running') as ExecTask['status'];
+    if (!['running', 'accepted', 'blocked'].includes(status)) throw new UsageError('swarm report: --status must be running, accepted or blocked');
+    const round = has('round') ? Number(flag('round')) : 0;
+    if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError('swarm report: --round must be an integer from 0 to 99');
+    // A claim starts a task: it cannot go with a status that says the task is not running.
+    if (has('claim') && status !== 'running') throw new UsageError('swarm report: --claim starts a task and goes only with --status running');
+    let prev: PublicTask | null = null;
+    try { prev = normalizePublicTask(JSON.parse(readFileSync(executionTaskFile(main, task), 'utf8'))); } catch { prev = null; }
+    // Another session still holding the task's lease owns its public file: never overwrite it.
+    if (prev && prev.runId === e.runId && prev.by !== session && Date.parse(prev.leaseUntil) > now.getTime()) {
+      throw new UsageError(`swarm report: ${task} is reported by ${prev.by} until ${prev.leaseUntil}`);
+    }
+    if (member.role === 'manual' && member.task !== task) writeMember(main, { ...member, task });
+    const since = prev && prev.by === session && prev.stage === stage && prev.runId === e.runId ? prev.since : iso;
+    const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
+    const p: PublicTask = { task, runId: e.runId, stage, status, agent: has('no-agent') ? null : (flag('agent') ?? null), round, since, updatedAt: iso, leaseUntil: lease, by: session, mode: member.role === 'executor' ? 'sessions' : 'manual' };
+    writePublicTask(main, p);
+    // J-15: the state/T write of this report, built by the CLI; --claim adds the member's claim of its task.
+    const claimed = has('claim') ? { status: 'in_progress', owner: session, claimedAt: iso, startedAt: iso } : null;
+    return json({
+      ...p, ...publishFor(io, task, { project: e.project, ...(claimed ? { extra: claimed } : {}) }),
+      ...(claimed ? { event: startedEvent(session, task, now, io.rand) } : {}),
+    });
+  },
+  next: (rest, ctx) => {
+    const { io, deps, flag, json, now, memberCtx } = ctx;
+    const { e, session } = memberCtx(true);
+    const { plan, states, sessions, integrated } = readTickInput(io, deps, e, flag('plan'), flag('db'), 'next');
+    const running = Object.values(e.tasks).filter(t => t.status === 'running').length;
+    // The coordinator's own scheduler, seen from this session: its claims count as its own, the coordinator's as another's.
+    const d = schedule({ plan, states, sessions, exec: { ...e, coordinator: session, parallel: Math.min(10, running + 1) }, integrated, now: now.getTime() });
+    const start = d.actions.find((a): a is { type: 'start'; task: string } => a.type === 'start');
+    return json(start ? { task: start.task, reason: null } : { task: null, reason: d.next.stallReason ?? 'nothing is ready' });
+  },
+  start: (rest, ctx) => {
+    const { io, deps, flag, has, json, now, iso, lockDeps } = ctx;
+    const project = flag('project');
+    const session = flag('session');
+    if (!project || !ID.test(project) || !session || !ID.test(session)) throw new UsageError('swarm start: --project and --session are required');
+    // D-08: --plan, the plan the run executes, must be of this project; checked before anything else is read or moves.
+    if (has('plan')) {
+      const plan = loadPlanArg(io, flag('plan'), 'start');
+      checkPlanProject('start', flag('plan')!, plan.project, project);
+    }
+    // C1: Claude's id of the session that runs the start, checked before any branch or worktree moves. It becomes the
+    // execution's hookSession, the one session its Stop hook steps (also on a resume, e.g. after a /clear).
+    const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
+    if (!hook) throw new UsageError(noClaudeSession('swarm start', '--hook-session'));
+    // I-03: the run id swarm propose printed (launch.json keeps it), so the start question answered before a /clear is
+    // tied to this run. A resume keeps its own.
+    const runIdFlag = flag('run-id');
+    if (has('run-id') && runIdFlag === undefined) throw new UsageError('swarm start: --run-id needs the run id swarm propose printed');
+    const config = loadConfig(io.cwd);
+    let parallel = config.swarm.parallel;
+    if (has('parallel')) {
+      const v = Number(flag('parallel'));
+      if (!Number.isInteger(v) || v < 1 || v > 10) throw new UsageError('swarm start: --parallel must be an integer from 1 to 10');
+      parallel = v;
+    }
+    const kind = flag('kind') ?? 'plan';
+    if (kind !== 'plan' && kind !== 'ephemeral') throw new UsageError('swarm start: --kind must be plan or ephemeral');
+    if (kind === 'ephemeral' && flag('mode') === 'sessions') throw new UsageError('swarm start: an ephemeral run is always subagents (sessions need a plan)');
+    // swarm.mode in the config chooses for plan runs only: an ephemeral run has no plan to launch sessions on.
+    const mode = kind === 'ephemeral' ? (flag('mode') ?? 'subagents') : (flag('mode') ?? config.swarm.mode ?? 'subagents');
+    if (mode !== 'subagents' && mode !== 'sessions') throw new UsageError('swarm start: --mode must be subagents or sessions');
+    if (has('autonomy') && flag('autonomy') !== 'auto' && flag('autonomy') !== 'ask') throw new UsageError('swarm start: --autonomy must be auto or ask');
+    const auto = flag('autonomy') === 'auto' ? { autonomy: 'auto' as const } : {};
+    const locale = personLocaleArg(rest);
+    // I-03: a run runs the config's commands (swarm.setup, the validators). Without the person's trust for them nothing
+    // moves: exit 3 with `trust`, whose question the coordinator asks before it starts again.
+    const trust = trustIn(io.cwd, config);
+    if (trust.state === 'ask' || trust.state === 'changed') {
+      const out = { started: false, trust: trustOutput(trust, spanish(locale, io.cwd, project), io.cwd, noteOnce(io.cwd, trust.hash!)) };
+      return { code: 3, stdout: `${JSON.stringify(out, null, 2)}\n`, stderr: '' };
+    }
+    const base = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
+    if (!base || base === 'HEAD') throw new UsageError('swarm start: the main checkout must be on a branch');
+    const prev = readExecution(io.cwd);
+    // D-14: a start never changes the coordinator of an active execution; taking it over is swarm takeover's call.
+    if (prev?.active && prev.coordinator !== session) throw new UsageError(
+      `swarm start: the execution ${prev.runId} is coordinated by ${prev.coordinator}; to go on with it from this session run ` +
+      `swarm takeover --session ${session} --hook-session <id> (it checks that ${prev.coordinator} stopped), or join it as a manual member (/forge:run --join)`);
+    const branch = flag('branch') ?? runBranch(project);
+    if (!isRunBranch(branch)) throw new UsageError('swarm start: --branch is not a valid branch name');
+    // execution.json is read back through the safe id rules: refuse here, before any branch or worktree exists.
+    if (!isMemberId(session)) throw new UsageError('swarm start: --session must use letters, digits, _ - . (at most 120)');
+    if (!isSafeId(runIdOf(project, now))) throw new UsageError('swarm start: --project must use letters, digits, _ - .');
+    if (kind === 'ephemeral' && !isRunBranch(base)) throw new UsageError(`swarm start: the base branch ${base} is outside the run branch rule (letters, digits, _ - . /)`);
+    let setup: SetupResult = null;
+    let baseSync: 'created' | 'up-to-date' | 'fast-forward' | 'merged' | null = null;
+    const resume = !!prev && prev.active && prev.kind === kind && prev.project === project && prev.branch === (kind === 'plan' ? branch : base);
+    let loose: LooseTask[] = [];
+    let ignoredTasks = false;
+    const moves: string[] = [];
+    // Even from its own coordinator, of either kind: a new run would overwrite the execution.json of the run in progress.
+    if (prev?.active && !resume) {
+      throw new UsageError(`swarm start: the execution ${prev.runId} is active (kind ${prev.kind}); finish it or stop it (forge stop) first; a request during it goes to that run`);
+    }
+    // Wave 0 handoff: a resume from another Claude session rebinds only once the bound one stopped, by takeover's
+    // rule; while it may still step its run, a silent rebind would leave two sessions stepping it. `claude --resume`
+    // goes on under the same id, so it needs no rebind.
+    if (resume && prev && prev.hookSession !== null && prev.hookSession !== hook) {
+      const liveness = boundLiveness(io.cwd, prev, now.getTime());
+      if (liveness !== 'stopped') throw new UsageError(boundElsewhere('start', prev.runId, prev.hookSession, liveness));
+    }
+    // Checked before any branch or worktree moves. Only the id swarm propose prints for this project, exactly
+    // (<project>-<stamp>: another project's never matches, whatever its name), and only one no run has used: the run of
+    // execution.json, a run an authorization names (a merge question, or a yes it used) or the ledger's events name has
+    // started, and taking its id would take its answers and mix its events with this run's.
+    if (runIdFlag !== undefined && !resume) {
+      if (!isRunIdOf(project, runIdFlag)) throw new UsageError(`swarm start: --run-id must be the run id swarm propose printed for ${project} (${project}-<stamp>)`);
+      const started = runIdFlag === prev?.runId || readAuths(io.cwd).some(r => r.runId === runIdFlag && (r.kind === 'merge' || r.usedAt !== undefined))
+        || readEvents(io.cwd).some(ev => ev.runId === runIdFlag);
+      if (started) throw new UsageError(`swarm start: --run-id ${runIdFlag} is the id of a run that already started (execution.json, an authorization or the ledger names it); run swarm propose again for a new id`);
+    }
+    const runId = runIdFlag !== undefined && !resume ? runIdFlag : runIdOf(project, now);
+    if (kind === 'ephemeral') {
+      if (resume && prev) {
+        // The run keeps the batch it started with: new requests go to the next run.
+        const doc = readLoose(io.cwd, prev.runId);
+        if (!doc) throw new UsageError('swarm start: the ephemeral run lost .forge/loose.json');
+        loose = doc.tasks;
+        ignoredTasks = has('tasks');
+      } else {
+        loose = loadTasksArg(io, flag('tasks'), 'start');
+        // Loose ids repeat between runs: a leftover worktree or a branch with unmerged work is refused, all checks
+        // before anything moves.
+        for (const t of loose) {
+          const dir = taskWorktree(io.cwd, t.id);
+          // Final review 8: an earlier run's integrated task worktree goes with swarm cleanup.
+          if (existsSync(dir)) throw new UsageError(`swarm start: ${dir} already exists; once its task is integrated, FORGE swarm cleanup removes it (else git worktree remove it), or use another id`);
+          const tb = taskBranch(t.id);
+          if (deps.git(['rev-parse', '--verify', '-q', `refs/heads/${tb}`]) === null) continue;
+          if (deps.git(['merge-base', '--is-ancestor', tb, base]) === null) throw new UsageError(`swarm start: ${tb} has work not on ${base}; use another id`);
+          moves.push(tb);
+        }
+      }
+      if (!has('parallel')) parallel = Math.min(parallel, Math.max(1, widthOf(planOfLoose(loose))));
+    }
+    if (kind === 'plan') {
+      const wt = runWorktree(io.cwd);
+      // The run branch gets its own worktree: it can be neither the base (checked out here) nor a branch
+      // another worktree holds, or `git worktree add` refuses it.
+      if (branch === base) throw new UsageError(`swarm start: ${branch} is the base branch (checked out in the main checkout); the run branch must be another one (omit --branch for ${runBranch(project)})`);
+      const defaultBranch = defaultBranchOf(deps.git);
+      if (defaultBranch && branch === defaultBranch) throw new UsageError(`swarm start: ${branch} is the default branch; an execution never integrates into it directly`);
+      const holder = worktreeHolding(deps.git(['worktree', 'list', '--porcelain']), branch);
+      if (holder && !samePath(holder, wt)) throw new UsageError(`swarm start: ${branch} is checked out in another worktree (${holder}); pick another --branch`);
+      if (existsSync(wt)) {
+        const on = deps.at(wt).git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
+        if (on !== branch) throw new UsageError(`swarm start: ${wt} exists and is on ${on ?? '?'}, not ${branch}; switch it or remove it (git worktree remove)`);
+      }
+      const existed = deps.git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
+      if (!existed && deps.git(['branch', branch, base]) === null) {
+        throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
+      }
+      // A-08: the run and task worktrees never show as untracked, also without a .gitignore entry for them. Asked at
+      // the main checkout, as addTaskWorktree does: the ignore rules are read from where git runs.
+      const mainDir = mainWorktreeFrom(deps.git(['worktree', 'list', '--porcelain']));
+      excludeWorktrees(mainDir ? args => deps.git(['-C', mainDir, ...args]) : deps.git);
+      if (!existsSync(wt)) {
+        if (deps.git(['worktree', 'add', wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
+        setup = runSetup(deps, wt, io.cwd);
+      }
+      // A run branch left by an earlier execution is brought up to its base before planning; a conflict is
+      // refused (never a second run branch) and nothing is removed.
+      if (!existed) baseSync = 'created';
+      else if (!resume) {
+        const at = deps.at(wt);
+        // Read before any merge: once a merge stops on a conflict, the worktree always looks dirty.
+        const status = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
+        const dirty = status === null || status.trim() !== '';
+        const dirtyMsg = `swarm start: the run worktree ${wt} has uncommitted changes; commit or clean them before ${branch} is brought up to ${base}`;
+        if (deps.git(['merge-base', '--is-ancestor', base, branch]) !== null) baseSync = 'up-to-date';
+        else if (deps.git(['merge-base', '--is-ancestor', branch, base]) !== null) {
+          if (at.git(['merge', '--ff-only', base]) === null) throw new UsageError(dirty ? dirtyMsg : `swarm start: cannot fast-forward ${branch} to ${base}`);
+          baseSync = 'fast-forward';
+        } else if (at.git(['merge', '--no-ff', base, '-m', `forge: bring ${base} into ${branch}`]) !== null) baseSync = 'merged';
+        else {
+          at.git(['merge', '--abort']);
+          // A refused merge in a dirty worktree is not a conflict: say what blocks it.
+          if (dirty) throw new UsageError(dirtyMsg);
+          throw new UsageError(`swarm start: ${branch} has diverged from ${base} and they conflict; merge them by hand or remove ${branch}`);
+        }
+      }
+    }
+    // The person's language (--locale): a resume keeps the recorded one unless a new flag is given.
+    const lang = locale ? { locale } : {};
+    // I-03: --merge-on-finish needs the person's yes to the start question, recorded by the hook `answer`: tied to this
+    // run id or, asked before the run existed (auto mode at launch), to this session and project for 24 hours. A plan
+    // run whose base is forge's own needs none; an ephemeral run never takes it (it makes no final merge). Without it
+    // the run starts with mergeOnFinish false and says why. A resume asks about its own run and its own base (the
+    // branch it merges into), not the branch the checkout is on now. Checked here, after every git step, and spent at
+    // once (a launch yes is tied to this run then): a yes that cannot be marked used starts no run with it, so it never
+    // sets two runs' mergeOnFinish.
+    const mergeInto = resume && prev ? prev.base : base;
+    const mofAsked = kind === 'plan' && has('merge-on-finish') && !(resume && prev?.mergeOnFinish);
+    let mof = mofAsked && isForgeTarget(mergeInto);
+    let mergeRefused: MofReason | null = null;
+    let mergeNote: string | null = null;
+    if (mofAsked && !isForgeTarget(mergeInto)) {
+      const mofRun = resume && prev ? prev.runId : runId;
+      const v = checkMofAuth(readAuths(io.cwd), { runId: mofRun, target: mergeInto, session: hook, project: resume && prev ? prev.project : project, now: io.now().getTime() });
+      if (!v.ok) { mergeRefused = v.reason; mergeNote = v.note ?? null; } else {
+        try { useAuth(io.cwd, v.record, iso, mofRun); } catch (err) {
+          throw new Error(`swarm start: the yes ${v.record.authId} to the start question could not be marked used (${err instanceof Error ? err.message : String(err)}); execution.json was not written, run swarm start again`);
+        }
+        mof = true;
+      }
+    }
+    const state: ExecutionState = resume && prev
+      ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || mof, coordinator: session, hookSession: hook, sleepUntil: null, ...auto, ...lang }
+      : {
+          runId, kind, mode, parallel, project, base, branch: kind === 'plan' ? branch : base,
+          mergeOnFinish: mof, coordinator: session, hookSession: hook, active: true, stopReason: null, stallReason: null,
+          startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, closedAt: null, closedBy: null, ...auto, ...lang,
+        };
+    // An execution that would not read back (an id outside the safe rule) is refused rather than saved.
+    if (!normalizeExecution(state)) throw new UsageError('swarm start: --project, --session and the run branch must use letters, digits, _ - . (and / in the branch), at most 120 characters');
+    // A task branch already merged into the base is deleted (an ancestor of it: nothing is lost); `swarm worktree`
+    // creates it again from the tip of the run's branch when its turn comes, so it sees the work integrated since.
+    for (const tb of moves) {
+      if (deps.git(['branch', '-d', tb]) === null) throw new UsageError(`swarm start: cannot delete ${tb}; if a worktree still holds it, run git worktree prune or remove that worktree (git worktree remove)`);
+    }
+    // Learned notes two tasks append to the same surface are merged by git's union driver, never left as a conflict.
+    const attributes = unionLearned(deps);
+    // C2: a new run over an ended one that nobody closed replaces it; say which (execution.json keeps one run).
+    const replaced = prev && !prev.active && !prev.closedAt && !resume ? { runId: prev.runId, stopReason: prev.stopReason } : null;
+    rmSync(stopFile(io.cwd), { force: true });
+    // A resume keeps what changed meanwhile and takes only this start's fields.
+    updateExecution(io.cwd, cur => (resume && cur && cur.runId === state.runId
+      ? { ...cur, parallel: state.parallel, mode: state.mode, mergeOnFinish: state.mergeOnFinish, coordinator: state.coordinator, hookSession: state.hookSession, sleepUntil: null, ...auto, ...lang }
+      : state), lockDeps);
+    if (kind === 'ephemeral' && !resume) writeLoose(io.cwd, { runId: state.runId, tasks: loose });
+    // K5-08: a new run starts clean: the public task files, members and live signals of earlier runs go (a resume keeps
+    // its own).
+    if (!resume) pruneRunState(io.cwd, state.runId, { now: now.getTime(), stale: false, dryRun: false });
+    const looseOut = kind === 'ephemeral'
+      ? { loose: loose.length, ...(ignoredTasks ? { ignoredTasks: true, message: `the ephemeral run ${state.runId} is resumed with its own ${loose.length} tasks; --tasks was ignored (start a new run for new requests once this one ends)` } : {}) }
+      : {};
+    const announce = startAnnounce({
+      es: spanish(state.locale ?? null, io.cwd, project), kind, resume, runId: state.runId, mode: state.mode, parallel: state.parallel,
+      branch: state.branch, base: state.base, mergeOnFinish: state.mergeOnFinish, loose: loose.length, setup, mergeRefused, mergeNote,
+    });
+    return json({ ...state, setup, baseSync, ...looseOut, announce, ...attributes, ...(replaced ? { replaced } : {}), ...(mergeRefused ? { mergeRefused } : {}) });
+  },
+  status: (rest, ctx) => {
+    const { io, json, now } = ctx;
+    // K2-01: the execution of the main checkout, from any worktree.
+    const main = mainCheckout(io.cwd);
+    const state = readExecution(main);
+    // §4.6: an active execution that no session drives (forge 0.15 left it unbound) says so.
+    const unbound = !!state?.active && state.hookSession === null;
+    // Final review 1: the Claude session bound to a run that is not closed, and how alive it is judged as if the run
+    // were active, so /forge:run --resume leaves an ended run to a coordinator still on it.
+    const coordinator = state && !state.closedAt ? { hookSession: state.hookSession, liveness: boundLiveness(main, { ...state, active: true }, now.getTime()) } : null;
+    return json({
+      present: state !== null, state, ...(state ? { work: tasksWork(main, state) } : {}), ...(coordinator ? { coordinator } : {}),
+      ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}),
+      // J-15: meta/run as the roadmap takes it, built by the CLI; carry 10: once the run ended, the writes that free the
+      // coordinator's tasks it left running or stopped.
+      publish: state ? { run: runDocOf(main, state), ...(!state.active ? { release: releaseWrites(state, openTasks(state)) } : {}) } : null,
+    });
+  },
+  propose: (rest, ctx) => {
+    const { io, flag, has, json, now } = ctx;
+    const planned = !flag('plan') && has('tasks') ? null : loadPlanArg(io, flag('plan'), 'propose');
+    const plan = planned ?? planOfLoose(loadTasksArg(io, flag('tasks'), 'propose'));
+    const locale = localeArg(rest, 'propose');
+    const p = widthProfile(plan);
+    const width = widthOf(plan);
+    const config = loadConfig(io.cwd);
+    const configured = config.swarm.mode ?? null;
+    const parallel = width < 2 ? 1 : Math.min(config.swarm.parallel, width);
+    const reasons = [`${plan.tasks.length} tasks`, `up to ${width} at once (dependencies and zones)`];
+    // D-19: how wide the plan is wave by wave, its longest chain and the zones that serialize it, said in one line.
+    const es = locale ? locale === 'es' : isSpanish((plan as { locale?: string }).locale);
+    return json({
+      width, configured, recommended: { mode: 'subagents', parallel }, reasons,
+      profile: p.profile, chain: p.chain, serializing: p.serializing, mostlySerial: p.mostlySerial, say: proposeSay(es, plan.tasks.length, p),
+      // I-03: the id the run gets if it starts now (launch.json keeps it, swarm start --run-id adopts it), so the start
+      // question can be tied to it before the run exists; none for loose tasks (an ephemeral run never merges at the end).
+      runId: planned ? runIdOf(planned.project, now) : null,
+    });
+  },
+  worktree: (rest, ctx) => {
+    const { io, deps, has, json, iso, current, notEnded, update, taskArg, memberCtx } = ctx;
+    if (has('member')) {
+      // A member gets its task worktree in the main checkout; execution.json stays the coordinator's.
+      const task = taskArg();
+      const { main, e, session, m } = memberCtx(true);
+      if (m!.role === 'executor' && m!.task !== task) throw new UsageError(`swarm worktree: ${session} executes ${m!.task}, not ${task}`);
+      return json({ ...addTaskWorktree(deps, main, task, e.branch, e.project), work: workRel({ project: e.project, task }) });
+    }
+    const task = taskArg();
+    const e = notEnded(current());
+    // Final review 7: a plan run's project, which no other plan's leftover task/<T> may pass for; an ephemeral run has none.
+    const added = addTaskWorktree(deps, io.cwd, task, e.branch, e.kind === 'plan' ? e.project : null);
+    const { worktree: dir, branch } = added;
+    const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: null };
+    update(cur => cur && { ...notEnded(cur), tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), worktree: dir, branch, updatedAt: iso } } });
+    return json({ ...added, work: workRel({ project: e.kind === 'plan' ? e.project : null, task }) });
+  },
+  task: (rest, ctx) => {
+    const { io, flag, has, json, ok, now, iso, current, notEnded, update, taskArg } = ctx;
+    const task = taskArg();
+    const e = current();
+    const prev = e.tasks[task];
+    if (!prev) throw new UsageError(`swarm task: ${task} is not part of this execution`);
+    if (has('drop')) {
+      // A claim race lost to another session: forget the task so the next tick sees that session's claim.
+      update(cur => { if (!cur) return null; const { [task]: _dropped, ...tasks } = cur.tasks; return { ...cur, tasks }; });
+      rmSync(executionTaskFile(io.cwd, task), { force: true });
+      return ok();
+    }
+    notEnded(e);
+    const stageArg = flag('stage') as Stage | undefined;
+    if (stageArg !== undefined && !STAGES.includes(stageArg)) throw new UsageError(`swarm task: --stage must be one of ${STAGES.join('|')}`);
+    const statusArg = flag('status') as ExecTask['status'] | undefined;
+    // Carry 2: a claim starts a task, as swarm report's does: it cannot go with a status that says the task is not running.
+    if (has('claim') && (statusArg ?? prev.status) !== 'running') throw new UsageError('swarm task: --claim starts a task and goes only with --status running');
+    let detailArg: string | null | undefined;
+    if (flag('detail-file')) {
+      try { detailArg = readFileSync(path.resolve(io.cwd, flag('detail-file')!), 'utf8').trim().slice(0, 500) || null; } catch { throw new UsageError('swarm task: cannot read --detail-file'); }
+    }
+    const roundArg = has('round') ? Number(flag('round')) : undefined;
+    if (roundArg !== undefined && (!Number.isInteger(roundArg) || roundArg < 0 || roundArg > 99)) throw new UsageError('swarm task: --round must be an integer from 0 to 99');
+    const agentArg = has('no-agent') ? null : flag('agent');
+    // Only the fields given here change; the rest keep what the task holds when the lock is taken (I-15).
+    const build = (base: ExecTask): ExecTask => {
+      const stage = stageArg ?? base.stage;
+      const status = statusArg ?? base.status;
+      // K2-02: a task forge stop stopped never runs again in this execution (a new swarm start makes a new one).
+      if (base.status === 'stopped' && status !== 'stopped') throw new UsageError(`swarm task: ${task} is stopped (forge stop) and stays stopped`);
+      if (!['running', 'accepted', 'blocked'].includes(status) && status !== base.status) throw new UsageError('swarm task: --status must be running, accepted or blocked');
+      const stageSince = base.stage !== stage ? iso : base.stageSince;
+      // Blocked now (it was not): the task's time ends here. Back to running: the next finish writes it again.
+      const finishedAt = status === 'blocked' && base.status !== 'blocked' ? iso : status === 'running' && base.finishedAt ? null : base.finishedAt;
+      return {
+        ...base, stage, status, round: roundArg ?? base.round, agent: agentArg === undefined ? base.agent : agentArg,
+        detail: detailArg === undefined ? base.detail : detailArg, updatedAt: iso, stageSince, ...(finishedAt !== undefined ? { finishedAt } : {}),
+      };
+    };
+    let base = prev;
+    let next = build(prev);
+    update(cur => {
+      if (!cur) return null;
+      notEnded(cur);
+      base = cur.tasks[task] ?? prev;
+      next = build(base);
+      return { ...cur, tasks: { ...cur.tasks, [task]: next } };
+    });
+    const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
+    writePublicTask(io.cwd, { task, runId: e.runId, stage: next.stage, status: next.status, agent: next.agent, round: next.round, since: next.stageSince, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: base.executor });
+    if (base.stage !== next.stage) appendPhase(io.cwd, { ts: iso, kind: 'phase', task, phase: next.stage, ...(e.kind === 'plan' && isSafeId(e.project) ? { project: e.project } : {}) });
+    // J-15: the state/T write of this stage, built by the CLI; --claim adds the claim of a task the coordinator starts.
+    // A loose task of an ephemeral run has no state/T.
+    const claimed = has('claim') && e.kind === 'plan' ? { status: 'in_progress', owner: e.coordinator, claimedAt: iso, startedAt: iso } : null;
+    const pub = e.kind === 'plan' ? publishFor(io, task, { project: e.project, ...(claimed ? { extra: claimed } : {}) }) : { publish: null };
+    return json({ ...next, ...pub, ...(claimed ? { event: startedEvent(e.coordinator, task, now, io.rand) } : {}) });
+  },
+  tick: (rest, ctx) => {
+    const { io, deps, flag, json, now, iso, current, update } = ctx;
+    const e = current();
+    if (!e.active) throw new UsageError('swarm tick: the execution is not active');
+    // I-03: without the person's trust for the commands of a config this run would use (the main checkout's, the run
+    // worktree's, those of the task worktrees not integrated yet), nothing of it runs: the run stalls here, and the
+    // first stall over those commands says so (`note`: leave one question note).
+    const untrusted = untrustedFor([io.cwd, ...(e.kind === 'plan' ? [runWorktree(io.cwd)] : []),
+      ...Object.values(e.tasks).filter(t => t.status !== 'integrated' && t.worktree).map(t => t.worktree)]);
+    if (untrusted) {
+      const note = noteOnce(io.cwd, untrusted.trust.hash!);
+      // Only the run this tick read, still active: one stopped or closed meanwhile stays as it is (K2-02).
+      update(cur => (cur?.active && cur.runId === e.runId ? { ...cur, active: false, stopReason: 'stalled', stallReason: 'untrusted-commands', lastStepAt: iso } : null));
+      const trust = trustOutput(untrusted.trust, spanish(e.locale ?? null, io.cwd, e.project), untrusted.dir);
+      // `running` as any tick counts it: agents already at work go on; the run starts and integrates nothing more.
+      return json({ actions: [{ type: 'stalled', reason: 'untrusted-commands', note, trust }], running: Object.values(e.tasks).filter(t => t.status === 'running').length, parallel: e.parallel });
+    }
+    // An ephemeral run schedules from its own loose.json and execution: no plan, no roadmap.
+    const input = e.kind === 'ephemeral'
+      ? (() => {
+          const loose = readLoose(io.cwd, e.runId);
+          if (!loose) throw new UsageError('swarm tick: the ephemeral run has no .forge/loose.json');
+          return { plan: planOfLoose(loose.tasks), states: statesOfLoose(e), sessions: {}, integrated: [] as string[] };
+        })()
+      : readTickInput(io, deps, e, flag('plan'), flag('db'), 'tick');
+    const { plan, states, sessions, integrated } = input;
+    const publicTasks: Record<string, PublicTask> = {};
+    try {
+      for (const f of readdirSync(path.join(io.cwd, '.forge', 'execution')).filter(n => n.endsWith('.json')).slice(0, 500)) {
+        try { const p = normalizePublicTask(JSON.parse(readFileSync(path.join(io.cwd, '.forge', 'execution', f), 'utf8'))); if (p && `${p.task}.json` === f) publicTasks[p.task] = p; } catch { /* skip */ }
+      }
+    } catch { /* none yet */ }
+    let agents: BgAgent[] | null = null;
+    if (flag('agents')) {
+      let raw: unknown;
+      try { raw = JSON.parse(readFileSync(path.resolve(io.cwd, flag('agents')!), 'utf8')); } catch { throw new UsageError('swarm tick: cannot read --agents'); }
+      if (!Array.isArray(raw)) throw new UsageError('swarm tick: --agents must be a JSON array of {name, state}');
+      agents = raw.filter((a): a is BgAgent => !!a && typeof a === 'object' && typeof a.name === 'string' && (a.state === 'working' || a.state === 'idle')).slice(0, 100);
+    }
+    // D-07: an integration is in flight (merging.json, from its baseline to its commit): this tick integrates nothing.
+    const merging = mergeInFlight(io.cwd, now.getTime()) !== null;
+    // The scheduler decides on the execution as it is under the lock, so a swarm task or an integrate that ran
+    // meanwhile is never overwritten (I-15).
+    let d!: ReturnType<typeof schedule>;
+    update(cur => {
+      d = schedule({ plan, states, sessions, exec: cur ?? e, integrated, now: now.getTime(), publicTasks, agents, merging });
+      // Wave 0 handoff: an ephemeral run integrates each task into the person's branch as it goes, so the tick that
+      // finishes it finds all its work merged already, and no swarm merge will ever close it: it closes here (C2).
+      if (d.next.kind === 'ephemeral' && !d.next.active && d.next.stopReason === 'finished' && !d.next.closedAt) d = { ...d, next: { ...d.next, closedAt: iso, closedBy: 'merge' } };
+      return d.next;
+    });
+    // In sessions mode a start carries the whole `waypoint launch` argument list: the coordinator runs it as is.
+    const planPath = flag('plan');
+    const actions = e.mode === 'sessions' && planPath
+      ? d.actions.map(a => a.type === 'start' ? { ...a, launch: memberLaunch(io.cwd, planPath, a.task, e) } : a)
+      : d.actions;
+    return json({ actions, running: Object.values(d.next.tasks).filter(t => t.status === 'running').length, parallel: e.parallel });
+  },
+  retry: (rest, ctx) => {
+    const { io, deps, flag, has, json, ok, now, iso, current, notEnded, update, taskArg } = ctx;
+    const task = taskArg();
+    const e = current();
+    const t = e.tasks[task];
+    if (e.closedAt) throw new UsageError(`swarm retry: the execution ${e.runId} is closed; start a new one`);
+    // K2-02: a stopped run moves no task (an integrate that ended in conflict after forge stop wakes its coordinator).
+    notEnded(e);
+    // Checked on the read above and again under the lock, on the task as it is then: a write that landed since is
+    // kept, and a task no longer in that state is left alone (I-15). Only an execution still stalled then is revived.
+    const revived = (x: ExecutionState) => !x.active && x.stopReason === 'stalled';
+    // Final review 1: swarm start's rule, before anything moves. Reviving a stalled run from another Claude session
+    // while its bound one may still step it (finishing it, or waiting on the person) leaves two sessions on it. The
+    // coordinator's own retry (its conflict path) passes its own id; one back from /clear has an ended signal (the live
+    // hook writes it at the SessionEnd of the bound session, R4). R5: checked on the read and again under the lock, on
+    // the run as it is then, so one a tick stalled meanwhile is gated too.
+    const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
+    const gate = (x: ExecutionState): void => {
+      if (!revived(x) || !x.hookSession || hook === x.hookSession) return;
+      const liveness = boundLiveness(io.cwd, { ...x, active: true }, now.getTime());
+      if (liveness !== 'stopped') throw new UsageError(boundElsewhere('retry', x.runId, x.hookSession, liveness));
+    };
+    gate(e);
+    // R7 (I2): the run this retry revives, under the lock. The bound session reviving its own run is on it again: an
+    // ended signal it left (a SessionEnd before its claude --resume) is cleared, so another session stays gated.
+    let woke: ExecutionState | null = null;
+    const revive = (cur: ExecutionState) => {
+      if (!revived(cur)) return {};
+      woke = cur;
+      return { active: true, stopReason: null, stallReason: null };
+    };
+    const clearOwnEnded = () => {
+      const w = woke as ExecutionState | null;
+      if (w && hook && hook === w.hookSession) clearEnded(io.cwd, w, hook, now);
+    };
+    if (has('adopt')) {
+      const adoptable = (x: ExecTask | undefined): x is ExecTask => !!x && x.status === 'conflict' && x.executor !== 'subagents';
+      const notAdoptable = (x: ExecTask | undefined) =>
+        new UsageError(`swarm retry: --adopt takes a member's task in conflict (${task} is ${x ? `${x.status}, ${x.executor}` : 'not in this execution'})`);
+      if (!adoptable(t)) throw notAdoptable(t);
+      if (deps.git(['rev-parse', '--verify', '-q', `refs/heads/${t.branch}`]) === null) throw new UsageError(`swarm retry: ${t.branch} does not exist`);
+      // The fix round runs where the branch already is (a member's task-<T>, or the manual session's own worktree).
+      const holder = worktreeHolding(deps.git(['worktree', 'list', '--porcelain']), t.branch);
+      // Taking over a session's own worktree must not trample its uncommitted edits.
+      if (holder !== null) {
+        const status = deps.at(holder).git(['status', '--porcelain']);
+        if (status === null) throw new UsageError(`swarm retry: could not read the worktree status of ${t.branch} (${holder}); check it by hand before --adopt`);
+        if (status.trim() !== '') {
+          throw new UsageError(`swarm retry: the worktree of ${t.branch} (${holder}) has uncommitted changes; commit or discard them before --adopt`);
+        }
+      }
+      const worktree = holder ?? addTaskWorktree(deps, io.cwd, task, e.branch, e.kind === 'plan' ? e.project : null).worktree;
+      let adopted = t;
+      update(cur => {
+        if (!cur) return null;
+        notEnded(cur);
+        gate(cur);
+        const base = cur.tasks[task] ?? t;
+        if (!adoptable(base)) throw notAdoptable(base);
+        adopted = base;
+        return {
+          ...cur, ...revive(cur),
+          tasks: { ...cur.tasks, [task]: { ...base, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: base.attempts + 1, nudgedAt: null, finishedAt: iso, updatedAt: iso, stageSince: iso } },
+        };
+      });
+      clearOwnEnded();
+      writePublicTask(io.cwd, { task, runId: e.runId, stage: 'implement', status: 'running', agent: null, round: adopted.round, since: iso, updatedAt: iso, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString(), by: e.coordinator, mode: 'subagents' });
+      // D-08: `work`, the task's work folder in the main checkout, where the coordinator writes its brief.
+      return json({ task, adopted: true, previous: adopted.executor, worktree, branch: t.branch, work: workRel({ project: e.project, task }) });
+    }
+    const retryable = (x: ExecTask | undefined): x is ExecTask => !!x && (x.status === 'conflict' || x.status === 'blocked');
+    if (!retryable(t)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
+    update(cur => {
+      if (!cur) return null;
+      notEnded(cur);
+      gate(cur);
+      const base = cur.tasks[task] ?? t;
+      if (!retryable(base)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
+      return {
+        ...cur, ...revive(cur),
+        tasks: { ...cur.tasks, [task]: { ...base, status: 'running', stage: 'implement', attempts: base.attempts + 1, detail: null, finishedAt: null, updatedAt: iso, stageSince: iso } },
+      };
+    });
+    clearOwnEnded();
+    return ok();
+  },
+  relaunch,
+  nudge: relaunch,
+  sleep: (rest, ctx) => {
+    const { io, has, ok, now, current, update } = ctx;
+    const seconds = Number(rest[0]);
+    if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_SLEEP_S) throw new UsageError(`swarm sleep: seconds must be an integer from 1 to ${MAX_SLEEP_S}`);
+    const e = current();
+    const until = new Date(now.getTime() + seconds * 1000).toISOString();
+    update(cur => cur && { ...cur, sleepUntil: until });
+    if (has('mark')) return ok();
+    (io.sleep ?? sleepSync)(seconds * 1000);
+    // A newer sleep (or a --mark) may have replaced it meanwhile: only clear the value this call set.
+    const after = readExecution(io.cwd);
+    if (after && after.sleepUntil === until) update(cur => (cur && cur.sleepUntil === until ? { ...cur, sleepUntil: null } : null));
+    // The coordinator wakes on this output: it repeats the language to answer in, when one is known.
+    const run = parseRun(readRunText(io.cwd));
+    const reply = sessionReply(run?.active ? run : null, after ?? e, () => planLocale(io.cwd, e.project));
+    return reply ? { code: 0, stdout: `woke.${reply}\n`, stderr: '' } : ok();
+  },
+  stop: (rest, ctx) => {
+    const { io, flag, ok, update } = ctx;
+    const reason = flag('reason') ?? 'stopped';
+    if (reason !== 'stopped' && reason !== 'budget') throw new UsageError('swarm stop: --reason must be stopped or budget');
+    const e = readExecution(io.cwd);
+    if (e?.active) update(cur => (cur?.active ? { ...cur, active: false, stopReason: reason, sleepUntil: null } : null));
+    return ok();
+  },
+  close: (rest, ctx) => {
+    const { io, json, iso, lockDeps } = ctx;
+    // C2: closes an ended execution of the main checkout, from any worktree. It never touches git, worktrees,
+    // branches or live/: /forge:stop releases the tasks it lists and publishes meta/run. K2-02: like forge stop, it
+    // removes the member files of the run and lists them in `sessions`, so /forge:stop messages a stalled run's members
+    // too; after forge stop there are none left.
+    const main = mainCheckout(io.cwd);
+    const e = readExecution(main);
+    if (!e) throw new UsageError('swarm close: no execution');
+    if (e.active) throw new UsageError(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
+    if (e.closedAt) return json({ closed: 'already', runId: e.runId, closedAt: e.closedAt, closedBy: e.closedBy ?? null });
+    closeEnded(main, iso, 'close', lockDeps);
+    // K2-02: forge stop leaves the tasks it stopped as stopped: they are released like running ones.
+    const open = openTasks(e).map(id => [id, e.tasks[id]] as const);
+    // Every member of the run, not only those the role readers see: each is listed to message and its file goes.
+    const sessions = allMembersOf(main, e.runId).map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
+    // C4: the summary and its cleanup read the member files, so they are built before those files go.
+    const runs = runsOf(io, e.runId);
+    for (const m of sessions) rmSync(memberFile(main, m.sessionId), { force: true });
+    return json({
+      closed: true, runId: e.runId, kind: e.kind, stopReason: e.stopReason, closedAt: iso,
+      // The coordinator's own tasks go back to free on the roadmap, as printed writes (carry 10); a member's task stays
+      // with its session. A loose task has no state/T to free, so an ephemeral run releases nothing.
+      release: releaseWrites(e, open.map(([id]) => id)),
+      members: open.filter(([, t]) => t.executor !== 'subagents').map(([id]) => id),
+      sessions,
+      ...runs,
+    });
+  },
+  cleanup: (rest, ctx) => {
+    const { io, deps, has, json, now } = ctx;
+    // D-03, D-18: forge's worktrees and branches already integrated into the branch of the main checkout, and the
+    // state of the executions that ended. Never `branch -D`, `worktree remove --force` nor `reset`: what git refuses stays.
+    const dryRun = has('dry-run');
+    const e = readExecution(io.cwd);
+    if (e?.active) throw new UsageError(`swarm cleanup: the execution ${e.runId} is active; stop or close it first`);
+    // A worktree removed under a merge, a step or a background command in flight loses their work: none may be running.
+    // D-07: swarm merge's and swarm tick's rule: a live attempt's marker, or one still being written.
+    const inFlight = mergeInFlight(io.cwd, now.getTime());
+    if (inFlight) {
+      const m = inFlight.doc;
+      throw new UsageError(`swarm cleanup: an integration is merging (.forge/execution/merging.json${m ? `, pid ${m.pid}${m.task ? `, ${m.task}` : ''}` : ''}); run it again once it ends`);
+    }
+    const job = liveJobs(io.cwd, now)[0];
+    if (job) throw new UsageError(`swarm cleanup: a background forge command is running (${job.cmd}${job.task ? ` ${job.task}` : ''}, .forge/jobs/${job.name}.json); run it again once it ends`);
+    const step = stepLockHeld(io.cwd, now);
+    if (step) throw new UsageError(`swarm cleanup: a swarm step is running (.forge/jobs/step.lock${step.pid ? `, pid ${step.pid}` : ''}); run it again once it ends`);
+    const head = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim() || 'HEAD';
+    const merged = (b: string) => deps.git(['merge-base', '--is-ancestor', `refs/heads/${b}`, 'HEAD']) !== null;
+    const rel = (p: string) => path.relative(io.cwd, p).split(path.sep).join('/');
+    const taskOf = (b: string) => (b.startsWith('task/') && isPlanId(b.slice(5)) ? b.slice(5) : null);
+    const removed = { worktrees: [] as string[], branches: [] as string[], files: 0, bytes: 0 };
+    const kept: { path?: string; branch?: string; reason: string }[] = [];
+    const gone: string[] = [];
+    // Final review 5: cleanup holds no lock, so another session's swarm start or swarm retry may make a run active
+    // meanwhile; before each removal the execution is read again, and one that became active stops it there.
+    const halt = () => {
+      const cur = readExecution(io.cwd);
+      if (!cur?.active) return;
+      const done = [...removed.worktrees, ...removed.branches];
+      throw new UsageError(`swarm cleanup: the execution ${cur.runId} became active; run it again once it ends (${done.length ? `already removed: ${done.join(', ')}` : 'nothing was removed'})`);
+    };
+    // A worktree whose folder is gone (removed by hand) is only git's registration of it: `git worktree prune` drops it
+    // first, so its branch is decided below in this same run. Carry 7: the prune is git's, for the whole repository, so
+    // it runs only when one of forge's own worktrees (task-* or run, not a waypoint track's) is `prunable`, and `pruned`
+    // names every registration it drops. A dry-run reads them as dropped.
+    const blocks = (deps.git(['worktree', 'list', '--porcelain']) ?? '').split(/\r?\n\r?\n/);
+    const prunable = (b: string) => /^prunable\b/m.test(b);
+    const prunes = forgeWorktrees(blocks.filter(prunable).join('\n\n'), io.cwd).some(w => !w.branch?.startsWith('track/'));
+    const pruned = prunes ? blocks.filter(prunable).flatMap(b => {
+      const at = b.split(/\r?\n/).find(l => l.startsWith('worktree '))?.slice('worktree '.length).trim();
+      return at ? [rel(path.resolve(at))] : [];
+    }) : [];
+    if (prunes && !dryRun) deps.git(['worktree', 'prune']);
+    const listed = prunes && !dryRun ? (deps.git(['worktree', 'list', '--porcelain']) ?? '').split(/\r?\n\r?\n/) : blocks;
+    const porcelain = listed.filter(b => !(prunes && prunable(b))).join('\n\n');
+    const worktrees = forgeWorktrees(porcelain, io.cwd);
+    for (const w of worktrees) {
+      const where = { path: rel(w.path), ...(w.branch ? { branch: w.branch } : {}) };
+      // Final review 4: a waypoint track's worktree (`.claude/worktrees/<track>`) may be named run or task-*: never forge's.
+      if (w.branch?.startsWith('track/')) { kept.push({ ...where, reason: "a waypoint track, not forge's" }); continue; }
+      // What prune leaves with no folder is locked: git keeps it, and its branch with it.
+      if (!existsSync(w.path)) { kept.push({ ...where, reason: 'its folder is gone and git keeps it registered (locked): git worktree unlock it, then run swarm cleanup again' }); continue; }
+      if (!w.branch) { kept.push({ ...where, reason: 'detached HEAD' }); continue; }
+      if (!merged(w.branch)) { kept.push({ ...where, reason: `not merged into ${head}` }); continue; }
+      const status = deps.at(w.path).git(['status', '--porcelain']);
+      if (status === null || status.trim()) { kept.push({ ...where, reason: 'has uncommitted changes or untracked files' }); continue; }
+      // D-10: events only the worktree's own ledger holds (from before D-10, or from a worktree ledgerRoot does not tell
+      // as forge's) would go with it. The main ledger is never rewritten here (its order is the readers'): it stays.
+      if (unmergedEvents(w.path, io.cwd).length) { kept.push({ ...where, reason: 'unmerged ledger' }); continue; }
+      // Final review 3: the evidence is looked for where keepEvidence puts it; a walk that stopped at its cap cannot
+      // tell what it left out, so the worktree stays.
+      const evidence = evidenceOf(w.path);
+      if (evidence.truncated) { kept.push({ ...where, reason: 'too many files under .forge/work to check its evidence' }); continue; }
+      if (!dryRun) {
+        // K2-04: the verification a member left in its worktree reaches the main checkout first; what cannot keeps it.
+        const { skipped } = copyTree(w.path, io.cwd, evidence.files, { missingOnly: true });
+        if (skipped.length) {
+          kept.push({ ...where, reason: `its evidence could not be copied to the main checkout (${skipped.length} file${skipped.length === 1 ? '' : 's'}); run swarm cleanup again once it can` });
+          continue;
+        }
+        halt();
+        if (deps.git(['worktree', 'remove', w.path]) === null) { kept.push({ ...where, reason: 'git worktree remove refused it' }); continue; }
+      }
+      removed.worktrees.push(where.path);
+      // The run worktree may hold a branch the person named (--branch): only forge's own branches go.
+      if (!isForgeBranch(w.branch)) { kept.push({ branch: w.branch, reason: 'not a forge branch (task/* or forge/run-*)' }); continue; }
+      if (!dryRun) halt();
+      if (!dryRun && deps.git(['branch', '-d', w.branch]) === null) { kept.push({ branch: w.branch, reason: 'git branch -d refused it' }); continue; }
+      removed.branches.push(w.branch);
+      const t = taskOf(w.branch);
+      if (t) gone.push(t);
+    }
+    const held = new Set(worktrees.map(w => w.branch).filter((b): b is string => !!b));
+    const refs = deps.git(['for-each-ref', '--format=%(refname)', 'refs/heads/task', 'refs/heads/forge', 'refs/heads/track']) ?? '';
+    for (const b of forgeBranches(refs)) {
+      if (held.has(b)) continue;
+      if (b === head) { kept.push({ branch: b, reason: 'checked out in the main checkout' }); continue; }
+      const holder = worktreeHolding(porcelain, b);
+      if (holder) { kept.push({ branch: b, reason: `checked out in ${rel(holder)}` }); continue; }
+      if (!merged(b)) { kept.push({ branch: b, reason: `not merged into ${head}` }); continue; }
+      if (!dryRun) halt();
+      if (!dryRun && deps.git(['branch', '-d', b]) === null) { kept.push({ branch: b, reason: 'git branch -d refused it' }); continue; }
+      removed.branches.push(b);
+      const t = taskOf(b);
+      if (t) gone.push(t);
+    }
+    // waypoint's tracks are never forge's: they stay, named, each once (its worktree may have named it above).
+    for (const l of refs.split(/\r?\n/).map(x => x.trim())) {
+      const b = l.slice('refs/heads/'.length);
+      if (l.startsWith('refs/heads/track/') && !kept.some(k => k.branch === b)) kept.push({ branch: b, reason: "a waypoint track, not forge's" });
+    }
+    // The state files of a run that started meanwhile would go with the ended ones'.
+    if (!dryRun) halt();
+    // D-18: the state of the runs that ended: all of it once the execution is closed; that of earlier runs otherwise.
+    const state = pruneRunState(io.cwd, e && !e.closedAt ? e.runId : null, { now: now.getTime(), stale: true, dryRun });
+    const work = pruneWork(io.cwd, gone, dryRun);
+    removed.files = state.files.length + work.files.length;
+    removed.bytes = state.bytes + work.bytes;
+    return json({ dryRun, removed, kept, ...(pruned.length ? { pruned } : {}) });
+  },
+  takeover: (rest, ctx) => {
+    const { io, flag, json, now, iso, current, update } = ctx;
+    const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
+    if (!hook) throw new UsageError(noClaudeSession('swarm takeover', '--hook-session'));
+    const session = flag('session');
+    if (!session) throw new UsageError('swarm takeover: --session is required');
+    if (!isMemberId(session)) throw new UsageError(`swarm takeover: --session ${session.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
+    const e = current();
+    if (!e.active) throw new UsageError('swarm takeover: the execution is not active');
+    // --session is the waypoint SID that becomes the coordinator; --hook-session is Claude's id of this session, bound
+    // at once, so its Stop hook steps the execution from now on (C1).
+    // The same Claude session: already bound (its waypoint SID may have changed).
+    if (hook === e.hookSession) {
+      if (e.coordinator !== session) update(cur => cur && { ...cur, coordinator: session });
+      return json({ took: 'already', runId: e.runId });
+    }
+    // The coordinator's SID from another Claude session (a resume, a /clear): it rebinds only once the bound one
+    // stopped (wave 0 handoff); while it lives, this one joins as a manual member.
+    if (session === e.coordinator) {
+      const alive = e.hookSession === null ? 'stopped' : boundLiveness(io.cwd, e, now.getTime());
+      if (alive !== 'stopped') return json({ took: false, previous: e.hookSession, liveness: alive, joinAs: 'manual' });
+      update(cur => cur && { ...cur, hookSession: hook });
+      return json({ took: 'already', runId: e.runId });
+    }
+    // A run member keeps its role: it would otherwise coordinate the task it executes.
+    if (readMember(io.cwd, session)?.runId === e.runId) throw new UsageError(`swarm takeover: ${session} is a member of the execution ${e.runId}; a run member cannot take over the coordinator`);
+    const previous = e.hookSession ?? e.coordinator;
+    // The run band's rule decides (boundLiveness); --db is still accepted, but the roadmap lease no longer counts.
+    const liveness = boundLiveness(io.cwd, e, now.getTime());
+    if (liveness !== 'stopped') return json({ took: false, previous, liveness, joinAs: 'manual' });
+    update(cur => cur && { ...cur, coordinator: session, hookSession: hook, sleepUntil: null });
+    // The user asked this session to go on: their decision, recorded in the decision format (by: user).
+    appendEvent(io.cwd, { ts: iso, kind: 'decision', point: 'takeover', what: 'takeover', chosen: session, why: `the coordinator ${previous} stopped`, by: 'user', weight: 'minor', previous, session, runId: e.runId });
+    return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === 'running').map(([id]) => id) });
+  },
+  step: (rest, ctx) => {
+    const { ext } = ctx;
+    // D-12: cli/step.ts, given by run.ts (it calls the CLI itself: no import of run.ts here).
+    if (!ext.step) throw new UsageError('swarm step: not available here');
+    return ext.step(rest);
+  },
+  integrate: (rest, ctx) => {
+    const { io, deps } = ctx;
+    return integrate(rest, io, deps);
+  },
+  merge: (rest, ctx) => {
+    const { io, deps } = ctx;
+    return mergeFinal(rest, io, deps);
+  },
+};
+
 export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { step?: (rest: string[]) => Result } = {}): Result {
   const [sub, ...rest] = args;
-  const flag = (name: string) => {
-    const i = rest.indexOf(`--${name}`);
-    const v = i >= 0 ? rest[i + 1] : undefined;
-    return v === undefined || v.startsWith('--') ? undefined : v;
-  };
-  const has = (name: string) => rest.includes(`--${name}`);
-  const json = (v: unknown): Result => ({ code: 0, stdout: JSON.stringify(v, null, 2) + '\n', stderr: '' });
-  const ok = (): Result => ({ code: 0, stdout: 'ok\n', stderr: '' });
-  const now = io.now();
-  const iso = now.toISOString();
-  const current = () => {
-    const e = readExecution(io.cwd);
-    if (!e) throw new UsageError(`swarm ${sub}: no execution (forge swarm start)`);
-    return e;
-  };
-  // K2-02: an execution forge stop stopped, or one closed, stays as it is: a step or an agent still at work when the person
-  // stopped it records nothing more. One that is only inactive (stalled) still moves: swarm retry revives it.
-  const notEnded = (x: ExecutionState): ExecutionState => {
-    if (x.closedAt) throw new UsageError(`swarm ${sub}: the execution ${x.runId} is closed; nothing of it moves any more`);
-    if (!x.active && x.stopReason === 'stopped') throw new UsageError(`swarm ${sub}: the execution ${x.runId} is stopped (forge stop); nothing of it moves any more`);
-    return x;
-  };
-  // I-15: every write of execution.json reads it again under its lock and changes only what this command changes.
-  const lockDeps: LockDeps = { now: io.now, sleep: io.sleep };
-  const update = (fn: (cur: ExecutionState | null) => ExecutionState | null) => updateExecution(io.cwd, fn, lockDeps);
+  const ctx = swarmCtx(sub, rest, io, deps, ext);
+  const { has } = ctx;
   if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge', 'takeover', 'step', 'cleanup'].includes(sub ?? '') && !(sub === 'worktree' && has('member'))) {
     const top = deps.git(['rev-parse', '--show-toplevel'])?.trim();
     const main = mainWorktreeFrom(deps.git(['worktree', 'list', '--porcelain']));
@@ -1119,811 +1909,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       throw new UsageError(`swarm ${sub}: run it from the main checkout${main ? ` (${main})` : ''}, not from a worktree`);
     }
   }
-  const taskArg = () => {
-    const t = rest[0];
-    if (!t || !isPlanId(t)) throw new UsageError(`swarm ${sub}: a task id is required`);
-    return t;
-  };
-  // Members read the execution of the main checkout from any worktree and never write execution.json.
-  const memberCtx = (needMember: boolean) => {
-    const main = mainCheckout(io.cwd);
-    const e = readExecution(main);
-    if (!e?.active) throw new UsageError(`swarm ${sub}: no active execution`);
-    if (e.kind === 'ephemeral') throw new UsageError(`swarm ${sub}: an ephemeral run takes no members`);
-    const session = flag('session') ?? flag('member');
-    if (!session) throw new UsageError(`swarm ${sub}: --session is required`);
-    if (!isMemberId(session)) throw new UsageError(`swarm ${sub}: --session ${session.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
-    const m = needMember ? readMember(main, session) : null;
-    if (needMember && (!m || m.runId !== e.runId)) throw new UsageError(`swarm ${sub}: ${session} has not joined this execution`);
-    return { main, e, session, m };
-  };
-
-  switch (sub) {
-    case 'join': {
-      const { main, e, session } = memberCtx(false);
-      if (session === e.coordinator || session === e.hookSession) throw new UsageError(`swarm join: ${session} coordinates this execution`);
-      const role = flag('role');
-      if (role !== 'executor' && role !== 'manual') throw new UsageError('swarm join: --role must be executor or manual');
-      const task = flag('task') ?? null;
-      if (task !== null && !isPlanId(task)) throw new UsageError('swarm join: --task is not a task id');
-      if (role === 'executor' && !task) throw new UsageError('swarm join: an executor needs --task');
-      // Claude's own session id, the one its hooks receive: the hooks find the member by it (C1: the flag, else
-      // CLAUDE_CODE_SESSION_ID). A flag without a value, or an unsubstituted `${CLAUDE_SESSION_ID}`, counts as absent.
-      const given = flag('hook-session');
-      const id = claudeSessionId(given, io.env ?? process.env);
-      // A rejoin without one keeps the hook id this member recorded in the same run.
-      const before = readMember(main, session);
-      const hookSession = id ?? (before?.runId === e.runId ? before.hookSession : null);
-      // No usable id does not stop the join: the member works without its own live signal, and the output says why.
-      const warning = id !== null ? null
-        : given ? `--hook-session ${given.slice(0, 130)} is not a usable session id (letters, digits, _ - .; max 120): joined without a live signal`
-          : hookSession === null ? 'no Claude session id (--hook-session or CLAUDE_CODE_SESSION_ID): joined without a live signal' : null;
-      if (hookSession !== null && hookSession === e.hookSession) throw new UsageError(`swarm join: ${hookSession} coordinates this execution`);
-      writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag('name') ?? null, since: iso, hookSession });
-      return json({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project, ...(warning ? { warning } : {}) });
-    }
-    case 'report': {
-      const task = taskArg();
-      const { main, e, session, m } = memberCtx(true);
-      const member = m!;
-      if (member.role === 'executor' && member.task !== task) throw new UsageError(`swarm report: ${session} executes ${member.task}, not ${task}`);
-      const stage = flag('stage') as Stage | undefined;
-      if (!stage || !STAGES.includes(stage)) throw new UsageError(`swarm report: --stage must be one of ${STAGES.join('|')}`);
-      const status = (flag('status') ?? 'running') as ExecTask['status'];
-      if (!['running', 'accepted', 'blocked'].includes(status)) throw new UsageError('swarm report: --status must be running, accepted or blocked');
-      const round = has('round') ? Number(flag('round')) : 0;
-      if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError('swarm report: --round must be an integer from 0 to 99');
-      // A claim starts a task: it cannot go with a status that says the task is not running.
-      if (has('claim') && status !== 'running') throw new UsageError('swarm report: --claim starts a task and goes only with --status running');
-      let prev: PublicTask | null = null;
-      try { prev = normalizePublicTask(JSON.parse(readFileSync(executionTaskFile(main, task), 'utf8'))); } catch { prev = null; }
-      // Another session still holding the task's lease owns its public file: never overwrite it.
-      if (prev && prev.runId === e.runId && prev.by !== session && Date.parse(prev.leaseUntil) > now.getTime()) {
-        throw new UsageError(`swarm report: ${task} is reported by ${prev.by} until ${prev.leaseUntil}`);
-      }
-      if (member.role === 'manual' && member.task !== task) writeMember(main, { ...member, task });
-      const since = prev && prev.by === session && prev.stage === stage && prev.runId === e.runId ? prev.since : iso;
-      const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
-      const p: PublicTask = { task, runId: e.runId, stage, status, agent: has('no-agent') ? null : (flag('agent') ?? null), round, since, updatedAt: iso, leaseUntil: lease, by: session, mode: member.role === 'executor' ? 'sessions' : 'manual' };
-      writePublicTask(main, p);
-      // J-15: the state/T write of this report, built by the CLI; --claim adds the member's claim of its task.
-      const claimed = has('claim') ? { status: 'in_progress', owner: session, claimedAt: iso, startedAt: iso } : null;
-      return json({
-        ...p, ...publishFor(io, task, { project: e.project, ...(claimed ? { extra: claimed } : {}) }),
-        ...(claimed ? { event: startedEvent(session, task, now, io.rand) } : {}),
-      });
-    }
-    case 'next': {
-      const { e, session } = memberCtx(true);
-      const { plan, states, sessions, integrated } = readTickInput(io, deps, e, flag('plan'), flag('db'), 'next');
-      const running = Object.values(e.tasks).filter(t => t.status === 'running').length;
-      // The coordinator's own scheduler, seen from this session: its claims count as its own, the coordinator's as another's.
-      const d = schedule({ plan, states, sessions, exec: { ...e, coordinator: session, parallel: Math.min(10, running + 1) }, integrated, now: now.getTime() });
-      const start = d.actions.find((a): a is { type: 'start'; task: string } => a.type === 'start');
-      return json(start ? { task: start.task, reason: null } : { task: null, reason: d.next.stallReason ?? 'nothing is ready' });
-    }
-    case 'start': {
-      const project = flag('project');
-      const session = flag('session');
-      if (!project || !ID.test(project) || !session || !ID.test(session)) throw new UsageError('swarm start: --project and --session are required');
-      // D-08: --plan, the plan the run executes, must be of this project; checked before anything else is read or moves.
-      if (has('plan')) {
-        const plan = loadPlanArg(io, flag('plan'), 'start');
-        checkPlanProject('start', flag('plan')!, plan.project, project);
-      }
-      // C1: Claude's id of the session that runs the start, checked before any branch or worktree moves. It becomes the
-      // execution's hookSession, the one session its Stop hook steps (also on a resume, e.g. after a /clear).
-      const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
-      if (!hook) throw new UsageError(noClaudeSession('swarm start', '--hook-session'));
-      // I-03: the run id swarm propose printed (launch.json keeps it), so the start question answered before a /clear is
-      // tied to this run. A resume keeps its own.
-      const runIdFlag = flag('run-id');
-      if (has('run-id') && runIdFlag === undefined) throw new UsageError('swarm start: --run-id needs the run id swarm propose printed');
-      const config = loadConfig(io.cwd);
-      let parallel = config.swarm.parallel;
-      if (has('parallel')) {
-        const v = Number(flag('parallel'));
-        if (!Number.isInteger(v) || v < 1 || v > 10) throw new UsageError('swarm start: --parallel must be an integer from 1 to 10');
-        parallel = v;
-      }
-      const kind = flag('kind') ?? 'plan';
-      if (kind !== 'plan' && kind !== 'ephemeral') throw new UsageError('swarm start: --kind must be plan or ephemeral');
-      if (kind === 'ephemeral' && flag('mode') === 'sessions') throw new UsageError('swarm start: an ephemeral run is always subagents (sessions need a plan)');
-      // swarm.mode in the config chooses for plan runs only: an ephemeral run has no plan to launch sessions on.
-      const mode = kind === 'ephemeral' ? (flag('mode') ?? 'subagents') : (flag('mode') ?? config.swarm.mode ?? 'subagents');
-      if (mode !== 'subagents' && mode !== 'sessions') throw new UsageError('swarm start: --mode must be subagents or sessions');
-      if (has('autonomy') && flag('autonomy') !== 'auto' && flag('autonomy') !== 'ask') throw new UsageError('swarm start: --autonomy must be auto or ask');
-      const auto = flag('autonomy') === 'auto' ? { autonomy: 'auto' as const } : {};
-      const locale = personLocaleArg(rest);
-      // I-03: a run runs the config's commands (swarm.setup, the validators). Without the person's trust for them nothing
-      // moves: exit 3 with `trust`, whose question the coordinator asks before it starts again.
-      const trust = trustIn(io.cwd, config);
-      if (trust.state === 'ask' || trust.state === 'changed') {
-        const out = { started: false, trust: trustOutput(trust, spanish(locale, io.cwd, project), io.cwd, noteOnce(io.cwd, trust.hash!)) };
-        return { code: 3, stdout: `${JSON.stringify(out, null, 2)}\n`, stderr: '' };
-      }
-      const base = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
-      if (!base || base === 'HEAD') throw new UsageError('swarm start: the main checkout must be on a branch');
-      const prev = readExecution(io.cwd);
-      // D-14: a start never changes the coordinator of an active execution; taking it over is swarm takeover's call.
-      if (prev?.active && prev.coordinator !== session) throw new UsageError(
-        `swarm start: the execution ${prev.runId} is coordinated by ${prev.coordinator}; to go on with it from this session run ` +
-        `swarm takeover --session ${session} --hook-session <id> (it checks that ${prev.coordinator} stopped), or join it as a manual member (/forge:run --join)`);
-      const branch = flag('branch') ?? runBranch(project);
-      if (!isRunBranch(branch)) throw new UsageError('swarm start: --branch is not a valid branch name');
-      // execution.json is read back through the safe id rules: refuse here, before any branch or worktree exists.
-      if (!isMemberId(session)) throw new UsageError('swarm start: --session must use letters, digits, _ - . (at most 120)');
-      if (!isSafeId(runIdOf(project, now))) throw new UsageError('swarm start: --project must use letters, digits, _ - .');
-      if (kind === 'ephemeral' && !isRunBranch(base)) throw new UsageError(`swarm start: the base branch ${base} is outside the run branch rule (letters, digits, _ - . /)`);
-      let setup: SetupResult = null;
-      let baseSync: 'created' | 'up-to-date' | 'fast-forward' | 'merged' | null = null;
-      const resume = !!prev && prev.active && prev.kind === kind && prev.project === project && prev.branch === (kind === 'plan' ? branch : base);
-      let loose: LooseTask[] = [];
-      let ignoredTasks = false;
-      const moves: string[] = [];
-      // Even from its own coordinator, of either kind: a new run would overwrite the execution.json of the run in progress.
-      if (prev?.active && !resume) {
-        throw new UsageError(`swarm start: the execution ${prev.runId} is active (kind ${prev.kind}); finish it or stop it (forge stop) first; a request during it goes to that run`);
-      }
-      // Wave 0 handoff: a resume from another Claude session rebinds only once the bound one stopped, by takeover's
-      // rule; while it may still step its run, a silent rebind would leave two sessions stepping it. `claude --resume`
-      // goes on under the same id, so it needs no rebind.
-      if (resume && prev && prev.hookSession !== null && prev.hookSession !== hook) {
-        const liveness = boundLiveness(io.cwd, prev, now.getTime());
-        if (liveness !== 'stopped') throw new UsageError(boundElsewhere('start', prev.runId, prev.hookSession, liveness));
-      }
-      // Checked before any branch or worktree moves. Only the id swarm propose prints for this project, exactly
-      // (<project>-<stamp>: another project's never matches, whatever its name), and only one no run has used: the run of
-      // execution.json, a run an authorization names (a merge question, or a yes it used) or the ledger's events name has
-      // started, and taking its id would take its answers and mix its events with this run's.
-      if (runIdFlag !== undefined && !resume) {
-        if (!isRunIdOf(project, runIdFlag)) throw new UsageError(`swarm start: --run-id must be the run id swarm propose printed for ${project} (${project}-<stamp>)`);
-        const started = runIdFlag === prev?.runId || readAuths(io.cwd).some(r => r.runId === runIdFlag && (r.kind === 'merge' || r.usedAt !== undefined))
-          || readEvents(io.cwd).some(ev => ev.runId === runIdFlag);
-        if (started) throw new UsageError(`swarm start: --run-id ${runIdFlag} is the id of a run that already started (execution.json, an authorization or the ledger names it); run swarm propose again for a new id`);
-      }
-      const runId = runIdFlag !== undefined && !resume ? runIdFlag : runIdOf(project, now);
-      if (kind === 'ephemeral') {
-        if (resume && prev) {
-          // The run keeps the batch it started with: new requests go to the next run.
-          const doc = readLoose(io.cwd, prev.runId);
-          if (!doc) throw new UsageError('swarm start: the ephemeral run lost .forge/loose.json');
-          loose = doc.tasks;
-          ignoredTasks = has('tasks');
-        } else {
-          loose = loadTasksArg(io, flag('tasks'), 'start');
-          // Loose ids repeat between runs: a leftover worktree or a branch with unmerged work is refused, all checks
-          // before anything moves.
-          for (const t of loose) {
-            const dir = taskWorktree(io.cwd, t.id);
-            // Final review 8: an earlier run's integrated task worktree goes with swarm cleanup.
-            if (existsSync(dir)) throw new UsageError(`swarm start: ${dir} already exists; once its task is integrated, FORGE swarm cleanup removes it (else git worktree remove it), or use another id`);
-            const tb = taskBranch(t.id);
-            if (deps.git(['rev-parse', '--verify', '-q', `refs/heads/${tb}`]) === null) continue;
-            if (deps.git(['merge-base', '--is-ancestor', tb, base]) === null) throw new UsageError(`swarm start: ${tb} has work not on ${base}; use another id`);
-            moves.push(tb);
-          }
-        }
-        if (!has('parallel')) parallel = Math.min(parallel, Math.max(1, widthOf(planOfLoose(loose))));
-      }
-      if (kind === 'plan') {
-        const wt = runWorktree(io.cwd);
-        // The run branch gets its own worktree: it can be neither the base (checked out here) nor a branch
-        // another worktree holds, or `git worktree add` refuses it.
-        if (branch === base) throw new UsageError(`swarm start: ${branch} is the base branch (checked out in the main checkout); the run branch must be another one (omit --branch for ${runBranch(project)})`);
-        const defaultBranch = defaultBranchOf(deps.git);
-        if (defaultBranch && branch === defaultBranch) throw new UsageError(`swarm start: ${branch} is the default branch; an execution never integrates into it directly`);
-        const holder = worktreeHolding(deps.git(['worktree', 'list', '--porcelain']), branch);
-        if (holder && !samePath(holder, wt)) throw new UsageError(`swarm start: ${branch} is checked out in another worktree (${holder}); pick another --branch`);
-        if (existsSync(wt)) {
-          const on = deps.at(wt).git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
-          if (on !== branch) throw new UsageError(`swarm start: ${wt} exists and is on ${on ?? '?'}, not ${branch}; switch it or remove it (git worktree remove)`);
-        }
-        const existed = deps.git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
-        if (!existed && deps.git(['branch', branch, base]) === null) {
-          throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
-        }
-        // A-08: the run and task worktrees never show as untracked, also without a .gitignore entry for them. Asked at
-        // the main checkout, as addTaskWorktree does: the ignore rules are read from where git runs.
-        const mainDir = mainWorktreeFrom(deps.git(['worktree', 'list', '--porcelain']));
-        excludeWorktrees(mainDir ? args => deps.git(['-C', mainDir, ...args]) : deps.git);
-        if (!existsSync(wt)) {
-          if (deps.git(['worktree', 'add', wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
-          setup = runSetup(deps, wt, io.cwd);
-        }
-        // A run branch left by an earlier execution is brought up to its base before planning; a conflict is
-        // refused (never a second run branch) and nothing is removed.
-        if (!existed) baseSync = 'created';
-        else if (!resume) {
-          const at = deps.at(wt);
-          // Read before any merge: once a merge stops on a conflict, the worktree always looks dirty.
-          const status = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
-          const dirty = status === null || status.trim() !== '';
-          const dirtyMsg = `swarm start: the run worktree ${wt} has uncommitted changes; commit or clean them before ${branch} is brought up to ${base}`;
-          if (deps.git(['merge-base', '--is-ancestor', base, branch]) !== null) baseSync = 'up-to-date';
-          else if (deps.git(['merge-base', '--is-ancestor', branch, base]) !== null) {
-            if (at.git(['merge', '--ff-only', base]) === null) throw new UsageError(dirty ? dirtyMsg : `swarm start: cannot fast-forward ${branch} to ${base}`);
-            baseSync = 'fast-forward';
-          } else if (at.git(['merge', '--no-ff', base, '-m', `forge: bring ${base} into ${branch}`]) !== null) baseSync = 'merged';
-          else {
-            at.git(['merge', '--abort']);
-            // A refused merge in a dirty worktree is not a conflict: say what blocks it.
-            if (dirty) throw new UsageError(dirtyMsg);
-            throw new UsageError(`swarm start: ${branch} has diverged from ${base} and they conflict; merge them by hand or remove ${branch}`);
-          }
-        }
-      }
-      // The person's language (--locale): a resume keeps the recorded one unless a new flag is given.
-      const lang = locale ? { locale } : {};
-      // I-03: --merge-on-finish needs the person's yes to the start question, recorded by the hook `answer`: tied to this
-      // run id or, asked before the run existed (auto mode at launch), to this session and project for 24 hours. A plan
-      // run whose base is forge's own needs none; an ephemeral run never takes it (it makes no final merge). Without it
-      // the run starts with mergeOnFinish false and says why. A resume asks about its own run and its own base (the
-      // branch it merges into), not the branch the checkout is on now. Checked here, after every git step, and spent at
-      // once (a launch yes is tied to this run then): a yes that cannot be marked used starts no run with it, so it never
-      // sets two runs' mergeOnFinish.
-      const mergeInto = resume && prev ? prev.base : base;
-      const mofAsked = kind === 'plan' && has('merge-on-finish') && !(resume && prev?.mergeOnFinish);
-      let mof = mofAsked && isForgeTarget(mergeInto);
-      let mergeRefused: MofReason | null = null;
-      let mergeNote: string | null = null;
-      if (mofAsked && !isForgeTarget(mergeInto)) {
-        const mofRun = resume && prev ? prev.runId : runId;
-        const v = checkMofAuth(readAuths(io.cwd), { runId: mofRun, target: mergeInto, session: hook, project: resume && prev ? prev.project : project, now: io.now().getTime() });
-        if (!v.ok) { mergeRefused = v.reason; mergeNote = v.note ?? null; } else {
-          try { useAuth(io.cwd, v.record, iso, mofRun); } catch (err) {
-            throw new Error(`swarm start: the yes ${v.record.authId} to the start question could not be marked used (${err instanceof Error ? err.message : String(err)}); execution.json was not written, run swarm start again`);
-          }
-          mof = true;
-        }
-      }
-      const state: ExecutionState = resume && prev
-        ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || mof, coordinator: session, hookSession: hook, sleepUntil: null, ...auto, ...lang }
-        : {
-            runId, kind, mode, parallel, project, base, branch: kind === 'plan' ? branch : base,
-            mergeOnFinish: mof, coordinator: session, hookSession: hook, active: true, stopReason: null, stallReason: null,
-            startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, closedAt: null, closedBy: null, ...auto, ...lang,
-          };
-      // An execution that would not read back (an id outside the safe rule) is refused rather than saved.
-      if (!normalizeExecution(state)) throw new UsageError('swarm start: --project, --session and the run branch must use letters, digits, _ - . (and / in the branch), at most 120 characters');
-      // A task branch already merged into the base is deleted (an ancestor of it: nothing is lost); `swarm worktree`
-      // creates it again from the tip of the run's branch when its turn comes, so it sees the work integrated since.
-      for (const tb of moves) {
-        if (deps.git(['branch', '-d', tb]) === null) throw new UsageError(`swarm start: cannot delete ${tb}; if a worktree still holds it, run git worktree prune or remove that worktree (git worktree remove)`);
-      }
-      // Learned notes two tasks append to the same surface are merged by git's union driver, never left as a conflict.
-      const attributes = unionLearned(deps);
-      // C2: a new run over an ended one that nobody closed replaces it; say which (execution.json keeps one run).
-      const replaced = prev && !prev.active && !prev.closedAt && !resume ? { runId: prev.runId, stopReason: prev.stopReason } : null;
-      rmSync(stopFile(io.cwd), { force: true });
-      // A resume keeps what changed meanwhile and takes only this start's fields.
-      updateExecution(io.cwd, cur => (resume && cur && cur.runId === state.runId
-        ? { ...cur, parallel: state.parallel, mode: state.mode, mergeOnFinish: state.mergeOnFinish, coordinator: state.coordinator, hookSession: state.hookSession, sleepUntil: null, ...auto, ...lang }
-        : state), lockDeps);
-      if (kind === 'ephemeral' && !resume) writeLoose(io.cwd, { runId: state.runId, tasks: loose });
-      // K5-08: a new run starts clean: the public task files, members and live signals of earlier runs go (a resume keeps
-      // its own).
-      if (!resume) pruneRunState(io.cwd, state.runId, { now: now.getTime(), stale: false, dryRun: false });
-      const looseOut = kind === 'ephemeral'
-        ? { loose: loose.length, ...(ignoredTasks ? { ignoredTasks: true, message: `the ephemeral run ${state.runId} is resumed with its own ${loose.length} tasks; --tasks was ignored (start a new run for new requests once this one ends)` } : {}) }
-        : {};
-      const announce = startAnnounce({
-        es: spanish(state.locale ?? null, io.cwd, project), kind, resume, runId: state.runId, mode: state.mode, parallel: state.parallel,
-        branch: state.branch, base: state.base, mergeOnFinish: state.mergeOnFinish, loose: loose.length, setup, mergeRefused, mergeNote,
-      });
-      return json({ ...state, setup, baseSync, ...looseOut, announce, ...attributes, ...(replaced ? { replaced } : {}), ...(mergeRefused ? { mergeRefused } : {}) });
-    }
-    case 'status': {
-      // K2-01: the execution of the main checkout, from any worktree.
-      const main = mainCheckout(io.cwd);
-      const state = readExecution(main);
-      // §4.6: an active execution that no session drives (forge 0.15 left it unbound) says so.
-      const unbound = !!state?.active && state.hookSession === null;
-      // Final review 1: the Claude session bound to a run that is not closed, and how alive it is judged as if the run
-      // were active, so /forge:run --resume leaves an ended run to a coordinator still on it.
-      const coordinator = state && !state.closedAt ? { hookSession: state.hookSession, liveness: boundLiveness(main, { ...state, active: true }, now.getTime()) } : null;
-      return json({
-        present: state !== null, state, ...(state ? { work: tasksWork(main, state) } : {}), ...(coordinator ? { coordinator } : {}),
-        ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}),
-        // J-15: meta/run as the roadmap takes it, built by the CLI; carry 10: once the run ended, the writes that free the
-        // coordinator's tasks it left running or stopped.
-        publish: state ? { run: runDocOf(main, state), ...(!state.active ? { release: releaseWrites(state, openTasks(state)) } : {}) } : null,
-      });
-    }
-    case 'propose': {
-      const planned = !flag('plan') && has('tasks') ? null : loadPlanArg(io, flag('plan'), 'propose');
-      const plan = planned ?? planOfLoose(loadTasksArg(io, flag('tasks'), 'propose'));
-      const locale = localeArg(rest, 'propose');
-      const p = widthProfile(plan);
-      const width = widthOf(plan);
-      const config = loadConfig(io.cwd);
-      const configured = config.swarm.mode ?? null;
-      const parallel = width < 2 ? 1 : Math.min(config.swarm.parallel, width);
-      const reasons = [`${plan.tasks.length} tasks`, `up to ${width} at once (dependencies and zones)`];
-      // D-19: how wide the plan is wave by wave, its longest chain and the zones that serialize it, said in one line.
-      const es = locale ? locale === 'es' : isSpanish((plan as { locale?: string }).locale);
-      return json({
-        width, configured, recommended: { mode: 'subagents', parallel }, reasons,
-        profile: p.profile, chain: p.chain, serializing: p.serializing, mostlySerial: p.mostlySerial, say: proposeSay(es, plan.tasks.length, p),
-        // I-03: the id the run gets if it starts now (launch.json keeps it, swarm start --run-id adopts it), so the start
-        // question can be tied to it before the run exists; none for loose tasks (an ephemeral run never merges at the end).
-        runId: planned ? runIdOf(planned.project, now) : null,
-      });
-    }
-    case 'worktree': {
-      if (has('member')) {
-        // A member gets its task worktree in the main checkout; execution.json stays the coordinator's.
-        const task = taskArg();
-        const { main, e, session, m } = memberCtx(true);
-        if (m!.role === 'executor' && m!.task !== task) throw new UsageError(`swarm worktree: ${session} executes ${m!.task}, not ${task}`);
-        return json({ ...addTaskWorktree(deps, main, task, e.branch, e.project), work: workRel({ project: e.project, task }) });
-      }
-      const task = taskArg();
-      const e = notEnded(current());
-      // Final review 7: a plan run's project, which no other plan's leftover task/<T> may pass for; an ephemeral run has none.
-      const added = addTaskWorktree(deps, io.cwd, task, e.branch, e.kind === 'plan' ? e.project : null);
-      const { worktree: dir, branch } = added;
-      const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: null };
-      update(cur => cur && { ...notEnded(cur), tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), worktree: dir, branch, updatedAt: iso } } });
-      return json({ ...added, work: workRel({ project: e.kind === 'plan' ? e.project : null, task }) });
-    }
-    case 'task': {
-      const task = taskArg();
-      const e = current();
-      const prev = e.tasks[task];
-      if (!prev) throw new UsageError(`swarm task: ${task} is not part of this execution`);
-      if (has('drop')) {
-        // A claim race lost to another session: forget the task so the next tick sees that session's claim.
-        update(cur => { if (!cur) return null; const { [task]: _dropped, ...tasks } = cur.tasks; return { ...cur, tasks }; });
-        rmSync(executionTaskFile(io.cwd, task), { force: true });
-        return ok();
-      }
-      notEnded(e);
-      const stageArg = flag('stage') as Stage | undefined;
-      if (stageArg !== undefined && !STAGES.includes(stageArg)) throw new UsageError(`swarm task: --stage must be one of ${STAGES.join('|')}`);
-      const statusArg = flag('status') as ExecTask['status'] | undefined;
-      // Carry 2: a claim starts a task, as swarm report's does: it cannot go with a status that says the task is not running.
-      if (has('claim') && (statusArg ?? prev.status) !== 'running') throw new UsageError('swarm task: --claim starts a task and goes only with --status running');
-      let detailArg: string | null | undefined;
-      if (flag('detail-file')) {
-        try { detailArg = readFileSync(path.resolve(io.cwd, flag('detail-file')!), 'utf8').trim().slice(0, 500) || null; } catch { throw new UsageError('swarm task: cannot read --detail-file'); }
-      }
-      const roundArg = has('round') ? Number(flag('round')) : undefined;
-      if (roundArg !== undefined && (!Number.isInteger(roundArg) || roundArg < 0 || roundArg > 99)) throw new UsageError('swarm task: --round must be an integer from 0 to 99');
-      const agentArg = has('no-agent') ? null : flag('agent');
-      // Only the fields given here change; the rest keep what the task holds when the lock is taken (I-15).
-      const build = (base: ExecTask): ExecTask => {
-        const stage = stageArg ?? base.stage;
-        const status = statusArg ?? base.status;
-        // K2-02: a task forge stop stopped never runs again in this execution (a new swarm start makes a new one).
-        if (base.status === 'stopped' && status !== 'stopped') throw new UsageError(`swarm task: ${task} is stopped (forge stop) and stays stopped`);
-        if (!['running', 'accepted', 'blocked'].includes(status) && status !== base.status) throw new UsageError('swarm task: --status must be running, accepted or blocked');
-        const stageSince = base.stage !== stage ? iso : base.stageSince;
-        // Blocked now (it was not): the task's time ends here. Back to running: the next finish writes it again.
-        const finishedAt = status === 'blocked' && base.status !== 'blocked' ? iso : status === 'running' && base.finishedAt ? null : base.finishedAt;
-        return {
-          ...base, stage, status, round: roundArg ?? base.round, agent: agentArg === undefined ? base.agent : agentArg,
-          detail: detailArg === undefined ? base.detail : detailArg, updatedAt: iso, stageSince, ...(finishedAt !== undefined ? { finishedAt } : {}),
-        };
-      };
-      let base = prev;
-      let next = build(prev);
-      update(cur => {
-        if (!cur) return null;
-        notEnded(cur);
-        base = cur.tasks[task] ?? prev;
-        next = build(base);
-        return { ...cur, tasks: { ...cur.tasks, [task]: next } };
-      });
-      const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
-      writePublicTask(io.cwd, { task, runId: e.runId, stage: next.stage, status: next.status, agent: next.agent, round: next.round, since: next.stageSince, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: base.executor });
-      if (base.stage !== next.stage) appendPhase(io.cwd, { ts: iso, kind: 'phase', task, phase: next.stage, ...(e.kind === 'plan' && isSafeId(e.project) ? { project: e.project } : {}) });
-      // J-15: the state/T write of this stage, built by the CLI; --claim adds the claim of a task the coordinator starts.
-      // A loose task of an ephemeral run has no state/T.
-      const claimed = has('claim') && e.kind === 'plan' ? { status: 'in_progress', owner: e.coordinator, claimedAt: iso, startedAt: iso } : null;
-      const pub = e.kind === 'plan' ? publishFor(io, task, { project: e.project, ...(claimed ? { extra: claimed } : {}) }) : { publish: null };
-      return json({ ...next, ...pub, ...(claimed ? { event: startedEvent(e.coordinator, task, now, io.rand) } : {}) });
-    }
-    case 'tick': {
-      const e = current();
-      if (!e.active) throw new UsageError('swarm tick: the execution is not active');
-      // I-03: without the person's trust for the commands of a config this run would use (the main checkout's, the run
-      // worktree's, those of the task worktrees not integrated yet), nothing of it runs: the run stalls here, and the
-      // first stall over those commands says so (`note`: leave one question note).
-      const untrusted = untrustedFor([io.cwd, ...(e.kind === 'plan' ? [runWorktree(io.cwd)] : []),
-        ...Object.values(e.tasks).filter(t => t.status !== 'integrated' && t.worktree).map(t => t.worktree)]);
-      if (untrusted) {
-        const note = noteOnce(io.cwd, untrusted.trust.hash!);
-        // Only the run this tick read, still active: one stopped or closed meanwhile stays as it is (K2-02).
-        update(cur => (cur?.active && cur.runId === e.runId ? { ...cur, active: false, stopReason: 'stalled', stallReason: 'untrusted-commands', lastStepAt: iso } : null));
-        const trust = trustOutput(untrusted.trust, spanish(e.locale ?? null, io.cwd, e.project), untrusted.dir);
-        // `running` as any tick counts it: agents already at work go on; the run starts and integrates nothing more.
-        return json({ actions: [{ type: 'stalled', reason: 'untrusted-commands', note, trust }], running: Object.values(e.tasks).filter(t => t.status === 'running').length, parallel: e.parallel });
-      }
-      // An ephemeral run schedules from its own loose.json and execution: no plan, no roadmap.
-      const input = e.kind === 'ephemeral'
-        ? (() => {
-            const loose = readLoose(io.cwd, e.runId);
-            if (!loose) throw new UsageError('swarm tick: the ephemeral run has no .forge/loose.json');
-            return { plan: planOfLoose(loose.tasks), states: statesOfLoose(e), sessions: {}, integrated: [] as string[] };
-          })()
-        : readTickInput(io, deps, e, flag('plan'), flag('db'), 'tick');
-      const { plan, states, sessions, integrated } = input;
-      const publicTasks: Record<string, PublicTask> = {};
-      try {
-        for (const f of readdirSync(path.join(io.cwd, '.forge', 'execution')).filter(n => n.endsWith('.json')).slice(0, 500)) {
-          try { const p = normalizePublicTask(JSON.parse(readFileSync(path.join(io.cwd, '.forge', 'execution', f), 'utf8'))); if (p && `${p.task}.json` === f) publicTasks[p.task] = p; } catch { /* skip */ }
-        }
-      } catch { /* none yet */ }
-      let agents: BgAgent[] | null = null;
-      if (flag('agents')) {
-        let raw: unknown;
-        try { raw = JSON.parse(readFileSync(path.resolve(io.cwd, flag('agents')!), 'utf8')); } catch { throw new UsageError('swarm tick: cannot read --agents'); }
-        if (!Array.isArray(raw)) throw new UsageError('swarm tick: --agents must be a JSON array of {name, state}');
-        agents = raw.filter((a): a is BgAgent => !!a && typeof a === 'object' && typeof a.name === 'string' && (a.state === 'working' || a.state === 'idle')).slice(0, 100);
-      }
-      // D-07: an integration is in flight (merging.json, from its baseline to its commit): this tick integrates nothing.
-      const merging = mergeInFlight(io.cwd, now.getTime()) !== null;
-      // The scheduler decides on the execution as it is under the lock, so a swarm task or an integrate that ran
-      // meanwhile is never overwritten (I-15).
-      let d!: ReturnType<typeof schedule>;
-      update(cur => {
-        d = schedule({ plan, states, sessions, exec: cur ?? e, integrated, now: now.getTime(), publicTasks, agents, merging });
-        // Wave 0 handoff: an ephemeral run integrates each task into the person's branch as it goes, so the tick that
-        // finishes it finds all its work merged already, and no swarm merge will ever close it: it closes here (C2).
-        if (d.next.kind === 'ephemeral' && !d.next.active && d.next.stopReason === 'finished' && !d.next.closedAt) d = { ...d, next: { ...d.next, closedAt: iso, closedBy: 'merge' } };
-        return d.next;
-      });
-      // In sessions mode a start carries the whole `waypoint launch` argument list: the coordinator runs it as is.
-      const planPath = flag('plan');
-      const actions = e.mode === 'sessions' && planPath
-        ? d.actions.map(a => a.type === 'start' ? { ...a, launch: memberLaunch(io.cwd, planPath, a.task, e) } : a)
-        : d.actions;
-      return json({ actions, running: Object.values(d.next.tasks).filter(t => t.status === 'running').length, parallel: e.parallel });
-    }
-    case 'retry': {
-      const task = taskArg();
-      const e = current();
-      const t = e.tasks[task];
-      if (e.closedAt) throw new UsageError(`swarm retry: the execution ${e.runId} is closed; start a new one`);
-      // K2-02: a stopped run moves no task (an integrate that ended in conflict after forge stop wakes its coordinator).
-      notEnded(e);
-      // Checked on the read above and again under the lock, on the task as it is then: a write that landed since is
-      // kept, and a task no longer in that state is left alone (I-15). Only an execution still stalled then is revived.
-      const revived = (x: ExecutionState) => !x.active && x.stopReason === 'stalled';
-      // Final review 1: swarm start's rule, before anything moves. Reviving a stalled run from another Claude session
-      // while its bound one may still step it (finishing it, or waiting on the person) leaves two sessions on it. The
-      // coordinator's own retry (its conflict path) passes its own id; one back from /clear has an ended signal (the live
-      // hook writes it at the SessionEnd of the bound session, R4). R5: checked on the read and again under the lock, on
-      // the run as it is then, so one a tick stalled meanwhile is gated too.
-      const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
-      const gate = (x: ExecutionState): void => {
-        if (!revived(x) || !x.hookSession || hook === x.hookSession) return;
-        const liveness = boundLiveness(io.cwd, { ...x, active: true }, now.getTime());
-        if (liveness !== 'stopped') throw new UsageError(boundElsewhere('retry', x.runId, x.hookSession, liveness));
-      };
-      gate(e);
-      // R7 (I2): the run this retry revives, under the lock. The bound session reviving its own run is on it again: an
-      // ended signal it left (a SessionEnd before its claude --resume) is cleared, so another session stays gated.
-      let woke: ExecutionState | null = null;
-      const revive = (cur: ExecutionState) => {
-        if (!revived(cur)) return {};
-        woke = cur;
-        return { active: true, stopReason: null, stallReason: null };
-      };
-      const clearOwnEnded = () => {
-        const w = woke as ExecutionState | null;
-        if (w && hook && hook === w.hookSession) clearEnded(io.cwd, w, hook, now);
-      };
-      if (has('adopt')) {
-        const adoptable = (x: ExecTask | undefined): x is ExecTask => !!x && x.status === 'conflict' && x.executor !== 'subagents';
-        const notAdoptable = (x: ExecTask | undefined) =>
-          new UsageError(`swarm retry: --adopt takes a member's task in conflict (${task} is ${x ? `${x.status}, ${x.executor}` : 'not in this execution'})`);
-        if (!adoptable(t)) throw notAdoptable(t);
-        if (deps.git(['rev-parse', '--verify', '-q', `refs/heads/${t.branch}`]) === null) throw new UsageError(`swarm retry: ${t.branch} does not exist`);
-        // The fix round runs where the branch already is (a member's task-<T>, or the manual session's own worktree).
-        const holder = worktreeHolding(deps.git(['worktree', 'list', '--porcelain']), t.branch);
-        // Taking over a session's own worktree must not trample its uncommitted edits.
-        if (holder !== null) {
-          const status = deps.at(holder).git(['status', '--porcelain']);
-          if (status === null) throw new UsageError(`swarm retry: could not read the worktree status of ${t.branch} (${holder}); check it by hand before --adopt`);
-          if (status.trim() !== '') {
-            throw new UsageError(`swarm retry: the worktree of ${t.branch} (${holder}) has uncommitted changes; commit or discard them before --adopt`);
-          }
-        }
-        const worktree = holder ?? addTaskWorktree(deps, io.cwd, task, e.branch, e.kind === 'plan' ? e.project : null).worktree;
-        let adopted = t;
-        update(cur => {
-          if (!cur) return null;
-          notEnded(cur);
-          gate(cur);
-          const base = cur.tasks[task] ?? t;
-          if (!adoptable(base)) throw notAdoptable(base);
-          adopted = base;
-          return {
-            ...cur, ...revive(cur),
-            tasks: { ...cur.tasks, [task]: { ...base, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: base.attempts + 1, nudgedAt: null, finishedAt: iso, updatedAt: iso, stageSince: iso } },
-          };
-        });
-        clearOwnEnded();
-        writePublicTask(io.cwd, { task, runId: e.runId, stage: 'implement', status: 'running', agent: null, round: adopted.round, since: iso, updatedAt: iso, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString(), by: e.coordinator, mode: 'subagents' });
-        // D-08: `work`, the task's work folder in the main checkout, where the coordinator writes its brief.
-        return json({ task, adopted: true, previous: adopted.executor, worktree, branch: t.branch, work: workRel({ project: e.project, task }) });
-      }
-      const retryable = (x: ExecTask | undefined): x is ExecTask => !!x && (x.status === 'conflict' || x.status === 'blocked');
-      if (!retryable(t)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
-      update(cur => {
-        if (!cur) return null;
-        notEnded(cur);
-        gate(cur);
-        const base = cur.tasks[task] ?? t;
-        if (!retryable(base)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
-        return {
-          ...cur, ...revive(cur),
-          tasks: { ...cur.tasks, [task]: { ...base, status: 'running', stage: 'implement', attempts: base.attempts + 1, detail: null, finishedAt: null, updatedAt: iso, stageSince: iso } },
-        };
-      });
-      clearOwnEnded();
-      return ok();
-    }
-    case 'relaunch':
-    case 'nudge': {
-      const task = taskArg();
-      const e = current();
-      const t = e.tasks[task];
-      if (!t || t.status !== 'running' || t.executor !== 'sessions') throw new UsageError(`swarm ${sub}: ${task} is not a running sessions task`);
-      const planArg = flag('plan');
-      if (has('plan') && (!planArg || planArg.startsWith('-'))) throw new UsageError(`swarm ${sub}: --plan needs a file`);
-      if (planArg) {
-        const isFile = (() => { try { return statSync(path.resolve(io.cwd, planArg)).isFile(); } catch { return false; } })();
-        if (planArg.startsWith('-') || !isFile) throw new UsageError(`swarm ${sub}: --plan ${planArg} is not a plan file`);
-      }
-      if (sub === 'nudge') {
-        // The text (and so the plan) is read before anything is saved.
-        const es = (planArg ? loadPlanArg(io, planArg, 'nudge').locale : planLocale(io.cwd, e.project)) === 'es';
-        const text = es ? `[forge run] ${task}: continúa con ${t.stage}; si estás bloqueado, márcalo como bloqueado`
-          : `[forge run] ${task}: continue with ${t.stage}; if you are blocked, mark it blocked`;
-        update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), nudgedAt: iso } } });
-        return json({ task, name: `wp-${e.project}-${task}`, text });
-      }
-      const planPath = planArg;
-      if (!planPath) throw new UsageError('swarm relaunch: --plan is required');
-      // The cap and the reason live in schedule.ts: one rule for the scheduler and this command.
-      const verdict = relaunchOrBlock(task, t.attempts);
-      if (verdict.type === 'block') {
-        update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), status: 'blocked', detail: verdict.reason, updatedAt: iso, finishedAt: iso } } });
-        return json({ task, blocked: true, reason: verdict.reason });
-      }
-      const attempt = verdict.attempt;
-      const log = deps.git(['log', '--oneline', '-n', '20', `${e.branch}..${t.branch}`])?.trim();
-      const commits = log ? log.split(/\r?\n/).map(l => `  - ${l}`).join('\n') : '  - none';
-      // D-08: the task's work folder, by project; the note goes to the main checkout's, the member works in its worktree's.
-      const ref = { project: e.kind === 'plan' ? e.project : null, task };
-      const note = path.join(workDir(io.cwd, ref), 'handover.md');
-      // A run member keeps its work files (brief-<n>.md, report-<n>.txt, validators-<n>.json, reviews-<n>-<round>/)
-      // in .forge/work/<project>/<T>/ of its own task worktree, where it runs; only this note lives in the main checkout.
-      // A member started before D-08 has them in the older .forge/work/<T>/ there: the folder with its brief is named.
-      const memberRoot = t.worktree || taskWorktree(io.cwd, task);
-      const memberWork = pickWorkDir(workDir(memberRoot, ref), workDir(memberRoot, { project: null, task }));
-      mkdirSync(path.dirname(note), { recursive: true });
-      writeFileSync(note, [
-        `# Handover: ${task} (attempt ${attempt} of ${RELAUNCH_CAP + 1})`, '',
-        `- Run: ${e.runId} · coordinator ${e.coordinator} · run branch ${e.branch}`,
-        `- Last stage: ${t.stage} · round ${t.round} · agent ${t.agent ?? 'none'} · since ${t.stageSince}`,
-        `- Detail: ${t.detail ?? 'none'}`,
-        `- Commits on ${t.branch} not yet on ${e.branch}:`, commits, '',
-        `- This note: ${note} (main checkout ${io.cwd})`,
-        `- Work files of the earlier attempts: ${memberWork} (the brief is brief-<n>.md there, with report-<n>.txt, validators-<n>.json and reviews-<n>-<round>/)`, '',
-        `Resume from ${t.branch} in this worktree: read the brief in ${memberWork} if it exists (else write it as the brief stage says), do not redo a step whose output file is already written, and continue from the last stage.`, '',
-      ].join('\n'));
-      update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), attempts: attempt, startedAt: iso, nudgedAt: null, updatedAt: iso } } });
-      return json({ task, attempt, note, work: workRel(ref), launch: memberLaunch(io.cwd, planPath, task, e) });
-    }
-    case 'sleep': {
-      const seconds = Number(rest[0]);
-      if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_SLEEP_S) throw new UsageError(`swarm sleep: seconds must be an integer from 1 to ${MAX_SLEEP_S}`);
-      const e = current();
-      const until = new Date(now.getTime() + seconds * 1000).toISOString();
-      update(cur => cur && { ...cur, sleepUntil: until });
-      if (has('mark')) return ok();
-      (io.sleep ?? sleepSync)(seconds * 1000);
-      // A newer sleep (or a --mark) may have replaced it meanwhile: only clear the value this call set.
-      const after = readExecution(io.cwd);
-      if (after && after.sleepUntil === until) update(cur => (cur && cur.sleepUntil === until ? { ...cur, sleepUntil: null } : null));
-      // The coordinator wakes on this output: it repeats the language to answer in, when one is known.
-      const run = parseRun(readRunText(io.cwd));
-      const reply = sessionReply(run?.active ? run : null, after ?? e, () => planLocale(io.cwd, e.project));
-      return reply ? { code: 0, stdout: `woke.${reply}\n`, stderr: '' } : ok();
-    }
-    case 'stop': {
-      const reason = flag('reason') ?? 'stopped';
-      if (reason !== 'stopped' && reason !== 'budget') throw new UsageError('swarm stop: --reason must be stopped or budget');
-      const e = readExecution(io.cwd);
-      if (e?.active) update(cur => (cur?.active ? { ...cur, active: false, stopReason: reason, sleepUntil: null } : null));
-      return ok();
-    }
-    case 'close': {
-      // C2: closes an ended execution of the main checkout, from any worktree. It never touches git, worktrees,
-      // branches or live/: /forge:stop releases the tasks it lists and publishes meta/run. K2-02: like forge stop, it
-      // removes the member files of the run and lists them in `sessions`, so /forge:stop messages a stalled run's members
-      // too; after forge stop there are none left.
-      const main = mainCheckout(io.cwd);
-      const e = readExecution(main);
-      if (!e) throw new UsageError('swarm close: no execution');
-      if (e.active) throw new UsageError(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
-      if (e.closedAt) return json({ closed: 'already', runId: e.runId, closedAt: e.closedAt, closedBy: e.closedBy ?? null });
-      closeEnded(main, iso, 'close', lockDeps);
-      // K2-02: forge stop leaves the tasks it stopped as stopped: they are released like running ones.
-      const open = openTasks(e).map(id => [id, e.tasks[id]] as const);
-      // Every member of the run, not only those the role readers see: each is listed to message and its file goes.
-      const sessions = allMembersOf(main, e.runId).map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
-      // C4: the summary and its cleanup read the member files, so they are built before those files go.
-      const runs = runsOf(io, e.runId);
-      for (const m of sessions) rmSync(memberFile(main, m.sessionId), { force: true });
-      return json({
-        closed: true, runId: e.runId, kind: e.kind, stopReason: e.stopReason, closedAt: iso,
-        // The coordinator's own tasks go back to free on the roadmap, as printed writes (carry 10); a member's task stays
-        // with its session. A loose task has no state/T to free, so an ephemeral run releases nothing.
-        release: releaseWrites(e, open.map(([id]) => id)),
-        members: open.filter(([, t]) => t.executor !== 'subagents').map(([id]) => id),
-        sessions,
-        ...runs,
-      });
-    }
-    case 'cleanup': {
-      // D-03, D-18: forge's worktrees and branches already integrated into the branch of the main checkout, and the
-      // state of the executions that ended. Never `branch -D`, `worktree remove --force` nor `reset`: what git refuses stays.
-      const dryRun = has('dry-run');
-      const e = readExecution(io.cwd);
-      if (e?.active) throw new UsageError(`swarm cleanup: the execution ${e.runId} is active; stop or close it first`);
-      // A worktree removed under a merge, a step or a background command in flight loses their work: none may be running.
-      // D-07: swarm merge's and swarm tick's rule: a live attempt's marker, or one still being written.
-      const inFlight = mergeInFlight(io.cwd, now.getTime());
-      if (inFlight) {
-        const m = inFlight.doc;
-        throw new UsageError(`swarm cleanup: an integration is merging (.forge/execution/merging.json${m ? `, pid ${m.pid}${m.task ? `, ${m.task}` : ''}` : ''}); run it again once it ends`);
-      }
-      const job = liveJobs(io.cwd, now)[0];
-      if (job) throw new UsageError(`swarm cleanup: a background forge command is running (${job.cmd}${job.task ? ` ${job.task}` : ''}, .forge/jobs/${job.name}.json); run it again once it ends`);
-      const step = stepLockHeld(io.cwd, now);
-      if (step) throw new UsageError(`swarm cleanup: a swarm step is running (.forge/jobs/step.lock${step.pid ? `, pid ${step.pid}` : ''}); run it again once it ends`);
-      const head = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim() || 'HEAD';
-      const merged = (b: string) => deps.git(['merge-base', '--is-ancestor', `refs/heads/${b}`, 'HEAD']) !== null;
-      const rel = (p: string) => path.relative(io.cwd, p).split(path.sep).join('/');
-      const taskOf = (b: string) => (b.startsWith('task/') && isPlanId(b.slice(5)) ? b.slice(5) : null);
-      const removed = { worktrees: [] as string[], branches: [] as string[], files: 0, bytes: 0 };
-      const kept: { path?: string; branch?: string; reason: string }[] = [];
-      const gone: string[] = [];
-      // Final review 5: cleanup holds no lock, so another session's swarm start or swarm retry may make a run active
-      // meanwhile; before each removal the execution is read again, and one that became active stops it there.
-      const halt = () => {
-        const cur = readExecution(io.cwd);
-        if (!cur?.active) return;
-        const done = [...removed.worktrees, ...removed.branches];
-        throw new UsageError(`swarm cleanup: the execution ${cur.runId} became active; run it again once it ends (${done.length ? `already removed: ${done.join(', ')}` : 'nothing was removed'})`);
-      };
-      // A worktree whose folder is gone (removed by hand) is only git's registration of it: `git worktree prune` drops it
-      // first, so its branch is decided below in this same run. Carry 7: the prune is git's, for the whole repository, so
-      // it runs only when one of forge's own worktrees (task-* or run, not a waypoint track's) is `prunable`, and `pruned`
-      // names every registration it drops. A dry-run reads them as dropped.
-      const blocks = (deps.git(['worktree', 'list', '--porcelain']) ?? '').split(/\r?\n\r?\n/);
-      const prunable = (b: string) => /^prunable\b/m.test(b);
-      const prunes = forgeWorktrees(blocks.filter(prunable).join('\n\n'), io.cwd).some(w => !w.branch?.startsWith('track/'));
-      const pruned = prunes ? blocks.filter(prunable).flatMap(b => {
-        const at = b.split(/\r?\n/).find(l => l.startsWith('worktree '))?.slice('worktree '.length).trim();
-        return at ? [rel(path.resolve(at))] : [];
-      }) : [];
-      if (prunes && !dryRun) deps.git(['worktree', 'prune']);
-      const listed = prunes && !dryRun ? (deps.git(['worktree', 'list', '--porcelain']) ?? '').split(/\r?\n\r?\n/) : blocks;
-      const porcelain = listed.filter(b => !(prunes && prunable(b))).join('\n\n');
-      const worktrees = forgeWorktrees(porcelain, io.cwd);
-      for (const w of worktrees) {
-        const where = { path: rel(w.path), ...(w.branch ? { branch: w.branch } : {}) };
-        // Final review 4: a waypoint track's worktree (`.claude/worktrees/<track>`) may be named run or task-*: never forge's.
-        if (w.branch?.startsWith('track/')) { kept.push({ ...where, reason: "a waypoint track, not forge's" }); continue; }
-        // What prune leaves with no folder is locked: git keeps it, and its branch with it.
-        if (!existsSync(w.path)) { kept.push({ ...where, reason: 'its folder is gone and git keeps it registered (locked): git worktree unlock it, then run swarm cleanup again' }); continue; }
-        if (!w.branch) { kept.push({ ...where, reason: 'detached HEAD' }); continue; }
-        if (!merged(w.branch)) { kept.push({ ...where, reason: `not merged into ${head}` }); continue; }
-        const status = deps.at(w.path).git(['status', '--porcelain']);
-        if (status === null || status.trim()) { kept.push({ ...where, reason: 'has uncommitted changes or untracked files' }); continue; }
-        // D-10: events only the worktree's own ledger holds (from before D-10, or from a worktree ledgerRoot does not tell
-        // as forge's) would go with it. The main ledger is never rewritten here (its order is the readers'): it stays.
-        if (unmergedEvents(w.path, io.cwd).length) { kept.push({ ...where, reason: 'unmerged ledger' }); continue; }
-        // Final review 3: the evidence is looked for where keepEvidence puts it; a walk that stopped at its cap cannot
-        // tell what it left out, so the worktree stays.
-        const evidence = evidenceOf(w.path);
-        if (evidence.truncated) { kept.push({ ...where, reason: 'too many files under .forge/work to check its evidence' }); continue; }
-        if (!dryRun) {
-          // K2-04: the verification a member left in its worktree reaches the main checkout first; what cannot keeps it.
-          const { skipped } = copyTree(w.path, io.cwd, evidence.files, { missingOnly: true });
-          if (skipped.length) {
-            kept.push({ ...where, reason: `its evidence could not be copied to the main checkout (${skipped.length} file${skipped.length === 1 ? '' : 's'}); run swarm cleanup again once it can` });
-            continue;
-          }
-          halt();
-          if (deps.git(['worktree', 'remove', w.path]) === null) { kept.push({ ...where, reason: 'git worktree remove refused it' }); continue; }
-        }
-        removed.worktrees.push(where.path);
-        // The run worktree may hold a branch the person named (--branch): only forge's own branches go.
-        if (!isForgeBranch(w.branch)) { kept.push({ branch: w.branch, reason: 'not a forge branch (task/* or forge/run-*)' }); continue; }
-        if (!dryRun) halt();
-        if (!dryRun && deps.git(['branch', '-d', w.branch]) === null) { kept.push({ branch: w.branch, reason: 'git branch -d refused it' }); continue; }
-        removed.branches.push(w.branch);
-        const t = taskOf(w.branch);
-        if (t) gone.push(t);
-      }
-      const held = new Set(worktrees.map(w => w.branch).filter((b): b is string => !!b));
-      const refs = deps.git(['for-each-ref', '--format=%(refname)', 'refs/heads/task', 'refs/heads/forge', 'refs/heads/track']) ?? '';
-      for (const b of forgeBranches(refs)) {
-        if (held.has(b)) continue;
-        if (b === head) { kept.push({ branch: b, reason: 'checked out in the main checkout' }); continue; }
-        const holder = worktreeHolding(porcelain, b);
-        if (holder) { kept.push({ branch: b, reason: `checked out in ${rel(holder)}` }); continue; }
-        if (!merged(b)) { kept.push({ branch: b, reason: `not merged into ${head}` }); continue; }
-        if (!dryRun) halt();
-        if (!dryRun && deps.git(['branch', '-d', b]) === null) { kept.push({ branch: b, reason: 'git branch -d refused it' }); continue; }
-        removed.branches.push(b);
-        const t = taskOf(b);
-        if (t) gone.push(t);
-      }
-      // waypoint's tracks are never forge's: they stay, named, each once (its worktree may have named it above).
-      for (const l of refs.split(/\r?\n/).map(x => x.trim())) {
-        const b = l.slice('refs/heads/'.length);
-        if (l.startsWith('refs/heads/track/') && !kept.some(k => k.branch === b)) kept.push({ branch: b, reason: "a waypoint track, not forge's" });
-      }
-      // The state files of a run that started meanwhile would go with the ended ones'.
-      if (!dryRun) halt();
-      // D-18: the state of the runs that ended: all of it once the execution is closed; that of earlier runs otherwise.
-      const state = pruneRunState(io.cwd, e && !e.closedAt ? e.runId : null, { now: now.getTime(), stale: true, dryRun });
-      const work = pruneWork(io.cwd, gone, dryRun);
-      removed.files = state.files.length + work.files.length;
-      removed.bytes = state.bytes + work.bytes;
-      return json({ dryRun, removed, kept, ...(pruned.length ? { pruned } : {}) });
-    }
-    case 'takeover': {
-      const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
-      if (!hook) throw new UsageError(noClaudeSession('swarm takeover', '--hook-session'));
-      const session = flag('session');
-      if (!session) throw new UsageError('swarm takeover: --session is required');
-      if (!isMemberId(session)) throw new UsageError(`swarm takeover: --session ${session.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
-      const e = current();
-      if (!e.active) throw new UsageError('swarm takeover: the execution is not active');
-      // --session is the waypoint SID that becomes the coordinator; --hook-session is Claude's id of this session, bound
-      // at once, so its Stop hook steps the execution from now on (C1).
-      // The same Claude session: already bound (its waypoint SID may have changed).
-      if (hook === e.hookSession) {
-        if (e.coordinator !== session) update(cur => cur && { ...cur, coordinator: session });
-        return json({ took: 'already', runId: e.runId });
-      }
-      // The coordinator's SID from another Claude session (a resume, a /clear): it rebinds only once the bound one
-      // stopped (wave 0 handoff); while it lives, this one joins as a manual member.
-      if (session === e.coordinator) {
-        const alive = e.hookSession === null ? 'stopped' : boundLiveness(io.cwd, e, now.getTime());
-        if (alive !== 'stopped') return json({ took: false, previous: e.hookSession, liveness: alive, joinAs: 'manual' });
-        update(cur => cur && { ...cur, hookSession: hook });
-        return json({ took: 'already', runId: e.runId });
-      }
-      // A run member keeps its role: it would otherwise coordinate the task it executes.
-      if (readMember(io.cwd, session)?.runId === e.runId) throw new UsageError(`swarm takeover: ${session} is a member of the execution ${e.runId}; a run member cannot take over the coordinator`);
-      const previous = e.hookSession ?? e.coordinator;
-      // The run band's rule decides (boundLiveness); --db is still accepted, but the roadmap lease no longer counts.
-      const liveness = boundLiveness(io.cwd, e, now.getTime());
-      if (liveness !== 'stopped') return json({ took: false, previous, liveness, joinAs: 'manual' });
-      update(cur => cur && { ...cur, coordinator: session, hookSession: hook, sleepUntil: null });
-      // The user asked this session to go on: their decision, recorded in the decision format (by: user).
-      appendEvent(io.cwd, { ts: iso, kind: 'decision', point: 'takeover', what: 'takeover', chosen: session, why: `the coordinator ${previous} stopped`, by: 'user', weight: 'minor', previous, session, runId: e.runId });
-      return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === 'running').map(([id]) => id) });
-    }
-    case 'step':
-      // D-12: cli/step.ts, given by run.ts (it calls the CLI itself: no import of run.ts here).
-      if (!ext.step) throw new UsageError('swarm step: not available here');
-      return ext.step(rest);
-    case 'integrate':
-      return integrate(rest, io, deps);
-    case 'merge':
-      return mergeFinal(rest, io, deps);
-    default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--run-id R] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO] [--claim]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--hook-session ID] [--locale es|en] [--retry-deps]|retry <T> [--adopt] [--hook-session ID]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO] [--claim]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID>');
-  }
+  const fn = sub !== undefined && Object.hasOwn(SUBCOMMANDS, sub) ? SUBCOMMANDS[sub] : undefined;
+  if (!fn) throw new UsageError(SWARM_USAGE);
+  return fn(rest, ctx);
 }
