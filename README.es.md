@@ -7,9 +7,9 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 [English](README.md) · **Español** · [Historial de cambios](CHANGELOG.md)
 
-![waypoint 0.29.0](https://img.shields.io/badge/waypoint-0.29.0-cba6f7?style=flat-square)
-![forge 0.22.3](https://img.shields.io/badge/forge-0.22.3-fab387?style=flat-square)
-![lens 0.13.4](https://img.shields.io/badge/lens-0.13.4-b4befe?style=flat-square)
+![waypoint 0.30.0](https://img.shields.io/badge/waypoint-0.30.0-cba6f7?style=flat-square)
+![forge 0.23.0](https://img.shields.io/badge/forge-0.23.0-fab387?style=flat-square)
+![lens 0.13.5](https://img.shields.io/badge/lens-0.13.5-b4befe?style=flat-square)
 ![Marketplace de Claude Code](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -78,7 +78,7 @@ Añade el marketplace directamente desde GitHub e instala los plugins que quiera
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # instala waypoint ^0.29.0 como dependencia
+claude plugin install forge@bg-kit     # instala waypoint ^0.30.0 como dependencia
 claude plugin install lens@bg-kit
 ```
 
@@ -228,11 +228,15 @@ build.mjs     compila todos los plugins
 ## Desarrollo
 
 ```bash
-npm install
-npm test                 # vitest
+npm ci                   # las dependencias del lockfile; los tests piden Node ≥ 22.12 (vitest 5)
+npm run mod-types:update # los tipos del motor contra los que compila typecheck:mod (fuera de git; ver abajo)
+npm run ci               # lo que comprueba el CI: tipos, tipos de los mods, tests, frescura del build, claude plugin validate y test
+npm test                 # vitest: los proyectos unit y slow
+npm run test:unit        # el bucle rápido, sin los ficheros lentos
 npm run typecheck        # las CLI y las fuentes compartidas
 npm run typecheck:mod    # los mods (src/mod, src/lens)
 npm run build            # regenera dist/, hooks/ y assets/ de cada plugin; sube el resultado
+npm run clean-temp       # cuenta lo que dejaron en el temporal las ejecuciones viejas de los tests; npm run clean-temp -- --apply lo borra
 npm run art              # regenera los SVG de los README en docs/assets
 node scripts/usage-report.mjs <proyecto>/.forge/usage   # coste por agente y por sesión, de los ficheros de consumo de lens
 
@@ -248,3 +252,8 @@ node scripts/tui-snapshots.mjs --sizes 80x24 --modes main --config-dir <un direc
 ```
 
 Sube la versión del plugin en su `plugin.json` con cada cambio: Claude Code guarda en caché los plugins instalados por versión.
+
+- **Los tipos del motor** (`types/claude-code/index.d.ts`) no están en git: `npm run mod-types:update` los copia de la copia que escribe Claude Code al cargar la carpeta de un mod (abre una vez una sesión con `claude --plugin-dir plugins/waypoint`) o del checkout principal, y forge prepara sus worktrees con él.
+- **CI.** `.github/workflows/ci.yml` corre `npm run ci` en Ubuntu y Windows, con Node 22 y una versión fija de Claude Code, en cada push a `main` y en cada pull request. Sin los tipos del motor se salta `typecheck:mod` con un aviso. `npm run ci` es también la comprobación que cierra cada cambio aquí.
+- **Los tests y el temporal.** Cada ejecución de los tests tiene su propia raíz de temporales, que se borra al acabar, y un test crea sus directorios temporales con `useTempDirs()` de `tests/helpers/tmp.ts`.
+- **Tags.** Tras integrar un cambio en `main` con el árbol limpio, etiqueta cada plugin que cambió de versión: `node scripts/tag-plugins.mjs <plugin…>` enseña los tags `<nombre>--v<versión>` que crearía `claude plugin tag`, y `--apply` los crea en local. Nada de aquí los publica.

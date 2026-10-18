@@ -13,6 +13,21 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.30.0 — 2026-10-18
+
+#### Added
+- `design-snapshot --note-file <f>` takes the note from a file, so a note with quotes or `$` never goes through the shell; the design skill writes it there (J-22).
+
+#### Changed
+- The `PostToolUse` hook starts only for a command that names git (`if: Bash(*git*)`), and also for PowerShell: every other call saves a `node` start (hooks filter, J-22).
+- Each skill's `allowed-tools` lists the git commands it runs instead of `Bash(git *)`, and the README recommends a narrow `allow` list, a `deny` for `git push`, `git reset --hard`, `git clean` and `git -c`, and says why `git -C` is left for Claude Code to ask (I-03).
+- A flag followed by another flag has no value, as in forge: `next --session --track x` exits 2 (J-22).
+- `waypoint:plan` commits `plan.yaml` and `design.md` with pathspecs, and so does the delegation of `waypoint:work` (A-16).
+- Built with esbuild 0.28 (I-17).
+
+#### Repository
+- `npm run ci` runs the types, the mod types, the tests, a build freshness check, `claude plugin validate` and `claude plugin test`; `.github/workflows/ci.yml` runs it on Ubuntu and Windows. vitest 5, happy-dom 21 and esbuild 0.28 clear `npm audit`; the tests leave nothing in the temp directory, and `npm run clean-temp` counts what old runs left; the version tests are invariants and a contract test checks every command and flag the skills cite (I-01, I-05, I-09, I-10, I-16, I-17).
+
 ### 0.29.0 — 2026-10-18
 
 #### Added
@@ -320,6 +335,17 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.23.0 — 2026-10-18
+
+#### Added
+- Your trust in the commands of `.forge/config.yaml` (each validator's `cmd` and `affected_cmd`, and `swarm.setup`), tied to their hash: the triage prints `trust` with its question, `local set commands allowed --expect <hash>|denied|none` records the answer, and nothing runs them without it (exit 2; `swarm start` exits 3; an unattended run stalls with `untrusted-commands` and leaves one note per set of commands). «No» runs only the validators forge detects. The trust lives in `<git common dir>/forge/trust.json`, so a committed `.forge/local.yaml` grants nothing, and outside a git repository forge asks every time. The question lists every command, with any non-ASCII character shown as `<U+XXXX>`, and a duplicate validator name is a config error (I-03).
+- A final merge needs your recorded answer: `swarm merge` prints `needs-authorization` with its question, the new hook `answer` (PostToolUse on AskUserQuestion) records your answer in `.forge/execution/auth/`, and `--yes` merges only on that yes, from the same session within the hour. An away-from-keyboard auto-submit, or a yes with a note, does not count, and one answer allows one merge. `authorize merge-on-finish` records the start question; `swarm propose` prints the `runId` and `swarm start --run-id` adopts it, so a yes given before a `/clear` still counts. Run ids have propose's exact shape and are never reused (I-03).
+
+#### Changed
+- `swarm start --merge-on-finish` without your recorded yes starts with `mergeOnFinish: false` and says why; a `forge/…` branch needs no answer. Merge-on-finish merges a finished run once, and only after the final review accepts. In auto mode the merge question is asked at launch even when the request already says to merge (I-03).
+- The README recommends `Bash(node *forge.cjs*)` in `.claude/settings.local.json` of the projects you trust, `deny: Bash(*forge.cjs* hook *)` so Claude cannot call the hook commands by hand, and optional `ask` rules for every final merge and for `local set` (I-03).
+- Depends on waypoint ^0.30.0.
 
 ### 0.22.3 — 2026-10-18
 
@@ -769,6 +795,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.13.5 — 2026-10-18
+
+#### Changed
+- Rebuilt with esbuild 0.28; nothing lens shows changes (I-17).
 
 ### 0.13.4 — 2026-10-18
 

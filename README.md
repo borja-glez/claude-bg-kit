@@ -7,9 +7,9 @@ Design them, plan them, build them with independent review, run them in parallel
 
 **English** · [Español](README.es.md) · [Changelog](CHANGELOG.md)
 
-![waypoint 0.29.0](https://img.shields.io/badge/waypoint-0.29.0-cba6f7?style=flat-square)
-![forge 0.22.3](https://img.shields.io/badge/forge-0.22.3-fab387?style=flat-square)
-![lens 0.13.4](https://img.shields.io/badge/lens-0.13.4-b4befe?style=flat-square)
+![waypoint 0.30.0](https://img.shields.io/badge/waypoint-0.30.0-cba6f7?style=flat-square)
+![forge 0.23.0](https://img.shields.io/badge/forge-0.23.0-fab387?style=flat-square)
+![lens 0.13.5](https://img.shields.io/badge/lens-0.13.5-b4befe?style=flat-square)
 ![Claude Code plugin marketplace](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -78,7 +78,7 @@ Add the marketplace straight from GitHub, then install the plugins you want:
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # pulls in waypoint ^0.29.0 as a dependency
+claude plugin install forge@bg-kit     # pulls in waypoint ^0.30.0 as a dependency
 claude plugin install lens@bg-kit
 ```
 
@@ -228,11 +228,15 @@ build.mjs     bundles every plugin
 ## Develop
 
 ```bash
-npm install
-npm test                 # vitest
+npm ci                   # the dependencies of the lockfile; the tests need Node ≥ 22.12 (vitest 5)
+npm run mod-types:update # the engine types typecheck:mod compiles against (not in git; see below)
+npm run ci               # what CI checks: types, mod types, tests, build freshness, claude plugin validate and test
+npm test                 # vitest: the projects unit and slow
+npm run test:unit        # the quick loop, without the slow files
 npm run typecheck        # the CLIs and shared sources
 npm run typecheck:mod    # the mods (src/mod, src/lens)
 npm run build            # rebuilds every plugin's dist/, hooks/ and assets/; commit the output
+npm run clean-temp       # counts what old test runs left in the temp dir; npm run clean-temp -- --apply deletes it
 npm run art              # regenerates the README SVGs in docs/assets
 node scripts/usage-report.mjs <project>/.forge/usage   # cost per agent and per session, from lens's usage files
 
@@ -248,3 +252,8 @@ node scripts/tui-snapshots.mjs --sizes 80x24 --modes main --config-dir <an isola
 ```
 
 Bump the plugin's version in its `plugin.json` on every change: Claude Code caches installed plugins by version.
+
+- **The engine types** (`types/claude-code/index.d.ts`) are not in git: `npm run mod-types:update` copies them from the copy Claude Code writes when it loads a mod folder (open a session with `claude --plugin-dir plugins/waypoint` once) or from the main checkout, and forge sets up its worktrees with it.
+- **CI.** `.github/workflows/ci.yml` runs `npm run ci` on Ubuntu and Windows, with Node 22 and a pinned Claude Code, on every push to `main` and every pull request. Without the engine types it skips `typecheck:mod` with a warning. `npm run ci` is also the check that closes every change here.
+- **Tests and the temp dir.** Each test run gets its own temp root, removed at the end, and a test makes its temp directories with `useTempDirs()` of `tests/helpers/tmp.ts`.
+- **Tags.** After a change is merged into `main` with a clean tree, tag each plugin whose version changed: `node scripts/tag-plugins.mjs <plugin…>` shows the `<name>--v<version>` tags `claude plugin tag` would create, and `--apply` creates them locally. Nothing here pushes them.

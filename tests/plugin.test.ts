@@ -1868,6 +1868,14 @@ describe('plugin layout', () => {
     for (const f of ['large', 'execution', 'autonomy']) expect(runRef(f), f).not.toContain('«Sí, intégrala en');
   });
 
+  it('the root READMEs tell how to check and tag a change: npm run ci, test:unit, clean-temp, mod-types:update and tag-plugins (I-05)', () => {
+    for (const f of ['README.md', 'README.es.md']) {
+      for (const w of ['npm run ci', 'npm run test:unit', 'npm run clean-temp', 'npm run mod-types:update', 'node scripts/tag-plugins.mjs', '.github/workflows/ci.yml']) {
+        expect(read(f), `${f}: ${w}`).toContain(w);
+      }
+    }
+  });
+
   it('the trust in the config commands: trust.md, and triage, the start, auto mode, review and infinite send to it (I-03)', () => {
     const trust = runRef('trust');
     for (const w of ['FORGE local set commands allowed --expect <hash> --cwd <trust.cwd>', 'FORGE local set commands denied', '`note: true`', '`untrusted-commands`', 'AskUserQuestion', 'trust.commands']) {
