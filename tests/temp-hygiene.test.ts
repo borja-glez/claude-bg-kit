@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { walk } from './helpers/files.js';
 import { removeDir, useTempDirs } from './helpers/tmp.js';
 import setup, { stamp } from './setup/temp-root.js';
 
@@ -72,11 +73,6 @@ describe('removeDir (I-01)', () => {
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('bgkit-busy-AbC123'));
     } finally { warn.mockRestore(); }
   });
-});
-
-const walk = (dir: string): string[] => readdirSync(dir).flatMap(n => {
-  const p = path.join(dir, n);
-  return statSync(p).isDirectory() ? walk(p) : [p];
 });
 
 describe('no test makes a temp directory by hand (I-01)', () => {
