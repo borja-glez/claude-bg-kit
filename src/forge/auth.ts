@@ -5,7 +5,8 @@
 //   merges, less than 60 minutes ago; the merge it allows uses it.
 // - `merge-on-finish` lets `swarm start --merge-on-finish` set mergeOnFinish. It is tied to the run id, with no session and
 //   no expiry, because the start question is answered in the design session and the run starts in another after /clear.
-//   One asked before the run exists (auto mode at launch) has no run id and is tied to the session that asked instead.
+//   One asked before the run exists (auto mode at launch) has no run id and is tied instead to the session that asked and
+//   to the project it names, for 24 hours (as launch.json): a later task of that session never inherits it.
 // Writing these files by hand gets past it: this closes the casual path (adding --yes), not a deliberate forgery.
 // Only the person's own submit counts: a choice the engine sent while they were away, a follow-up instead of the submit,
 // or a yes they added a note to is not a yes.
@@ -22,6 +23,8 @@ export interface AuthRecord {
   authId: string; kind: AuthKind; runId: string | null; target: string; question: string; yes: string; createdAt: string;
   /** C1 id of the session that asked: on a merge record, and on a merge-on-finish record without a run; else null. */
   session: string | null;
+  /** The project a merge-on-finish record without a run is for (`swarm start --project`); none on the others. */
+  project?: string;
   /** `other`: the person picked the yes label but added a note to it, which is not a yes (`note` keeps what they wrote). */
   answeredAt?: string; answer?: 'yes' | 'no' | 'other'; answeredBy?: string | null; usedAt?: string;
   /** The note the person added to their choice in AskUserQuestion, when there was one. */
@@ -33,10 +36,12 @@ export interface AuthRecord {
   unreadable?: true;
 }
 export type MergeAuthReason = 'no session id' | 'record unreadable' | 'no answer recorded' | 'answered no' | 'expired' | 'other session' | 'other run' | 'other branch' | 'already used';
-export type MofReason = 'record unreadable' | 'no answer recorded' | 'answered no' | 'other run' | 'other branch' | 'already used';
+export type MofReason = 'record unreadable' | 'no answer recorded' | 'answered no' | 'expired' | 'other run' | 'other project' | 'other branch' | 'already used';
 
 /** A merge record allows the merge for this long after its answer. */
 export const MERGE_AUTH_TTL_MS = 60 * 60_000;
+/** A merge-on-finish record without a run (asked at launch) allows it for this long after its answer, as launch.json. */
+export const MOF_LAUNCH_TTL_MS = 24 * 60 * 60_000;
 /** How far ahead of now a record's createdAt or answeredAt may be (clock skew); a record dated later allows nothing. */
 export const AUTH_CLOCK_SKEW_MS = 5 * 60_000;
 /** The records read: the ones written last. */
@@ -78,6 +83,7 @@ export function normalizeAuth(x: unknown): AuthRecord | null {
   if (runId === undefined || !target || !isRunBranch(target) || !question || !yes || !createdAt) return null;
   return {
     authId, kind, runId, target, question, yes, createdAt, session: isSafeId(o.session) ? o.session : null,
+    ...(isSafeId(o.project) ? { project: o.project } : {}),
     ...(iso(o.answeredAt) ? { answeredAt: iso(o.answeredAt) } : {}),
     ...(o.answer === 'yes' || o.answer === 'no' || o.answer === 'other' ? { answer: o.answer } : {}),
     ...(o.answeredBy === null || isSafeId(o.answeredBy) ? { answeredBy: o.answeredBy as string | null } : {}),
@@ -250,18 +256,20 @@ export function mergeAsk(authId: string, branch: string, target: string, es: boo
   };
 }
 
-/** The start question of a run that may merge into `target` by itself when it ends (no first), and its yes label. */
-export function mofAsk(authId: string, target: string, es: boolean, isDefault: boolean): { ask: AuthAsk; yes: string } {
+/** The start question of a run that may merge into `target` by itself when it ends (no first), and its yes label. One
+ *  asked before the run exists names its `project`. */
+export function mofAsk(authId: string, target: string, es: boolean, isDefault: boolean, project?: string): { ask: AuthAsk; yes: string } {
   const yes = es ? `Sí, intégrala en ${target}` : `Yes, merge it into ${target}`;
   const where = isDefault
     ? (es ? `${target} es la rama por defecto del repositorio` : `${target} is the repository's default branch`)
     : (es ? `forge integra la rama de ejecución en ${target} al acabar` : `forge merges the run branch into ${target} when it ends`);
+  const of = project ? (es ? ` de ${project}` : ` of ${project}`) : '';
   return {
     yes,
     ask: {
       question: es
-        ? `Cuando todo esté hecho y la revisión final pase, ¿integro la rama de ejecución en ${target} sin preguntarte? [${authId}]`
-        : `When everything is done and the final review passes, do I merge the run branch into ${target} without asking you? [${authId}]`,
+        ? `Cuando todo esté hecho y la revisión final${of} pase, ¿integro la rama de ejecución en ${target} sin preguntarte? [${authId}]`
+        : `When everything is done and the final review${of} passes, do I merge the run branch into ${target} without asking you? [${authId}]`,
       header: es ? 'Al acabar' : 'On finish',
       options: [
         { label: es ? 'No, la reviso yo (Recomendado)' : 'No, I will review it (Recommended)', description: es ? 'al acabar te pregunto antes de integrar' : 'when it ends I ask you before merging' },
@@ -273,19 +281,19 @@ export function mofAsk(authId: string, target: string, es: boolean, isDefault: b
 }
 
 /**
- * A question that waits for its answer: the open record of the same kind, run, branch and session (a merge one younger
- * than MERGE_AUTH_TTL_MS, none dated ahead of now) when its question still reads the same, else a new record under an
- * id no file has.
+ * A question that waits for its answer: the open record of the same kind, run, branch, session and project (a merge one
+ * younger than MERGE_AUTH_TTL_MS, none dated ahead of now) when its question still reads the same, else a new record
+ * under an id no file has.
  */
 export function pendingAuth(root: string, o: {
   kind: AuthKind; runId: string | null; target: string; session: string | null; now: Date; rand: () => number;
-  build: (authId: string) => { ask: AuthAsk; yes: string };
+  build: (authId: string) => { ask: AuthAsk; yes: string }; project?: string;
 }): { authId: string; ask: AuthAsk } {
   const dir = authDir(root);
   const recs = readAuthsIn(dir);
   const nowMs = o.now.getTime();
-  const open = recs.find(r => !r.unreadable && r.kind === o.kind && r.runId === o.runId && r.target === o.target && r.session === o.session && !r.answer
-    && !r.usedAt && !aheadOf(r, nowMs) && (o.kind !== 'merge' || nowMs - Date.parse(r.createdAt) < MERGE_AUTH_TTL_MS));
+  const open = recs.find(r => !r.unreadable && r.kind === o.kind && r.runId === o.runId && r.target === o.target && r.session === o.session
+    && r.project === o.project && !r.answer && !r.usedAt && !aheadOf(r, nowMs) && (o.kind !== 'merge' || nowMs - Date.parse(r.createdAt) < MERGE_AUTH_TTL_MS));
   if (open) {
     const b = o.build(open.authId);
     if (b.ask.question === open.question) return { authId: open.authId, ask: b.ask };
@@ -295,7 +303,10 @@ export function pendingAuth(root: string, o: {
     if (!AUTH_ID.test(authId)) throw new Error('auth: the run id cannot name an authorization');
     if (existsSync(path.join(dir, `${authId}.json`))) continue;
     const b = o.build(authId);
-    const rec: AuthRecord = { authId, kind: o.kind, runId: o.runId, target: o.target, question: b.ask.question, yes: b.yes, createdAt: o.now.toISOString(), session: o.session };
+    const rec: AuthRecord = {
+      authId, kind: o.kind, runId: o.runId, target: o.target, question: b.ask.question, yes: b.yes, createdAt: o.now.toISOString(), session: o.session,
+      ...(o.project ? { project: o.project } : {}),
+    };
     if (writeAuthIn(dir, rec, null)) return { authId, ask: b.ask };
   }
   throw new Error('auth: no free authorization id');
@@ -342,17 +353,25 @@ export function checkMergeAuth(recs: AuthRecord[], o: { runId: string; target: s
 }
 
 /**
- * Whether `swarm start --merge-on-finish` may set mergeOnFinish for run `runId` into `target`, and why not. `now`
- * (milliseconds, the clock by default) only sets aside a yes dated ahead of it.
+ * Whether `swarm start --merge-on-finish` may set mergeOnFinish for run `runId` of `project` into `target`, and why
+ * not. A record tied to the run decides from any session, at any time; one asked before the run existed (no run) only
+ * for the session that asked and the project it names, MOF_LAUNCH_TTL_MS after its answer. `now` (milliseconds, the
+ * clock by default) also sets aside a yes dated ahead of it.
  */
-export function checkMofAuth(recs: AuthRecord[], o: { runId: string; target: string; session: string | null; now?: number }):
+export function checkMofAuth(recs: AuthRecord[], o: { runId: string; target: string; session: string | null; project?: string | null; now?: number }):
   { ok: true; record: AuthRecord } | { ok: false; reason: MofReason; note?: string } {
   if (unreadableFor(recs, 'merge-on-finish', o.runId, o.session !== null)) return { ok: false, reason: 'record unreadable' };
-  const mof = deciding(recs, 'merge-on-finish', o.now ?? Date.now());
-  const r = mof.filter(x => x.runId === o.runId || (x.runId === null && o.session !== null && x.session === o.session)).sort(newestFirst)[0];
-  if (!r) return { ok: false, reason: mof.some(x => x.answer === 'yes' && !x.usedAt && x.runId !== null && x.runId !== o.runId) ? 'other run' : 'no answer recorded' };
+  const nowMs = o.now ?? Date.now();
+  const mof = deciding(recs, 'merge-on-finish', nowMs);
+  const launch = (x: AuthRecord) => x.runId === null && o.session !== null && x.session === o.session;
+  const r = mof.filter(x => x.runId === o.runId || (launch(x) && !!o.project && x.project === o.project)).sort(newestFirst)[0];
+  if (!r) {
+    const open = mof.filter(x => x.answer === 'yes' && !x.usedAt);
+    return { ok: false, reason: open.some(x => x.runId !== null && x.runId !== o.runId) ? 'other run' : open.some(launch) ? 'other project' : 'no answer recorded' };
+  }
   if (r.usedAt) return { ok: false, reason: 'already used' };
   if (r.answer !== 'yes') return { ok: false, reason: 'answered no', ...noteOf(r) };
+  if (r.runId === null && nowMs - answeredMs(r) > MOF_LAUNCH_TTL_MS) return { ok: false, reason: 'expired' };
   if (r.target !== o.target) return { ok: false, reason: 'other branch' };
   return { ok: true, record: r };
 }

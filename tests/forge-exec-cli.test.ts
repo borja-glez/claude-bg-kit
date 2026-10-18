@@ -2104,9 +2104,11 @@ describe('the run id and the merge on finish (I-03)', () => {
     }
   });
   it('a yes asked before the run existed (auto mode at launch) counts only from the session that asked, and is tied to its run then', () => {
-    const a = out(cli(['authorize', 'merge-on-finish', '--branch', 'main', '--locale', 'en', '--hook-session', 'hook-main'], io));
+    const a = out(cli(['authorize', 'merge-on-finish', '--branch', 'main', '--project', 'shop', '--locale', 'en', '--hook-session', 'hook-main'], io));
     expect(a.runId).toBeNull();
     expect(a.authId).toMatch(/^mof-launch-[0-9a-z]{4}$/);
+    expect(a.ask.question).toContain('the final review of shop passes');
+    expect(readAuths(root).find(r => r.authId === a.authId)).toMatchObject({ project: 'shop', session: 'hook-main' });
     answerHook(a.ask.question, yesOf(a.ask), 'hook-main');
     const other = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish', '--hook-session', 'hook-other'], io));
     expect(other).toMatchObject({ mergeOnFinish: false, mergeRefused: 'no answer recorded' });
@@ -2115,10 +2117,28 @@ describe('the run id and the merge on finish (I-03)', () => {
     const mine = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], { ...io, now: () => new Date(NOW.getTime() + 60_000) }));
     expect(mine.mergeOnFinish).toBe(true);
     expect(readAuths(root).find(r => r.authId === a.authId)).toMatchObject({ runId: mine.runId, usedAt: expect.any(String) });
-    expect(cli(['authorize', 'merge-on-finish', '--branch', 'main'], io).code).toBe(2);
+    expect(cli(['authorize', 'merge-on-finish', '--branch', 'main', '--project', 'shop'], io).code).toBe(2);
+    // Without a run the project is required: the yes is that project's only.
+    const noProject = cli(['authorize', 'merge-on-finish', '--branch', 'main', '--hook-session', 'hook-main'], io);
+    expect(noProject.code).toBe(2);
+    expect(noProject.stderr).toContain('--project');
+  });
+  it('a launch yes of another project, or answered more than 24 hours before, leaves mergeOnFinish false (m6)', () => {
+    const a = out(cli(['authorize', 'merge-on-finish', '--branch', 'main', '--project', 'blog', '--locale', 'en', '--hook-session', 'hook-main'], io));
+    answerHook(a.ask.question, yesOf(a.ask), 'hook-main');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish', '--hook-session', 'hook-main'], io)))
+      .toMatchObject({ mergeOnFinish: false, mergeRefused: 'other project' });
+    run(['swarm', 'stop'], io);
+    out(run(['swarm', 'close'], io));
+    const b = out(cli(['authorize', 'merge-on-finish', '--branch', 'main', '--project', 'shop', '--locale', 'en', '--hook-session', 'hook-main'], io));
+    answerHook(b.ask.question, yesOf(b.ask), 'hook-main');
+    const late = { ...io, now: () => new Date(NOW.getTime() + 25 * 3600_000) };
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish', '--hook-session', 'hook-main'], late)))
+      .toMatchObject({ mergeOnFinish: false, mergeRefused: 'expired' });
+    expect(readAuths(root).filter(r => r.usedAt)).toEqual([]);
   });
   it('a used yes starts no second run that merges by itself: the launch yes of the session, or the run id it was used for', () => {
-    const a = out(cli(['authorize', 'merge-on-finish', '--branch', 'main', '--locale', 'en', '--hook-session', 'hook-main'], io));
+    const a = out(cli(['authorize', 'merge-on-finish', '--branch', 'main', '--project', 'shop', '--locale', 'en', '--hook-session', 'hook-main'], io));
     answerHook(a.ask.question, yesOf(a.ask), 'hook-main');
     expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], io)).mergeOnFinish).toBe(true);
     run(['swarm', 'stop'], io);
@@ -2187,6 +2207,8 @@ describe('the run id and the merge on finish (I-03)', () => {
     expect(line({ mergeRefused: 'already used', es: true })).toBe('No integro solo al acabar (pregunta del arranque: esa respuesta ya se usó).');
     expect(line({ mergeRefused: 'answered no', mergeNote: 'el viernes', es: true })).toBe('No integro solo al acabar (pregunta del arranque: respondiste con una nota: «el viernes»).');
     expect(line({ mergeRefused: 'answered no' })).toBe('I will not merge by myself at the end (start question: you answered no).');
+    expect(line({ mergeRefused: 'expired' })).toBe('I will not merge by myself at the end (start question: the answer is more than 24 hours old).');
+    expect(line({ mergeRefused: 'other project', es: true })).toBe('No integro solo al acabar (pregunta del arranque: la respuesta era para otro proyecto).');
   });
   it('one rule for the default branch, which swarm start and authorize share: origin\'s HEAD, else main, else master', () => {
     const fake = (origin: string | null, heads: string[]) => (a: string[]) =>

@@ -1356,11 +1356,12 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       // The person's language (--locale): a resume keeps the recorded one unless a new flag is given.
       const lang = locale ? { locale } : {};
       // I-03: --merge-on-finish needs the person's yes to the start question, recorded by the hook `answer`: tied to this
-      // run id or, asked before the run existed (auto mode at launch), to this session. A plan run whose base is forge's
-      // own needs none; an ephemeral run never takes it (it makes no final merge). Without it the run starts with
-      // mergeOnFinish false and says why. A resume asks about its own run and its own base (the branch it merges into),
-      // not the branch the checkout is on now. Checked here, after every git step, and spent at once (a launch yes is tied
-      // to this run then): a yes that cannot be marked used starts no run with it, so it never sets two runs' mergeOnFinish.
+      // run id or, asked before the run existed (auto mode at launch), to this session and project for 24 hours. A plan
+      // run whose base is forge's own needs none; an ephemeral run never takes it (it makes no final merge). Without it
+      // the run starts with mergeOnFinish false and says why. A resume asks about its own run and its own base (the
+      // branch it merges into), not the branch the checkout is on now. Checked here, after every git step, and spent at
+      // once (a launch yes is tied to this run then): a yes that cannot be marked used starts no run with it, so it never
+      // sets two runs' mergeOnFinish.
       const mergeInto = resume && prev ? prev.base : base;
       const mofAsked = kind === 'plan' && has('merge-on-finish') && !(resume && prev?.mergeOnFinish);
       let mof = mofAsked && isForgeTarget(mergeInto);
@@ -1368,7 +1369,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       let mergeNote: string | null = null;
       if (mofAsked && !isForgeTarget(mergeInto)) {
         const mofRun = resume && prev ? prev.runId : runId;
-        const v = checkMofAuth(readAuths(io.cwd), { runId: mofRun, target: mergeInto, session: hook, now: io.now().getTime() });
+        const v = checkMofAuth(readAuths(io.cwd), { runId: mofRun, target: mergeInto, session: hook, project: resume && prev ? prev.project : project, now: io.now().getTime() });
         if (!v.ok) { mergeRefused = v.reason; mergeNote = v.note ?? null; } else {
           try { useAuth(io.cwd, v.record, iso, mofRun); } catch (err) {
             throw new Error(`swarm start: the yes ${v.record.authId} to the start question could not be marked used (${err instanceof Error ? err.message : String(err)}); execution.json was not written, run swarm start again`);

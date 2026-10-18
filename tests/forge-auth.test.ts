@@ -69,12 +69,39 @@ describe('merge-on-finish authorizations (I-03)', () => {
   });
   it('one asked before the run existed (auto mode at launch) counts only for the session that asked, and using it ties it to the run', () => {
     const root = tmp('forge-auth-');
-    const launch = mof({ authId: 'mof-launch-ef56', runId: null, session: 'auto-1' });
-    expect(checkMofAuth([launch], { runId: 'shop-r9', target: 'main', session: 'auto-1' })).toMatchObject({ ok: true });
-    expect(checkMofAuth([launch], { runId: 'shop-r9', target: 'main', session: 'auto-2' })).toEqual({ ok: false, reason: 'no answer recorded' });
+    const launch = mof({ authId: 'mof-launch-ef56', runId: null, session: 'auto-1', project: 'shop' });
+    expect(checkMofAuth([launch], { runId: 'shop-r9', target: 'main', session: 'auto-1', project: 'shop', now: Date.parse(at(30)) })).toMatchObject({ ok: true });
+    expect(checkMofAuth([launch], { runId: 'shop-r9', target: 'main', session: 'auto-2', project: 'shop', now: Date.parse(at(30)) })).toEqual({ ok: false, reason: 'no answer recorded' });
     writeAuth(root, launch);
     useAuth(root, launch, at(3), 'shop-r9');
     expect(readAuths(root)).toEqual([{ ...launch, runId: 'shop-r9', usedAt: at(3) }]);
+  });
+  it('a launch yes counts only for the project it names, and for 24 hours after the answer; a yes tied to its run has no expiry (m6)', () => {
+    const launch = mof({ authId: 'mof-launch-ef56', runId: null, session: 'auto-1', project: 'shop' });
+    const o = { runId: 'shop-r9', target: 'main', session: 'auto-1', project: 'shop', now: Date.parse(at(60)) };
+    expect(checkMofAuth([launch], { ...o, now: Date.parse(at(24 * 60 - 1)) })).toMatchObject({ ok: true });
+    expect(checkMofAuth([launch], { ...o, now: Date.parse(at(24 * 60 + 1)) })).toEqual({ ok: false, reason: 'expired' });
+    expect(checkMofAuth([launch], { ...o, runId: 'blog-r9', project: 'blog' })).toEqual({ ok: false, reason: 'other project' });
+    expect(checkMofAuth([launch], { ...o, project: undefined })).toEqual({ ok: false, reason: 'other project' });
+    // One that names no project is no project's.
+    expect(checkMofAuth([mof({ ...launch, project: undefined })], o)).toEqual({ ok: false, reason: 'other project' });
+    // A newer no to another project's question does not take this project's yes away.
+    const blogNo = mof({ authId: 'mof-launch-zz99', runId: null, session: 'auto-1', project: 'blog', answer: 'no', answeredAt: at(5) });
+    expect(checkMofAuth([launch, blogNo], o)).toMatchObject({ ok: true });
+    expect(checkMofAuth([mof({ answeredAt: at(-3 * 24 * 60) })], { ...o, runId: 'shop-r1' })).toMatchObject({ ok: true });
+    expect(normalizeAuth(launch)).toEqual(launch);
+    expect(normalizeAuth({ ...launch, project: '../x' })).toEqual(mof({ ...launch, project: undefined }));
+  });
+  it('pendingAuth reuses an open launch question only for the same project', () => {
+    const root = tmp('forge-auth-');
+    const o = { kind: 'merge-on-finish' as const, runId: null, target: 'main', session: 'auto-1', now: new Date(T), rand: () => 0.25, build: (id: string) => mofAsk(id, 'main', false, true, 'shop'), project: 'shop' };
+    const a = pendingAuth(root, o);
+    expect(a.ask.question).toContain('shop');
+    expect(pendingAuth(root, o)).toEqual(a);
+    expect(readAuths(root)[0]).toMatchObject({ authId: a.authId, project: 'shop', runId: null });
+    const b = pendingAuth(root, { ...o, project: 'blog', rand: () => 0.75, build: (id: string) => mofAsk(id, 'main', false, true, 'blog') });
+    expect(b.authId).not.toBe(a.authId);
+    expect(readAuths(root).find(r => r.authId === b.authId)).toMatchObject({ project: 'blog' });
   });
   it('a launch record without the session that asked counts for nobody, and a merge yes is never a merge-on-finish yes', () => {
     expect(checkMofAuth([mof({ authId: 'mof-launch-ef56', runId: null, session: null })], { runId: 'shop-r9', target: 'main', session: null }))
@@ -111,6 +138,11 @@ describe('authorization records (I-03)', () => {
     expect(m.ask.options.map(o => o.label)).toEqual(['No, I will review it (Recommended)', 'Yes, merge it into main']);
     expect(m.yes).toBe('Yes, merge it into main');
     expect(m.ask.options[1].description).toContain('default branch');
+    // A launch question (no run yet) names the project it is for.
+    expect(mofAsk('mof-launch-0000', 'main', false, true, 'shop').ask.question)
+      .toBe('When everything is done and the final review of shop passes, do I merge the run branch into main without asking you? [mof-launch-0000]');
+    expect(mofAsk('mof-launch-0000', 'main', true, true, 'shop').ask.question)
+      .toBe('Cuando todo esté hecho y la revisión final de shop pase, ¿integro la rama de ejecución en main sin preguntarte? [mof-launch-0000]');
     for (const a of [m.ask, mofAsk('mof-x-0000', 'main', true, false).ask, mergeAsk('merge-x-0000', 'b', 'main', false).ask]) expect(a.header.length).toBeLessThanOrEqual(12);
   });
   it('normalizeAuth: an id of the other kind, a date that is not an ISO instant, a long label or a bad session is not kept', () => {

@@ -55,7 +55,9 @@ const REFUSED: Record<MofReason, { es: string; en: string }> = {
   'record unreadable': { es: 'no pude leer un registro de autorización', en: 'an authorization record could not be read' },
   'no answer recorded': { es: 'no hay ninguna respuesta tuya registrada', en: 'no answer of yours is recorded' },
   'answered no': { es: 'respondiste que no', en: 'you answered no' },
+  'expired': { es: 'la respuesta tiene más de 24 horas', en: 'the answer is more than 24 hours old' },
   'other run': { es: 'la respuesta era para otra ejecución', en: 'the answer was for another run' },
+  'other project': { es: 'la respuesta era para otro proyecto', en: 'the answer was for another project' },
   'other branch': { es: 'la respuesta era para otra rama', en: 'the answer was for another branch' },
   'already used': { es: 'esa respuesta ya se usó', en: 'that answer was already used' },
 };
