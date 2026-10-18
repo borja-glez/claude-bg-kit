@@ -9,7 +9,7 @@ import { loadConfig } from '../config.js';
 import { stopFile, parseRun, readRunText } from '../run.js';
 import { isLocale } from '../../lib/forge-run.js';
 import { appendEvent, appendPhase, readEvents, unmergedEvents } from '../ledger.js';
-import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, taskBase, type LockDeps } from '../execution.js';
+import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, taskBase, runIdOf, isRunIdOf, type LockDeps } from '../execution.js';
 import { sleepSync } from '../pid.js';
 import { liveJobs, noSlot, stepLockHeld, type Slot } from '../jobs.js';
 import { readMergingFile, takeMerging, removeMergingIf, mergingLive, mergingStaleAt, mergeInFlight, type MergingDoc, type MergingHold } from '../merging.js';
@@ -409,6 +409,8 @@ interface MergeOpts {
   slot?: Slot;
   /** D-07: the task the merge integrates, for merging.json (none for the final merge). */
   task?: string | null;
+  /** The branch `at` must still be on when the merge starts, checked under the marker as HEAD's commit is. */
+  branch?: string;
 }
 
 // The untracked paths git does not ignore, forge's own state aside (a directory collapsed into `dir/`).
@@ -662,6 +664,11 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   }
   // D-07: the merge phase, so a later attempt tells its own leftover (this ref, from this pre) from someone's.
   if (!hold.stamp('merge', until({ installs: 2 }))) return takenOver();
+  // Its branch too, not only HEAD's commit: a checkout switched meanwhile to another branch at that commit would take it.
+  if (o.branch !== undefined) {
+    const on = at.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
+    if (on !== o.branch) return { result: 'dirty', detail: `is on ${on ?? '?'}, not ${o.branch}`, ...withSetup() };
+  }
   if (at.git(['merge', '--no-ff', '--no-commit', ref]) === null) {
     if (!merging()) return { result: 'conflict', detail: `git refused to merge ${ref}`, ...withSetup() };
     return rollback(`merge conflict with ${ref}`);
@@ -859,7 +866,7 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'run', setup: config.swarm.setup, personal,
     retryDeps: rest.includes('--retry-deps'),
     run: runOptions(config, readEvents(io.cwd), io.now()),
-    main: io.cwd, cache: { read: cache, write: cache }, now: io.now, slot: io.slot,
+    main: io.cwd, cache: { read: cache, write: cache }, now: io.now, slot: io.slot, branch: e.branch,
   });
   // C4: the events of a plan run's task carry the run's project.
   logValidations(io, task, r.validations, e.kind === 'plan' && isSafeId(e.project) ? e.project : null);
@@ -939,9 +946,12 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     const m = inFlight.doc;
     return out({ result: 'busy', detail: `${m ? `an integration (${m.task ?? m.ref}, pid ${m.pid}) is merging in ${m.dir}` : 'an integration is starting'}; run swarm merge again once it ends` });
   }
-  // I-03: without mergeOnFinish, a merge into a branch that is not forge's needs the person's yes to this question,
-  // recorded by the hook `answer` from their AskUserQuestion answer: --yes alone is not enough. The session is C1's
-  // (the flag wins over CLAUDE_CODE_SESSION_ID): the yes counts only from the session that merges.
+  // I-03: a merge into a branch that is not forge's needs a permission of the person's, recorded by the hook `answer` from
+  // their AskUserQuestion answer (--yes alone is none), and each permission allows one merge:
+  // - their yes to the start question (mergeOnFinish) allows the one final merge of this run once it finished (inactive,
+  //   `finished`, not closed); while the run is active, stopped or closed, the merge asks as any other does;
+  // - their yes to this merge's question, from the session that merges (C1's: the flag wins over
+  //   CLAUDE_CODE_SESSION_ID), less than an hour old, whose question named this run branch and this base.
   const es = spanish(locale, io.cwd, e.project);
   const hookAt = rest.indexOf('--hook-session');
   const session = claudeSessionId(hookAt >= 0 ? rest[hookAt + 1] : null, io.env ?? process.env);
@@ -949,14 +959,28 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     kind: 'merge', runId: e.runId, target: e.base, session, now: io.now(), rand: io.rand ?? Math.random,
     build: id => mergeAsk(id, e.branch, e.base, es),
   });
-  const check = () => checkMergeAuth(readAuths(io.cwd), { runId: e.runId, target: e.base, session, now: io.now().getTime() });
+  // A yes is bound to the branches its question named: its record carries this merge's question, in either language.
+  const named = (r: AuthRecord) => [true, false].some(sp => mergeAsk(r.authId, e.branch, e.base, sp).ask.question === r.question);
+  const check = (): ReturnType<typeof checkMergeAuth> => {
+    const v = checkMergeAuth(readAuths(io.cwd), { runId: e.runId, target: e.base, session, now: io.now().getTime() });
+    return v.ok && !named(v.record) ? { ok: false, reason: 'other branch' } : v;
+  };
   const needsYes = (v: { reason: string; note?: string }): Result => out({ result: 'needs-authorization', reason: v.reason, ...(v.note ? { note: v.note } : {}), ...ask() });
-  let auth: AuthRecord | null = null;
-  if (!e.mergeOnFinish && !isForgeTarget(e.base)) {
+  /** The question path: without --yes the question; with it the yes recorded for it, or why not. */
+  const askYes = (): Result | AuthRecord => {
     if (!rest.includes('--yes')) return out({ result: 'needs-authorization', ...ask() });
     const v = check();
-    if (!v.ok) return needsYes(v);
-    auth = v.record;
+    return v.ok ? v.record : needsYes(v);
+  };
+  const finishedRun = (x: ExecutionState | null): x is ExecutionState =>
+    !!x && x.runId === e.runId && x.mergeOnFinish && !x.active && x.stopReason === 'finished' && !x.closedAt;
+  const asks = !isForgeTarget(e.base);
+  const onFinish = asks && finishedRun(e);
+  let auth: AuthRecord | null = null;
+  if (asks && !onFinish) {
+    const a = askYes();
+    if ('code' in a) return a;
+    auth = a;
   }
   const branch = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
   if (branch !== e.base) return out({ result: 'main-dirty', detail: `the main checkout is on ${branch ?? '?'}, not ${e.base}` });
@@ -966,19 +990,34 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'main', setup: config.swarm.setup,
     runAt: cleanRunWorktree(deps, runWorktree(io.cwd), e.branch), personal: true, retryDeps: rest.includes('--retry-deps'),
     run: runOptions(config, readEvents(io.cwd), io.now()),
-    main: io.cwd, cache: { read: false, write: config.validate.cache }, now: io.now, slot: io.slot,
+    main: io.cwd, cache: { read: false, write: config.validate.cache }, now: io.now, slot: io.slot, branch: e.base,
   };
-  // I-03: the yes is spent before the merge, the one step that cannot be undone, so no yes ever allows two merges: it is
-  // checked again and marked used while this process holds the execution's lock, which another merge of the run takes
-  // for the same. A yes that cannot be marked used merges nothing. A merge that ends otherwise (main-dirty, main-deps,
-  // conflict: nothing merged) gives it back; a give-back that fails, or a merge that throws, leaves it used (the next
-  // swarm merge asks again).
+  // I-03: the permission is spent before the merge, the one step that cannot be undone, so none ever allows two merges.
+  // Each is checked again and spent while this process holds the execution's lock, which another merge of the run takes
+  // to spend its own: mergeOnFinish goes false, the merge yes gets usedAt. One that cannot be checked and spent merges
+  // nothing. A merge that ends otherwise (main-dirty, main-deps, conflict) with the base's HEAD where it was gives it
+  // back; a give-back that fails, a base that moved, or a merge that throws leaves it spent (the next swarm merge asks).
   const lockDeps: LockDeps = { now: io.now, sleep: io.sleep };
   const locked = <T>(fn: () => T): T => {
     const box: { v?: T } = {};
     updateExecution(io.cwd, () => { box.v = fn(); return null; }, lockDeps);
     return box.v as T;
   };
+  const failed = (err: unknown) => (err instanceof Error ? err.message : String(err));
+  let finishSpent = false;
+  if (onFinish) {
+    try {
+      finishSpent = updateExecution(io.cwd, cur => (finishedRun(cur) ? { ...cur, mergeOnFinish: false } : null), lockDeps) !== null;
+    } catch (err) {
+      throw new Error(`swarm merge: nothing was merged: the merge on finish could not be checked and claimed (${failed(err)}); run swarm merge again`);
+    }
+    // The run changed since it was read (another merge claimed it, or it was resumed): the question path.
+    if (!finishSpent) {
+      const a = askYes();
+      if ('code' in a) return a;
+      auth = a;
+    }
+  }
   const usedAt = io.now().toISOString();
   if (auth) {
     const asked = auth.authId;
@@ -990,20 +1029,38 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
         return again;
       });
     } catch (err) {
-      throw new Error(`swarm merge: nothing was merged: the yes ${asked} could not be marked used (${err instanceof Error ? err.message : String(err)}); run swarm merge --yes again`);
+      throw new Error(`swarm merge: nothing was merged: the yes ${asked} could not be checked and marked used (${failed(err)}); run swarm merge --yes again`);
     }
     if (!v.ok) return needsYes(v);
     auth = v.record;
   }
+  const headOf = () => deps.git(['rev-parse', 'HEAD'])?.trim() || null;
+  const headBefore = headOf();
   const r = mergeIn(deps, e.branch, opts);
-  if (auth && r.result !== 'merged') {
-    const given = auth;
+  const given = auth;
+  if (r.result !== 'merged' && headBefore !== null && headOf() === headBefore) {
+    if (finishSpent) {
+      try {
+        updateExecution(io.cwd, cur => (cur && cur.runId === e.runId && !cur.mergeOnFinish && !cur.active && cur.stopReason === 'finished' && !cur.closedAt
+          ? { ...cur, mergeOnFinish: true } : null), lockDeps);
+      } catch { /* it stays spent: the next swarm merge asks the merge question */ }
+    }
+    if (given) {
+      try {
+        locked(() => {
+          const cur = readAuths(io.cwd).find(x => x.authId === given.authId && !x.unreadable);
+          if (cur?.usedAt === usedAt) writeAuth(io.cwd, given);
+        });
+      } catch { /* it stays used: the next swarm merge asks again */ }
+    }
+  } else if (r.result === 'merged' && given) {
+    // Marked used again, in case a give-back from a lock section that was taken over (past its stale time) undid it.
     try {
       locked(() => {
         const cur = readAuths(io.cwd).find(x => x.authId === given.authId && !x.unreadable);
-        if (cur?.usedAt === usedAt) writeAuth(io.cwd, given);
+        if (cur && !cur.usedAt) useAuth(io.cwd, cur, usedAt);
       });
-    } catch { /* it stays used: the next swarm merge asks again */ }
+    } catch { /* best effort: it was marked used before the merge */ }
   }
   const extras = attemptExtras(r, es, e.branch, true);
   if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}`, ...extras });
@@ -1172,7 +1229,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       if (!isRunBranch(branch)) throw new UsageError('swarm start: --branch is not a valid branch name');
       // execution.json is read back through the safe id rules: refuse here, before any branch or worktree exists.
       if (!isMemberId(session)) throw new UsageError('swarm start: --session must use letters, digits, _ - . (at most 120)');
-      if (!isSafeId(`${project}-${iso.replace(/[:.]/g, '')}`)) throw new UsageError('swarm start: --project must use letters, digits, _ - .');
+      if (!isSafeId(runIdOf(project, now))) throw new UsageError('swarm start: --project must use letters, digits, _ - .');
       if (kind === 'ephemeral' && !isRunBranch(base)) throw new UsageError(`swarm start: the base branch ${base} is outside the run branch rule (letters, digits, _ - . /)`);
       let setup: SetupResult = null;
       let baseSync: 'created' | 'up-to-date' | 'fast-forward' | 'merged' | null = null;
@@ -1191,27 +1248,17 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         const liveness = boundLiveness(io.cwd, prev, now.getTime());
         if (liveness !== 'stopped') throw new UsageError(boundElsewhere('start', prev.runId, prev.hookSession, liveness));
       }
-      // Checked before any branch or worktree moves: another project's id, one outside the safe id rule (it names files)
-      // or the id of the run execution.json still holds (its events and records would mix) is refused.
-      if (runIdFlag !== undefined && !resume && (!isSafeId(runIdFlag) || !runIdFlag.startsWith(`${project}-`) || runIdFlag === prev?.runId)) {
-        throw new UsageError(`swarm start: --run-id must start with ${project}-, use letters, digits, _ - . (at most 120) and not be the run of execution.json`);
+      // Checked before any branch or worktree moves. Only the id swarm propose prints for this project, exactly
+      // (<project>-<stamp>: another project's never matches, whatever its name), and only one no run has used: the run of
+      // execution.json, a run an authorization names (a merge question, or a yes it used) or the ledger's events name has
+      // started, and taking its id would take its answers and mix its events with this run's.
+      if (runIdFlag !== undefined && !resume) {
+        if (!isRunIdOf(project, runIdFlag)) throw new UsageError(`swarm start: --run-id must be the run id swarm propose printed for ${project} (${project}-<stamp>)`);
+        const started = runIdFlag === prev?.runId || readAuths(io.cwd).some(r => r.runId === runIdFlag && (r.kind === 'merge' || r.usedAt !== undefined))
+          || readEvents(io.cwd).some(ev => ev.runId === runIdFlag);
+        if (started) throw new UsageError(`swarm start: --run-id ${runIdFlag} is the id of a run that already started (execution.json, an authorization or the ledger names it); run swarm propose again for a new id`);
       }
-      const runId = runIdFlag !== undefined && !resume ? runIdFlag : `${project}-${iso.replace(/[:.]/g, '')}`;
-      // I-03: --merge-on-finish needs the person's yes to the start question, recorded by the hook `answer`: tied to this
-      // run id or, asked before the run existed (auto mode at launch), to this session. A base of forge's own needs none.
-      // Without it the run starts with mergeOnFinish false and says why. A resume asks about its own run and its own base
-      // (the branch it merges into), not the branch the checkout is on now.
-      const mergeInto = resume && prev ? prev.base : base;
-      let mofRecord: AuthRecord | null = null;
-      let mergeRefused: MofReason | null = null;
-      let mergeNote: string | null = null;
-      const mofAsked = has('merge-on-finish') && !(resume && prev?.mergeOnFinish);
-      if (mofAsked && kind === 'plan' && !isForgeTarget(mergeInto)) {
-        const v = checkMofAuth(readAuths(io.cwd), { runId: resume && prev ? prev.runId : runId, target: mergeInto, session: hook, now: now.getTime() });
-        if (v.ok) mofRecord = v.record;
-        else { mergeRefused = v.reason; mergeNote = v.note ?? null; }
-      }
-      const mof = mofAsked && !mergeRefused;
+      const runId = runIdFlag !== undefined && !resume ? runIdFlag : runIdOf(project, now);
       if (kind === 'ephemeral') {
         if (resume && prev) {
           // The run keeps the batch it started with: new requests go to the next run.
@@ -1284,6 +1331,27 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       }
       // The person's language (--locale): a resume keeps the recorded one unless a new flag is given.
       const lang = locale ? { locale } : {};
+      // I-03: --merge-on-finish needs the person's yes to the start question, recorded by the hook `answer`: tied to this
+      // run id or, asked before the run existed (auto mode at launch), to this session. A plan run whose base is forge's
+      // own needs none; an ephemeral run never takes it (it makes no final merge). Without it the run starts with
+      // mergeOnFinish false and says why. A resume asks about its own run and its own base (the branch it merges into),
+      // not the branch the checkout is on now. Checked here, after every git step, and spent at once (a launch yes is tied
+      // to this run then): a yes that cannot be marked used starts no run with it, so it never sets two runs' mergeOnFinish.
+      const mergeInto = resume && prev ? prev.base : base;
+      const mofAsked = kind === 'plan' && has('merge-on-finish') && !(resume && prev?.mergeOnFinish);
+      let mof = mofAsked && isForgeTarget(mergeInto);
+      let mergeRefused: MofReason | null = null;
+      let mergeNote: string | null = null;
+      if (mofAsked && !isForgeTarget(mergeInto)) {
+        const mofRun = resume && prev ? prev.runId : runId;
+        const v = checkMofAuth(readAuths(io.cwd), { runId: mofRun, target: mergeInto, session: hook, now: io.now().getTime() });
+        if (!v.ok) { mergeRefused = v.reason; mergeNote = v.note ?? null; } else {
+          try { useAuth(io.cwd, v.record, iso, mofRun); } catch (err) {
+            throw new Error(`swarm start: the yes ${v.record.authId} to the start question could not be marked used (${err instanceof Error ? err.message : String(err)}); execution.json was not written, run swarm start again`);
+          }
+          mof = true;
+        }
+      }
       const state: ExecutionState = resume && prev
         ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || mof, coordinator: session, hookSession: hook, sleepUntil: null, ...auto, ...lang }
         : {
@@ -1303,14 +1371,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       // C2: a new run over an ended one that nobody closed replaces it; say which (execution.json keeps one run).
       const replaced = prev && !prev.active && !prev.closedAt && !resume ? { runId: prev.runId, stopReason: prev.stopReason } : null;
       rmSync(stopFile(io.cwd), { force: true });
-      // I-03: the yes to the start question is spent by this start (a launch one is tied to this run now), before
-      // execution.json says mergeOnFinish: one that cannot be marked used starts nothing with it, so it never sets a
-      // second run's mergeOnFinish.
-      if (mofRecord) {
-        try { useAuth(io.cwd, mofRecord, iso, state.runId); } catch (err) {
-          throw new Error(`swarm start: the yes ${mofRecord.authId} to the start question could not be marked used (${err instanceof Error ? err.message : String(err)}); execution.json was not written, run swarm start again`);
-        }
-      }
       // A resume keeps what changed meanwhile and takes only this start's fields.
       updateExecution(io.cwd, cur => (resume && cur && cur.runId === state.runId
         ? { ...cur, parallel: state.parallel, mode: state.mode, mergeOnFinish: state.mergeOnFinish, coordinator: state.coordinator, hookSession: state.hookSession, sleepUntil: null, ...auto, ...lang }
@@ -1362,7 +1422,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         profile: p.profile, chain: p.chain, serializing: p.serializing, mostlySerial: p.mostlySerial, say: proposeSay(es, plan.tasks.length, p),
         // I-03: the id the run gets if it starts now (launch.json keeps it, swarm start --run-id adopts it), so the start
         // question can be tied to it before the run exists; none for loose tasks (an ephemeral run never merges at the end).
-        runId: planned ? `${planned.project}-${iso.replace(/[:.]/g, '')}` : null,
+        runId: planned ? runIdOf(planned.project, now) : null,
       });
     }
     case 'worktree': {

@@ -10,7 +10,7 @@ import { readEvents } from '../src/forge/ledger.js';
 import { loadConfig } from '../src/forge/config.js';
 import { SLOT_MAX_WAIT_MS } from '../src/forge/jobs.js';
 import { mergingFile, readMerging, readMergingFile, removeMergingIf, takeMerging, MERGING_UNREADABLE_MS } from '../src/forge/merging.js';
-import { authDir, readAuths, useAuth, writeAuth } from '../src/forge/auth.js';
+import { authDir, mergeAsk, readAuths, useAuth, writeAuth, type AuthRecord } from '../src/forge/auth.js';
 import { hookAnswerStdin } from './helpers/hook-answer.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
@@ -1141,7 +1141,7 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     mkdirSync(blocker);
     const r = run(['swarm', 'merge', '--yes', '--hook-session', 'hook-main'], io);
     expect(r.code).toBe(1);
-    expect(r.stderr).toContain(`nothing was merged: the yes ${p.authId} could not be marked used`);
+    expect(r.stderr).toContain(`nothing was merged: the yes ${p.authId} could not be checked and marked used`);
     expect(git('log', '-1', '--format=%s')).toBe('init');
     expect(record(p.authId)).not.toHaveProperty('usedAt');
     rmSync(blocker, { recursive: true });
@@ -1165,6 +1165,104 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     expect(out(swarmCommand(['merge', '--yes', '--hook-session', 'hook-main'], io, deps))).toMatchObject({ result: 'needs-authorization', reason: 'already used' });
     expect(spent).toBe(true);
     expect(git('log', '-1', '--format=%s')).toBe('init');
+  });
+  const yesTo = (authId: string, question: string): AuthRecord => ({
+    authId, kind: 'merge', runId: readExecution(root)!.runId, target: 'main', question, yes: 'Yes, merge it', createdAt: '2026-10-12T12:00:00.000Z',
+    session: 'hook-main', answeredAt: '2026-10-12T12:00:00.000Z', answer: 'yes', answeredBy: 'hook-main',
+  });
+  const mergeCommits = () => git('log', '--format=%s', 'main').split('\n').filter(s => s === 'forge: merge forge/run-shop').length;
+  it('a yes to the start question allows the one final merge of the finished run: none while it runs or once stopped, none after it', () => {
+    finished();
+    saveExecution(root, { ...readExecution(root)!, mergeOnFinish: true });
+    // Active: the run has not finished, so the merge asks as any other does.
+    expect(merge([])).toMatchObject({ result: 'needs-authorization' });
+    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stopped' });
+    expect(merge([])).toMatchObject({ result: 'needs-authorization' });
+    saveExecution(root, { ...readExecution(root)!, stopReason: 'finished' });
+    // A merge that ends main-dirty gives it back; the next one merges with it and spends it.
+    writeFileSync(path.join(root, 'dirty.txt'), 'x\n');
+    expect(merge([])).toMatchObject({ result: 'main-dirty' });
+    expect(readExecution(root)!.mergeOnFinish).toBe(true);
+    rmSync(path.join(root, 'dirty.txt'));
+    expect(merge([])).toMatchObject({ result: 'merged', closed: true });
+    expect(readExecution(root)).toMatchObject({ mergeOnFinish: false, closedBy: 'merge' });
+    // A commit on the run branch after it: the next merge asks.
+    commitIn(runWt(), 'late.txt', 'late\n', 'late commit');
+    expect(merge([])).toMatchObject({ result: 'needs-authorization' });
+    expect(mergeCommits()).toBe(1);
+  });
+  it('the merge on finish is claimed under the lock: a run another merge claimed since it was read asks its question', () => {
+    finished();
+    saveExecution(root, { ...readExecution(root)!, mergeOnFinish: true, active: false, stopReason: 'finished' });
+    const mainGit = defaultGit(root);
+    // Another merge of the run claims it while this one reads which branch the main checkout is on.
+    const deps: SwarmDeps = {
+      git: a => { if (a[0] === 'rev-parse' && a[1] === '--abbrev-ref') saveExecution(root, { ...readExecution(root)!, mergeOnFinish: false }); return mainGit(a); },
+      exec: defaultExec(root), repo: repoReader(root), at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
+    };
+    expect(out(swarmCommand(['merge', '--hook-session', 'hook-main'], io, deps))).toMatchObject({ result: 'needs-authorization' });
+    expect(mergeCommits()).toBe(0);
+  });
+  it('a yes whose question named other branches is no yes for this merge: one of shop-other\'s run branch never merges shop\'s', () => {
+    finished();
+    const authId = `merge-${readExecution(root)!.runId}-cccc`;
+    writeAuth(root, yesTo(authId, mergeAsk(authId, 'forge/run-shop-other', 'main', false).ask.question));
+    expect(merge(['--yes'])).toMatchObject({ result: 'needs-authorization', reason: 'other branch' });
+    expect(mergeCommits()).toBe(0);
+    // This merge's own question, in either language, is one.
+    writeAuth(root, yesTo(authId, mergeAsk(authId, 'forge/run-shop', 'main', true).ask.question));
+    expect(merge(['--yes'])).toMatchObject({ result: 'merged' });
+  });
+  it('a later run cannot take this run\'s id, nor with it the yes given back to it after a main-dirty', () => {
+    finished();
+    const runA = readExecution(root)!.runId;
+    const p = merge([]);
+    answer(p.ask.question, 'Yes, merge it');
+    writeFileSync(path.join(root, 'dirty.txt'), 'x\n');
+    expect(merge(['--yes'])).toMatchObject({ result: 'main-dirty' });
+    rmSync(path.join(root, 'dirty.txt'));
+    expect(record(p.authId)).not.toHaveProperty('usedAt');
+    run(['swarm', 'stop'], io);
+    out(run(['swarm', 'close'], io));
+    const later = (min: number): Io => ({ ...io, now: () => new Date(Date.parse('2026-10-12T12:00:00.000Z') + min * 60_000) });
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--hook-session', 'hook-main'], later(1)));
+    run(['swarm', 'stop'], later(1));
+    out(run(['swarm', 'close'], later(1)));
+    const c = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--hook-session', 'hook-main', '--run-id', runA], later(2));
+    expect(c.code).toBe(2);
+    expect(c.stderr).toContain(`--run-id ${runA} is the id of a run that already started`);
+    expect(mergeCommits()).toBe(0);
+  });
+  it('a conflict whose merge commit landed anyway keeps the yes used: the base moved, so it is not given back', () => {
+    finished();
+    const p = merge([]);
+    answer(p.ask.question, 'Yes, merge it');
+    const mainGit = defaultGit(root);
+    // git commits the merge but the command reports a failure: the attempt rolls back what it cannot, a conflict.
+    const deps: SwarmDeps = {
+      git: a => { const r = mainGit(a); return a[0] === 'commit' ? null : r; },
+      exec: defaultExec(root), repo: repoReader(root), at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
+    };
+    expect(out(swarmCommand(['merge', '--yes', '--hook-session', 'hook-main'], io, deps))).toMatchObject({ result: 'conflict' });
+    expect(mergeCommits()).toBe(1);
+    expect(record(p.authId)).toMatchObject({ usedAt: '2026-10-12T12:00:00.000Z' });
+    expect(merge(['--yes'])).toMatchObject({ result: 'needs-authorization', reason: 'already used' });
+  });
+  it('a main checkout switched to another branch at the same commit while the merge validates takes nothing', () => {
+    finished();
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators:\n  - name: ok\n    cmd: node -e "process.exit(0)"\n');
+    const p = merge([]);
+    answer(p.ask.question, 'Yes, merge it');
+    let switched = false;
+    const deps: SwarmDeps = {
+      git: defaultGit(root), repo: repoReader(root),
+      exec: (cmd, t) => { if (!switched) { switched = true; git('switch', '-q', '-c', 'elsewhere'); } return defaultExec(root)(cmd, t); },
+      at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
+    };
+    expect(out(swarmCommand(['merge', '--yes', '--hook-session', 'hook-main'], io, deps))).toMatchObject({ result: 'main-dirty', detail: 'the main checkout is on elsewhere, not main' });
+    expect(switched).toBe(true);
+    expect(git('log', '-1', '--format=%s', 'elsewhere')).toBe('init');
+    expect(record(p.authId)).not.toHaveProperty('usedAt');
   });
   it('without a Claude session id the yes cannot be checked: needs-authorization, no session id', () => {
     finished();

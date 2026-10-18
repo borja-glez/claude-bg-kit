@@ -5,7 +5,7 @@ import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, withEventContext, LEDGER_KINDS, type EventContext, type LedgerKind, type LedgerEvent } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
 import { decideStop, decideExecutionStop, UNBOUND_WARNING } from '../hook.js';
-import { readExecution, updateExecution, runWorktree, executionTaskFile, writePublicTask, executionHolding, eventsSince } from '../execution.js';
+import { readExecution, updateExecution, runWorktree, executionTaskFile, writePublicTask, executionHolding, eventsSince, hasRunStamp } from '../execution.js';
 import { planLocale, replyIn, sessionReply } from '../../lib/locale.js';
 import { isLocale } from '../../lib/forge-run.js';
 import { isRunBranch, isSafeId, normalizePublicTask, type PublicTask } from '../../lib/execution-state.js';
@@ -1687,7 +1687,7 @@ function runCommand(argv: string[], io: Io): Result {
         if (args[0] !== 'merge-on-finish') throw new UsageError(usage);
         const branch = flag('branch');
         if (!branch || !isRunBranch(branch)) throw new UsageError(`authorize merge-on-finish: --branch must be the branch the run merges into; ${usage}`);
-        if (has('run') && (flag('run') === undefined || !isSafeId(flag('run')))) throw new UsageError('authorize merge-on-finish: --run must be the run id swarm propose printed');
+        if (has('run') && !hasRunStamp(flag('run'))) throw new UsageError('authorize merge-on-finish: --run must be the run id swarm propose printed (<project>-<stamp>)');
         const loc = flag('locale');
         if (has('locale') && loc !== 'es' && loc !== 'en') throw new UsageError('authorize merge-on-finish: --locale must be es or en');
         const runId = flag('run') ?? null;

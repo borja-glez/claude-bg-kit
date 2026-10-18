@@ -5,7 +5,21 @@ import { UsageError } from './cli/errors.js';
 import { pidAlive, removeFileIf, sleepSync } from './pid.js';
 import { readSwarm, swarmFile } from './swarm.js';
 import { mainCheckout } from './local.js';
-import { fromSwarm, parseExecution, type ExecutionState, type PublicTask } from '../lib/execution-state.js';
+import { fromSwarm, isSafeId, parseExecution, type ExecutionState, type PublicTask } from '../lib/execution-state.js';
+
+/** The id of a run of `project` started at `at`: swarm start gives it, swarm propose prints it before the run exists. */
+export const runIdOf = (project: string, at: Date) => `${project}-${at.toISOString().replace(/[:.]/g, '')}`;
+/** The stamp runIdOf ends a run id with: the ISO instant without `:` and `.`. */
+const RUN_STAMP = String.raw`\d{4}-\d{2}-\d{2}T\d{9}Z`;
+const reEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * I-03: whether `id` is a run id of `project` exactly as runIdOf makes it. Another project's never is, whatever their
+ * names (`shop` and `shop-other`): the stamp has a fixed shape, so the project is what comes before it.
+ */
+export const isRunIdOf = (project: string, id: unknown): id is string =>
+  isSafeId(id) && new RegExp(`^${reEscape(project)}-${RUN_STAMP}$`).test(id);
+/** I-03: whether `id` has the shape of a run id (a safe id that ends with runIdOf's stamp), its project unknown. */
+export const hasRunStamp = (id: unknown): id is string => isSafeId(id) && new RegExp(`^.+-${RUN_STAMP}$`).test(id);
 
 export const executionFile = (root: string) => path.join(root, '.forge', 'execution.json');
 export const executionTaskFile = (root: string, task: string) => path.join(root, '.forge', 'execution', `${task}.json`);
