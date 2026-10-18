@@ -142,4 +142,23 @@ describe('derive: the derived data once per revision of the data (H-06)', () => 
     expect(parallelOf(model({ sessions: {} }), [])).toBe(1);
     expect(computeDerived(model({ states: Object.fromEntries(plan.tasks.map(t => [t.id, { status: 'done' as const }])) })).forecast).toBeNull();
   });
+
+  it('with the coordinator of the active run not live, each live executor of the run counts one; an executor of another run always does (final carry 1)', () => {
+    const alive = '2026-10-11T12:10:00Z';
+    const run = { runId: 'r1', mode: 'subagents' as const, parallel: 3, branch: 'forge/run-x', mergeOnFinish: false, active: true, stopReason: null, coordinator: 'main', slots: [], kind: 'plan' as const, loose: [] };
+    const ex = (runId: string) => ({ name: runId, heartbeatAt: '2026-10-11T11:59:00Z', leaseUntil: alive, status: 'active' as const, role: 'executor' as const, runId });
+    const sessions = {
+      main: { name: 'main', heartbeatAt: '2026-10-11T08:00:00Z', leaseUntil: '2026-10-11T08:10:00Z', status: 'active' as const, role: 'coordinator' as const, runId: 'r1' },
+      ex1: ex('r1'), ex2: ex('r1'),
+    };
+    const m = model({ run, sessions });
+    expect(computeDerived(m).liveSessions.live.sort()).toEqual(['ex1', 'ex2']);
+    expect(parallelOf(m, computeDerived(m).liveSessions.live)).toBe(2);
+    // The coordinator back: its parallel counts its slots, its executors nothing more.
+    const back = model({ run, sessions: { ...sessions, main: { ...sessions.main, heartbeatAt: '2026-10-11T11:59:00Z', leaseUntil: alive } } });
+    expect(parallelOf(back, computeDerived(back).liveSessions.live)).toBe(3);
+    // An executor that works for another run is not one of this run's slots.
+    const other = model({ run, sessions: { ...back.sessions, ex3: ex('r0') } });
+    expect(parallelOf(other, computeDerived(other).liveSessions.live)).toBe(4);
+  });
 });

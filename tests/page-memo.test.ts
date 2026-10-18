@@ -110,7 +110,7 @@ describe('the analysis and the minimap are built once per key (C31, carry 4b-1)'
     const at = builds();
     (root.querySelector('[data-action="tl-all"]') as HTMLElement).click();
     await settle();
-    expect(app.ui.autoOpen).toBe(false);
+    expect(root.querySelector('[data-action="tl-all"]')!.getAttribute('data-open')).toBe('0');
     (root.querySelector('[data-role="timeline"]') as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     await settle();
     expect(app.ui.span).toBeGreaterThan(0);

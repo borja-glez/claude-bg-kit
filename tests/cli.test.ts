@@ -450,6 +450,16 @@ describe('final fix: db plan cache, idle owners, recover caches', () => {
     expect(JSON.parse(run(['recover', 'plan.yaml', '--db', db, '--states', states, '--sessions', sessions], io).stdout)).toEqual([{ taskId: 'T099', owner: 'gone' }]);
   });
 
+  it('two plan documents with one phase id are one phase, the first one (final carry 4)', () => {
+    const db = dbPlan();
+    writeDocs('db/plan', { F9b: { id: 'F9', name: 'Copia', plan_status: 'provisional', order: 1, tasks: [{ id: 'T098', title: 'De la copia', track: 'backend', phase: 'F9', done_when: 'x', depends_on: [], zones: [] }] } });
+    const st = run(['status', 'plan.yaml', '--db', db], io);
+    expect(st.code).toBe(0);
+    expect(st.stdout).toContain('(0/1) · phases 0/1');
+    expect(st.stdout).toContain('next: T099 Solo en la db');
+    expect(st.stdout).not.toContain('T098');
+  });
+
   it('--db with a missing cache fails', () => {
     for (const cmd of [['next', '--session', 'be'], ['conflicts', '--session', 'be', '--task', 'T001'], ['status']]) {
       const r = run([cmd[0], 'plan.yaml', '--db', 'nodb', ...cmd.slice(1)], io);

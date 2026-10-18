@@ -37,8 +37,20 @@ export function buildDocs(plan: Plan, nowIso: string): { meta: MetaDoc; phases: 
   };
 }
 
+/** Final carry 4: one document per phase id: the first wins, and `dropped` hears of each other one (by its index), once. Two
+ *  documents with one id would give the page two nodes with one key, and the CLI two phases of one name. */
+export function uniquePhases(phases: readonly PhaseDoc[], dropped?: (index: number) => void): PhaseDoc[] {
+  const seen = new Set<string>();
+  return phases.filter((p, i) => {
+    if (!seen.has(p.id)) return !!seen.add(p.id);
+    dropped?.(i);
+    return false;
+  });
+}
+
+/** The plan as the page and the CLI read it from its documents: the phases in their order, each id once (uniquePhases). */
 export function planViewFromDocs(meta: MetaDoc, phases: PhaseDoc[]): PlanView {
-  const ordered = [...phases].sort((a, b) => a.order - b.order);
+  const ordered = uniquePhases(phases).sort((a, b) => a.order - b.order);
   return {
     tracks: meta.tracks,
     versions: meta.versions,

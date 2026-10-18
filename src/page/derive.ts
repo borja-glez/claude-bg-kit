@@ -28,14 +28,17 @@ export interface Derived {
 }
 
 /** G-12: how many work in parallel: each live session counts one, the coordinator of the active run its parallel, and the
- *  sessions of that run (or executors) nothing more, since they are its slots. At least 1. */
+ *  sessions of that run (or executors of no run) nothing more, since they are its slots. Final carry 1: a live executor
+ *  counts whatever the coordinator does: with the coordinator not live (its lease lapsed mid-run), each live session of
+ *  the run counts one; an executor of another run is never one of its slots. At least 1. */
 export function parallelOf(m: Model, live: readonly string[]): number {
   const r = m.run && m.run.active ? m.run : null;
+  const led = !!r && live.includes(r.coordinator);
   let n = 0;
   for (const sid of live) {
     const s = m.sessions[sid];
     if (r && sid === r.coordinator) n += Math.max(1, Math.floor(num(r.parallel)));
-    else if (r && (s?.runId === r.runId || s?.role === 'executor')) continue;
+    else if (led && (s?.runId === r!.runId || (s?.role === 'executor' && !s.runId))) continue;
     else n += 1;
   }
   return Math.max(1, n);

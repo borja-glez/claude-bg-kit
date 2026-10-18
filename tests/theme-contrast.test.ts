@@ -76,5 +76,14 @@ describe('text tokens reach 4.5:1 on --base and --mantle in both themes (K3-11, 
         expect(contrast(R(forced, fg, dark), R(forced, bg, dark)), `light ${sel}: --${fg} on --${bg}`).toBeGreaterThanOrEqual(4.5);
       }
     });
+    // Final carry 6: text on a surface other than --base and --mantle (inline code on --s0, a card on --crust) does not
+    // inherit a colour checked only against those two: the rule that writes text there names its colour, which the pairs
+    // above then check.
+    it(`${file}: a rule that writes text over --crust, --s0 or --s1 names its text colour`, () => {
+      for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        if (!/(?:^|[;\s])background:var\(--(?:crust|s0|s1)\)/.test(m[2]) || !/(?:^|[;\s])font(?:-size)?:/.test(m[2])) continue;
+        expect(m[2], m[1].trim()).toMatch(/(?:^|[;\s])color:var\(--[\w-]+\)/);
+      }
+    });
   }
 });

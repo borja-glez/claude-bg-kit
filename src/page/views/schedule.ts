@@ -330,13 +330,17 @@ function burnChart(d: Dict, bd: Burndown, now: number, loc: string, width: numbe
   const ideal = bd.ideal
     ? `<line class="bdi" x1="${px(bd.ideal[0]!.t).toFixed(1)}" y1="${py(bd.ideal[0]!.left).toFixed(1)}" x2="${px(bd.ideal[1]!.t).toFixed(1)}" y2="${py(0).toFixed(1)}"/>`
     : '';
-  const target = bd.target !== null ? `<line class="bdtg" x1="${px(bd.target).toFixed(1)}" x2="${px(bd.target).toFixed(1)}" y1="${PAD}" y2="${H - PAD}"/>` : '';
+  // Final carry 3: a target before the first start is not drawn (it would sit at a negative place), and near an edge its
+  // label is drawn inwards (at the chart's end, the usual case, to the left of the line), never out of the card.
+  const tgX = bd.target !== null && bd.target > bd.start ? px(bd.target) : null;
+  const tgSide = tgX === null ? '' : tgX / W > 0.85 ? ' end' : tgX / W < 0.15 ? ' start' : '';
+  const target = tgX !== null ? `<line class="bdtg" x1="${tgX.toFixed(1)}" x2="${tgX.toFixed(1)}" y1="${PAD}" y2="${H - PAD}"/>` : '';
   const svg = `<svg class="bd" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${yTicks.map(v => `<line class="bdg" x1="${PAD}" x2="${W - PAD}" y1="${py(v).toFixed(1)}" y2="${py(v).toFixed(1)}"/>`).join('')}${target}${ideal}<path class="bda" d="${steps}"/><line class="bdn" x1="${px(now).toFixed(1)}" x2="${px(now).toFixed(1)}" y1="${PAD}" y2="${H - PAD}"/></svg>`;
   const labels = [
     ...yTicks.map(v => `<span class="bdk y" style="top:${at(py(v), H)}">${v}</span>`),
     `<span class="bdk x l">${esc(fmt(new Date(bd.start).toISOString(), loc))}</span>`,
     `<span class="bdk x r">${esc(fmt(new Date(bd.end).toISOString(), loc))}</span>`,
-    bd.target !== null ? `<span class="bdk tg" style="left:${at(px(bd.target), W)}">${esc(d.insights.target(fmt(new Date(bd.target).toISOString(), loc)))}</span>` : '',
+    tgX !== null && bd.target !== null ? `<span class="bdk tg${tgSide}" style="left:${at(tgX, W)}">${esc(d.insights.target(fmt(new Date(bd.target).toISOString(), loc)))}</span>` : '',
   ].join('');
   const left = bd.actual[bd.actual.length - 1]!.left;
   const legend = `<div class="legend"><span><i class="lg bdl-a"></i>${esc(d.insights.actual)}</span>${bd.ideal ? `<span><i class="lg bdl-i"></i>${esc(d.insights.ideal)}</span>` : `<span class="hint">${esc(d.insights.noTarget)}</span>`}<span class="mono">${left} ${esc(d.insights.tasksLeft)}</span></div>`;

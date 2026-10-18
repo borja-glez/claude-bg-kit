@@ -2,7 +2,7 @@
   --lavender:#b4befe;--blue:#89b4fa;--sapphire:#74c7ec;--sky:#89dceb;--teal:#94e2d5;--green:#a6e3a1;--yellow:#f9e2af;--peach:#fab387;--red:#f38ba8;--mauve:#cba6f7;--pink:#f5c2e7;--flamingo:#f2cdcd;
   --done:var(--sapphire);--cur:var(--peach);--blk:var(--yellow);--now:var(--red);--rh:28px;
   --mute:#868ba3;--t-peach:var(--peach);--t-yellow:var(--yellow);--t-green:var(--green);--t-blue:var(--blue);--t-lav:var(--lavender);--t-teal:var(--teal);--t-red:var(--red);--t-mauve:var(--mauve);--t-pink:var(--pink);--t-sapphire:var(--sapphire);--t-sky:var(--sky);--t-flamingo:var(--flamingo);
-  --on-lav:#11111b;--on-peach:#11111b;--on-red:#11111b;--on-teal:#11111b;--on-yellow:#11111b;color-scheme:dark}
+  --on-lav:#11111b;--on-peach:#11111b;--on-red:#11111b;--on-teal:#11111b;--on-yellow:#11111b;--on-scrim:#ffffff;color-scheme:dark}
 @media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--crust:#dce0e8;--mantle:#e6e9ef;--base:#eff1f5;--s0:#ccd0da;--s1:#bcc0cc;--s2:#acb0be;--o0:#9ca0b0;--o1:#8c8fa1;--sub0:#62657b;--sub1:#5c5f77;--text:#4c4f69;
   --lavender:#7287fd;--blue:#1e66f5;--sapphire:#209fb5;--sky:#04a5e5;--teal:#179299;--green:#40a02b;--yellow:#df8e1d;--peach:#fe640b;--red:#d20f39;--mauve:#8839ef;--pink:#ea76cb;--flamingo:#dd7878;--mute:#5c5f77;--t-peach:#a3440a;--t-yellow:#8a5a00;--t-green:#2a7020;--t-blue:#1a55c8;--t-lav:#4f5bd5;--t-teal:#0b6573;--t-red:#b0153a;--t-mauve:#7a2fd0;--t-pink:#b8336f;--t-sapphire:#0f6e80;--t-sky:#0a6a96;--t-flamingo:#a8434a;--on-lav:#11111b;--on-peach:#11111b;--on-red:#ffffff;--on-teal:#11111b;--on-yellow:#11111b;color-scheme:light}}
 :root[data-theme="dark"]{color-scheme:dark}
@@ -210,7 +210,7 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 }
 
 /* Status dots in the timeline rows take the status colour. */
-.tr .sd.st-free,.tr .sd.st-orphaned{color:var(--s2)}
+.tr .sd.st-free,.tr .sd.st-orphaned{background:var(--s2)}
 
 /* ---- Timeline tools: status filter, layers, export ---- */
 .tools{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-top:8px}
@@ -272,6 +272,7 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .bdk.x{top:100%;margin-top:4px}
 .bdk.x.l{left:0} .bdk.x.r{right:0}
 .bdk.tg{top:0;transform:translateX(-50%);color:var(--t-green)}
+.bdk.tg.end{transform:translateX(-100%)} .bdk.tg.start{transform:none}
 .zl.shared{border-left:3px solid var(--yellow);padding-left:6px}
 .zs{font-size:12px;color:var(--t-yellow)}
 .zlg{margin-top:8px}
@@ -358,7 +359,7 @@ section.loose .lt .mono{margin-left:auto}
 .evi{margin-left:6px;font-size:11px}.evi.ok{color:var(--t-green)}.evi.del{color:var(--t-red)}
 .lightbox{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px;cursor:zoom-out}
 .lightbox img{max-width:100%;max-height:80dvh;border-radius:6px}
-.lightbox .cap{color:#fff;font-size:13px;max-width:720px}
+.lightbox .cap{color:var(--on-scrim);font-size:13px;max-width:720px}
 .evidence .warn{color:var(--t-yellow)}
 .dbg{margin-top:18px;font:11px 'JetBrains Mono',monospace;color:var(--sub0)}
 .dbg ul{margin:6px 0 0;padding-left:16px;overflow-wrap:anywhere}
@@ -419,7 +420,7 @@ button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-
 .dtab.on{color:var(--text);border-bottom-color:var(--peach)}
 .dtab:focus-visible,.dpanel:focus-visible,.chip:focus-visible,.shot:focus-visible{outline:2px solid var(--lavender);outline-offset:2px}
 .dpanel{min-width:0;overflow-wrap:anywhere}
-.dpanel code{font:12px 'JetBrains Mono',monospace;background:var(--s0);border-radius:3px;padding:0 4px}
+.dpanel code{font:12px 'JetBrains Mono',monospace;color:var(--text);background:var(--s0);border-radius:3px;padding:0 4px}
 .dpanel a{color:var(--t-blue)}
 .warnbox{margin-top:10px;padding:8px 10px;border-radius:6px;border:1px solid var(--yellow);background:color-mix(in srgb,var(--yellow) 12%,transparent);font-size:13px;color:var(--text)}
 .chip.st-done{border-color:var(--done)} .chip.st-in_progress,.chip.st-claimed{border-color:var(--cur)} .chip.st-blocked{border-color:var(--blk)}
@@ -502,7 +503,7 @@ button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-
 /* One list of notes and proposals; a column never wider than a 390 px screen (carry 10b). */
 .tlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:10px;margin-top:12px;align-items:start}
 .note[tabindex]:focus-visible{outline:2px solid var(--lavender);outline-offset:2px}
-.note p code{font:11.5px 'JetBrains Mono',monospace;background:var(--s0);border-radius:3px;padding:0 4px}
+.note p code{font:11.5px 'JetBrains Mono',monospace;color:var(--text);background:var(--s0);border-radius:3px;padding:0 4px}
 .ans.res{border-left:3px solid var(--done)}
 .ans .lnk{margin-left:8px}
 .phist{margin-top:8px;font-size:12px;color:var(--sub1)}

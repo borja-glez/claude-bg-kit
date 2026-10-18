@@ -1909,10 +1909,24 @@ describe('the analysis: burndown and zones (H-26, G-27)', () => {
     const m = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1', 'F2'], target: '2026-10-13' }] } };
     const html = renderApp(m, ui({ view: 'schedule', burnScope: 'v:0.1' }));
     expect(html).toContain('class="bdi"');
-    expect(html).toMatch(/<span class="bdk tg" style="left:[\d.]+%">objetivo [^<]+<\/span>/);
+    expect(html).toMatch(/<span class="bdk tg(?: end)?" style="left:[\d.]+%">objetivo [^<]+<\/span>/);
     // A phase reads its version's target, and the whole plan its last version's.
     expect(renderApp(m, ui({ view: 'schedule', burnScope: 'p:F2' }))).toContain('class="bdi"');
     expect(renderApp(m, ui({ view: 'schedule' }))).toContain('class="bdi"');
+  });
+  it('the target’s label stays inside the chart at its edges, and a target before the first start is not drawn (final carry 3)', () => {
+    const at = (target: string) => {
+      const m = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1', 'F2'], target }] } };
+      return chartOf(renderApp(m, ui({ view: 'schedule', burnScope: 'v:0.1', width: 900 })));
+    };
+    // The usual case: the target is where the chart ends; its label is drawn to the left of it.
+    expect(at('2026-10-13')).toMatch(/<span class="bdk tg end" style="left:9\d\.\d\d%">objetivo [^<]+<\/span>/);
+    expect(cssRule(CSS, '.bdk.tg.end')).toContain('transform:translateX(-100%)');
+    // Before the first start: no ideal line, no marker and no label at a negative place.
+    const early = at('2026-01-01');
+    expect(early).not.toContain('class="bdtg"');
+    expect(early).not.toContain('class="bdk tg');
+    expect(early).not.toMatch(/left:-/);
   });
   it('the zones go by directory, with a legend, and one that two running tasks share is marked first', () => {
     const m = base();
@@ -2434,8 +2448,15 @@ describe('«Te necesita»: a decision that changed says whose it was (carry 4b-3
 });
 
 describe('theme.css: the light theme writes its text with its text tokens (H-19)', () => {
-  it('no text is coloured with a palette colour, a state alias or --o0 / --o1: it goes through --mute and the --t-* tokens', () => {
-    expect(CSS).not.toMatch(/[{;]color:var\(--(o0|o1|peach|yellow|green|blue|lavender|teal|red|mauve|pink|sapphire|sky|flamingo|done|cur|blk|now)\)/);
+  it('no text is coloured with a palette colour, a surface, a state alias, --o0 / --o1 or a literal: it goes through --mute and the --t-* tokens (final carry 6)', () => {
+    expect(CSS).not.toMatch(/[{;]color:var\(--(o0|o1|peach|yellow|green|blue|lavender|teal|red|mauve|pink|sapphire|sky|flamingo|done|cur|blk|now|crust|mantle|base|s0|s1|s2)\)/);
+    expect(CSS).not.toMatch(/[{;]color:(?:#|rgb|white|black)/);
+    // A free task's dot is a fill (background:currentColor) and says so; the gallery's caption sits on its dark overlay in
+    // both themes, in a token of its own.
+    expect(cssRule(CSS, '.tr .sd.st-free')).toBe('background:var(--s2)');
+    expect(cssRule(CSS, '.lightbox .cap')).toContain('color:var(--on-scrim)');
+    expect(cssRule(CSS, ':root')).toContain('--on-scrim:#ffffff');
+    expect(CSS).not.toMatch(/data-theme="light"\][^}]*--on-scrim/);
   });
   it('in the dark theme each text token is the colour of before (--mute is the design page’s, 4.5:1 on --base)', () => {
     const root = cssRule(CSS, ':root');

@@ -87,6 +87,13 @@ export function paceRatioOf(plan: PlanView, states: States): number {
   return clampPace(ratios.length % 2 ? ratios[mid]! : (ratios[mid - 1]! + ratios[mid]!) / 2);
 }
 
+/** Final carry 1: the largest of the values (0 for none) in a loop: a spread into Math.max fails past about 100 000. */
+export function maxOf(values: Iterable<number>): number {
+  let max = 0;
+  for (const v of values) if (v > max) max = v;
+  return max;
+}
+
 /**
  * G-12: the one forecast end. A list schedule of the work left: each pending task lasts its remaining minutes times the
  * pace; the running ones go first, from now; then, in turn, the ready task (its pending dependencies already scheduled)
@@ -138,7 +145,7 @@ export function forecastEnd(plan: PlanView, states: States, now: number, opts: {
     finish.set(id, end);
     left.delete(id);
   }
-  const at = now + Math.max(...finish.values()) * MIN;
+  const at = now + maxOf(finish.values()) * MIN;
   // A finite date past what a Date holds (an absurd estimate) would throw in toISOString: none rather than a broken page.
   return Number.isFinite(at) && Math.abs(at) <= MAX_DATE ? { at: Math.round(at), parallel } : null;
 }
@@ -184,8 +191,10 @@ export interface ZoneHeat { zone: string; tasks: number; done: number; active: n
 /** G-27: a zone by its directory: the first two segments of its path before any glob ('src/a/b/**' and 'src/a/b/c.ts' are
  *  both 'src/a'); a zone that starts with a glob stays as it is. */
 export function zoneDir(zone: string): string {
-  const parts = staticPrefix(zone).split('/').filter(Boolean);
-  return parts.length ? parts.slice(0, 2).join('/') : zone;
+  const prefix = staticPrefix(zone);
+  const parts = prefix.split('/').filter(Boolean);
+  // Final carry 3: an absolute path keeps its leading «/».
+  return parts.length ? `${prefix.startsWith('/') ? '/' : ''}${parts.slice(0, 2).join('/')}` : zone;
 }
 
 /** G-27: each directory the plan's zones fall in, with how many tasks plan to touch it, how many are done or running and

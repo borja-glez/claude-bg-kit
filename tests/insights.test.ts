@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
-import { burndown, criticalPath, forecastEnd, PACE_MAX, PACE_MIN, paceRatioOf, remainingMin, targetMs, zoneDir, zoneHeat } from '../src/lib/insights.js';
+import { burndown, criticalPath, forecastEnd, maxOf, PACE_MAX, PACE_MIN, paceRatioOf, remainingMin, targetMs, zoneDir, zoneHeat } from '../src/lib/insights.js';
 import { groupIds, layoutRows, NONE_GROUP, windowAt } from '../src/lib/timeline.js';
 import type { PlanView, States } from '../src/lib/types.js';
 
@@ -81,6 +81,16 @@ describe('forecastEnd: the one forecast of the page (G-12)', () => {
   });
 });
 
+describe('maxOf (final carry 1)', () => {
+  it('the largest of any number of values, past what a spread into Math.max takes; 0 for none', () => {
+    const many = Array.from({ length: 600_000 }, (_, i) => (i * 7919) % 600_000);
+    expect(() => Math.max(...many)).toThrow(RangeError);
+    expect(maxOf(many)).toBe(599_999);
+    expect(maxOf(new Map([['a', 3], ['b', 9]]).values())).toBe(9);
+    expect(maxOf([])).toBe(0);
+  });
+});
+
 describe('burndown (H-26)', () => {
   const s: States = {
     T001: { status: 'done', startedAt: '2026-10-11T08:00:00Z', doneAt: '2026-10-11T09:00:00Z' },
@@ -117,6 +127,9 @@ describe('zone heat by directory (G-27)', () => {
     expect(zoneDir('README.md')).toBe('README.md');
     expect(zoneDir('**/*.ts')).toBe('**/*.ts');
     expect(zoneDir('src\\a\\b\\c.ts')).toBe('src/a');
+    // Final carry 3: an absolute path keeps its leading «/».
+    expect(zoneDir('/abs/x/y/**')).toBe('/abs/x');
+    expect(zoneDir('/etc')).toBe('/etc');
   });
   it('counts planned, done, running and touched tasks per directory, and marks first one that two running tasks share', () => {
     const p = { ...plan, tasks: plan.tasks.map(t => (t.id === 'T003' ? { ...t, zones: ['src/api/cart/**'] } : t)) };

@@ -1,4 +1,4 @@
-import { planViewFromDocs } from '../lib/sync.js';
+import { planViewFromDocs, uniquePhases } from '../lib/sync.js';
 import { isPlanId } from '../lib/ids.js';
 import { TASK_STATUSES, type MessageDoc, type MetaDoc, type NoteDoc, type NoteType, type PhaseDoc, type SessionDoc, type States, type TaskStatus } from '../lib/types.js';
 import { clampPan, clampSpan, groupIds, panFor, zoomAround, type Zoom } from '../lib/timeline.js';
@@ -701,6 +701,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (action === 'zoom') { ui.zoom = el.dataset.zoom as Zoom; ui.offset = 0; ui.span = undefined; ui.pan = undefined; ui.fit = false; }
     else if (action === 'shift') {
       const dir = Number(el.dataset.dir);
+      // Final carry 2: «Ahora» keeps «Ajustar» while the fitted window already shows now (it always does, unless the plan is
+      // wider than the widest zoom); ‹ and › move the window and end it.
+      if (dir === 0 && ui.fit && !ui.span) { const w = timelineWindow(model, ui); if (model.now >= w.from && model.now <= w.to) return; }
       if (ui.fit) freeze();
       if (ui.span) ui.pan = dir === 0 ? 0 : clampPan((ui.pan ?? 0) + dir * ui.span * 0.5);
       else ui.offset = dir === 0 ? 0 : ui.offset + dir;
@@ -1313,7 +1316,16 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   try { runsUnsub = runsDb.collection('runs').orderBy('endedAt', 'desc').limit(MAX_RUNS).onSnapshot(onRuns as never, plainRuns); }
   catch { plainRuns(); }
   unsubs.push(() => runsUnsub());
-  unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const rep = reporter('plan'); const p = rows(s).map(r => normalizePhase(r.body, rep(`plan/${r.id}`))).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } planSnap = true; settleLink(); changed(); }) as never, onPlanErr));
+  // Final carry 4: two documents with one phase id are one phase, the first; each other one is listed once with ?debug=1.
+  unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => {
+    const rep = reporter('plan');
+    const docs = rows(s).map(r => ({ path: `plan/${r.id}`, doc: normalizePhase(r.body, rep(`plan/${r.id}`)) })).filter((x): x is { path: string; doc: PhaseDoc } => x.doc !== null);
+    const p = uniquePhases(docs.map(x => x.doc), i => rep(docs[i]!.path)?.('id', 'dropped', 'repeated phase id'));
+    if (p.length) { phaseDocs = p; rebuild(); }
+    planSnap = true;
+    settleLink();
+    changed();
+  }) as never, onPlanErr));
   unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => {
     const rep = reporter('state');
     model.states = Object.fromEntries(rows(s).map(r => [r.id, normalizeState(r.body, rep(`state/${r.id}`))])) as States;
