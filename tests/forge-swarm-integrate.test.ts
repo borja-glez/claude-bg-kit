@@ -1171,7 +1171,16 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     session: 'hook-main', answeredAt: '2026-10-12T12:00:00.000Z', answer: 'yes', answeredBy: 'hook-main',
   });
   const mergeCommits = () => git('log', '--format=%s', 'main').split('\n').filter(s => s === 'forge: merge forge/run-shop').length;
-  it('a yes to the start question allows the one final merge of the finished run: none while it runs or once stopped, none after it', () => {
+  /** The run's final review as large.md runs it: its reviewer's JSON, then FORGE verdict --task shop-final. Its action. */
+  const finalReview = (passes: boolean, at: Io = io) => {
+    const dir = path.join(root, '.forge', 'work', 'shop', 'final');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'correctness.json'), passes ? '{"verdict":"pass","confidence":1,"findings":[]}'
+      : '{"verdict":"fail","confidence":1,"findings":[{"severity":"critical","file":"a.txt","problem":"broken"}]}');
+    writeFileSync(path.join(root, '.forge', 'work', 'shop', 'final-validators.json'), '[]');
+    return out(run(['verdict', '--task', 'shop-final', '--dir', '.forge/work/shop/final', '--validators', '.forge/work/shop/final-validators.json'], at)).action;
+  };
+  it('a yes to the start question allows the one final merge of the finished run once its final review accepts: none before, none after', () => {
     finished();
     saveExecution(root, { ...readExecution(root)!, mergeOnFinish: true });
     // Active: the run has not finished, so the merge asks as any other does.
@@ -1179,6 +1188,13 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stopped' });
     expect(merge([])).toMatchObject({ result: 'needs-authorization' });
     saveExecution(root, { ...readExecution(root)!, stopReason: 'finished' });
+    // Finished, but no final review yet, then one that asks for a fix: it asks, and keeps the start yes for later.
+    expect(merge([])).toMatchObject({ result: 'needs-authorization' });
+    expect(finalReview(false)).toBe('fix');
+    expect(merge([])).toMatchObject({ result: 'needs-authorization' });
+    expect(readExecution(root)!.mergeOnFinish).toBe(true);
+    expect(mergeCommits()).toBe(0);
+    expect(finalReview(true)).toBe('accept');
     // A merge that ends main-dirty gives it back; the next one merges with it and spends it.
     writeFileSync(path.join(root, 'dirty.txt'), 'x\n');
     expect(merge([])).toMatchObject({ result: 'main-dirty' });
@@ -1191,8 +1207,20 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     expect(merge([])).toMatchObject({ result: 'needs-authorization' });
     expect(mergeCommits()).toBe(1);
   });
+  it('a final accept older than the last integration into the run branch does not count: the review did not see that work', () => {
+    finished();
+    expect(finalReview(true)).toBe('accept');
+    accept('T2', 'b.txt', 'b\n');
+    expect(out(run(['swarm', 'integrate', 'T2'], when('12:05')))).toMatchObject({ result: 'integrated' });
+    saveExecution(root, { ...readExecution(root)!, mergeOnFinish: true, active: false, stopReason: 'finished' });
+    expect(merge([], when('12:06'))).toMatchObject({ result: 'needs-authorization' });
+    expect(finalReview(true, when('12:07'))).toBe('accept');
+    expect(merge([], when('12:08'))).toMatchObject({ result: 'merged', closed: true });
+    expect(mergeCommits()).toBe(1);
+  });
   it('the merge on finish is claimed under the lock: a run another merge claimed since it was read asks its question', () => {
     finished();
+    expect(finalReview(true)).toBe('accept');
     saveExecution(root, { ...readExecution(root)!, mergeOnFinish: true, active: false, stopReason: 'finished' });
     const mainGit = defaultGit(root);
     // Another merge of the run claims it while this one reads which branch the main checkout is on.

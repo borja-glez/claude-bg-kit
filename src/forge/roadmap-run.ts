@@ -90,6 +90,10 @@ function executorsOf(main: string, e: ExecutionState): string[] {
   return [...out].filter(isSafeId).sort();
 }
 
+/** The last verdict of run `e`'s final review: `FORGE verdict --task <project>-final`, logged since the run started. */
+export const finalVerdictOf = (events: readonly LedgerEvent[], e: ExecutionState): LedgerEvent | undefined =>
+  events.filter(x => x.kind === 'verdict' && x.task === `${e.project}-final` && x.ts >= e.startedAt).at(-1);
+
 function runSummary(main: string, e: ExecutionState, now: Date): RunSummaryDoc {
   const events = readEvents(main);
   const project = e.kind === 'plan' ? e.project : null;
@@ -101,7 +105,7 @@ function runSummary(main: string, e: ExecutionState, now: Date): RunSummaryDoc {
       if (!Object.hasOwn(e.tasks, l.id)) tasks.push({ id: l.id, ...(title ? { title } : {}), status: 'queued' });
     }
   }
-  const final = events.filter(x => x.kind === 'verdict' && x.task === `${e.project}-final` && x.ts >= e.startedAt).at(-1);
+  const final = finalVerdictOf(events, e);
   const n = (v: unknown) => (int(v, 0, 999) ? v : 0);
   return {
     v: 1, runId: e.runId, kind: e.kind, mode: e.mode, parallel: e.parallel, branch: cleanText(e.branch, 200), target: cleanText(e.base, 200), coordinator: e.coordinator,

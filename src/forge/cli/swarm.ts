@@ -38,7 +38,7 @@ import { copyTree, evidenceOf } from '../evidence-copy.js';
 import { cleanText } from '../../lib/forge-status.js';
 import { publishFor, startedEvent, type StateWrite } from '../roadmap-sources.js';
 import { runDocOf } from '../run-doc.js';
-import { roadmapRun } from '../roadmap-run.js';
+import { finalVerdictOf, roadmapRun } from '../roadmap-run.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; repo: RepoReader }
 export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
@@ -949,7 +949,8 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   // I-03: a merge into a branch that is not forge's needs a permission of the person's, recorded by the hook `answer` from
   // their AskUserQuestion answer (--yes alone is none), and each permission allows one merge:
   // - their yes to the start question (mergeOnFinish) allows the one final merge of this run once it finished (inactive,
-  //   `finished`, not closed); while the run is active, stopped or closed, the merge asks as any other does;
+  //   `finished`, not closed) and its final review accepted it; while the run is active, stopped or closed, or its final
+  //   review has not accepted the run as it is, the merge asks as any other does;
   // - their yes to this merge's question, from the session that merges (C1's: the flag wins over
   //   CLAUDE_CODE_SESSION_ID), less than an hour old, whose question named this run branch and this base.
   const es = spanish(locale, io.cwd, e.project);
@@ -972,8 +973,17 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     const v = check();
     return v.ok ? v.record : needsYes(v);
   };
+  const events = readEvents(io.cwd);
+  // The start question's promise: «when everything is done and the final review passes». The run's final review last
+  // said `accept` (fix and redo do not), and no task was integrated into the run branch after that verdict.
+  const reviewed = (x: ExecutionState): boolean => {
+    const v = finalVerdictOf(events, x);
+    const at = v?.action === 'accept' ? Date.parse(v.ts) : NaN;
+    if (Number.isNaN(at)) return false;
+    return Object.values(x.tasks).every(t => t.status !== 'integrated' || !t.finishedAt || !(Date.parse(t.finishedAt) > at));
+  };
   const finishedRun = (x: ExecutionState | null): x is ExecutionState =>
-    !!x && x.runId === e.runId && x.mergeOnFinish && !x.active && x.stopReason === 'finished' && !x.closedAt;
+    !!x && x.runId === e.runId && x.mergeOnFinish && !x.active && x.stopReason === 'finished' && !x.closedAt && reviewed(x);
   const asks = !isForgeTarget(e.base);
   const onFinish = asks && finishedRun(e);
   let auth: AuthRecord | null = null;
@@ -989,7 +999,7 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     message: `forge: merge ${e.branch}`, scope: 'final', timeoutSec: config.validatorTimeoutSec, configRoot: io.cwd,
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'main', setup: config.swarm.setup,
     runAt: cleanRunWorktree(deps, runWorktree(io.cwd), e.branch), personal: true, retryDeps: rest.includes('--retry-deps'),
-    run: runOptions(config, readEvents(io.cwd), io.now()),
+    run: runOptions(config, events, io.now()),
     main: io.cwd, cache: { read: false, write: config.validate.cache }, now: io.now, slot: io.slot, branch: e.base,
   };
   // I-03: the permission is spent before the merge, the one step that cannot be undone, so none ever allows two merges.
