@@ -24,10 +24,14 @@ jobs:
       - run: npm install -g @anthropic-ai/claude-code@2.1.302
         env:
           DISABLE_AUTOUPDATER: "1"
+      # The runner's own temp dir, long form: on Windows TEMP is an 8.3 path (C:\Users\RUNNER~1\…) that git reports long.
       - run: npm run ci
         env:
           CLAUDE_CONFIG_DIR: ${{ runner.temp }}/claude
           DISABLE_AUTOUPDATER: "1"
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TMPDIR: ${{ runner.temp }}
   node20:
     strategy:
       fail-fast: false

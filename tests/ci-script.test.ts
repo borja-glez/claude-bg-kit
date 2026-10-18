@@ -60,6 +60,11 @@ describe('npm run ci (I-05)', () => {
     expect(cmds.some(c => /^npm install -g @anthropic-ai\/claude-code@\d+\.\d+\.\d+$/.test(c))).toBe(true);
     expect(cmds.some(c => /core\.longpaths true/.test(c))).toBe(true);
   });
+  it('.github/workflows/ci.yml runs npm run ci with TEMP, TMP and TMPDIR at the runner temp dir (Windows gives an 8.3 TEMP)', () => {
+    const steps = parse(read('.github/workflows/ci.yml')).jobs.ci.steps as { run?: string; env?: Record<string, string> }[];
+    const env = steps.find(s => s.run === 'npm run ci')?.env ?? {};
+    for (const k of ['TEMP', 'TMP', 'TMPDIR']) expect(env[k], k).toBe('${{ runner.temp }}');
+  });
   it('.github/workflows/ci.yml loads the forge and waypoint bundles on Node 20, the minimum the plugins promise', () => {
     const job = parse(read('.github/workflows/ci.yml')).jobs.node20;
     const steps = job.steps as { run?: string; uses?: string; with?: Record<string, unknown> }[];

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,10 +8,33 @@ import { removeDir, useTempDirs } from './helpers/tmp.js';
 import setup, { stamp } from './setup/temp-root.js';
 
 describe('the temp root of a test run (I-01)', () => {
+  const tmp = useTempDirs();
   it('inside a test, os.tmpdir() is the bgkit-vitest-<pid>-<stamp> root of this run', () => {
     expect(path.basename(tmpdir())).toMatch(/^bgkit-vitest-\d+-\d{14}$/);
     expect(process.env.BGKIT_TEMP_ROOT).toBe(tmpdir());
     for (const k of ['TEMP', 'TMP', 'TMPDIR']) expect(process.env[k], k).toBe(tmpdir());
+  });
+  it('the root is its own realpath, long form: a Windows 8.3 TEMP (RUNNER~1) never reaches the tests, which compare paths with what git and realpath give', () => {
+    const root = process.env.BGKIT_TEMP_ROOT as string;
+    expect(root).toBe(realpathSync.native(root));
+  });
+  it('the setup builds the root from the realpath of the temp dir: a TEMP reached through a link gives the real path', () => {
+    const real = realpathSync.native(tmp('real-'));
+    const alias = path.join(tmp('alias-'), 'temp');
+    symlinkSync(real, alias, 'junction');
+    const before = { TEMP: process.env.TEMP, TMP: process.env.TMP, TMPDIR: process.env.TMPDIR, root: process.env.BGKIT_TEMP_ROOT };
+    for (const k of ['TEMP', 'TMP', 'TMPDIR'] as const) process.env[k] = alias;
+    let root = '';
+    try {
+      const teardown = setup();
+      root = process.env.BGKIT_TEMP_ROOT as string;
+      teardown();
+    } finally {
+      for (const k of ['TEMP', 'TMP', 'TMPDIR'] as const) process.env[k] = before[k];
+      process.env.BGKIT_TEMP_ROOT = before.root;
+    }
+    expect(path.dirname(root)).toBe(real);
+    expect(path.basename(root)).toMatch(/^bgkit-vitest-\d+-\d{14}$/);
   });
   it('stamp is yyyymmddHHMMss in local time', () => {
     expect(stamp(new Date(2026, 9, 16, 9, 5, 7))).toBe('20261016090507');

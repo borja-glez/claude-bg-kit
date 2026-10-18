@@ -2,7 +2,7 @@
 // os.tmpdir()/bgkit-vitest-<pid>-<stamp>: the workers inherit them, so every temp entry of the run lands there, the
 // tests' own and those of the CLIs and the git the tests start (os.tmpdir() reads TEMP on Windows, TMPDIR elsewhere).
 // The teardown removes it. A run cut short (Ctrl+C, a timeout) leaves it behind: scripts/clean-temp.mjs counts it.
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -16,7 +16,9 @@ export function stamp(d: Date): string {
 
 export default function setup(): () => void {
   const saved = Object.fromEntries(KEYS.map(k => [k, process.env[k]])) as Record<(typeof KEYS)[number], string | undefined>;
-  const root = path.join(tmpdir(), `bgkit-vitest-${process.pid}-${stamp(new Date())}`);
+  // The real path, long form: on a Windows runner TEMP is an 8.3 path (C:\Users\RUNNER~1\…), and the tests compare the
+  // paths they build from tmpdir() with those git and realpath give.
+  const root = path.join(realpathSync.native(tmpdir()), `bgkit-vitest-${process.pid}-${stamp(new Date())}`);
   mkdirSync(root, { recursive: true });
   for (const k of KEYS) process.env[k] = root;
   process.env.BGKIT_TEMP_ROOT = root;
