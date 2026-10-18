@@ -72,14 +72,15 @@ await writeFile('plugins/waypoint/assets/design.template.html', designHtml);
 console.log('built assets/design.template.html');
 
 // A mod bundle: 'claude-code' is the engine's own module, resolved at load. The engine reads register off the
-// module's source: it must be `export const register` at the top level.
+// module's source: it must be `export const register` at the top level. esbuild writes it as var, let or const
+// depending on its version.
 async function bundleMod(entry, outfile) {
   const mod = await build({
     entryPoints: [entry], bundle: true, format: 'esm', platform: 'neutral', mainFields: ['module', 'main'],
     target: 'es2022', jsx: 'transform', jsxFactory: 'h', jsxFragment: 'Fragment', external: ['claude-code'], write: false,
   });
   const js = mod.outputFiles[0].text
-    .replace(/^var register = /m, 'export const register = ')
+    .replace(/^(?:var|let|const) register = /m, 'export const register = ')
     .replace(/^export \{\s*register\s*\};\s*$/m, '');
   if (!/^export const register = /m.test(js) || /^export \{/m.test(js)) throw new Error(`${outfile}: unexpected bundle shape`);
   await writeFile(outfile, js);

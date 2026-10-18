@@ -1744,4 +1744,15 @@ describe('plugin layout', () => {
     expect(floorAtLeast('^2.1.8', '5.0.5')).toBe(false);
     expect(floorAtLeast('latest', '5.0.5')).toBe(false);
   });
+  it('dev dependencies: happy-dom 21.0.1 and esbuild 0.28.2 or later; engines.node is the README badge; no foreign package (I-17)', () => {
+    const pkg = JSON.parse(read('package.json'));
+    expect(floorAtLeast(pkg.devDependencies['happy-dom'], '21.0.1'), pkg.devDependencies['happy-dom']).toBe(true);
+    expect(floorAtLeast(pkg.devDependencies.esbuild, '0.28.2'), pkg.devDependencies.esbuild).toBe(true);
+    const badge = /badge\/node-%E2%89%A5%20(\d+)-/.exec(read('README.md'))?.[1];
+    expect(badge).toBeDefined();
+    expect(pkg.engines?.node).toBe(`>=${badge}`);
+    // The pty snapshot script of wave 3 installs these by hand (--no-save): they never enter package.json.
+    const declared = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.optionalDependencies };
+    for (const p of ['node-pty', '@xterm/headless', 'node-addon-api']) expect(declared, p).not.toHaveProperty(p);
+  });
 });
