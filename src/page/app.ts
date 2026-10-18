@@ -29,7 +29,7 @@ export interface Env {
   debug?: boolean;
   now?: () => number;
   refreshMs?: number;
-  /** Timers for the composition ceiling (defaults to the globals; tests pass fakes). */
+  /** Timers for the composition ceiling and the frame fallback (defaults to the globals; tests pass fakes). */
   timers?: { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(id: unknown): void };
   /** H-06: how the page's HTML reaches the DOM (morphInto; tests pass one that throws). */
   morph?: (root: HTMLElement, html: string) => Element | null | void;
@@ -445,9 +445,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   const FRAME_FALLBACK_MS = 100;
   let scheduled = false;
   let stopped = false;
-  let fallback: ReturnType<typeof setTimeout> | null = null;
+  let fallback: unknown = null;
   const frame = () => {
-    if (fallback !== null) { clearTimeout(fallback); fallback = null; }
+    if (fallback !== null) { timers.clearTimeout(fallback); fallback = null; }
     if (scheduled && !stopped) render();
   };
   const schedule = () => {
@@ -456,7 +456,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     const raf = (globalThis as { requestAnimationFrame?: (fn: () => void) => unknown }).requestAnimationFrame;
     if (!raf) { queueMicrotask(frame); return; }
     raf(frame);
-    fallback = setTimeout(frame, FRAME_FALLBACK_MS);
+    fallback = timers.setTimeout(frame, FRAME_FALLBACK_MS);
   };
   /** The wheel, a drag, the keys and the scroll of the timeline: the same per-frame repaint. */
   const scheduleFrame = schedule;
@@ -1232,7 +1232,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   const unsubs: (() => void)[] = [];
   const stop = () => {
     stopped = true;
-    if (fallback !== null) { clearTimeout(fallback); fallback = null; }
+    if (fallback !== null) { timers.clearTimeout(fallback); fallback = null; }
     clearInterval(timer);
     document.documentElement.classList.remove('wp-modal');
     unsubs.splice(0).forEach(u => u());

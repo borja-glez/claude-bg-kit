@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs } from '../src/lib/sync.js';
 import { normalizeApproval, normalizeProposal, ownerApproved, ownerCheck, proposalDigest } from '../src/lib/proposals.js';
 import { run as forgeCli } from '../src/forge/cli/run.js';
-import { start, type Snapshot } from '../src/page/app.js';
+import { start as startPage, type Snapshot } from '../src/page/app.js';
 import { morphInto } from '../src/page/morph.js';
 import { fitWindow } from '../src/lib/timeline.js';
 import { timelineWindow } from '../src/page/render.js';
@@ -18,8 +18,20 @@ const plan = parsePlan(readFileSync(join(process.cwd(), 'tests', 'fixtures', 'pl
 const snapshot: Snapshot = buildDocs(plan, '2026-10-11T09:00:00Z');
 const NOW = Date.parse('2026-10-11T12:00:00Z');
 const flush = () => new Promise(r => setTimeout(r, 0));
+// Final-carries 4: the page repaints on the next animation frame, which happy-dom runs as a setImmediate, and flush is a
+// setTimeout(0). When the worker loses the CPU for a millisecond right after a test awaits in the check phase (a loaded
+// full run), that timer comes first and the test reads the page before its repaint. Here a frame is a 0 ms timer as well,
+// so a flush asked for after a frame always runs after it: timers keep their order. (A test that drives the frames
+// itself still stubs requestAnimationFrame; vi.unstubAllGlobals() gives this one back.)
+globalThis.requestAnimationFrame = (fn: FrameRequestCallback) => setTimeout(() => fn(performance.now()), 0) as unknown as number;
 // The page keeps its view in the URL hash: each test starts from a clean one.
 beforeEach(() => { history.replaceState(null, '', location.pathname); });
+// Final-carries 4: a page a test left running keeps its popstate, hashchange and keydown listeners, its 30 s tick and
+// its note timer, so in a later test it answered that test's Escape, Back or hash change and wrote the shared URL: how
+// slowly the suite ran (load) decided whether it did. Every page a test starts is stopped once the test ends.
+const started: { stop(): void }[] = [];
+const start: typeof startPage = async env => { const app = await startPage(env); started.push(app); return app; };
+afterEach(() => { for (const app of started.splice(0)) app.stop(); });
 
 type Cb = (snap: unknown) => void;
 function fakeDb() {
@@ -51,6 +63,57 @@ function fakeDb() {
     subs,
   };
 }
+
+let leftRunning: Awaited<ReturnType<typeof startPage>> | null = null;
+describe('the test helpers (final-carries 4)', () => {
+  it('a page a test does not stop is stopped after it', async () => {
+    leftRunning = await start({ claude: null, snapshot, root: document.createElement('div'), now: () => NOW });
+    expect(started).toContain(leftRunning);
+  });
+  it('so a later test\'s hash change, Back or Escape reaches no page of an earlier test', async () => {
+    const app = leftRunning!;
+    history.replaceState(null, '', '#t=T003');
+    window.dispatchEvent(new Event('hashchange'));
+    window.dispatchEvent(new Event('popstate'));
+    await settle();
+    expect(app.ui.modal).toBeNull();
+    expect(location.hash).toBe('#t=T003');
+  });
+  it('the frame fallback runs on the page\'s timers, so a test can hold it', async () => {
+    vi.stubGlobal('requestAnimationFrame', () => 0);
+    try {
+      const calls: number[] = [];
+      let fallback: (() => void) | null = null;
+      const timers = { setTimeout: (fn: () => void, ms: number) => { calls.push(ms); if (ms === 100) fallback = fn; return calls.length; }, clearTimeout: () => {} };
+      let paints = 0;
+      const root = document.createElement('div');
+      const app = await start({ claude: null, snapshot, root, now: () => NOW, timers, morph: (r, h) => { paints++; morphInto(r, h); } });
+      paints = 0;
+      click(root, '[data-view="talk"]');
+      await settle();
+      expect(calls).toContain(100);
+      expect(paints).toBe(0);
+      fallback!();
+      expect(paints).toBe(1);
+      app.stop();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it('flush waits for a frame asked for before it, also when the worker is busy right after the await', async () => {
+    const busy = (ms: number) => { const t = Date.now(); while (Date.now() - t < ms) { /* the load of a full run */ } };
+    for (let i = 0; i < 20; i++) {
+      // Resumed in the check phase, as a test is after a frame.
+      await new Promise<void>(r => setImmediate(r));
+      let painted = false;
+      requestAnimationFrame(() => { painted = true; });
+      const p = flush();
+      busy(3);
+      await p;
+      expect(painted, `trial ${i}`).toBe(true);
+    }
+  });
+});
 
 describe('start', () => {
   it('renders the embedded snapshot offline when db is unavailable', async () => {
@@ -224,16 +287,16 @@ describe('start', () => {
     // happy-dom's WheelEvent drops the modifier keys; a browser's carries them.
     Object.defineProperty(wheel, 'ctrlKey', { value: true });
     canvas.dispatchEvent(wheel);
-    await new Promise(r => setTimeout(r, 30));
+    await flush();
     expect(fitPressed()).toBe('false');
     expect(app.ui.span!).toBeLessThan(fit.to - fit.from);
     const before = app.ui.pan!;
     (root.querySelector('[data-role="timeline"]') as HTMLElement).focus();
     root.querySelector('[data-role="timeline"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    await new Promise(r => setTimeout(r, 30));
+    await flush();
     expect(app.ui.pan!).toBeGreaterThan(before);
     root.querySelector('[data-role="timeline"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: '0', bubbles: true }));
-    await new Promise(r => setTimeout(r, 30));
+    await flush();
     expect(fitPressed()).toBe('true');
     expect(decodeView(location.hash).span).toBeUndefined();
     (root.querySelector('[data-zoom="1d"]') as HTMLElement).click();
@@ -276,7 +339,7 @@ describe('start', () => {
     const claude = { use: async (name: string) => (name === 'downloads' ? { save } : null) };
     const app = await start({ claude, snapshot, root, now: () => NOW });
     (root.querySelector('[data-action="export"][data-format="svg"]') as HTMLElement).click();
-    await new Promise(r => setTimeout(r, 20));
+    await flush();
     expect(save).toHaveBeenCalledTimes(1);
     const req = save.mock.calls[0][0];
     expect(req.filename).toMatch(/timeline\.svg$/);
@@ -1645,7 +1708,7 @@ describe('the views and the URL (§4.6, H-25)', () => {
     // happy-dom's WheelEvent drops the modifier keys; a browser's carries them.
     Object.defineProperty(wheel, 'ctrlKey', { value: true });
     canvas.dispatchEvent(wheel);
-    await new Promise(r => setTimeout(r, 30));
+    await flush();
     expect(app.ui.span).toBeGreaterThan(0);
     expect(location.hash).toMatch(/^#v=schedule&s=\d+/);
     history.replaceState(null, '', '#v=schedule&z=1w');
@@ -1769,7 +1832,9 @@ describe('one repaint per animation frame (carry 10d)', () => {
       history.replaceState(null, '', '#v=schedule&o=F1,F2');
       const root = document.createElement('div');
       document.body.appendChild(root);
-      const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : n === 'user' ? fakeUser() : null) }, snapshot, root, now: () => NOW, morph: (r, h) => { paints++; morphInto(r, h); } });
+      // Only the frames this test runs repaint: the 100 ms fallback never fires here, however slowly the test runs.
+      const held = { setTimeout: () => 0, clearTimeout: () => {} };
+      const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : n === 'user' ? fakeUser() : null) }, snapshot, root, now: () => NOW, timers: held, morph: (r, h) => { paints++; morphInto(r, h); } });
       const frame = async () => { await settle(); while (frames.length) frames.shift()!(); await settle(); };
       await frame();
       paints = 0;
@@ -1838,7 +1903,7 @@ describe('the timeline paints what is in view (H-06)', () => {
     Object.defineProperty(tlw, 'clientHeight', { configurable: true, value: 560 });
     tlw.scrollTop = 200 * 28;
     tlw.dispatchEvent(new Event('scroll'));
-    await new Promise(r => setTimeout(r, 60));
+    await flush();
     await settle();
     expect(app.ui.tl).toEqual({ first: 200, count: 21 });
     expect((root.querySelector('[data-role="timeline"]') as HTMLElement).dataset.start).toBe('180');
@@ -1865,7 +1930,7 @@ describe('the timeline scroll, edge cases (H-06)', () => {
       Object.defineProperty(el, 'clientHeight', { configurable: true, value: 560 });
       el.scrollTop = row * 28;
       el.dispatchEvent(new Event('scroll'));
-      await new Promise(r => setTimeout(r, 60));
+      await flush();
       await settle();
     };
     return { app, root, tl, scrollTo };
@@ -1897,7 +1962,7 @@ describe('the timeline scroll, edge cases (H-06)', () => {
     Object.defineProperty(el, 'clientHeight', { configurable: true, value: 560 });
     el.scrollTop = rows * 28 - 560;
     el.dispatchEvent(new Event('scroll'));
-    await new Promise(r => setTimeout(r, 60));
+    await flush();
     await settle();
   };
   const paintsTheRowInView = (el: HTMLElement) => {
@@ -2705,7 +2770,7 @@ describe('the schedule opens fitted, with the phases in progress open (H-14)', (
     // 100 px of 1000 to the left: the window moves a tenth of its span later, and is no longer the fit.
     window.dispatchEvent(new PointerEvent('pointermove', { clientX: 400, bubbles: true }));
     window.dispatchEvent(new PointerEvent('pointerup', { clientX: 400, bubbles: true }));
-    await new Promise(r => setTimeout(r, 30));
+    await flush();
     await settle();
     expect(two.root.querySelector('[data-action="fit"]')!.getAttribute('aria-pressed')).toBe('false');
     expect(timelineWindow(two.app.model, two.app.ui).from - fit.from).toBeCloseTo((fit.to - fit.from) * 0.1, -3);
@@ -2731,13 +2796,13 @@ describe('the burndown at its real width (H-26)', () => {
     await settle();
     expect(observed[0]).toBe(root.querySelector('[data-role="burndown"]'));
     report([{ contentRect: { width: 900 } }]);
-    await new Promise(r => setTimeout(r, 60));
+    await flush();
     await settle();
     expect(app.ui.width).toBe(900);
     expect(root.querySelector('.bd')!.getAttribute('viewBox')).toBe('0 0 900 160');
     // A change under 8 px is not worth a redraw.
     report([{ contentRect: { width: 905 } }]);
-    await new Promise(r => setTimeout(r, 60));
+    await flush();
     expect(app.ui.width).toBe(900);
     app.stop();
     vi.unstubAllGlobals();
