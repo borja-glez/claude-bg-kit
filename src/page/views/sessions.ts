@@ -41,11 +41,13 @@ export function renderSessionsView(m: Model, d: Dict, ui: UiState, dv: Derived):
     const title = `${rid === NO_RUN ? d.sessions.noRun : d.sessions.group(rid)}${state ? ` · ${state}` : ''} · ${d.sessions.count(list.length)}`;
     // Final review M1: a run and «Sin ejecución» have keys of their own kind (r:<run> and none), so no run id, whatever it
     // says, takes the other's. M2: the fold the data says is in the key too, so a change of it is a new node the morph does
-    // not keep folded; the fold the person chose (the `toggle` event, app.ts) wins over it.
+    // not keep folded; the fold the person chose (the `toggle` event, app.ts) wins over it. Re-review N2: while it does, the
+    // key keeps the data's fold of when the person chose, so a flip of the data rebuilds nothing and a focus inside stays.
     const group = rid === NO_RUN ? 'none' : `r:${rid}`;
     const fold = (kind: 'sg' | 'si', byData: boolean) => {
-      const open = ui.folds?.get(`${kind}:${group}`) ?? byData;
-      return `data-k="${esc(`${kind}:${group}:${byData ? 'open' : 'folded'}`)}"${open ? ' open' : ''}`;
+      const own = ui.folds?.get(`${kind}:${group}`);
+      const open = own ? own.open : byData;
+      return `data-k="${esc(`${kind}:${group}:${own ? own.key : byData ? 'open' : 'folded'}`)}"${open ? ' open' : ''}`;
     };
     const inner = folded || !idle.length
       ? cards(list)

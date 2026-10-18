@@ -77,6 +77,9 @@ const placeNew = (marked: Element[], root: HTMLElement, next: HTMLElement): Set<
   const doc = root.ownerDocument;
   for (const el of keyed) {
     if (!isNew(el) || holdsLive.has(el)) continue;
+    // Re-review N3: a stub (R2), or a node holding one, is left to morphdom, whose walk sees it added and makes the morph
+    // throw: moved in here it would never be walked, and paint an empty section.
+    if (el.hasAttribute('data-stub') || el.querySelector('[data-stub]')) continue;
     if (!anchorOf.has(el)) {
       const run = [el];
       let after = el.nextElementSibling;
@@ -102,9 +105,21 @@ const placeNew = (marked: Element[], root: HTMLElement, next: HTMLElement): Set<
 const sameSection = (from: Element, stub: Element): boolean =>
   from.tagName === stub.tagName && nodeKey(from) === nodeKey(stub) && from.getAttribute('class') === stub.getAttribute('class');
 
+/** Re-review N1: whether a focused field, its attributes mirrored, still differs from the render in more than what the
+ *  person typed or chose: a select's options, or an attribute other than the value. */
+const leftStale = (from: Field, to: Element): boolean => {
+  if (from.tagName === 'SELECT') return from.innerHTML !== to.innerHTML;
+  const names = new Set([...Array.from(from.attributes), ...Array.from(to.attributes)].map(a => a.name));
+  names.delete('value');
+  for (const n of names) if (from.getAttribute(n) !== to.getAttribute(n)) return true;
+  return false;
+};
+
 /** The children of `root` become those of `html`. Throws when morphdom does (the caller replaces everything then), and when a
- *  section's stub found no node of its own in the page (R2): the caller paints the page in full then. */
-export function morphInto(root: HTMLElement, html: string): void {
+ *  section's stub found no node of its own in the page (R2): the caller paints the page in full then. Returns the focused
+ *  field it left as the person has it while the render says otherwise (re-review N1), so the caller can paint its section
+ *  again once the field loses the focus; else null. */
+export function morphInto(root: HTMLElement, html: string): Element | null {
   // A string would lose all but its first node: morph into a sibling element that holds the whole HTML.
   const next = root.cloneNode(false) as HTMLElement;
   next.innerHTML = html;
@@ -114,6 +129,7 @@ export function morphInto(root: HTMLElement, html: string): void {
   const dirty = dirtyFields(marked);
   const placed = placeNew(marked, root, next);
   let lost = false;
+  let kept: Element | null = null;
   morphdom(root, next, {
     childrenOnly: true,
     getNodeKey: nodeKey,
@@ -136,11 +152,16 @@ export function morphInto(root: HTMLElement, html: string): void {
       // Filled by hand (the arrows of the dependencies): never entered.
       if (from.getAttribute('data-morph') === 'skip') return false;
       // The person is typing or choosing there: its value, its selection and its open list stay.
-      if (from === active && isField(from)) { mirrorAttrs(from, to); return false; }
+      if (from === active && isField(from)) {
+        mirrorAttrs(from, to);
+        if (leftStale(from, to)) kept = from;
+        return false;
+      }
       if (from.tagName === 'DETAILS') to.toggleAttribute('open', (from as HTMLDetailsElement).open);
       return true;
     },
   });
   for (const el of placed) el.remove();
   if (lost) throw new Error('[waypoint] a section stub found no node of its own');
+  return kept;
 }

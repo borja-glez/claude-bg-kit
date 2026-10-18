@@ -2118,9 +2118,11 @@ describe('the sessions view (G-04, G-10, H-23)', () => {
     expect(head(renderApp(m, ui({ view: 'sessions' })))).toBe('sg:none:folded');
     m.sessions.ana = { name: 'ana', heartbeatAt: at(0), leaseUntil: at(5), status: 'active', role: 'manual' };
     expect(head(renderApp(m, ui({ view: 'sessions' })))).toBe('sg:none:open open');
-    expect(head(renderApp(m, ui({ view: 'sessions', folds: new Map([['sg:none', false]]) })))).toBe('sg:none:open');
+    expect(head(renderApp(m, ui({ view: 'sessions', folds: new Map([['sg:none', { open: false, key: 'open' as const }]]) })))).toBe('sg:none:open');
     delete m.sessions.ana;
-    expect(head(renderApp(m, ui({ view: 'sessions', folds: new Map([['sg:none', true]]) })))).toBe('sg:none:folded open');
+    expect(head(renderApp(m, ui({ view: 'sessions', folds: new Map([['sg:none', { open: true, key: 'folded' as const }]]) })))).toBe('sg:none:folded open');
+    // Re-review N2: while the person's fold wins, the key keeps the data's fold of when the person chose.
+    expect(head(renderApp(m, ui({ view: 'sessions', folds: new Map([['sg:none', { open: false, key: 'open' as const }]]) })))).toBe('sg:none:open');
   });
   it('the coordinator of the active run lists its slots and the free ones, and the values of a card are aligned to the left (H-23)', () => {
     const m = base();

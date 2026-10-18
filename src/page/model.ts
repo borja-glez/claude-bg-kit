@@ -102,8 +102,9 @@ export interface UiState {
   /** G-07: the runs of the history the person opened (by runId). */
   runsOpen?: Set<string>;
   /** Final review M2: the folds of Sesiones' groups the person chose (sg:r:<run>, sg:none, si:…), open or not; a group
-   *  without one folds as its data says. */
-  folds?: Map<string, boolean>;
+   *  without one folds as its data says. Re-review N2: with the fold the data said when the person chose (`key`), which
+   *  stays in the group's key while the person's fold wins, so a flip of the data keeps the group's node. */
+  folds?: Map<string, { open: boolean; key: 'open' | 'folded' }>;
   timelineGroup: GroupBy;
   draft: { type: NoteType; text: string };
   answering: string | null;

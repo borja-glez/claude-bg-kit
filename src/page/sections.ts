@@ -29,6 +29,28 @@ const stubOf = (body: string): string | null => {
   return `<${tag}${body.slice(0, gt).match(KEPT)?.join('') ?? ''} data-morph="skip" data-stub></${tag}>`;
 };
 
+const ENTITY: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" };
+const unesc = (v: string): string => v.replace(/&(?:amp|lt|gt|quot|#39);/g, e => ENTITY[e]!);
+/** What a stub is matched by, as `tag|class|key`, from a section's string or from an element of the page. */
+const bodySig = (body: string): string => {
+  const open = body.slice(0, Math.max(0, body.indexOf('>')));
+  const attr = (n: string) => { const m = new RegExp(`\\s${n}="([^"]*)"`).exec(open); return m ? unesc(m[1]!) : ''; };
+  return `${(/^<([a-zA-Z][\w-]*)/.exec(open)?.[1] ?? '').toLowerCase()}|${attr('class')}|${attr('id') || attr('data-k') || attr('data-scroll-key')}`;
+};
+const elementSig = (el: Element): string =>
+  `${el.tagName.toLowerCase()}|${el.getAttribute('class') ?? ''}|${el.id || el.getAttribute('data-k') || el.getAttribute('data-scroll-key') || ''}`;
+
+/** Re-review N1: `painted` without the sections that hold `el` (its ancestors up to `root`, matched as a stub is: tag, class
+ *  and key), so the next repaint paints them in full. A focused field the morph left as the person had it keeps the DOM
+ *  off its section's string until then. */
+export function forgetHolding(painted: ReadonlyMap<string, string>, el: Element, root: Element): Map<string, string> {
+  const holders = new Set<string>();
+  for (let p = el.parentElement; p && p !== root; p = p.parentElement) holders.add(elementSig(p));
+  const out = new Map(painted);
+  for (const [name, body] of painted) if (holders.has(bodySig(body))) out.delete(name);
+  return out;
+}
+
 /** Where the section whose body starts at `from` ends (its closing mark), past the sections inside it. */
 function closeOf(html: string, from: number): number {
   let depth = 1;

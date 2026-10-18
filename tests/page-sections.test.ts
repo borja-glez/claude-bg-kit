@@ -35,7 +35,7 @@ async function boot(hash: string) {
   document.body.appendChild(root);
   const inputs: string[] = [];
   const clock = { now: BIG_NOW };
-  const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : null) }, snapshot: bigSnapshot(BIG_NOW), root, now: () => clock.now, morph: (r, html) => { inputs.push(html); morphInto(r, html); } });
+  const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : null) }, snapshot: bigSnapshot(BIG_NOW), root, now: () => clock.now, morph: (r, html) => { inputs.push(html); return morphInto(r, html); } });
   const docs = bigDocs(BIG_NOW);
   for (const [path, body] of Object.entries(docs.meta)) f.push(path, body as Record<string, unknown>);
   for (const [path, rows] of Object.entries(docs.coll)) f.push(path, rows);
@@ -129,6 +129,25 @@ describe('morphInto with stubs (R2)', () => {
     expect(() => morphInto(root, `<main><section class="ins"${STUB}</section></main>`)).toThrow();
     root.innerHTML = '<main><section class="other"><b>x</b></section></main>';
     expect(() => morphInto(root, `<main><section class="ins"${STUB}</section></main>`)).toThrow();
+  });
+
+  it('a stub inside a new keyed node placeNew would move in, or a new keyed stub, goes through the same net (re-review N3)', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    for (const html of [
+      `<div class="l"><div data-k="x"><section class="ins"${STUB}</section></div><i data-k="a"></i></div>`,
+      `<div class="l"><i data-k="y"${STUB}</i><i data-k="a"></i></div>`,
+    ]) {
+      root.innerHTML = '<div class="l"><i data-k="a"></i></div>';
+      expect(() => morphInto(root, html), html).toThrow();
+    }
+    // A new keyed node without a stub inside is still placed before its anchor, and nothing is left behind.
+    root.innerHTML = '<div class="l"><i data-k="a"></i></div>';
+    const a = root.querySelector('[data-k="a"]');
+    morphInto(root, '<div class="l"><div data-k="x"><b>new</b></div><i data-k="a"></i></div>');
+    expect(root.innerHTML).toBe('<div class="l"><div data-k="x"><b>new</b></div><i data-k="a"></i></div>');
+    expect(root.querySelector('[data-k="a"]')).toBe(a);
+    root.remove();
   });
 });
 
@@ -242,6 +261,38 @@ describe('a repaint skips the sections that did not change (R2)', () => {
     expect(document.activeElement).toBe(link);
     expect(root.querySelector('[data-scroll-key="zones"]')).toBe(zones);
     expect(zones.scrollTop).toBe(40);
+    app.stop();
+  });
+
+  it('a field focused while its section repainted takes what the render says once it loses the focus (re-review N1)', async () => {
+    const { root, app, inputs, f } = await boot('#v=schedule');
+    const sel = root.querySelector('select[data-action="burn-scope"]') as HTMLSelectElement;
+    const labels = () => Array.from(sel.options, o => o.textContent ?? '');
+    sel.focus();
+    const plan = bigDocs(BIG_NOW).coll.plan as Record<string, { name: string }>;
+    f.push('plan', { ...plan, F1: { ...plan.F1!, name: 'Fase uno renombrada' } });
+    await settle();
+    // While focused, the select keeps the options the person has open; its section is painted (not a stub).
+    expect(root.querySelector('select[data-action="burn-scope"]')).toBe(sel);
+    expect(document.activeElement).toBe(sel);
+    expect(inputs.at(-1)).not.toContain(`<section class="insights"${STUB}`);
+    expect(labels().some(l => l.includes('Fase uno renombrada'))).toBe(false);
+    inputs.length = 0;
+    sel.blur();
+    await settle();
+    // One repaint, which does not skip the section that held it.
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]).not.toContain(`<section class="insights"${STUB}`);
+    expect(labels().some(l => l.includes('Fase uno renombrada'))).toBe(true);
+    // The strip, which did not hold it, is still skipped.
+    expect(inputs[0]).toContain(`<div class="strip"${STUB}</div>`);
+    // A field whose section never changed while focused costs nothing on blur.
+    const box = root.querySelector('[data-role="search"]') as HTMLInputElement;
+    box.focus();
+    inputs.length = 0;
+    box.blur();
+    await settle();
+    expect(inputs).toHaveLength(0);
     app.stop();
   });
 

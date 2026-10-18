@@ -3124,6 +3124,34 @@ describe('Sesiones folds a group as its data says, unless the person folded or o
     app.stop();
   });
 
+  it('while the person’s fold wins, a flip of the data’s fold keeps the group’s node, and the focus inside it (re-review N2)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser(), '#v=sessions');
+    f.push('state', { T002: { status: 'in_progress', owner: 'a', startedAt: at(-30) } });
+    f.push('sessions', { a: stopped('A') });
+    await settle();
+    expect(group(root).open).toBe(false);
+    flip(group(root));
+    await settle();
+    const node = group(root);
+    const chip = root.querySelector('[data-k="ts:a:T002"]') as HTMLButtonElement;
+    chip.focus();
+    expect(document.activeElement).toBe(chip);
+    // A live session joins: the data now says open, the person had said open already.
+    f.push('sessions', { a: stopped('A'), b: live('B') });
+    await settle();
+    expect(group(root)).toBe(node);
+    expect(group(root).open).toBe(true);
+    expect(document.activeElement).toBe(chip);
+    // And back: every session stopped, the data says folded; the person's fold still wins, on the same node.
+    f.push('sessions', { a: stopped('A'), b: stopped('B') });
+    await settle();
+    expect(group(root)).toBe(node);
+    expect(group(root).open).toBe(true);
+    expect(document.activeElement).toBe(chip);
+    app.stop();
+  });
+
   it('a `toggle` the page’s own painting fires (the fold as the render said it) is not the person’s', async () => {
     const f = fakeDb();
     const { root, app } = await boot(f, fakeUser(), '#v=sessions');

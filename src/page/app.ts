@@ -12,7 +12,7 @@ import { parseSeen, pruneSeen, seenKey } from './needs.js';
 import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeRunSummary, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import type { RunSummaryDoc } from '../lib/run-summary.js';
 import { decodeView, encodeView, type ViewState } from './urlstate.js';
-import { paintSections, stripSections } from './sections.js';
+import { forgetHolding, paintSections, stripSections } from './sections.js';
 import { byNewestRun, currentPhaseId, DETAIL_TABS, esc, GROUPS, parsePlanFilter, phasesInProgress, planFilterKeys, PROPOSAL_FILTERS, relText, renderPage, TALK_FILTERS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, togglePlanFilter, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkFilter, type UiState, type View } from './render.js';
 
 /**
@@ -32,7 +32,7 @@ export interface Env {
   /** Timers for the composition ceiling (defaults to the globals; tests pass fakes). */
   timers?: { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(id: unknown): void };
   /** H-06: how the page's HTML reaches the DOM (morphInto; tests pass one that throws). */
-  morph?: (root: HTMLElement, html: string) => void;
+  morph?: (root: HTMLElement, html: string) => Element | null | void;
 }
 
 /** A composition longer than this renders anyway (a lost compositionend must not freeze the page). */
@@ -378,6 +378,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   };
   /** R2: the string of every section the page holds, as it was last painted (sections.ts). */
   let painted: ReadonlyMap<string, string> = new Map();
+  /** Re-review N1: the focused field a morph left off the render, until it loses the focus. */
+  let keptField: Element | null = null;
   const render = () => {
     scheduled = false;
     if (composing) { deferred = true; return; }
@@ -386,6 +388,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       // Review Focus 2: a plan snapshot that dropped the open task closes its detail (and unlocks the page).
       if (ui.modal && !model.plan.tasks.some(t => t.id === ui.modal)) { ui.modal = null; ui.shot = null; trailAt = 0; focusBack(); }
       const full = renderPage(model, ui, derive(model));
+      // Re-review N1: once the field a morph left off the render has lost the focus, the sections holding it are painted in
+      // full, not skipped as if the page held their string, so it takes what the render says.
+      if (keptField && document.activeElement !== keptField) { painted = forgetHolding(painted, keptField, env.root); keptField = null; }
       // R2: a section whose string is the one painted goes as a stub, so the morph neither parses nor diffs it.
       const sections = new Map<string, string>();
       const html = paintSections(full, painted, sections);
@@ -396,9 +401,13 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       // H-06: morphdom touches only the nodes that changed; if it throws (a stub that found no node of its own included),
       // everything is replaced as before, every section in full.
       painted = new Map();
-      try { morph(env.root, html); }
+      let kept: Element | null = null;
+      try { kept = morph(env.root, html) ?? null; }
       catch (e) { console.error('[waypoint] morph failed', e); replaceAll(stripSections(full)); }
       painted = sections;
+      // Re-review N1: a focused field the morph left as the person has it (a select whose options changed): its sections
+      // are painted again once it loses the focus (onFocusOut), not skipped as if the page held their string.
+      if (kept) keptField = kept;
       // One focus path, after either: what an action asked to focus wins (§4.7: the active tab on opening, the tab the
       // keys moved to, the gallery, what opened a detail or a screenshot on closing); else the focus goes back to where it
       // was (H-06). After an action it is never left on the body: the open detail's tab, else the view's main element.
@@ -867,9 +876,11 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (!/^s[gi]:/.test(k)) return;
     const at = k.lastIndexOf(':');
     const group = k.slice(0, at);
-    const said = ui.folds?.get(group) ?? k.slice(at + 1) === 'open';
+    const key = k.slice(at + 1) === 'open' ? 'open' : 'folded';
+    const said = ui.folds?.get(group)?.open ?? key === 'open';
     if (el!.open === said) return;
-    ui.folds = new Map(ui.folds ?? []).set(group, el!.open);
+    // Re-review N2: the key's fold is kept with the person's, so the group's key, and its node, stay.
+    ui.folds = new Map(ui.folds ?? []).set(group, { open: el!.open, key });
     schedule();
   };
   const onCompStart = () => {
@@ -882,6 +893,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     const target = ev.target as HTMLElement | null;
     const role = target?.dataset?.role;
     if (composing && role && DRAFT_ROLES.includes(role)) endComposition();
+    // Re-review N1: a field the morph left off the render may be losing the focus: the next repaint looks (render).
+    if (keptField) schedule();
   };
   // ---- Timeline: free zoom and pan ----
   // The first wheel zoom, drag or key turns the preset window, or the fitted one (H-14), into a free one (span and pan in
