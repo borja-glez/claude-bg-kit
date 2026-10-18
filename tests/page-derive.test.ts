@@ -68,7 +68,7 @@ describe('derive: the derived data once per revision of the data (H-06)', () => 
   it('a render computes the metrics once, with the forecast and critical path layers on', () => {
     const ui: UiState = {
       zoom: '1d', offset: 0, expanded: new Set(['F1']), modal: null, search: '', view: 'schedule', shot: null, layers: ['critical', 'forecast'],
-      noteFilter: 'all', timelineGroup: 'phase',
+      timelineGroup: 'phase',
       draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
       proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '',
     };
@@ -93,7 +93,7 @@ describe('derive: the derived data once per revision of the data (H-06)', () => 
     vi.mocked(needsOf).mockClear();
     const ui = (over: Partial<UiState>): UiState => ({
       zoom: '1d', offset: 0, expanded: new Set(['F1']), modal: null, search: '', view: 'summary', shot: null,
-      noteFilter: 'all', timelineGroup: 'phase',
+      timelineGroup: 'phase',
       draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
       proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', ...over,
     });

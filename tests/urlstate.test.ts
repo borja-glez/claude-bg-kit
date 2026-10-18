@@ -57,4 +57,9 @@ describe('view state in the URL (§4.6, H-25)', () => {
     expect(decodeView('#v=plan&pf=free,deferred,tr:ui')).toEqual({ view: 'plan', pf: ['free', 'deferred', 'tr:ui'] });
     expect(decodeView(encodeView({ view: 'plan', pf: ['running'] }))).toEqual({ view: 'plan', pf: ['running'] });
   });
+  it('the conversation writes its filter as c=, unless it is everything (§4.6.7)', () => {
+    expect(encodeView({ view: 'talk', c: 'all' })).toBe('#v=talk');
+    expect(encodeView({ view: 'talk', c: 'open' })).toBe('#v=talk&c=open');
+    expect(decodeView('#v=talk&c=open')).toEqual({ view: 'talk', c: 'open' });
+  });
 });

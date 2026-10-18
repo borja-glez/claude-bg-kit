@@ -5,7 +5,7 @@ import { BIG_NOW, BIG_TASKS, bigModel, bigPlan, bigSnapshot, harnessHtml } from 
 
 const ui = (over: Partial<UiState> = {}): UiState => ({
   zoom: '1d', offset: 0, expanded: new Set(), modal: null, search: '', view: 'summary', shot: null,
-  noteFilter: 'all', timelineGroup: 'phase',
+  timelineGroup: 'phase',
   draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
   proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', ...over,
 });

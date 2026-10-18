@@ -12,7 +12,7 @@ import { parseSeen, pruneSeen, seenKey } from './needs.js';
 import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeRunSummary, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import type { RunSummaryDoc } from '../lib/run-summary.js';
 import { decodeView, encodeView, type ViewState } from './urlstate.js';
-import { byNewestRun, currentPhaseId, DETAIL_TABS, esc, GROUPS, NOTE_FILTERS, parsePlanFilter, phasesInProgress, planFilterKeys, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, togglePlanFilter, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type View } from './render.js';
+import { byNewestRun, currentPhaseId, DETAIL_TABS, esc, GROUPS, parsePlanFilter, phasesInProgress, planFilterKeys, PROPOSAL_FILTERS, relText, renderApp, TALK_FILTERS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, togglePlanFilter, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkFilter, type UiState, type View } from './render.js';
 
 /**
  * The page's embedded snapshot; G-13 and G-14: the waypoint that built it and the states the last listing saw. The page
@@ -76,8 +76,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   const now = env.now ?? Date.now;
   const morph = env.morph ?? morphInto;
   const ui: UiState = {
-    zoom: '1d', offset: 0, expanded: new Set(), modal: null, shot: null, search: '', view: 'summary', talk: 'notes', fit: true, autoOpen: true,
-    noteFilter: 'all', timelineGroup: 'phase',
+    zoom: '1d', offset: 0, expanded: new Set(), modal: null, shot: null, search: '', view: 'summary', talk: 'all', fit: true, autoOpen: true,
+    timelineGroup: 'phase',
     draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
     proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '',
   };
@@ -142,6 +142,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
    *  selector, so no key (from the database) can break the query (review M2). */
   let focusNext: string | { k: string } | null = null;
   const byKey = (k: string): { k: string } => ({ k });
+  /** H-17 (C23): «Ver la decisión» also brings into view what it asked to focus. The focus itself takes the one path above
+   *  (focusNext); this is the very target it set, so another action's focus is never scrolled to, and it lasts one render. */
+  let revealNext: { k: string } | null = null;
   const ACTIVE_TAB = '.modal [role="tab"][aria-selected="true"]';
   /** The detail closed: the focus goes back to what opened it, else (a link opened it) to the view's main element; the
    *  render finds another place when it is gone. Never left on the body. */
@@ -179,7 +182,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     ui.view = v.view && (VIEWS as readonly string[]).includes(v.view) ? (v.view as View) : 'summary';
     if (ui.view !== 'schedule') ui.tl = undefined;
     applyDetail(v);
-    if (ui.view === 'talk') ui.talk = v.c && (TALK_KINDS as readonly string[]).includes(v.c) ? (v.c as TalkKind) : 'notes';
+    if (ui.view === 'talk') ui.talk = v.c && (TALK_FILTERS as readonly string[]).includes(v.c) ? (v.c as TalkFilter) : 'all';
     if (ui.view === 'schedule') {
       ui.timelineGroup = v.group && (GROUPS as readonly string[]).includes(v.group) ? (v.group as UiState['timelineGroup']) : 'phase';
       ui.zoom = v.zoom ?? '1d';
@@ -390,10 +393,16 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       // was (H-06). After an action it is never left on the body: the open detail's tab, else the view's main element.
       const asked = focusNext;
       focusNext = null;
-      if (!asked || !focusTo(asked)) giveFocus(focus);
+      const reveal = revealNext !== null && revealNext === asked;
+      revealNext = null;
+      const took = !!asked && focusTo(asked);
+      if (!took) giveFocus(focus);
       if (asked && !env.root.contains(document.activeElement)) focusTo(ui.modal ? ACTIVE_TAB : 'main');
       dropArrows();
       if (document.scrollingElement && document.scrollingElement.scrollTop !== page) document.scrollingElement.scrollTop = page;
+      // H-17 (C23): what «Ver la decisión» asked to focus, and took it, comes into view; anything else keeps the page's
+      // scroll through the morph (above).
+      if (reveal && took) (document.activeElement as HTMLElement).scrollIntoView?.({ block: 'center' });
       document.documentElement.classList.toggle('wp-modal', ui.modal !== null);
       // §4.8: the page speaks the plan's language (screen readers, hyphenation).
       document.documentElement.lang = model.meta?.locale || 'en';
@@ -706,8 +715,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       const v = el.dataset.view as View;
       ui.view = VIEWS.includes(v) ? v : 'summary';
       if (ui.view !== 'schedule') ui.tl = undefined;
-      const c = el.dataset.c as TalkKind | undefined;
-      if (ui.view === 'talk' && c && TALK_KINDS.includes(c)) ui.talk = c;
+      const c = el.dataset.c as TalkFilter | undefined;
+      if (ui.view === 'talk' && c && TALK_FILTERS.includes(c)) ui.talk = c;
       // H-18: a link may carry the plan's filter («Te necesita» opens it on the deferred findings).
       const pf = el.dataset.pf;
       if (ui.view === 'plan' && pf !== undefined) ui.planFilter = parsePlanFilter(pf.split(','));
@@ -717,13 +726,24 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       if (ui.notice !== 'readonly') ui.notice = null;
       pushNext = true;
     }
+    // §4.6.7: the conversation's filter is a filter: it rewrites the address, it does not add a history entry (H-25). A
+    // pending link's task goes with it (review I2), and so does the notice of the last action.
     else if (action === 'talk-c') {
-      const c = el.dataset.c as TalkKind;
-      if (!TALK_KINDS.includes(c)) return;
+      const c = el.dataset.c as TalkFilter;
+      if (!TALK_FILTERS.includes(c)) return;
       ui.talk = c;
       linked = null;
       if (ui.notice !== 'readonly') ui.notice = null;
-      pushNext = true;
+    }
+    // H-17: «Ver la decisión»: the decision that closed a question, focused and in view («Todo» if the filter hides it). Only
+    // a loose decision the page received: the one path of the focus takes it by its key, never by a selector (C23).
+    else if (action === 'note-go') {
+      const n = model.notes.find(x => x.id === el.dataset.id);
+      if (ui.view !== 'talk' || !n || n.proposalId || n.type !== 'decision') return;
+      const shown = ui.talk === 'all' || ui.talk === 'decision' || (ui.talk === 'mine' && model.me !== null && n.author === model.me);
+      if (!shown) ui.talk = 'all';
+      revealNext = byKey(`n:${n.id}`);
+      focusNext = revealNext;
     }
     else if (action === 'tgroup') {
       const g = el.dataset.group as UiState['timelineGroup'];
@@ -759,7 +779,6 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       open.has(id) ? open.delete(id) : open.add(id);
       ui.runsOpen = open;
     }
-    else if (action === 'nfilter') { const k = el.dataset.filter as UiState['noteFilter']; if (!NOTE_FILTERS.includes(k)) return; ui.noteFilter = k; }
     else if (action === 'answer-open') { ui.answering = el.dataset.id ?? null; ui.answerDraft = ''; ui.notice = null; }
     // G-24: [Visto] marks the deferred findings of the listed tasks as seen, in this browser only.
     else if (action === 'seen-deferred') {

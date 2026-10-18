@@ -1,120 +1,218 @@
-// Conversación (spec §4.6.7). In 4b, two sub-tabs over the renders of before: the notes and the proposals; 4c joins them
-// with their filters, the comments inside their proposal and the decisions with their structure.
-import { canDecide, MAX_PROPOSAL_TEXT, PROPOSAL_CATEGORIES, PROPOSAL_RISKS, PROPOSAL_STATUSES, type ProposalStatus } from '../../lib/proposals.js';
-import { counts, filterNotes, MAX_NOTE, NOTE_TYPES } from '../../lib/notes.js';
+// Conversación (spec §4.6.7; G-17, H-17): one composer on top, one row of filters (everything, open questions, decisions,
+// proposals, ideas and debt, mine) and one list where notes and proposals mix by date. A proposal carries its comments
+// (they never show loose), the task it became, its history and the owner's mark; a decision shows its structure; a question
+// a decision resolved shows closed, with a link to that decision. Only the roadmap's owner decides proposals (§4.1): the
+// rules 4b set for it (the mark first, [Confirmar] only without one, a decision that changed decided again with its text in
+// view, the retry of an update that failed) hold under every filter, and who decided is what the owner's mark says (C26).
+import { canDecide, MAX_PROPOSAL_TEXT, PROPOSAL_CATEGORIES, PROPOSAL_RISKS, PROPOSAL_STATUSES, type ApprovalDoc, type ProposalDoc, type ProposalStatus } from '../../lib/proposals.js';
+import { counts, MAX_NOTE, NOTE_TYPES } from '../../lib/notes.js';
+import { inlineMd } from '../../lib/inline-md.js';
+import type { NoteDoc } from '../../lib/types.js';
 import type { Dict } from '../i18n.js';
-import { authorLabel, esc, fmt, oneOf, safeNote, unmarkedReason } from '../html.js';
-import { NOTE_FILTERS, PROPOSAL_FILTERS, TALK_KINDS, type Model, type ProposalFilter, type ProposalFilterKind, type UiState } from '../model.js';
+import { authorLabel, esc, fmt, labelOf, oneOf, safeNote, safeStatus, unmarkedReason } from '../html.js';
+import { PROPOSAL_FILTERS, TALK_FILTERS, type Model, type ProposalFilter, type ProposalFilterKind, type TalkFilter, type UiState } from '../model.js';
+
+type Note = NoteDoc & { id: string };
+type Prop = ProposalDoc & { id: string };
+type Item = { ts: string; note?: Note; prop?: Prop };
+
+const time = (s: string): number => { const t = Date.parse(s); return Number.isFinite(t) ? t : -Infinity; };
+/** An open question: no answer, and not closed by a decision (H-17). */
+const isOpenQuestion = (n: NoteDoc): boolean => n.type === 'question' && !n.answer && !n.answeredByNote;
+/** A person as the page names them, never as «tú»: for who decided or reopened a proposal, which anyone who writes
+ *  proposals/ can set (C26). */
+const named = (m: Model, d: Dict, who: string): string => authorLabel(m.me === null ? m : { ...m, me: null }, d, who);
 
 export function renderTalkView(m: Model, d: Dict, ui: UiState, loc: string): string {
-  const kind = ui.talk ?? 'notes';
-  const c = counts(m.notes);
-  const notes = `<b>${c.decision}</b> ${esc(d.noteCounts.decision)} · <b>${c.idea}</b> ${esc(d.noteCounts.idea)} · <b>${c.debt}</b> ${esc(d.noteCounts.debt)} · <b>${c.open}</b> ${esc(d.noteCounts.open)}`;
-  const statuses = m.proposals.map(p => oneOf(PROPOSAL_STATUSES, p.status, 'done'));
-  const proposals = PROPOSAL_FILTERS.status.filter((s): s is ProposalStatus => s !== 'all').map(s => `<b>${statuses.filter(x => x === s).length}</b> ${esc(d.pstatus[s])}`).join(' · ');
-  const tabs = TALK_KINDS.map(k => `<button type="button" class="tab${k === kind ? ' on' : ''}" data-action="talk-c" data-c="${k}" aria-pressed="${k === kind}">${esc(d.talkKind[k])}</button>`).join('');
-  return `<header class="hd"><h1>${esc(d.views.talk)}</h1><div class="meta">${kind === 'proposals' ? proposals : notes}</div></header>
-  <div class="tabs">${tabs}</div>
-  ${kind === 'proposals' ? renderProposals(m, d, ui, loc) : renderNotes(m, d, ui, loc)}`;
+  const filter: TalkFilter = ui.talk && TALK_FILTERS.includes(ui.talk) ? ui.talk : 'all';
+  // G-17: a proposal's comments live inside it, never as loose notes.
+  const loose = m.notes.filter(n => !n.proposalId);
+  const c = counts(loose);
+  // H-17: a question a decision closed is not open, here as in its filter.
+  const open = loose.filter(isOpenQuestion).length;
+  const toDecide = m.proposals.filter(p => canDecide(oneOf(PROPOSAL_STATUSES, p.status, 'done'))).length;
+  const meta = `<b>${open}</b> ${esc(d.noteCounts.open)} · <b>${c.decision}</b> ${esc(d.noteCounts.decision)} · <b>${c.idea}</b> ${esc(d.noteCounts.idea)} · <b>${c.debt}</b> ${esc(d.noteCounts.debt)} · <b>${toDecide}</b> ${esc(d.talk.toDecide)}`;
+  const tabs = `<div class="tabs" role="group" aria-label="${esc(d.talk.label)}">${TALK_FILTERS.map(k => `<button type="button" class="tab${k === filter ? ' on' : ''}" data-action="talk-c" data-c="${k}" aria-pressed="${k === filter}">${esc(d.talk.filter[k])}</button>`).join('')}</div>`;
+  const list = itemsOf(m, ui, filter, loose).map(x => (x.note ? noteCard(m, d, ui, loc, x.note) : proposalCard(m, d, ui, loc, x.prop!))).join('');
+  return `<header class="hd"><h1>${esc(d.views.talk)}</h1><div class="meta">${meta}</div></header>
+  ${composer(m, d, ui, filter)}${tabs}${filter === 'proposals' ? proposalFilters(d, ui) : ''}
+  <section class="talk">${list ? `<div class="tlist">${list}</div>` : `<div class="muted">${esc(d.talk.empty[filter])}</div>`}</section>`;
 }
 
-function renderNotes(m: Model, d: Dict, ui: UiState, loc: string): string {
+/** What a filter shows, notes and proposals mixed by date, newest first (stable for equal or junk dates). The proposal
+ *  filters (status, category, risk) apply only under «Propuestas», where they show. */
+function itemsOf(m: Model, ui: UiState, filter: TalkFilter, loose: Note[]): Item[] {
+  const mine = (author: string) => m.me !== null && author === m.me;
+  const notes = filter === 'proposals' ? [] : loose.filter(n =>
+    filter === 'all' ? true
+    : filter === 'open' ? isOpenQuestion(n)
+    : filter === 'decision' ? n.type === 'decision'
+    : filter === 'ideas' ? n.type === 'idea' || n.type === 'debt'
+    : mine(n.author));
+  const f = ui.proposalFilter;
+  const props = filter === 'all' ? m.proposals
+    : filter === 'mine' ? m.proposals.filter(p => mine(p.author))
+    : filter === 'proposals' ? m.proposals.filter(p => (f.status === 'all' || oneOf(PROPOSAL_STATUSES, p.status, 'done') === f.status)
+      && (f.category === 'all' || oneOf(PROPOSAL_CATEGORIES, p.category, 'feature') === f.category)
+      && (f.risk === 'all' || oneOf(PROPOSAL_RISKS, p.risk, 'high') === f.risk))
+    : [];
+  return [...notes.map(n => ({ ts: n.ts, note: n })), ...props.map(p => ({ ts: p.ts, prop: p }))]
+    .map((x, i) => ({ x, i })).sort((a, b) => (time(b.x.ts) - time(a.x.ts)) || a.i - b.i).map(y => y.x);
+}
+
+/** The composer of a new note, and what the page has to say about writing: read-only first; else what the last action
+ *  left (a failed write, an answer or a decision that came too late, the mark saved without its proposal, with its retry,
+ *  review M6); else, under «Propuestas», that the proposals turned read-only (only they did: notes keep working). */
+function composer(m: Model, d: Dict, ui: UiState, filter: TalkFilter): string {
   const ro = m.readOnly;
-  const notice = ro ? d.notice.readonly : ui.notice && ui.notice !== 'readonly' ? d.notice[ui.notice] : '';
-  const comp = `<div class="ncomp ${ro ? 'ro' : ''}">
-    <textarea name="note" data-role="note-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.notePlaceholder)}"${ro ? ' readonly' : ''}>${esc(ui.draft.text)}</textarea>
+  const notice = ro ? d.notice.readonly
+    : ui.notice && ui.notice !== 'readonly' ? d.notice[ui.notice]
+    : m.proposalsReadOnly && filter === 'proposals' ? d.notice.readonly : '';
+  const retry = !ro && !m.proposalsReadOnly && ui.notice === 'markSaved' ? ` <button type="button" class="btn" data-action="p-retry">${esc(d.retry)}</button>` : '';
+  return `<div class="ncomp ${ro ? 'ro' : ''}">
+    <textarea name="note" data-role="note-text" maxlength="${MAX_NOTE}" rows="2" aria-label="${esc(d.talk.compose)}" placeholder="${esc(d.notePlaceholder)}"${ro ? ' readonly' : ''}>${esc(ui.draft.text)}</textarea>
     <label class="btn sel">${esc(d.noteTypeLabel)}: <select name="note-type" data-action="note-type"${ro ? ' disabled' : ''}>${NOTE_TYPES.map(t =>
       `<option value="${t}"${t === ui.draft.type ? ' selected' : ''}>${esc(d.noteType[t])}</option>`).join('')}</select></label>
-    <button class="btn pri" data-action="note-add"${ro ? ' disabled' : ''}>${esc(d.add)}</button>
-  </div>${notice ? `<div class="notice" role="status">${esc(notice)}</div>` : ''}`;
-  const filt = `<div class="nfil">${NOTE_FILTERS.map(k => `<button class="tab ${ui.noteFilter === k ? 'on' : ''}" data-action="nfilter" data-filter="${k}">${esc(d.nfilter[k as keyof Dict['nfilter']])}</button>`).join('')}</div>`;
-  const list = filterNotes(m.notes, ui.noteFilter, m.me);
-  const cards = list.map(n => {
-    const t = safeNote(n.type);
-    const open = t === 'question' && !n.answer;
-    const label = open ? d.openQuestion : d.noteType[t];
-    const when = fmt(n.ts, loc);
-    const dec = n.decision;
-    const decHtml = dec ? `<div class="ndec">
-        <div><span class="k">${esc(d.decisionChosen)}</span> ${esc(dec.chosen)}${dec.alternatives?.length ? ` <span class="k">(${esc(dec.alternatives.join(', '))})</span>` : ''}</div>
-        <div><span class="k">${esc(d.decisionWhy)}</span> ${esc(dec.why)}</div>
-        ${dec.revert ? `<div><span class="k">${esc(d.decisionRevert)}</span> ${esc(dec.revert)}</div>` : ''}
-      </div>` : '';
-    const reply = !open || ro ? '' : ui.answering === n.id
-      ? `<div class="areply"><textarea name="answer" data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea>
-        <button class="btn pri" data-action="answer-send" data-id="${esc(n.id)}">${esc(d.send)}</button></div>`
-      : `<button class="btn" data-action="answer-open" data-id="${esc(n.id)}">${esc(d.reply)}</button>`;
-    return `<div class="note nb-${t}" data-k="n:${esc(n.id)}">
-      <div class="nh"><span><span class="nt-${t}">${esc(label)}</span>${dec ? ` <span class="nauto">${esc(dec.auto ? d.autoTag : d.yoursTag)}</span>` : ''}</span><span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
-      <p>${esc(n.text)}</p>
-      ${decHtml}
-      ${n.taskId ? `<button type="button" class="chip" data-action="open-task" data-id="${esc(n.taskId)}" data-k="tk:${esc(n.id)}">${esc(n.taskId)}</button>` : ''}
-      ${n.answer ? `<div class="ans"><span class="k">${esc(d.answeredBy)} · ${esc(authorLabel(m, d, n.answeredBy ?? ''))}</span>${esc(n.answer)}</div>` : ''}
-      ${reply}
-    </div>`;
-  }).join('');
-  return `<section class="notes-view">${comp}${filt}${cards ? `<div class="ngrid">${cards}</div>` : `<div class="muted">${esc(d.noNotes)}</div>`}</section>`;
+    <button type="button" class="btn pri" data-action="note-add"${ro ? ' disabled' : ''}>${esc(d.add)}</button>
+  </div>${notice ? `<div class="notice" role="status">${esc(notice)}${retry}</div>` : ''}`;
 }
 
-function renderProposals(m: Model, d: Dict, ui: UiState, loc: string): string {
-  const ro = m.readOnly || !!m.proposalsReadOnly;
+/** The status, category and risk filters of the proposals, under «Propuestas» only. */
+function proposalFilters(d: Dict, ui: UiState): string {
   const f = ui.proposalFilter;
-  const all = m.proposals.map(p => ({
-    p, status: oneOf(PROPOSAL_STATUSES, p.status, 'done'), category: oneOf(PROPOSAL_CATEGORIES, p.category, 'feature'), risk: oneOf(PROPOSAL_RISKS, p.risk, 'high'),
-  }));
-  const notice = ro ? d.notice.readonly : ui.notice && ui.notice !== 'readonly' ? d.notice[ui.notice] : '';
   const row = <K extends ProposalFilterKind>(kind: K, label: (v: Exclude<ProposalFilter[K], 'all'>) => string) =>
     `<div class="pfil"><span class="lbl">${esc(d.pfilter[kind])}</span>${PROPOSAL_FILTERS[kind].map(v =>
-      `<button class="tab ${f[kind] === v ? 'on' : ''}" data-action="pfilter" data-kind="${kind}" data-value="${v}">${esc(v === 'all' ? d.pfilter.all : label(v as Exclude<ProposalFilter[K], 'all'>))}</button>`).join('')}</div>`;
-  const filters = row('status', v => d.pstatus[v]) + row('category', v => d.pcategory[v]) + row('risk', v => d.prisk[v]);
-  const list = all
-    .filter(x => (f.status === 'all' || x.status === f.status) && (f.category === 'all' || x.category === f.category) && (f.risk === 'all' || x.risk === f.risk))
-    .sort((a, b) => (a.p.ts < b.p.ts ? 1 : a.p.ts > b.p.ts ? -1 : 0));
-  const cards = list.map(({ p, status, category, risk }) => {
-    const id = esc(p.id);
-    const when = fmt(p.ts, loc);
-    const comments = m.notes.filter(n => n.proposalId === p.id).sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
-    const decided = p.decidedBy || p.decidedAt
-      ? `<div class="pdec"><span class="k">${esc(d.pfield.decided)} · ${esc(authorLabel(m, d, p.decidedBy ?? ''))}${p.decidedAt && fmt(p.decidedAt, loc) ? ` · ${esc(fmt(p.decidedAt, loc))}` : ''}</span>${p.reason ? `<div>${esc(p.reason)}</div>` : ''}</div>` : '';
-    const thread = comments.length ? `<div class="pcom"><div class="lbl">${esc(d.pfield.comments)}</div>${comments.map(n =>
-      `<div class="mnote"><span class="k">${esc(authorLabel(m, d, n.author))}${fmt(n.ts, loc) ? ` · ${esc(fmt(n.ts, loc))}` : ''}</span><div>${esc(n.text)}</div></div>`).join('')}</div>` : '';
-    // §4.1: an approval the owner's mark does not back never becomes a task. Without a mark (from before the marks) the owner
-    // confirms it (only approvals/ is written); with a mark of other text or another status, the decision changed after the
-    // owner took it (review I2, re-review N1): it is decided again with its text in view, as a proposed one, with Approve
-    // and Reject, never a one-click confirm.
-    const why = unmarkedReason(p.id, p, m.approvals);
-    const open = canDecide(status) || why === 'changed';
-    let actions = '';
-    if (!ro) {
-      // §4.1: only the roadmap's owner decides; anyone else comments, and is told so once it is known (carry 5).
-      const decide = open && m.isOwner === true;
-      const rejectUi = !decide ? '' : ui.rejecting === p.id
-        ? `<div class="areply"><textarea name="reason" data-role="reason-text" maxlength="${MAX_PROPOSAL_TEXT}" rows="2" placeholder="${esc(d.reasonPlaceholder)}">${esc(ui.reasonDraft)}</textarea>
-          <button class="btn del" data-action="p-reject-send" data-id="${id}">${esc(d.sendReject)}</button></div>`
-        : `<button class="btn" data-action="p-reject-open" data-id="${id}">${esc(d.reject)}</button>`;
-      const commentUi = ui.commenting === p.id
-        ? `<div class="areply"><textarea name="comment" data-role="comment-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.commentPlaceholder)}">${esc(ui.commentDraft)}</textarea>
-          <button class="btn pri" data-action="p-comment-send" data-id="${id}">${esc(d.send)}</button></div>`
-        : `<button class="btn" data-action="p-comment-open" data-id="${id}">${esc(d.comment)}</button>`;
-      const onlyOwner = open && m.isOwner === false ? `<div class="muted">${esc(d.owner.onlyOwner)}</div>` : '';
-      actions = `<div class="pact">${decide ? `<button class="btn pri" data-action="p-approve" data-id="${id}">${esc(d.approve)}</button>` : ''}${rejectUi}${commentUi}${onlyOwner}</div>`;
-    }
-    const mark = why === 'no-mark'
-      ? `<div class="pmark"><span class="warn">${esc(d.owner.noMark)}</span>${m.isOwner === true && !ro ? ` <button type="button" class="btn" data-action="p-confirm" data-id="${id}">${esc(d.owner.confirm)}</button>` : ''}</div>`
-      : why === 'changed' ? `<div class="pmark"><span class="warn">${esc(m.isOwner === true ? d.owner.changed : d.owner.changedOther)}</span></div>` : '';
-    return `<div class="note prop pr-${risk}" data-id="${id}" data-k="pr:${id}">
-      <div class="nh"><span class="tag pc">${esc(d.pcategory[category])}</span><span class="pill risk-${risk}">${esc(d.prisk[risk])}</span><span class="pill ps-${status}">${esc(d.pstatus[status])}</span><span class="k">${esc(authorLabel(m, d, p.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
-      <h3>${esc(p.title)}</h3>
-      ${p.pillar ? `<div class="mono">${esc(d.pfield.pillar)}: ${esc(p.pillar)}</div>` : ''}
-      ${p.rationale ? `<p>${esc(p.rationale)}</p>` : ''}
-      ${p.evidence ? `<div class="lbl">${esc(d.pfield.evidence)}</div><pre class="evid" data-scroll-key="evid:${id}">${esc(p.evidence)}</pre>` : ''}
-      ${p.estimate || p.path ? `<div class="mono">${p.estimate ? `${esc(d.pfield.estimate)}: ${esc(p.estimate)}` : ''}${p.estimate && p.path ? ' · ' : ''}${p.path ? `${esc(d.pfield.path)}: ${esc(p.path)}` : ''}</div>` : ''}
-      ${decided}${mark}
-      ${thread}
-      ${actions}
-    </div>`;
-  }).join('');
-  // Review M6: a decision whose mark landed and whose proposal did not update says so, with a retry of that update alone.
-  const retry = !ro && ui.notice === 'markSaved' ? ` <button type="button" class="btn" data-action="p-retry">${esc(d.retry)}</button>` : '';
-  return `<section class="proposals-view">${notice ? `<div class="notice" role="status">${esc(notice)}${retry}</div>` : ''}${filters}${cards ? `<div class="pgrid">${cards}</div>` : `<div class="muted">${esc(d.noProposals)}</div>`}</section>`;
+      `<button type="button" class="tab ${f[kind] === v ? 'on' : ''}" data-action="pfilter" data-kind="${kind}" data-value="${v}" aria-pressed="${f[kind] === v}">${esc(v === 'all' ? d.pfilter.all : label(v as Exclude<ProposalFilter[K], 'all'>))}</button>`).join('')}</div>`;
+  return row('status', v => d.pstatus[v]) + row('category', v => d.pcategory[v]) + row('risk', v => d.prisk[v]);
+}
+
+/** A note: its kind (an open question says so), who and when, its text, a decision's structure, its task (a chip keyed by
+ *  the note, review M2), its answer or the decision that closed it (H-17), and [Responder] on an open question. Focusable
+ *  (tabindex -1), so «Ver la decisión» can give it the focus. */
+function noteCard(m: Model, d: Dict, ui: UiState, loc: string, n: Note): string {
+  const t = safeNote(n.type);
+  const open = isOpenQuestion(n);
+  const when = fmt(n.ts, loc);
+  const dec = n.decision;
+  const decHtml = dec ? `<div class="ndec">
+      <div><span class="k">${esc(d.talk.point)}</span> ${esc(dec.point)}</div>
+      <div><span class="k">${esc(d.decisionChosen)}</span> ${esc(dec.chosen)}${dec.alternatives?.length ? ` <span class="k">(${esc(dec.alternatives.join(', '))})</span>` : ''}</div>
+      <div><span class="k">${esc(d.decisionWhy)}</span> ${esc(dec.why)}</div>
+      ${dec.revert ? `<div><span class="k">${esc(d.decisionRevert)}</span> ${esc(dec.revert)}</div>` : ''}
+    </div>` : '';
+  // H-17: a question a decision closed names that decision, and «Ver la decisión» brings it into view. Only a loose
+  // decision (not a proposal's comment, not a note of another kind) is one the list shows and the link can reach.
+  const by = n.answeredByNote ? m.notes.find(x => x.id === n.answeredByNote && x.type === 'decision' && !x.proposalId) : undefined;
+  const answer = n.answeredByNote
+    ? `<div class="ans res"><span class="k">${esc(by ? d.talk.resolvedBy(authorLabel(m, d, by.author)) : d.talk.resolvedByUnknown)}</span>${n.answer ? esc(n.answer) : ''}${by ? `<button type="button" class="lnk" data-action="note-go" data-id="${esc(by.id)}">${esc(d.talk.seeDecision)}</button>` : ''}</div>`
+    : n.answer ? `<div class="ans"><span class="k">${esc(d.answeredBy)} · ${esc(authorLabel(m, d, n.answeredBy ?? ''))}</span>${esc(n.answer)}</div>` : '';
+  const reply = !open || m.readOnly ? '' : ui.answering === n.id
+    ? `<div class="areply"><textarea name="answer" data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" aria-label="${esc(d.answerPlaceholder)}" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea>
+      <button type="button" class="btn pri" data-action="answer-send" data-id="${esc(n.id)}">${esc(d.send)}</button></div>`
+    : `<button type="button" class="btn" data-action="answer-open" data-id="${esc(n.id)}">${esc(d.reply)}</button>`;
+  return `<div class="note nb-${t}" data-k="n:${esc(n.id)}" tabindex="-1">
+    <div class="nh"><span><span class="nt-${t}">${esc(open ? d.openQuestion : d.noteType[t])}</span>${dec ? ` <span class="nauto">${esc(dec.auto ? d.autoTag : d.yoursTag)}</span>` : ''}</span><span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
+    <p>${inlineMd(esc(n.text))}</p>
+    ${decHtml}
+    ${n.taskId ? `<button type="button" class="chip" data-action="open-task" data-id="${esc(n.taskId)}" data-k="tk:${esc(n.id)}">${esc(n.taskId)}</button>` : ''}
+    ${answer}
+    ${reply}
+  </div>`;
+}
+
+/** The owner's mark of a proposal (approvals/<pid>), by an own key only: nothing inherited from Object.prototype passes for
+ *  one; undefined until the marks arrive. */
+const markOf = (m: Model, pid: string): ApprovalDoc | undefined =>
+  (m.approvals && Object.hasOwn(m.approvals, pid) ? m.approvals[pid] : undefined);
+
+/** C26 (carries 4b-2, 4b-3): who decided a proposal, as far as the page can vouch for it. The owner's mark says it when there
+ *  is one: the page or /forge:decide is the owner («tú» to them, once the page knows they are), forge's policy is the policy
+ *  and never the owner; with the mark's time, and the status it marked when the proposal now says another. Without a mark,
+ *  the proposal's own decidedBy, which anyone who writes proposals/ can set: an approval still waiting for the owner's mark
+ *  never reads as the viewer's own. '' when nothing says who decided. */
+function decidedLine(m: Model, d: Dict, p: Prop, status: ProposalStatus, a: ApprovalDoc | undefined, loc: string): string {
+  let who: string;
+  let at: string | undefined;
+  let marked = '';
+  if (a) {
+    const owner = m.isOwner === true;
+    who = a.by === 'forge:policy' ? d.owner.by.policy
+      : a.by === 'forge:decide' ? (owner ? d.owner.by.youForge : d.owner.by.ownerForge)
+      : owner ? d.you : d.owner.by.owner;
+    at = a.decidedAt;
+    if (a.status !== status) marked = labelOf(d.pstatus, a.status);
+  } else {
+    if (!p.decidedBy && !p.decidedAt) return '';
+    const awaiting = (status === 'approved' || status === 'auto_approved') && p.taskId === undefined;
+    who = (awaiting ? named : authorLabel)(m, d, p.decidedBy ?? '');
+    at = p.decidedAt;
+  }
+  const date = at ? fmt(at, loc) : '';
+  return `<div class="pdec"><span class="k">${esc(d.pfield.decided)} · ${esc(who)}${marked ? ` · ${esc(marked)}` : ''}${date ? ` · ${esc(date)}` : ''}</span>${p.reason ? `<div>${esc(p.reason)}</div>` : ''}</div>`;
+}
+
+/** A proposal: its category, risk and status, the task it became (G-17), its text, who decided it (C26), the owner's mark
+ *  (§4.1), its history, its comments (oldest first) and, to the owner, Approve and Reject; anyone else comments. */
+function proposalCard(m: Model, d: Dict, ui: UiState, loc: string, p: Prop): string {
+  const ro = m.readOnly || !!m.proposalsReadOnly;
+  const status = oneOf(PROPOSAL_STATUSES, p.status, 'done');
+  const category = oneOf(PROPOSAL_CATEGORIES, p.category, 'feature');
+  const risk = oneOf(PROPOSAL_RISKS, p.risk, 'high');
+  const id = esc(p.id);
+  const when = fmt(p.ts, loc);
+  const comments = m.notes.filter(n => n.proposalId === p.id).sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  const a = markOf(m, p.id);
+  const decided = decidedLine(m, d, p, status, a, loc);
+  const thread = comments.length ? `<div class="pcom"><div class="lbl">${esc(d.pfield.comments)}</div>${comments.map(n =>
+    `<div class="mnote"><span class="k">${esc(authorLabel(m, d, n.author))}${fmt(n.ts, loc) ? ` · ${esc(fmt(n.ts, loc))}` : ''}</span><div>${esc(n.text)}</div></div>`).join('')}</div>` : '';
+  // §4.1: an approval the owner's mark does not back never becomes a task. Without a mark (from before the marks) the owner
+  // confirms it (only approvals/ is written); with a mark of other text or another status, the decision changed after the
+  // owner took it (review I2, re-review N1): it is decided again with its text in view, as a proposed one, with Approve
+  // and Reject, never a one-click confirm.
+  const why = unmarkedReason(p.id, p, m.approvals);
+  const open = canDecide(status) || why === 'changed';
+  let actions = '';
+  if (!ro) {
+    // §4.1: only the roadmap's owner decides; anyone else comments, and is told so once it is known (carry 5).
+    const decide = open && m.isOwner === true;
+    const rejectUi = !decide ? '' : ui.rejecting === p.id
+      ? `<div class="areply"><textarea name="reason" data-role="reason-text" maxlength="${MAX_PROPOSAL_TEXT}" rows="2" aria-label="${esc(d.reasonPlaceholder)}" placeholder="${esc(d.reasonPlaceholder)}">${esc(ui.reasonDraft)}</textarea>
+        <button type="button" class="btn del" data-action="p-reject-send" data-id="${id}">${esc(d.sendReject)}</button></div>`
+      : `<button type="button" class="btn" data-action="p-reject-open" data-id="${id}">${esc(d.reject)}</button>`;
+    const commentUi = ui.commenting === p.id
+      ? `<div class="areply"><textarea name="comment" data-role="comment-text" maxlength="${MAX_NOTE}" rows="2" aria-label="${esc(d.commentPlaceholder)}" placeholder="${esc(d.commentPlaceholder)}">${esc(ui.commentDraft)}</textarea>
+        <button type="button" class="btn pri" data-action="p-comment-send" data-id="${id}">${esc(d.send)}</button></div>`
+      : `<button type="button" class="btn" data-action="p-comment-open" data-id="${id}">${esc(d.comment)}</button>`;
+    const onlyOwner = open && m.isOwner === false ? `<div class="muted">${esc(d.owner.onlyOwner)}</div>` : '';
+    actions = `<div class="pact">${decide ? `<button type="button" class="btn pri" data-action="p-approve" data-id="${id}">${esc(d.approve)}</button>` : ''}${rejectUi}${commentUi}${onlyOwner}</div>`;
+  }
+  // C26, carry 4b-3: a decision that changed after it was taken says whose it was: forge's policy, or the owner's («tu
+  // decisión» to the owner).
+  const changed = a?.by === 'forge:policy'
+    ? (m.isOwner === true ? d.owner.changedPolicy : d.owner.changedPolicyOther)
+    : (m.isOwner === true ? d.owner.changed : d.owner.changedOther);
+  const mark = why === 'no-mark'
+    ? `<div class="pmark"><span class="warn">${esc(d.owner.noMark)}</span>${m.isOwner === true && !ro ? ` <button type="button" class="btn" data-action="p-confirm" data-id="${id}">${esc(d.owner.confirm)}</button>` : ''}</div>`
+    : why === 'changed' ? `<div class="pmark"><span class="warn">${esc(changed)}</span></div>` : '';
+  // G-17: the task the proposal became; a button only when the plan has it.
+  const toTask = !p.taskId ? ''
+    : m.plan.tasks.some(t => t.id === p.taskId)
+      ? `<button type="button" class="chip st-${safeStatus(m.states[p.taskId]?.status)}" data-action="open-task" data-id="${esc(p.taskId)}" data-k="pt:${id}">→ ${esc(p.taskId)}</button>`
+      : `<span class="chip">→ ${esc(p.taskId)}</span>`;
+  // G-17: the decisions a reopen replaced, as the proposal records them (never as «tú», C26).
+  const history = p.history?.length
+    ? `<div class="phist"><div class="lbl">${esc(d.talk.history)}</div><ul>${p.history.map(h =>
+        `<li>${esc(d.talk.reopened(named(m, d, h.reopenedBy), fmt(h.reopenedAt, loc), d.pstatus[oneOf(PROPOSAL_STATUSES, h.status, 'done')], h.decidedBy ? named(m, d, h.decidedBy) : null))}${h.reason ? ` · ${esc(h.reason)}` : ''}</li>`).join('')}</ul></div>`
+    : '';
+  return `<div class="note prop pr-${risk}" data-id="${id}" data-k="pr:${id}">
+    <div class="nh"><span class="tag pc">${esc(d.pcategory[category])}</span><span class="pill risk-${risk}">${esc(d.prisk[risk])}</span><span class="pill ps-${status}">${esc(d.pstatus[status])}</span>${toTask}<span class="k">${esc(authorLabel(m, d, p.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
+    <h3>${esc(p.title)}</h3>
+    ${p.pillar ? `<div class="mono">${esc(d.pfield.pillar)}: ${esc(p.pillar)}</div>` : ''}
+    ${p.rationale ? `<p>${esc(p.rationale)}</p>` : ''}
+    ${p.evidence ? `<div class="lbl">${esc(d.pfield.evidence)}</div><pre class="evid" data-scroll-key="evid:${id}">${esc(p.evidence)}</pre>` : ''}
+    ${p.estimate || p.path ? `<div class="mono">${p.estimate ? `${esc(d.pfield.estimate)}: ${esc(p.estimate)}` : ''}${p.estimate && p.path ? ' · ' : ''}${p.path ? `${esc(d.pfield.path)}: ${esc(p.path)}` : ''}</div>` : ''}
+    ${decided}${mark}${history}
+    ${thread}
+    ${actions}
+  </div>`;
 }

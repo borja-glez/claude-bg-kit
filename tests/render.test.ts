@@ -32,7 +32,7 @@ const base = (): Model => ({
 });
 const ui = (over: Partial<UiState> = {}): UiState => ({
   zoom: '1d', offset: 0, expanded: new Set(), modal: null, search: '', view: 'summary',
-  noteFilter: 'all', timelineGroup: 'phase',
+  timelineGroup: 'phase',
   draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
   proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', shot: null, ...over,
 });
@@ -477,7 +477,7 @@ describe('notes view', () => {
     expect(html).toContain('maxlength="2000"');
     expect(html).toContain('data-action="note-add"');
     expect(html).toContain('data-action="note-type"');
-    for (const f of ['all', 'decision', 'idea', 'debt', 'open', 'mine']) expect(html).toContain(`data-action="nfilter" data-filter="${f}"`);
+    for (const c of ['all', 'open', 'decision', 'proposals', 'ideas', 'mine']) expect(html).toContain(`data-action="talk-c" data-c="${c}"`);
     expect(html).toContain('Claude · backend');
     expect(html).toContain('tú');
     expect(html).toContain('Ana');
@@ -487,7 +487,7 @@ describe('notes view', () => {
     expect(html).toContain('data-action="open-task" data-id="T001"');
   });
   it('filters mine and shows the answer box and read-only notice', () => {
-    const html = renderApp({ ...base(), notes, me: 'user:u1' }, ui({ view: 'talk', noteFilter: 'mine' }));
+    const html = renderApp({ ...base(), notes, me: 'user:u1' }, ui({ view: 'talk', talk: 'mine' }));
     expect(html).toContain('mi idea');
     expect(html).not.toContain('deuda ajena');
     const open = renderApp({ ...base(), notes, me: 'user:u1' }, ui({ view: 'talk', answering: 'n2' }));
@@ -569,8 +569,11 @@ describe('theme.css', () => {
   });
   it('no grid of fixed-width columns overflows a 390 px screen: every auto-fill column fits its box (carry 10b)', () => {
     const mins = [...CSS.matchAll(/repeat\(auto-(?:fill|fit),\s*minmax\((min\([^)]*\)|[^,)]+),/g)].map(x => x[1]);
-    expect(mins.length).toBeGreaterThanOrEqual(5);
+    expect(mins.length).toBeGreaterThanOrEqual(4);
     for (const min of mins) expect(min).toMatch(/^min\(\d+px,100%\)$/);
+    // The conversation's one list (§4.6.7) took the place of the grids of notes and of proposals.
+    expect(cssRule(CSS, '.tlist')).toContain('grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))');
+    expect(CSS).not.toMatch(/\.(?:ngrid|pgrid|nfil)\b/);
     // Summary's live sessions: the section is a block (its title over the cards), the cards are the grid.
     const phone = cssMedia(CSS, '(max-width:760px)');
     expect(cssRule(CSS, '.sess')).not.toContain('grid-template-columns');
@@ -703,10 +706,12 @@ describe('proposals view', () => {
       p4: { status: 'approved' as const, decidedAt: at, by: 'page' as const, digest: proposalDigest('p2', ps[3]!) },
     };
     const html = renderApp({ ...base(), isOwner: true, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
-    // p1 (older text), p2 (a mark of another status) and p4 (a digest of another pid): the decision changed after the owner
-    // took it; no one-click confirm, Approve and Reject with the text in view.
+    // p1 (older text), p2 (a mark of another status) and p4 (a digest of another pid): the decision changed after it was
+    // taken; no one-click confirm, Approve and Reject with the text in view. C26, carry 4b-3: p2's mark is forge's policy's,
+    // so its line says the policy's decision, never «tu decisión».
     expect(html).not.toContain('sin la marca del dueño');
-    expect(html.match(/cambió después de tu decisión: revisa el texto y decide/g)).toHaveLength(3);
+    expect(html.match(/cambió después de tu decisión: revisa el texto y decide/g)).toHaveLength(2);
+    expect(html.match(/cambió después de la decisión de la política de forge: revisa el texto y decide/g)).toHaveLength(1);
     for (const id of ['p1', 'p2', 'p4']) {
       expect(html).not.toContain(`data-action="p-confirm" data-id="${id}"`);
       expect(html).toContain(`data-action="p-approve" data-id="${id}"`);
@@ -723,17 +728,19 @@ describe('proposals view', () => {
     expect(loading).not.toContain('data-action="p-approve"');
     // Read-only: the lines stay, the buttons go.
     const ro = renderApp({ ...base(), isOwner: true, proposalsReadOnly: true, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
-    expect(ro.match(/cambió después de tu decisión/g)).toHaveLength(3);
+    expect(ro.match(/cambió después de (?:tu decisión|la decisión de la política de forge)/g)).toHaveLength(3);
     expect(ro).not.toContain('data-action="p-confirm"');
     expect(ro).not.toContain('data-action="p-approve"');
     // To someone else: the owner's decision changed, and who decides; no buttons and no «tu».
     const other = renderApp({ ...base(), isOwner: false, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
-    expect(other.match(/cambió después de la decisión del dueño · no se convertirá en tarea/g)).toHaveLength(3);
+    expect(other.match(/cambió después de la decisión del dueño · no se convertirá en tarea/g)).toHaveLength(2);
+    expect(other.match(/cambió después de la decisión de la política de forge · no se convertirá en tarea/g)).toHaveLength(1);
     expect(other).not.toContain('tu decisión');
     expect(other).not.toContain('data-action="p-approve"');
     expect(other.match(/tu comentario le llega/g)).toHaveLength(3);
     const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, isOwner: true, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
-    expect(en.match(/changed after your decision: review the text and decide/g)).toHaveLength(3);
+    expect(en.match(/changed after your decision: review the text and decide/g)).toHaveLength(2);
+    expect(en.match(/changed after forge’s policy decided it: review the text and decide/g)).toHaveLength(1);
   });
   it('a decision changed after the owner took it never offers a one-click confirm: the two ways round the edit guard (re-review N1)', () => {
     const t1 = P({ id: 'p1', status: 'approved', path: 'src/cache/**' });
@@ -1050,7 +1057,7 @@ describe('scroll keys and relative times (G-01)', () => {
   });
   it('note and proposal cards carry their keys, escaped, so a morph never hands one card\'s focus to another (H-06)', () => {
     const m = { ...base(), notes: [{ id: 'n"1', ts: '2026-10-11T10:00:00Z', type: 'idea' as const, author: 'session:main', text: 'x' }], proposals: [P({ id: 'p<1' })] };
-    expect(renderApp(m, ui({ view: 'talk' }))).toContain('<div class="note nb-idea" data-k="n:n&quot;1">');
+    expect(renderApp(m, ui({ view: 'talk' }))).toContain('<div class="note nb-idea" data-k="n:n&quot;1" tabindex="-1">');
     expect(renderApp(m, ui({ view: 'talk', talk: 'proposals' }))).toContain('<div class="note prop pr-low" data-id="p&lt;1" data-k="pr:p&lt;1">');
   });
 });
@@ -2095,5 +2102,195 @@ describe('the sessions view (G-04, G-10, H-23)', () => {
     const m = base();
     m.sessions = { [HOSTILE]: { name: HOSTILE, heartbeatAt: at(0), leaseUntil: at(5), status: 'active', role: 'executor', runId: HOSTILE, branch: HOSTILE } };
     clean(renderApp(m, ui({ view: 'sessions' })));
+  });
+});
+
+describe('the conversation (G-17, H-17, §4.6.7)', () => {
+  const notesOf = () => [
+    note({ id: 'q1', ts: '2026-10-11T11:40:00Z', type: 'question', text: '¿apple pay?' }),
+    note({ id: 'q2', ts: '2026-10-11T11:41:00Z', type: 'question', text: '¿stripe o adyen?', answer: 'stripe', answeredBy: 'session:main', answeredAt: '2026-10-11T11:52:00Z', answeredByNote: 'd1' }),
+    note({ id: 'd1', ts: '2026-10-11T11:50:00Z', type: 'decision', author: 'session:main', text: 'Usamos stripe',
+      decision: { point: 'other', what: 'pasarela', chosen: 'stripe', alternatives: ['adyen'], why: 'ya integrado', revert: 'cambiar la clave', auto: false } }),
+    note({ id: 'i1', ts: '2026-10-11T11:20:00Z', type: 'idea', author: 'user:u1', text: 'cachear' }),
+    note({ id: 'b1', ts: '2026-10-11T11:10:00Z', type: 'debt', text: 'deuda' }),
+    note({ id: 'c1', ts: '2026-10-11T11:05:00Z', type: 'idea', author: 'user:u2', text: 'comentario de la propuesta', proposalId: 'p1' }),
+  ];
+  const propsOf = () => [P({ ts: '2026-10-11T11:45:00.000Z' }), P({ id: 'p2', ts: '2026-10-11T09:00:00.000Z', status: 'done', taskId: 'T002', title: 'Hecha ya', author: 'user:u1',
+    history: [{ status: 'approved', decidedBy: 'session:main', decidedAt: '2026-10-10T10:00:00Z', reopenedBy: 'user:u2', reopenedAt: '2026-10-10T12:00:00Z', reason: 'faltaba un caso' }] })];
+  const talk = (over: Partial<UiState> = {}, m: Partial<Model> = {}) =>
+    renderApp({ ...base(), me: 'user:u1', profiles: { u2: 'Ana' }, notes: notesOf(), proposals: propsOf(), ...m }, ui({ view: 'talk', ...over }));
+  const order = (html: string) => [...html.matchAll(/data-k="(?:n|pr):([^"]+)"/g)].map(x => x[1]);
+  const card = (html: string, key: string) => { const rest = html.slice(html.indexOf(`data-k="${key}"`) + 1); const j = rest.search(/data-k="(?:n|pr):/); return j < 0 ? rest : rest.slice(0, j); };
+
+  it('one list mixes notes and proposals by date, newest first, under the composer and the filters', () => {
+    const html = talk();
+    expect(order(html)).toEqual(['d1', 'p1', 'q2', 'q1', 'i1', 'b1', 'p2']);
+    expect(html.indexOf('data-role="note-text"')).toBeLessThan(html.indexOf('class="tlist"'));
+    expect(html).toContain('<button type="button" class="tab on" data-action="talk-c" data-c="all" aria-pressed="true">Todo</button>');
+    expect(html).not.toContain('data-action="pfilter"');
+  });
+  it('each filter shows its own: open questions, decisions, proposals (with their filters), ideas and debt, and mine', () => {
+    expect(order(talk({ talk: 'open' }))).toEqual(['q1']);
+    expect(order(talk({ talk: 'decision' }))).toEqual(['d1']);
+    expect(order(talk({ talk: 'proposals' }))).toEqual(['p1', 'p2']);
+    expect(order(talk({ talk: 'ideas' }))).toEqual(['i1', 'b1']);
+    expect(order(talk({ talk: 'mine' }))).toEqual(['i1', 'p2']);
+    expect(talk({ talk: 'proposals' })).toContain('data-action="pfilter" data-kind="status" data-value="all" aria-pressed="true"');
+    expect(order(talk({ talk: 'proposals', proposalFilter: { status: 'done', category: 'all', risk: 'all' } }))).toEqual(['p2']);
+  });
+  it('a comment shows only inside its proposal, which carries the task it became and its history (G-17)', () => {
+    const html = talk();
+    expect(card(html, 'pr:p1')).toContain('comentario de la propuesta');
+    expect(html.match(/comentario de la propuesta/g)).toHaveLength(1);
+    const p2 = card(html, 'pr:p2');
+    expect(p2).toContain('<button type="button" class="chip st-in_progress" data-action="open-task" data-id="T002" data-k="pt:p2">→ T002</button>');
+    expect(p2).toMatch(/Ana la reabrió el .+?: estaba aprobada por Claude · main · faltaba un caso/);
+  });
+  it('a decision shows its point, what was chosen and its alternatives, why, how to revert it, and whose it is', () => {
+    const d1 = card(talk(), 'n:d1');
+    expect(d1).toContain('<span class="nauto">tuya</span>');
+    for (const s of ['Punto:</span> other', 'Elegido:</span> stripe', '(adyen)', 'Por qué:</span> ya integrado', 'Cómo revertir:</span> cambiar la clave']) expect(d1, s).toContain(s);
+  });
+  it('a question a decision resolved shows closed, says whose decision it was and links to it (H-17)', () => {
+    const q2 = card(talk(), 'n:q2');
+    expect(q2).not.toContain('Pregunta abierta');
+    expect(q2).not.toContain('data-action="answer-open"');
+    expect(q2).toContain('Resuelta por la decisión de Claude · main');
+    expect(q2).toContain('<button type="button" class="lnk" data-action="note-go" data-id="d1">Ver la decisión</button>');
+    const lost = card(talk({}, { notes: notesOf().filter(n => n.id !== 'd1') }), 'n:q2');
+    expect(lost).toContain('Resuelta por una decisión');
+    expect(lost).not.toContain('note-go');
+  });
+  it('an empty filter says what it would show (H-24)', () => {
+    expect(talk({ talk: 'open' }, { notes: [] })).toContain('No hay preguntas abiertas.');
+    expect(renderApp(base(), ui({ view: 'talk' }))).toContain('Aún no hay notas ni propuestas: escribe la primera arriba.');
+  });
+  it('escapes a proposal history, a decision point, the task a proposal became and a resolved question (Review Focus 5)', () => {
+    clean(talk({}, {
+      notes: [note({ id: 'd9', type: 'decision', text: HOSTILE, decision: { point: HOSTILE as never, what: HOSTILE, chosen: HOSTILE, why: HOSTILE, auto: true } }),
+        note({ id: 'q9', type: 'question', text: HOSTILE, answer: HOSTILE, answeredByNote: 'd9', author: `user:${HOSTILE}` })],
+      proposals: [P({ taskId: HOSTILE, history: [{ status: 'approved', reopenedBy: HOSTILE, reopenedAt: HOSTILE, reason: HOSTILE }] })],
+    }));
+  });
+  it('only a loose decision closes a question with a link: one that names a comment or a note of another kind says only «a decision»', () => {
+    const notes = [note({ id: 'q3', type: 'question', answer: 'x', answeredByNote: 'c1' }), note({ id: 'c1', type: 'decision', proposalId: 'p1' }),
+      note({ id: 'q4', type: 'question', answer: 'y', answeredByNote: 'i1' }), note({ id: 'i1', type: 'idea', author: 'user:u1' })];
+    const html = talk({}, { notes });
+    for (const q of ['n:q3', 'n:q4']) {
+      expect(card(html, q), q).toContain('Resuelta por una decisión');
+      expect(card(html, q), q).not.toContain('note-go');
+    }
+  });
+  it('the owner’s rules hold under «Todo» as under «Propuestas»: Approve and Reject only for the owner, [Confirmar] only without a mark, decide again when it changed (§4.1)', () => {
+    const ps = [P({ id: 'p1', status: 'approved' }), P({ id: 'p2', status: 'approved', title: 'otra' }), P({ id: 'p3' })];
+    const approvals: Record<string, ApprovalDoc> = { p2: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'page', digest: proposalDigest('p2', P({ id: 'p2', status: 'approved' })) } };
+    for (const c of ['all', 'proposals'] as const) {
+      const owner = talk({ talk: c }, { isOwner: true, proposals: ps, approvals });
+      expect(owner, c).toContain('data-action="p-confirm" data-id="p1"');
+      expect(owner, c).not.toContain('data-action="p-confirm" data-id="p2"');
+      expect(owner, c).toContain('cambió después de tu decisión: revisa el texto y decide');
+      for (const id of ['p2', 'p3']) expect(owner, `${c} ${id}`).toContain(`data-action="p-approve" data-id="${id}"`);
+      const other = talk({ talk: c }, { isOwner: false, proposals: ps, approvals });
+      expect(other, c).not.toContain('data-action="p-approve"');
+      expect(other, c).not.toContain('data-action="p-confirm"');
+      expect(other, c).toContain('cambió después de la decisión del dueño · no se convertirá en tarea');
+      expect(other, c).toContain('data-action="p-comment-open" data-id="p3"');
+    }
+  });
+  it('a mark saved with its proposal update failed says so with its retry, under any filter, unless the proposals are read-only (review M6)', () => {
+    for (const c of ['all', 'proposals', 'open'] as const) {
+      const html = talk({ talk: c, notice: 'markSaved' }, { isOwner: true });
+      expect(html, c).toContain('La marca está guardada; falta actualizar la propuesta <button type="button" class="btn" data-action="p-retry">Reintentar</button>');
+    }
+    const ro = talk({ talk: 'proposals', notice: 'markSaved' }, { isOwner: true, proposalsReadOnly: true });
+    expect(ro).not.toContain('data-action="p-retry"');
+  });
+  it('every field of the conversation keeps its name and gets a label (Close b)', () => {
+    const html = talk({ answering: 'q1', commenting: 'p1', rejecting: 'p1' }, { isOwner: true });
+    for (const [name, role] of [['note', 'note-text'], ['answer', 'answer-text'], ['comment', 'comment-text'], ['reason', 'reason-text']]) {
+      expect(html, role).toMatch(new RegExp(`<textarea name="${name}" data-role="${role}"[^>]* aria-label="[^"]+"`));
+    }
+    expect(html).toMatch(/<select name="note-type" data-action="note-type"/);
+    expect(html).toContain('<div class="tabs" role="group" aria-label="Filtrar la conversación">');
+  });
+});
+
+describe('who decided a proposal: the owner’s mark, never what anyone can write in it (C26, carries 4b-2 and 4b-3)', () => {
+  const AT = '2026-10-11T10:00:00.000Z';
+  const decided = (html: string) => /<div class="pdec"><span class="k">([^<]*)<\/span>/.exec(html)?.[1] ?? '';
+  const view = (m: Partial<Model>) => renderApp({ ...base(), me: 'user:u1', profiles: { u2: 'Ana' }, ...m }, ui({ view: 'talk', talk: 'proposals' }));
+  const markOf = (p: ProposalDoc, by: ApprovalDoc['by'], status: ApprovalDoc['status'] = 'approved', digestOf: ProposalDoc = p): Record<string, ApprovalDoc> =>
+    ({ p1: { status, decidedAt: AT, by, digest: proposalDigest('p1', digestOf) } });
+
+  it('a mark of the page or of /forge:decide is the owner’s («tú» to the owner), one of forge’s policy is the policy’s, whatever decidedBy says', () => {
+    const p = P({ status: 'approved', decidedBy: 'user:u2', decidedAt: '2026-10-11T11:00:00.000Z' });
+    const auto = P({ status: 'auto_approved', decidedBy: 'user:u1', decidedAt: '2026-10-11T11:00:00.000Z' });
+    expect(decided(view({ isOwner: true, proposals: [p], approvals: markOf(p, 'page') }))).toMatch(/^Decidida por · tú · \S/);
+    expect(decided(view({ isOwner: false, proposals: [p], approvals: markOf(p, 'page') }))).toMatch(/^Decidida por · el dueño del roadmap · \S/);
+    expect(decided(view({ proposals: [p], approvals: markOf(p, 'page') }))).toMatch(/^Decidida por · el dueño del roadmap · /);
+    expect(decided(view({ isOwner: true, proposals: [p], approvals: markOf(p, 'forge:decide') }))).toMatch(/^Decidida por · tú, con forge · /);
+    expect(decided(view({ isOwner: false, proposals: [p], approvals: markOf(p, 'forge:decide') }))).toMatch(/^Decidida por · el dueño del roadmap, con forge · /);
+    for (const isOwner of [true, false]) {
+      const line = decided(view({ isOwner, proposals: [auto], approvals: markOf(auto, 'forge:policy', 'auto_approved') }));
+      expect(line, String(isOwner)).toMatch(/^Decidida por · la política de forge · /);
+      expect(line, String(isOwner)).not.toMatch(/tú|dueño/);
+    }
+    expect(view({ isOwner: true, proposals: [p], approvals: markOf(p, 'page') })).not.toContain('Ana');
+    const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, isOwner: true, proposals: [auto], approvals: markOf(auto, 'forge:policy', 'auto_approved') }, ui({ view: 'talk', talk: 'proposals' }));
+    expect(decided(en)).toMatch(/^Decided by · forge’s policy · /);
+  });
+  it('a decidedBy forged next to the owner’s mark is not who decided: the mark says it, with the status it marked (carry 4b-2)', () => {
+    // The owner rejected p1 on the page; someone turned it into an approval and wrote the owner, or Ana, as who decided.
+    const rejected = P({ status: 'rejected' });
+    for (const forged of ['user:u1', 'user:u2']) {
+      const p = P({ status: 'approved', decidedBy: forged, decidedAt: '2026-10-11T11:30:00.000Z' });
+      const owner = view({ isOwner: true, proposals: [p], approvals: markOf(p, 'page', 'rejected', rejected) });
+      expect(decided(owner), forged).toMatch(/^Decidida por · tú · Rechazada · \S/);
+      expect(owner, forged).toContain('cambió después de tu decisión: revisa el texto y decide');
+      expect(owner, forged).not.toContain('Ana');
+      expect(owner, forged).not.toContain('data-action="p-confirm"');
+      const other = view({ isOwner: false, me: 'user:u2', proposals: [p], approvals: markOf(p, 'page', 'rejected', rejected) });
+      expect(decided(other), forged).toMatch(/^Decidida por · el dueño del roadmap · Rechazada · /);
+      expect(other, forged).not.toMatch(/Decidida por · (?:tú|Ana)/);
+    }
+  });
+  it('an approval without the owner’s mark never reads as the viewer’s own, whatever its decidedBy says; with no mark to need it may (carry 4b-2)', () => {
+    const p = P({ status: 'approved', decidedBy: 'user:u1', decidedAt: '2026-10-11T11:30:00.000Z' });
+    const owner = view({ isOwner: true, proposals: [p], approvals: {} });
+    expect(decided(owner)).toMatch(/^Decidida por · usuario · /);
+    expect(owner).toContain('sin la marca del dueño · no se convertirá en tarea');
+    expect(owner).toContain('data-action="p-confirm" data-id="p1"');
+    // Until the marks arrive the page does not know either.
+    expect(decided(view({ isOwner: true, proposals: [p] }))).not.toContain('tú');
+    // A rejection, or a proposal that already has its task, needs no mark to count: who decided it reads as written.
+    expect(decided(view({ isOwner: true, proposals: [P({ status: 'rejected', decidedBy: 'user:u1', decidedAt: AT })], approvals: {} }))).toMatch(/^Decidida por · tú · /);
+    expect(decided(view({ isOwner: true, proposals: [P({ status: 'done', taskId: 'T002', decidedBy: 'user:u2', decidedAt: AT })], approvals: {} }))).toMatch(/^Decidida por · Ana · /);
+  });
+  it('a decision of forge’s policy that changed afterwards says it was the policy’s, to the owner and to anyone else (carry 4b-3)', () => {
+    const before = P({ status: 'auto_approved' });
+    const cases: [string, ProposalDoc & { id: string }][] = [
+      ['edited', P({ status: 'auto_approved', title: 'Cache prices v2' })],
+      ['flipped to approved', P({ status: 'approved', decidedBy: 'user:u1' })],
+    ];
+    for (const [name, p] of cases) {
+      const approvals = markOf(p, 'forge:policy', 'auto_approved', before);
+      const owner = view({ isOwner: true, proposals: [p], approvals });
+      expect(owner, name).toContain('cambió después de la decisión de la política de forge: revisa el texto y decide');
+      expect(owner, name).not.toContain('tu decisión');
+      expect(owner, name).toContain('data-action="p-approve" data-id="p1"');
+      expect(owner, name).not.toContain('data-action="p-confirm"');
+      const other = view({ isOwner: false, proposals: [p], approvals });
+      expect(other, name).toContain('cambió después de la decisión de la política de forge · no se convertirá en tarea');
+      expect(other, name).not.toContain('del dueño');
+      expect(other, name).not.toContain('data-action="p-approve"');
+    }
+    const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, isOwner: true, proposals: [cases[0]![1]], approvals: markOf(cases[0]![1], 'forge:policy', 'auto_approved', before) }, ui({ view: 'talk', talk: 'proposals' }));
+    expect(en).toContain('changed after forge’s policy decided it: review the text and decide');
+  });
+  it('the history names who reopened and who had decided as written, never as «tú» (carry 4b-2)', () => {
+    const p = P({ status: 'approved', decidedBy: 'user:u2', history: [{ status: 'rejected', decidedBy: 'user:u1', decidedAt: AT, reopenedBy: 'user:u1', reopenedAt: AT }] });
+    const html = view({ isOwner: true, proposals: [p], approvals: {} });
+    expect(html).toMatch(/usuario la reabrió el .+?: estaba rechazada por usuario/);
+    expect(html).not.toMatch(/tú la reabrió|por tú/);
   });
 });

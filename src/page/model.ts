@@ -2,7 +2,6 @@
 // Types and constants only; every view renders from these.
 import type { EventDoc, InfiniteDoc, MessageDoc, MetaDoc, NoteDoc, NoteType, PlanStatus, PlanView, RunDoc, SessionDoc, States } from '../lib/types.js';
 import type { GroupBy, Zoom } from '../lib/timeline.js';
-import type { NoteFilter } from '../lib/notes.js';
 import { PROPOSAL_CATEGORIES, PROPOSAL_RISKS, type ApprovalDoc, type ProposalCategory, type ProposalDoc, type ProposalRisk, type ProposalStatus } from '../lib/proposals.js';
 import type { Drop } from './normalize.js';
 import type { RunSummaryDoc } from '../lib/run-summary.js';
@@ -53,9 +52,9 @@ export interface Model {
 /** The six views of §4.6, in the order of the nav. */
 export type View = 'summary' | 'plan' | 'schedule' | 'runs' | 'sessions' | 'talk';
 export const VIEWS: readonly View[] = ['summary', 'plan', 'schedule', 'runs', 'sessions', 'talk'];
-/** What the conversation view shows in 4b: the notes or the proposals (4c joins them). */
-export type TalkKind = 'notes' | 'proposals';
-export const TALK_KINDS: readonly TalkKind[] = ['notes', 'proposals'];
+/** The conversation's filters (§4.6.7): everything, open questions, decisions, proposals, ideas and debt, and mine. */
+export type TalkFilter = 'all' | 'open' | 'decision' | 'proposals' | 'ideas' | 'mine';
+export const TALK_FILTERS: readonly TalkFilter[] = ['all', 'open', 'decision', 'proposals', 'ideas', 'mine'];
 /** The four tabs of the task detail (§4.7); forge shows only with forge data or evidence. */
 export type DetailTab = 'summary' | 'definition' | 'forge' | 'talk';
 export const DETAIL_TABS: readonly DetailTab[] = ['summary', 'definition', 'forge', 'talk'];
@@ -68,7 +67,6 @@ export const PLAN_FORGE_KEYS: readonly PlanForgeKey[] = ['deferred', 'overcap'];
 /** H-18: the plan's filters, by task, by the phase's plan status, by forge and by track. Within a group any matches;
  *  across groups all must. */
 export interface PlanFilter { tasks: PlanTaskKey[]; phases: PlanStatus[]; forge: PlanForgeKey[]; track: string | null }
-export const NOTE_FILTERS: readonly NoteFilter[] = ['all', 'decision', 'idea', 'debt', 'open', 'mine'];
 
 /** H-06: what the timeline's viewport shows, as rows: the first visible one and how many fit. Proportions of its scroll,
  *  so the page's zoom does not change them. */
@@ -76,8 +74,8 @@ export interface TlView { first: number; count: number }
 
 export interface UiState {
   zoom: Zoom; offset: number; expanded: Set<string>; modal: string | null; search: string; view: View;
-  /** The conversation's kind (notes by default). */
-  talk?: TalkKind;
+  /** The conversation's filter (everything by default). */
+  talk?: TalkFilter;
   /** The open tab of the task detail (the summary by default). */
   tab?: DetailTab;
   /** Index of the open verification screenshot in the modal's task, or null. */
@@ -103,7 +101,6 @@ export interface UiState {
   planOpen?: Set<string>;
   /** G-07: the runs of the history the person opened (by runId). */
   runsOpen?: Set<string>;
-  noteFilter: NoteFilter;
   timelineGroup: GroupBy;
   draft: { type: NoteType; text: string };
   answering: string | null;

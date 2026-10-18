@@ -34,14 +34,14 @@ const staticSel = (s: string): string => s.replace(/::?[\w-]+(\([^)]*\))?/g, '')
 
 const ui = (over: Partial<UiState> = {}): UiState => ({
   zoom: '1d', offset: 0, expanded: new Set(), modal: null, search: '', view: 'summary', shot: null,
-  noteFilter: 'all', timelineGroup: 'phase',
+  timelineGroup: 'phase',
   draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
   proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', ...over,
 } as UiState);
 
 /** The big plan's views in one document: Summary with the detail of T121 open (a loose task running in «En curso», the
  *  recent activity, «Te necesita»), the schedule with every phase open, Runs with its loose tasks and with the plan's
- *  run (and the first run of its history open), Plan and Sessions. */
+ *  run (and the first run of its history open), Plan, Sessions and Conversation. */
 function mountViews(): HTMLElement {
   const m = bigModel();
   m.run = { ...bigRun(BIG_NOW), kind: 'ephemeral', loose: [{ id: 'fix-x', title: 'Arreglar x', status: 'running', stage: 'implement', agent: 'forge-mech' }, { id: 'doc-y', title: 'Doc y', status: 'queued', stage: null, agent: null }] };
@@ -55,6 +55,8 @@ function mountViews(): HTMLElement {
     renderApp(bigModel(), ui({ view: 'runs', runsOpen: new Set([bigRuns()[0]!.runId]) })),
     renderApp(m, ui({ view: 'plan' })),
     renderApp(m, ui({ view: 'sessions' })),
+    // §4.6.7: the conversation, its notes and proposals in one list (a task chip, the task a proposal became).
+    renderApp(m, ui({ view: 'talk' })),
   ].map(h => `<section class="view-box">${h}</section>`).join('');
   document.body.appendChild(box);
   return box;

@@ -485,7 +485,7 @@ describe('notes', () => {
 
     it('click actions render even while composing', async () => {
       const { root, app } = await bootComposing(fakeTimers());
-      click(root, '[data-action="nfilter"][data-filter="all"]');
+      click(root, '[data-action="talk-c"][data-c="all"]');
       await settle();
       expect(root.innerHTML).toContain('llega-durante');
       app.stop();
@@ -650,7 +650,7 @@ describe('notes', () => {
     expect(root.innerHTML).toContain('Ana');
     expect(root.innerHTML).toContain('tú');
     const before = user.profiles.mock.calls.length;
-    click(root, '[data-action="nfilter"][data-filter="open"]');
+    click(root, '[data-action="talk-c"][data-c="open"]');
     await settle();
     expect(user.profiles.mock.calls.length).toBeGreaterThan(before);
     app.stop();
@@ -876,7 +876,7 @@ describe('proposals', () => {
     inject(root, 'p-approve', 'p1');
     await settle();
     expect(f.update).toHaveBeenCalledTimes(1);
-    click(root, '[data-action="talk-c"][data-c="notes"]');
+    click(root, '[data-action="talk-c"][data-c="all"]');
     await settle();
     expect(root.innerHTML).not.toContain('solo lectura');
     typeIn(root, 'note-text', 'sigue funcionando');
@@ -1643,7 +1643,7 @@ describe('the views and the URL (§4.6, H-25)', () => {
   });
 
   it('an old link opens the view that replaced its own, and the URL is rewritten to the new one', async () => {
-    for (const [hash, view, talk, canon] of [['#v=versions', 'plan', undefined, '#v=plan'], ['#v=notes', 'talk', 'notes', '#v=talk'], ['#v=proposals', 'talk', 'proposals', '#v=talk&c=proposals'], ['#v=tracking&z=1w', 'schedule', undefined, '#v=schedule&z=1w']] as const) {
+    for (const [hash, view, talk, canon] of [['#v=versions', 'plan', undefined, '#v=plan'], ['#v=notes', 'talk', 'all', '#v=talk'], ['#v=proposals', 'talk', 'proposals', '#v=talk&c=proposals'], ['#v=tracking&z=1w', 'schedule', undefined, '#v=schedule&z=1w']] as const) {
       history.replaceState(null, '', hash);
       const root = document.createElement('div');
       const app = await start({ claude: null, snapshot, root, now: () => NOW });
@@ -2821,6 +2821,126 @@ describe('the history of runs/ (G-07)', () => {
     fake.click();
     await settle();
     expect(app.ui.runsOpen).toBeUndefined();
+    app.stop();
+  });
+});
+
+describe('the conversation (G-17, H-17)', () => {
+  const NOTES = {
+    q1: { ts: '2026-10-11T11:40:00Z', type: 'question', author: 'user:u1', text: '¿A o B?', answer: 'A', answeredBy: 'session:main', answeredAt: '2026-10-11T11:52:00Z', answeredByNote: 'd1' },
+    d1: { ts: '2026-10-11T11:50:00Z', type: 'decision', author: 'session:main', text: 'Elegimos A', decision: { point: 'other', what: 'w', chosen: 'A', why: 'más simple', auto: false } },
+  };
+  it('the filter rewrites the address (c=) without a history entry, and an unknown one falls back to everything (Review Focus 3)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('notes', NOTES);
+    click(root, '[data-view="talk"]');
+    await settle();
+    const push = vi.spyOn(history, 'pushState');
+    click(root, '[data-action="talk-c"][data-c="decision"]');
+    await settle();
+    expect(app.ui.talk).toBe('decision');
+    expect(location.hash).toBe('#v=talk&c=decision');
+    expect(push).not.toHaveBeenCalled();
+    push.mockRestore();
+    app.stop();
+    const junk = await boot(fakeDb(), fakeUser(), '#v=talk&c=evil');
+    expect(junk.app.ui.talk).toBe('all');
+    junk.app.stop();
+  });
+
+  it('«Ver la decisión» shows the decision that closed the question, with everything if the filter hid it, and gives it the focus (H-17)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('notes', NOTES);
+    click(root, '[data-view="talk"]');
+    await settle();
+    click(root, '[data-action="talk-c"][data-c="mine"]');
+    await settle();
+    expect(root.querySelector('[data-k="n:d1"]')).toBeNull();
+    click(root, '[data-action="note-go"][data-id="d1"]');
+    await settle();
+    expect(app.ui.talk).toBe('all');
+    expect(document.activeElement).toBe(root.querySelector('[data-k="n:d1"]'));
+    app.stop();
+  });
+
+  it('«Ver la decisión» brings the focused card into view once, through the one focus path; a filter that shows it stays (C23)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('notes', { ...NOTES, d1: { ...NOTES.d1, author: 'user:u1' } });
+    click(root, '[data-view="talk"]');
+    await settle();
+    click(root, '[data-action="talk-c"][data-c="mine"]');
+    await settle();
+    const seen: Element[] = [];
+    const spy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) { seen.push(this); });
+    click(root, '[data-action="note-go"][data-id="d1"]');
+    await settle();
+    expect(app.ui.talk).toBe('mine');
+    const d1 = root.querySelector('[data-k="n:d1"]');
+    expect(document.activeElement).toBe(d1);
+    expect(seen).toEqual([d1]);
+    // The next render, a snapshot, does not scroll again.
+    f.push('notes', { ...NOTES, d1: { ...NOTES.d1, author: 'user:u1' }, n9: { ts: '2026-10-11T11:55:00Z', type: 'idea', author: 'user:u1', text: 'otra' } });
+    await settle();
+    expect(seen).toHaveLength(1);
+    spy.mockRestore();
+    app.stop();
+  });
+
+  it('a forged «Ver la decisión» to a note that is not a loose decision changes nothing', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('notes', { ...NOTES, i1: { ts: '2026-10-11T11:00:00Z', type: 'idea', author: 'session:main', text: 'idea' }, c1: { ts: '2026-10-11T11:01:00Z', type: 'decision', author: 'session:main', text: 'c', proposalId: 'p1', decision: NOTES.d1.decision } });
+    click(root, '[data-view="talk"]');
+    await settle();
+    click(root, '[data-action="talk-c"][data-c="mine"]');
+    await settle();
+    for (const id of ['i1', 'c1', 'nope']) {
+      const b = document.createElement('button');
+      b.dataset.action = 'note-go';
+      b.dataset.id = id;
+      root.querySelector('main')!.appendChild(b);
+      b.click();
+      await settle();
+      expect(app.ui.talk, id).toBe('mine');
+    }
+    app.stop();
+  });
+
+  it('a filter click drops a link’s pending task and the notice, and keeps the read-only one (review I2, C24)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser(), '#v=talk&t=T999');
+    expect(location.hash).toBe('#v=talk&t=T999');
+    click(root, '[data-action="talk-c"][data-c="open"]');
+    await settle();
+    expect(location.hash).toBe('#v=talk&c=open');
+    app.ui.notice = 'failed';
+    click(root, '[data-action="talk-c"][data-c="all"]');
+    await settle();
+    expect(app.ui.notice).toBeNull();
+    app.ui.notice = 'readonly';
+    click(root, '[data-action="talk-c"][data-c="open"]');
+    await settle();
+    expect(app.ui.notice).toBe('readonly');
+    app.stop();
+  });
+
+  it('the task a proposal became opens its detail, and closing it gives the focus back to that chip (G-17)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    f.push('proposals', { p1: { ts: '2026-10-11T10:00:00.000Z', category: 'perf', risk: 'low', title: 'Cache', rationale: 'r', evidence: 'e', pillar: 'x', status: 'done', source: 'scout', author: 'session:main', taskId: 'T003' } });
+    click(root, '[data-view="talk"]');
+    await settle();
+    click(root, '[data-k="pt:p1"]');
+    await settle();
+    expect(app.ui.modal).toBe('T003');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(document.activeElement).toBe(root.querySelector('[data-k="pt:p1"]'));
+    go.mockRestore();
     app.stop();
   });
 });

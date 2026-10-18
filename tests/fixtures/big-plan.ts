@@ -128,11 +128,17 @@ export function bigNotes(now = BIG_NOW): (NoteDoc & { id: string })[] {
   return [
     { id: 'q1', ts: at(now, -90), type: 'question', author: 'session:main', text: '¿Usamos el proveedor de pagos A o B?', taskId: taskId(DONE + 10) },
     { id: 'd1', ts: at(now, -120), type: 'decision', author: 'session:main', text: 'Diseño aprobado (v3)', decision: { point: 'design-approve', what: 'Diseño aprobado (v3)', chosen: 'approve', why: 'ronda 2 sin critical', auto: true } },
+    // A question a decision closed (H-17), and a comment that lives inside its proposal (G-17).
+    { id: 'q2', ts: at(now, -150), type: 'question', author: 'user:owner', text: '¿Mantenemos el carrito antiguo?', answer: 'No: se retira', answeredBy: 'session:main', answeredAt: at(now, -118), answeredByNote: 'd1' },
+    { id: 'c1', ts: at(now, -180), type: 'idea', author: 'user:ana', text: '¿Y la caché de inventario?', proposalId: 'p1' },
   ];
 }
 
 export function bigProposals(now = BIG_NOW): (ProposalDoc & { id: string })[] {
-  return [{ id: 'p1', ts: at(now, -200), category: 'perf', risk: 'low', title: 'Cachear los precios', rationale: 'Las consultas se repiten', evidence: 'bench: 120 ms → 8 ms', pillar: 'Checkout rápido', status: 'proposed', source: 'scout', author: 'session:main' }];
+  return [{ id: 'p1', ts: at(now, -200), category: 'perf', risk: 'low', title: 'Cachear los precios', rationale: 'Las consultas se repiten', evidence: 'bench: 120 ms → 8 ms', pillar: 'Checkout rápido', status: 'proposed', source: 'scout', author: 'session:main' },
+    { id: 'p2', ts: at(now, -600), category: 'quality', risk: 'low', title: 'Índice en pedidos', rationale: 'Las consultas por fecha recorren la tabla', evidence: 'EXPLAIN: seq scan',
+      pillar: 'Checkout rápido', status: 'done', source: 'scout', author: 'session:main', taskId: taskId(118),
+      history: [{ status: 'approved', decidedBy: 'session:main', decidedAt: at(now, -590), reopenedBy: 'user:owner', reopenedAt: at(now, -580), reason: 'faltaba el índice compuesto' }] }];
 }
 
 /** The page's embedded snapshot, with the states the last listing saw (G-14). */

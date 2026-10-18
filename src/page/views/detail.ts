@@ -221,7 +221,7 @@ function talkTab(m: Model, d: Dict, ui: UiState, talk: ReturnType<typeof talkOf>
   const o = talk.origin;
   const status = o ? oneOf(PROPOSAL_STATUSES, o.status, 'done') : 'done';
   const origin = o
-    ? sec(d.detail.origin, `<div class="mnote"><b>${esc(o.title)}</b> <span class="pill ps-${status}">${esc(d.pstatus[status])}</span> <button type="button" class="lnk" data-action="view" data-view="talk" data-c="proposals">${esc(d.talkKind.proposals)}</button></div>`)
+    ? sec(d.detail.origin, `<div class="mnote"><b>${esc(o.title)}</b> <span class="pill ps-${status}">${esc(d.pstatus[status])}</span> <button type="button" class="lnk" data-action="view" data-view="talk" data-c="proposals">${esc(d.talk.filter.proposals)}</button></div>`)
     : '';
   return `${notes ? `<div class="sec"><div class="lbl">${esc(d.notesSec)}</div>${notes}</div>` : `<div class="muted">${esc(d.detail.noTalk)}</div>`}${origin}`;
 }

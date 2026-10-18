@@ -1,5 +1,5 @@
-// The page's state in the URL hash, so a link opens the same thing (spec §4.6, H-25): the view, the kind of the
-// conversation, the plan's filter (H-18), the open task and its tab, and in the schedule its grouping, zoom (a preset or a
+// The page's state in the URL hash, so a link opens the same thing (spec §4.6, H-25): the view, the conversation's
+// filter (§4.6.7), the plan's filter (H-18), the open task and its tab, and in the schedule its grouping, zoom (a preset or a
 // free span and pan), open groups, status filter, search and layers. Only what is set is written; links of before wave 4
 // still open the right view.
 import { clampPan, clampSpan, type Zoom } from '../lib/timeline.js';
@@ -7,7 +7,7 @@ import { clampPan, clampSpan, type Zoom } from '../lib/timeline.js';
 export interface ViewState {
   view?: string; group?: string; zoom?: Zoom; span?: number; pan?: number;
   open?: string[]; status?: string[]; q?: string; layers?: string[]; debug?: boolean;
-  /** H-25: the task whose detail is open (`t`) and its tab (`tt`); the kind of the conversation view (`c`). */
+  /** H-25: the task whose detail is open (`t`) and its tab (`tt`); the conversation's filter (`c`, §4.6.7). */
   task?: string; tab?: string; c?: string;
   /** H-18: the plan's filter keys (pf=). */ pf?: string[];
 }
@@ -25,7 +25,7 @@ const int = (v: string | null) => {
 export function encodeView(v: ViewState): string {
   const p = new URLSearchParams();
   if (v.view && v.view !== 'summary') p.set('v', v.view);
-  if (v.view === 'talk' && v.c && v.c !== 'notes') p.set('c', v.c);
+  if (v.view === 'talk' && v.c && v.c !== 'all') p.set('c', v.c);
   if (v.view === 'plan' && v.pf?.length) p.set('pf', v.pf.join(','));
   if (v.view === 'schedule') {
     if (v.group && v.group !== 'phase') p.set('g', v.group);

@@ -3,7 +3,7 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { start } from '../src/page/app.js';
 import { morphInto, nodeKey } from '../src/page/morph.js';
-import { renderApp, VIEWS, type UiState } from '../src/page/render.js';
+import { renderApp, TALK_FILTERS, VIEWS, type UiState } from '../src/page/render.js';
 import { BIG_NOW, bigDocs, bigModel, bigRuns, bigSnapshot } from './fixtures/big-plan.js';
 
 const flush = () => new Promise(r => setTimeout(r, 0));
@@ -206,10 +206,10 @@ describe('morph keys (review M2)', () => {
   it('in every view, with the detail open, no two nodes share a morph key (morphdom keeps only one of them)', () => {
     const m = bigModel();
     m.notes = [...m.notes, { id: 'na', ts: '2026-10-16T10:00:00.000Z', type: 'idea', author: 'session:main', text: 'una', taskId: 'T121' }, { id: 'nb', ts: '2026-10-16T10:05:00.000Z', type: 'idea', author: 'session:main', text: 'otra', taskId: 'T121' }];
-    m.proposals = [...m.proposals, { ...m.proposals[0]!, id: 'p2', evidence: 'más' }];
+    m.proposals = [...m.proposals, { ...m.proposals[0]!, id: 'p3', evidence: 'más' }];
     const all = new Set(m.plan.phases.map(p => p.id));
-    const base = { zoom: '1d' as const, offset: 0, expanded: all, planOpen: all, runsOpen: new Set(bigRuns().map(r => r.runId)), modal: 'T121', search: '', shot: null, noteFilter: 'all' as const, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', layers: ['critical', 'forge'] };
-    for (const [view, talk] of [...VIEWS.map(v => [v, 'notes'] as const), ['talk', 'proposals'] as const]) {
+    const base = { zoom: '1d' as const, offset: 0, expanded: all, planOpen: all, runsOpen: new Set(bigRuns().map(r => r.runId)), modal: 'T121', search: '', shot: null, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', layers: ['critical', 'forge'] };
+    for (const [view, talk] of [...VIEWS.map(v => [v, 'all'] as const), ...TALK_FILTERS.map(c => ['talk', c] as const)]) {
       const box = document.createElement('div');
       box.innerHTML = renderApp(m, { ...base, view, talk } as UiState);
       const keys = Array.from(box.querySelectorAll('*')).map(nodeKey).filter((k): k is string => !!k);
@@ -259,7 +259,7 @@ describe('morphInto (H-06)', () => {
   // each one aside and appends them again after the new one: an item new at the top of a list moved every item under it.
   it('a keyed item inserted above keyed siblings leaves them in place: never removed, and a focused textarea keeps its focus with no blur (review M3)', async () => {
     const card = (id: string) => `<div class="note" data-k="n:${id}"><p>${id}</p><pre class="evid" data-scroll-key="evid:${id}">x</pre><textarea data-role="answer-text"></textarea></div>`;
-    const list = (ids: string[]) => `<div class="ngrid">${ids.map(card).join('')}</div>`;
+    const list = (ids: string[]) => `<div class="tlist">${ids.map(card).join('')}</div>`;
     const root = mount(list(['a', 'b', 'c', 'd']));
     const before = Array.from(root.querySelectorAll('.note'));
     const box = root.querySelector('[data-k="n:c"] textarea') as HTMLTextAreaElement;
@@ -321,10 +321,10 @@ describe('morphInto (H-06)', () => {
 
   it('a long run of new keyed items is placed in linear time, before an item of the page or with none after it (re-review m2)', () => {
     const card = (i: number) => `<div class="note" data-k="n:${i}"><p>${i}</p><button class="chip" data-k="tk:${i}">T</button></div>`;
-    const list = (ids: number[]) => `<div class="ngrid">${ids.map(card).join('')}</div>`;
+    const list = (ids: number[]) => `<div class="tlist">${ids.map(card).join('')}</div>`;
     const nav = '<nav data-k="nav"><b>nav</b></nav>';
     const steps = (n: number, anchor: boolean) => {
-      const root = mount(nav + (anchor ? list([-1]) : '<div class="ngrid"></div>'));
+      const root = mount(nav + (anchor ? list([-1]) : '<div class="tlist"></div>'));
       const spy = vi.spyOn(Element.prototype, 'nextElementSibling', 'get');
       const ids = Array.from({ length: n }, (_, i) => i);
       morphInto(root, nav + list(anchor ? [...ids, -1] : ids));
@@ -346,7 +346,7 @@ describe('morphInto (H-06)', () => {
   it('the live state of the fields is read once per morph, not once per unchanged node (carry 4)', () => {
     const m = bigModel();
     const all = new Set(m.plan.phases.map(p => p.id));
-    const ui = { zoom: '1d' as const, offset: 0, expanded: all, modal: null, search: '', view: 'schedule' as const, shot: null, noteFilter: 'all' as const, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '' } as UiState;
+    const ui = { zoom: '1d' as const, offset: 0, expanded: all, modal: null, search: '', view: 'schedule' as const, shot: null, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '' } as UiState;
     const root = mount(renderApp(m, ui));
     // One row's title changes: every other row, card and section is equal to its render.
     const changed = { ...m, plan: { ...m.plan, tasks: m.plan.tasks.map(t => (t.id === 'T030' ? { ...t, title: 'otro título' } : t)) } };
