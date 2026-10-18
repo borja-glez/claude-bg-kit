@@ -1882,6 +1882,10 @@ describe('plugin layout', () => {
     const exec = runRef('execution');
     for (const w of ['FORGE authorize merge-on-finish --run <runId>', '--run-id <runId>', '`needs-authorization`', 'FORGE swarm merge --yes', '--hook-session <CSID>']) expect(exec, w).toContain(w);
     expect(runRef('autonomy')).toContain('FORGE authorize merge-on-finish --branch <rama>');
+    // re-review N4: the project named at the auto launch reaches the design, and another name is said to drop the yes.
+    expect(runRef('autonomy')).toContain('--project <project>');
+    const design = runRef('large').split('\n').find(l => l.startsWith('1. **Design.**'))!;
+    for (const w of ['`references/autonomy.md`', '/waypoint:design new', '`other project`', '`needs-authorization`']) expect(design.slice(design.indexOf('**In auto**')), w).toContain(w);
     expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('`needs-authorization`');
     for (const f of ['large', 'execution', 'autonomy']) expect(runRef(f), f).not.toContain('«Sí, intégrala en');
   });
@@ -1916,6 +1920,10 @@ describe('plugin layout', () => {
     const trust = runRef('trust');
     // The stalled action as swarm tick prints it, and the new start: no run id, no merge on finish (both spent).
     for (const w of ['`stalled`', '`reason: untrusted-commands`', '`FORGE swarm start`', '`--run-id`', '`--merge-on-finish`', '`needs-authorization`']) expect(trust, w).toContain(w);
+    // re-review N2: the new run goes through the end of step 1 as any run does: announce, the coordinator, meta/run.
+    const restart = trust.slice(trust.indexOf('After a `stalled` action'));
+    for (const w of ['`announce`', '`sessions/<SID>`', 'role: "coordinator"', '`meta/run`', 'step 2']) expect(restart, w).toContain(w);
+    expect(restart.indexOf('`meta/run`')).toBeLessThan(restart.indexOf('step 2'));
     const exec = runRef('execution');
     const step7 = exec.slice(exec.indexOf('7. **End.**'), exec.indexOf('### Requests during an execution'));
     for (const w of ['`reason: untrusted-commands`', '`references/trust.md`']) expect(step7, w).toContain(w);
