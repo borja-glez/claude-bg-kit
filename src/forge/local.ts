@@ -41,26 +41,44 @@ export function mainCheckout(root: string): string {
 
 export const localFile = (root: string) => path.join(mainCheckout(root), '.forge', 'local.yaml');
 
+/** The environment of a git call whose error is read: git speaks English, so «not a git repository» can be told apart. */
+export const gitEnv = (): NodeJS.ProcessEnv => ({ ...process.env, LC_ALL: 'C', LANGUAGE: 'C' });
+
+/** Why a git call that threw gave no answer: `no-repo` when git says the directory is in no repository, `git-failed`
+ *  when it refused to run there, timed out, is missing or failed otherwise. */
+export const gitFailure = (e: unknown): 'no-repo' | 'git-failed' =>
+  (/not a git repository/i.test(String((e as { stderr?: unknown } | null)?.stderr ?? '')) ? 'no-repo' : 'git-failed');
+
+/** The files git lists under `.forge` in `cwd` (NUL-separated), or why it could not list them. Tests pass their own. */
+export type ForgeListing = (cwd: string) => { out: string } | { fail: 'no-repo' | 'git-failed' };
+const lsForge: ForgeListing = cwd => {
+  try {
+    return { out: execFileSync('git', ['ls-files', '-z', '--', ':(top,icase).forge'], {
+      cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: gitEnv(),
+    }) };
+  } catch (e) { return { fail: gitFailure(e) }; }
+};
+
 /**
  * Whether git tracks forge's file `.forge/<name>` in the main checkout of `root` (in any letter case), or `.forge` itself
- * as a link or a submodule: then a repository ships it, and what it says is the repository's, not the person's. False
- * when git cannot say (outside a repository: a copy without git is the directory's own). The same rule keeps the trust
- * in the commands outside every checkout (trust.ts).
+ * as a link or a submodule: then a repository ships it, and what it says is the repository's, not the person's.
+ * `unknown` when git could not say (it refused to run there, timed out or failed), which counts as tracked; `untracked`
+ * outside a repository, where a copy without git (a ZIP) is the directory's own: the known limit. The same rule keeps
+ * the trust in the commands outside every checkout (trust.ts).
  */
-export function localTracked(root: string, name: 'local.yaml' | 'learned.jsonl'): boolean {
-  let listed: string;
-  try {
-    listed = execFileSync('git', ['ls-files', '-z', '--', ':(top,icase).forge'], {
-      cwd: mainCheckout(root), encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true,
-    });
-  } catch { return false; }
-  return listed.split('\0').some(f => { const l = f.toLowerCase(); return l === '.forge' || l === `.forge/${name}`; });
+export function trackedState(root: string, name: 'local.yaml' | 'learned.jsonl', ls: ForgeListing = lsForge): 'tracked' | 'untracked' | 'unknown' {
+  const r = ls(mainCheckout(root));
+  if ('fail' in r) return r.fail === 'no-repo' ? 'untracked' : 'unknown';
+  return r.out.split('\0').some(f => { const l = f.toLowerCase(); return l === '.forge' || l === `.forge/${name}`; }) ? 'tracked' : 'untracked';
 }
 
-/** The surface permissions that grant: those of local.yaml, none while git tracks it (a repository could ship an
- *  «allowed» one). `s`: local.yaml as already read. */
-export function surfacePermissions(root: string, s: Pick<LocalState, 'surfaces'> = readLocal(root)): LocalState['surfaces'] {
-  return Object.keys(s.surfaces).length && localTracked(root, 'local.yaml') ? {} : s.surfaces;
+/** Whether `.forge/<name>` may be the repository's: tracked, or git could not say (fail closed). */
+export const localTracked = (root: string, name: 'local.yaml' | 'learned.jsonl', ls?: ForgeListing): boolean => trackedState(root, name, ls) !== 'untracked';
+
+/** The surface permissions that grant: those of local.yaml, none while git tracks it or cannot say (a repository could
+ *  ship an «allowed» one). `s`: local.yaml as already read. */
+export function surfacePermissions(root: string, s: Pick<LocalState, 'surfaces'> = readLocal(root), ls?: ForgeListing): LocalState['surfaces'] {
+  return Object.keys(s.surfaces).length && localTracked(root, 'local.yaml', ls) ? {} : s.surfaces;
 }
 
 const names = (x: unknown): string[] =>
@@ -127,12 +145,13 @@ export function recordLearned(root: string, surface: string, lines: string[], ts
 }
 
 /** The recorded digests per surface; a missing file or a bad line counts as nothing recorded, and so does a file git
- *  tracks (a repository could ship digests that take its own lines out of a surface the person allowed). */
-export function readLearned(root: string): Map<string, Set<string>> {
+ *  tracks or cannot say about (a repository could ship digests that take its own lines out of a surface the person
+ *  allowed). */
+export function readLearned(root: string, ls?: ForgeListing): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
   let text = '';
   try { text = readFileSync(learnedFile(root), 'utf8'); } catch { return out; }
-  if (text.trim() && localTracked(root, 'learned.jsonl')) return out;
+  if (text.trim() && localTracked(root, 'learned.jsonl', ls)) return out;
   for (const line of text.split('\n')) {
     let r: unknown;
     try { r = JSON.parse(line); } catch { continue; }

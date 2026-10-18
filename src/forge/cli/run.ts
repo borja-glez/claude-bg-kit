@@ -43,7 +43,7 @@ import { computeStats, renderStats, type PlanStates } from '../stats.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, planAffected, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
-import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, localTracked, surfacePermissions, OBJECT_ID, type SurfacePermission } from '../local.js';
+import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, trackedState, surfacePermissions, OBJECT_ID, type SurfacePermission } from '../local.js';
 import { commandsHash, configCommands, loadTrusted, noteOnce, readTrust, recordTrust, trustIn, trustOutput, updateTrust, UntrustedCommandsError } from '../trust.js';
 import { memberForHook, allMembersOf, memberFile } from '../members.js';
 import { hookLive } from '../live.js';
@@ -1687,9 +1687,14 @@ function runCommand(argv: string[], io: Io): Result {
           if (has('expect') && !expected) throw new UsageError('local set: --expect needs the hash verify-plan gave');
           const surface = readSurfaces(repoDir, readLearned(io.cwd)).find(x => x.name === m[1]);
           if (value === 'allowed' && !surface) throw new UsageError(`local set: .forge/verify/${m[1]}.md does not exist`);
-          // final-carries 7: a local.yaml git tracks grants no surface, so an allowance written there would ask forever.
-          if (value === 'allowed' && localTracked(io.cwd, 'local.yaml')) {
+          // final-carries 7: a local.yaml git tracks, or cannot say about, grants no surface, so an allowance written there
+          // would ask forever.
+          const tracked = value === 'allowed' ? trackedState(io.cwd, 'local.yaml') : 'untracked';
+          if (tracked === 'tracked') {
             throw new UsageError('local set: git tracks .forge/local.yaml, so a permission in it grants nothing: untrack it with git rm --cached .forge/local.yaml (the file stays) and answer again');
+          }
+          if (tracked === 'unknown') {
+            throw new UsageError('local set: git could not tell whether .forge/local.yaml is tracked (it refused to run here, or failed), so a permission in it grants nothing and forge asks each time');
           }
           if (value === 'allowed' && expected !== undefined && expected !== surface!.hash) {
             throw new UsageError(`local set: .forge/verify/${m[1]}.md changed since verify-plan showed it: run verify-plan again`);

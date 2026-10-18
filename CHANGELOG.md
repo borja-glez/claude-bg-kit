@@ -345,7 +345,7 @@ elsewhere and are reconstructed from their READMEs.
 #### Changed
 - `swarm start --merge-on-finish` without your recorded yes starts with `mergeOnFinish: false` and says why; a `forge/…` branch needs no answer. Merge-on-finish merges a finished run once, and only after the final review accepts. In auto mode the merge question is asked at launch even when the request already says to merge (I-03).
 - The README recommends `Bash(node *forge.cjs*)` in `.claude/settings.local.json` of the projects you trust, `deny: Bash(*forge.cjs* hook *)` so Claude cannot call the hook commands by hand, and optional `ask` rules for every final merge and for `local set` (I-03).
-- A surface permission in a `.forge/local.yaml` that git tracks grants nothing, and a tracked `.forge/learned.jsonl` records nothing, so a repository cannot ship an allowed surface; `local set surfaces.<name> allowed` refuses and says to untrack the file (I-03).
+- A surface permission in a `.forge/local.yaml` that git tracks grants nothing, and a tracked `.forge/learned.jsonl` records nothing, so a repository cannot ship an allowed surface; `local set surfaces.<name> allowed` refuses and says to untrack the file. When git cannot tell whether they are tracked (it refuses to run there, or fails), they grant nothing either (I-03).
 - Depends on waypoint ^0.30.0.
 
 ### 0.22.3 — 2026-10-18

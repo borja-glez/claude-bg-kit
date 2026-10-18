@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { readLocal, writeLocal, updateLocal, localFile, localTracked, mainCheckout, readLearned } from '../src/forge/local.js';
+import { readLocal, writeLocal, updateLocal, localFile, localTracked, mainCheckout, readLearned, surfacePermissions, trackedState } from '../src/forge/local.js';
 import { forgeDir } from '../src/forge/ledger.js';
 import { appendLearned, lineDigest, surfaceHash } from '../src/forge/surfaces.js';
 import { run, type Io } from '../src/forge/cli/run.js';
@@ -151,6 +151,32 @@ describe('a .forge/local.yaml or learned.jsonl that git tracks (final-carries 7)
     expect(localTracked(root, 'learned.jsonl')).toBe(true);
     expect(readLearned(root).size).toBe(0);
     expect(vp(root).surfaces[0].permission).toBe('changed');
+  });
+  it('when git cannot say whether they are tracked (it refuses, times out or fails), they grant and record nothing (re-review N1)', () => {
+    const failing = () => ({ fail: 'git-failed' as const });
+    const noRepo = () => ({ fail: 'no-repo' as const });
+    mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\n');
+    writeLocal(root, { surfaces: { web: { state: 'allowed', hash: surfaceHash('# Web\n') } }, known: [], proposed: [] });
+    writeFileSync(path.join(root, '.forge', 'learned.jsonl'), `${JSON.stringify({ surface: 'web', digest: lineDigest('- a note'), ts: '2026-10-18T10:00:00.000Z' })}\n`);
+    expect(trackedState(root, 'local.yaml', failing)).toBe('unknown');
+    expect(localTracked(root, 'local.yaml', failing)).toBe(true);
+    expect(surfacePermissions(root, readLocal(root), failing)).toEqual({});
+    expect(readLearned(root, failing).size).toBe(0);
+    // No repository at all (a copy without git): the directory's own files count, the known limit.
+    expect(trackedState(root, 'local.yaml', noRepo)).toBe('untracked');
+    expect(surfacePermissions(root, readLocal(root), noRepo)).toMatchObject({ web: { state: 'allowed' } });
+    expect(readLearned(root, noRepo).get('web')?.size).toBe(1);
+    // The CLI in a repository git refuses to read (a format it does not know): it asks, and says why it cannot record.
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    git('init', '-q');
+    git('config', 'core.repositoryformatversion', '99');
+    expect(trackedState(root, 'local.yaml')).toBe('unknown');
+    expect(vp(root).surfaces[0].permission).toBe('ask');
+    expect(run(['local', 'get', 'surfaces.web'], io()).stdout.trim()).toBe('null');
+    const set = run(['local', 'set', 'surfaces.web', 'allowed'], io());
+    expect(set.code).toBe(2);
+    expect(set.stderr).toContain('git could not tell whether .forge/local.yaml is tracked');
   });
   it('outside a git repository nothing is tracked, and a .forge that is a tracked link or submodule counts as tracked', () => {
     expect(localTracked(root, 'local.yaml')).toBe(false);

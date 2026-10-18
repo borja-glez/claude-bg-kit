@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadConfig, type ForgeConfig } from './config.js';
+import { gitEnv, gitFailure } from './local.js';
 
 export interface ConfigCommand { name: string; cmd: string }
 export interface CommandChange { name: string; before: string | null; after: string | null }
@@ -166,10 +167,10 @@ export function trustPlace(dir: string): TrustPlace {
   let common: string;
   try {
     common = execFileSync('git', ['rev-parse', '--git-common-dir'], {
-      cwd: dir, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, LC_ALL: 'C', LANGUAGE: 'C' },
+      cwd: dir, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: gitEnv(),
     }).trim();
   } catch (e) {
-    return { file: null, why: /not a git repository/i.test(String((e as { stderr?: unknown }).stderr ?? '')) ? 'no-repo' : 'git-failed' };
+    return { file: null, why: gitFailure(e) };
   }
   return common ? { file: path.join(path.resolve(dir, common), 'forge', 'trust.json') } : { file: null, why: 'git-failed' };
 }
