@@ -11588,8 +11588,16 @@ function buildDocs(plan, nowIso) {
     }))
   };
 }
+function uniquePhases(phases, dropped) {
+  const seen = /* @__PURE__ */ new Set();
+  return phases.filter((p, i) => {
+    if (!seen.has(p.id)) return !!seen.add(p.id);
+    dropped?.(i);
+    return false;
+  });
+}
 function planViewFromDocs(meta, phases) {
-  const ordered = [...phases].sort((a, b) => a.order - b.order);
+  const ordered = uniquePhases(phases).sort((a, b) => a.order - b.order);
   return {
     tracks: meta.tracks,
     versions: meta.versions,
@@ -14905,6 +14913,11 @@ function paceRatioOf(plan, states) {
   const mid = ratios.length >> 1;
   return clampPace(ratios.length % 2 ? ratios[mid] : (ratios[mid - 1] + ratios[mid]) / 2);
 }
+function maxOf(values) {
+  let max = 0;
+  for (const v of values) if (v > max) max = v;
+  return max;
+}
 function forecastEnd(plan, states, now, opts) {
   const pending = plan.tasks.filter((t) => !isDone(states, t.id));
   if (!pending.length) return null;
@@ -14950,7 +14963,7 @@ function forecastEnd(plan, states, now, opts) {
     finish.set(id2, end);
     left.delete(id2);
   }
-  const at2 = now + Math.max(...finish.values()) * MIN2;
+  const at2 = now + maxOf(finish.values()) * MIN2;
   return Number.isFinite(at2) && Math.abs(at2) <= MAX_DATE ? { at: Math.round(at2), parallel } : null;
 }
 
