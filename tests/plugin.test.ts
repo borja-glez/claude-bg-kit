@@ -35,6 +35,14 @@ const admits = (range: string, version: string): boolean => {
   return a > 0 ? x === a : b > 0 ? x === 0 && y === b : x === 0 && y === 0 && z === c;
 };
 
+/** Every SKILL.md and reference of forge and waypoint, repo-relative. */
+const skillDocs = (): string[] => ['forge', 'waypoint'].flatMap(p => readdirSync(new URL(`../plugins/${p}/skills/`, import.meta.url)).flatMap(s => {
+  const dir = `plugins/${p}/skills/${s}`;
+  const has = (rel: string) => existsSync(new URL(`../${dir}/${rel}`, import.meta.url));
+  const refs = has('references/') ? readdirSync(new URL(`../${dir}/references/`, import.meta.url)).filter(r => r.endsWith('.md')).map(r => `${dir}/references/${r}`) : [];
+  return [...(has('SKILL.md') ? [`${dir}/SKILL.md`] : []), ...refs];
+}));
+
 describe('plugin layout', () => {
   it('marketplace bg-kit lists waypoint, lens and forge', () => {
     const m = JSON.parse(read('.claude-plugin/marketplace.json'));
@@ -1748,5 +1756,18 @@ describe('plugin layout', () => {
     const post = JSON.parse(read('plugins/waypoint/hooks/hooks.json')).hooks.PostToolUse as { matcher: string; hooks: { type: string; if?: string; command: string }[] }[];
     expect(post.map(g => [g.matcher, g.hooks.map(h => [h.type, h.if])])).toEqual([['Bash', [['command', 'Bash(*git*)']]], ['PowerShell', [['command', 'PowerShell(*git*)']]]]);
     expect(new Set(post.flatMap(g => g.hooks.map(h => h.command)))).toEqual(new Set(['node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" hook post-commit']));
+  });
+  it('every design-snapshot of the skills passes its note in a file, never as --note "…" (J-22)', () => {
+    let files = 0;
+    for (const f of skillDocs()) {
+      for (const line of read(f).split('\n')) {
+        if (!line.includes('design-snapshot')) continue;
+        expect(line, f).not.toMatch(/--note ["'<]/);
+        if (line.includes('--note-file')) files++;
+      }
+    }
+    expect(files).toBeGreaterThanOrEqual(3);
+    expect(read('plugins/waypoint/skills/design/SKILL.md')).toContain('--note-file LOCAL/snapshot-note.txt');
+    expect(read('plugins/forge/skills/decisions/SKILL.md')).toContain('--note-file .forge/work/decisions/snapshot-note.txt');
   });
 });

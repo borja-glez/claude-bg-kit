@@ -45,7 +45,9 @@ export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
   const flag = (name: string) => {
     const i = args.indexOf(`--${name}`);
-    return i >= 0 ? args[i + 1] : undefined;
+    const v = i >= 0 ? args[i + 1] : undefined;
+    // J-22: as in forge, a flag followed by another flag has no value.
+    return v === undefined || v.startsWith('--') ? undefined : v;
   };
   const abs = (p: string) => path.resolve(io.cwd, p);
   const ok = (stdout: string): Result => ({ code: 0, stdout: stdout.endsWith('\n') ? stdout : `${stdout}\n`, stderr: '' });
@@ -695,8 +697,14 @@ export function run(argv: string[], io: Io): Result {
       }
       case 'design-snapshot': {
         const file = abs(args[0]);
-        const note = flag('note');
-        if (!note) return fail('design-snapshot: --note is required', 2);
+        // J-22: --note-file <f> takes the note from a file, so a note with quotes or $ never goes through the shell.
+        if (args.includes('--note-file') && flag('note-file') === undefined) return fail('design-snapshot: --note-file needs a file', 2);
+        if (flag('note') !== undefined && flag('note-file') !== undefined) return fail('design-snapshot: --note and --note-file are exclusive', 2);
+        let note = flag('note');
+        if (flag('note-file') !== undefined) {
+          try { note = readFileSync(abs(flag('note-file')!), 'utf8').replace(/[\r\n]+$/, ''); } catch { return fail(`design-snapshot: cannot read ${flag('note-file')}`, 2); }
+        }
+        if (!note) return fail('design-snapshot: --note or --note-file is required', 2);
         const text = readFileSync(file, 'utf8');
         const d = parseDesign(text);
         const base = path.join(path.dirname(file), 'design');

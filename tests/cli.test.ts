@@ -185,6 +185,12 @@ describe('waypoint CLI', () => {
     git('checkout', '-q', '-');
     expect(JSON.parse(run(['commit-info', side], io).stdout)).toMatchObject({ sha: side, title: 'forge: integrate T1' });
   });
+
+  it('a flag followed by another flag has no value, as in forge (J-22)', () => {
+    const r = run(['next', 'plan.yaml', '--session', '--track', 'backend'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('--session is required');
+  });
 });
 
 describe('multi-session commands', () => {
@@ -641,7 +647,7 @@ describe('task batches from the CLI (A-14)', () => {
     expect(o.metrics).toEqual({ op: 'update', collection: 'meta', doc_id: 'metrics', data: { lastCommit: { sha, ts: expect.any(String) }, tests: 12, updatedAt: '2026-10-11T10:00:00.000Z' } });
     expect(JSON.parse(readFileSync(path.join(dir, 'db', 'state', 'T001.json'), 'utf8')).status).toBe('done');
     expect(cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--meta-version', '2').code).toBe(2);
-    expect(cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--meta-version', '2', '--summary-file', 'summary.txt', '--rev', '--all').code).toBe(2);
+    expect(cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--meta-version', '2', '--summary-file', 'summary.txt', '--rev', 'a b').code).toBe(2);
     expect(cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--summary-file', 'summary.txt').code).toBe(0);
   });
   it('block --why-file writes the reason in the blocked event and in state/T.blockedReason', () => {
@@ -1370,6 +1376,16 @@ describe('design commands', () => {
     expect(out.stdout).toContain('warning: cannot check design_version: changelog.json is not valid JSON');
     writeFileSync(path.join(dir, 'plan.yaml'), 'project: [');
     expect(run(['validate', 'plan.yaml', '--design', rel], io).code).toBe(1);
+  });
+  it('design-snapshot --note-file takes the note from a file; with --note too, or a file it cannot read, it exits 2 and writes nothing (J-22)', () => {
+    writeFileSync(path.join(dir, 'note.txt'), 'borrador con "comillas", $(nada) y `código`\n');
+    const r = run(['design-snapshot', rel, '--note-file', 'note.txt', '--round', '0'], io);
+    expect(r.code).toBe(0);
+    expect(changelog()[0]).toMatchObject({ version: 1, note: 'borrador con "comillas", $(nada) y `código`', round: 0 });
+    for (const bad of [['--note', 'a', '--note-file', 'note.txt'], ['--note-file', 'missing.txt'], ['--note-file'], ['--note-file', '--round', '1'], []]) {
+      expect(run(['design-snapshot', rel, ...bad], io).code, bad.join(' ')).toBe(2);
+    }
+    expect(changelog()).toHaveLength(1);
   });
 });
 
