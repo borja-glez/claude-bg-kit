@@ -8,7 +8,10 @@ import { PATH_ORDER } from '../../triage.js';
 import { UsageError } from '../errors.js';
 import { restoringRegenerated } from '../swarm.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../../validate-cache.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, planAffected, type Scope, type Validator, type ValidatorResult } from '../../validators.js';
+import {
+  detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, planAffected,
+  type Scope, type Validator, type ValidatorResult,
+} from '../../validators.js';
 import { mainCheckout } from '../../local.js';
 import { loadTrusted } from '../../trust.js';
 import { noSlot } from '../../jobs.js';

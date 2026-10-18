@@ -17,7 +17,11 @@ import { defaultExec, defaultExecMany, defaultGit } from './exec.js';
 import { COMMANDS } from './commands/index.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
-export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined>; slot?: Slot; roadmapFit?: typeof fitForgeDoc }
+export interface Io {
+  cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany;
+  git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void;
+  env?: Record<string, string | undefined>; slot?: Slot; roadmapFit?: typeof fitForgeDoc;
+}
 
 // I-12: what moved out of this file keeps its import path for the other modules and the tests.
 export { defaultExec, defaultExecMany, defaultGit, repoReader } from './exec.js';

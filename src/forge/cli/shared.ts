@@ -7,7 +7,10 @@ import { readRunText, stopFile, type RunState, type StopContext } from '../run.j
 import { readExecution } from '../execution.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
 import { samePath } from '../../lib/worktree.js';
-import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult } from '../triage.js';
+import {
+  triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor,
+  PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult,
+} from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { taskText, tddLine } from '../brief.js';
 import { loadConfig, agentFor } from '../config.js';
@@ -73,7 +76,8 @@ export function mcpOf(io: Io, dir: string): Set<string> {
 export function surfaceBlob(dir: string, file: string): string | null {
   try {
     const text = Buffer.from(readFileSync(path.join(dir, file)).toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
-    const id = execFileSync('git', ['--no-replace-objects', 'hash-object', '-w', '--no-filters', '--stdin'], { cwd: dir, input: text, encoding: 'utf8', timeout: 10000, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true }).trim();
+    const id = execFileSync('git', ['--no-replace-objects', 'hash-object', '-w', '--no-filters', '--stdin'],
+      { cwd: dir, input: text, encoding: 'utf8', timeout: 10000, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true }).trim();
     return OBJECT_ID.test(id) ? id : null;
   } catch { return null; }
 }
@@ -143,7 +147,9 @@ export function stopContext(cwd: string, now: Date): StopContext {
     stopFile: existsSync(stopFile(cwd)),
     // Wave 4: approved work counts only with the owner's mark (with or without a task, as before); one without a task also
     // needs the mark to be of its present text: an edited one never becomes a task, so it does not hold the queue open.
-    approvedPending: proposals.filter(p => p.taskId === undefined ? ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule, now.getTime())) === 'ok' : markMatches(p, marks[p.id])).length,
+    approvedPending: proposals.filter(p => p.taskId === undefined
+      ? ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule, now.getTime())) === 'ok'
+      : markMatches(p, marks[p.id])).length,
     pendingProposals: proposals.filter(p => p.status === 'proposed' || p.status === 'discussing').length,
   };
 }
@@ -222,7 +228,8 @@ export function cleanupEvidence(dir: string): { killed: number[]; gone: number[]
   let pids: number[] = [];
   try { const raw = JSON.parse(readFileSync(path.join(dir, 'pids.json'), 'utf8')); if (Array.isArray(raw)) pids = raw.filter((p): p is number => Number.isInteger(p)); } catch { pids = []; }
   const pgid = (pid: number): number | null => {
-    try { const n = Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()); return Number.isInteger(n) && n > 0 ? n : null; } catch { return null; }
+    try { const n = Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)],
+      { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()); return Number.isInteger(n) && n > 0 ? n : null; } catch { return null; }
   };
   const kill = (pid: number) => {
     try {

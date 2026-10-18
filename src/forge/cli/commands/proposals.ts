@@ -3,8 +3,14 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir } from '../../ledger.js';
 import { parsePlan, PlanError } from '../../../lib/plan.js';
-import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, loadProposal, decideDoc, mirrorProposal, saveApproval, loadApproval, loadApprovals, removeApproval, type DecideError } from '../../proposals.js';
-import { normalizeProposal, isActionable, canDecide, normalizeApproval, ownerCheck, ownerApproved, proposalDigest, PROPOSAL_STATUSES, type Decision, type ProposalDoc, type ApprovalDoc } from '../../../lib/proposals.js';
+import {
+  PROPOSAL_ID, proposalId, saveProposal, loadProposals, loadProposal, decideDoc, mirrorProposal, saveApproval, loadApproval, loadApprovals,
+  removeApproval, type DecideError,
+} from '../../proposals.js';
+import {
+  normalizeProposal, isActionable, canDecide, normalizeApproval, ownerCheck, ownerApproved, proposalDigest, PROPOSAL_STATUSES,
+  type Decision, type ProposalDoc, type ApprovalDoc,
+} from '../../../lib/proposals.js';
 import { PAGE_RULES } from '../../../lib/publish.js';
 import { autoApprovable, similarRejected, similarOpen } from '../../policy.js';
 import { proposalToTask, proposalOfIncludes, proposalsOfIncludes } from '../../to-task.js';
@@ -81,7 +87,8 @@ export const command: Command = (args, ctx) => {
       try { raw = JSON.parse(readText(file, '--file')); } catch (e) { if (e instanceof UsageError) throw e; throw new UsageError('proposals add: --file must be a JSON object'); }
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new UsageError('proposals add: --file must be a JSON object');
       const o = raw as Record<string, unknown>;
-      const doc = normalizeProposal({ ...o, ts: typeof o.ts === 'string' ? o.ts : ts(), status: 'proposed', decidedBy: undefined, decidedAt: undefined, reason: undefined, taskId: undefined, history: undefined, author: subFlag('author') ?? o.author ?? 'session' });
+      const doc = normalizeProposal({ ...o, ts: typeof o.ts === 'string' ? o.ts : ts(), status: 'proposed', decidedBy: undefined, decidedAt: undefined,
+        reason: undefined, taskId: undefined, history: undefined, author: subFlag('author') ?? o.author ?? 'session' });
       if (!doc) throw new UsageError('proposals add: invalid proposal (category, risk, title and source are required and must be valid)');
       if (doc.source === 'scout' && (!doc.pillar?.trim() || !doc.evidence?.trim())) throw new UsageError('proposals add: a scout proposal needs a pillar and evidence');
       // Anti-repetition: a hit means the evidence adds nothing new to a rejected proposal.
@@ -186,7 +193,9 @@ export const command: Command = (args, ctx) => {
       const known = new Set((previousDoc?.history ?? []).map(e => JSON.stringify(e)));
       const tracked = previousDoc !== null && (doc.history ?? []).some(e => !known.has(JSON.stringify(e))
         && e.status === previousDoc.status && e.decidedBy === previousDoc.decidedBy && e.decidedAt === previousDoc.decidedAt);
-      const stderr = reopened && !tracked ? `proposals save: ${id} went from ${previousDoc.status} to ${doc.status} with no new history entry: the change was not made through proposals decide --reopen\n` : '';
+      const stderr = reopened && !tracked
+        ? `proposals save: ${id} went from ${previousDoc.status} to ${doc.status} with no new history entry: the change was not made through proposals decide --reopen\n`
+        : '';
       return { ...json({ id, status: doc.status, previous }), stderr };
     }
     case 'pull': {

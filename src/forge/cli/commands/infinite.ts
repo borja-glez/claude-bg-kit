@@ -38,7 +38,8 @@ export const command: Command = (args, ctx) => {
     // directory still counts as the active one.
     const runRoot = runRootOf(io.cwd);
     const current = parseRun(readRunText(runRoot));
-    if (current?.active && current.sessionId !== null && stopReason(current, stopContext(runRoot, io.now())) === null) throw new UsageError('infinite start: a run is already active (forge stop, or forge infinite status)');
+    if (current?.active && current.sessionId !== null
+      && stopReason(current, stopContext(runRoot, io.now())) === null) throw new UsageError('infinite start: a run is already active (forge stop, or forge infinite status)');
     const main = mainCheckout(io.cwd);
     forgeDir(main);
     rmSync(stopFile(main), { force: true });
@@ -55,7 +56,8 @@ export const command: Command = (args, ctx) => {
     const unbound = !!run?.active && run.sessionId === null;
     // G-08: meta/infinite as the roadmap takes it, for the skill to send as it is.
     const publish = run ? { infinite: infinitePublish(mainCheckout(io.cwd), run, io.now()) } : null;
-    return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run), ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}), unowned: unownedOf(runRoot, io.now()), publish });
+    return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run),
+      ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}), unowned: unownedOf(runRoot, io.now()), publish });
   }
   throw new UsageError('usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE]|status>');
 };

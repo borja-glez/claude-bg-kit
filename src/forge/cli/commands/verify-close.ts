@@ -66,7 +66,8 @@ export const command: Command = (args, ctx) => {
     let real: string, bytes: number;
     try { real = realpathSync(file); bytes = statSync(real).size; } catch { return []; }
     if (!inside(real)) return [];
-    return [{ file: path.relative(io.cwd, file).split(path.sep).join('/'), surface: c.surface, check: c.name, ok: c.ok, expected: c.expected, observed: c.observed, bytes, oversize: bytes > SHOT_MAX_BYTES }];
+    return [{ file: path.relative(io.cwd, file).split(path.sep).join('/'), surface: c.surface, check: c.name, ok: c.ok, expected: c.expected,
+      observed: c.observed, bytes, oversize: bytes > SHOT_MAX_BYTES }];
   });
   let previous: string[] = [];
   const db = flag('db');
@@ -93,8 +94,10 @@ export const command: Command = (args, ctx) => {
   const big = shots.filter(s => s.oversize).length;
   const learnedText = Object.entries(learned).map(([n, k]) => `${n} (${k})`).join(', ');
   const say = es
-    ? `Verificación ${v.result}: ${passed}/${total} comprobaciones${learnedText ? `; aprendido en ${learnedText}` : ''}${shots.length ? `; ${shots.length} captura(s)${big ? ` (${big} de más de 2 MB)` : ''}` : ''}.`
-    : `Verification ${v.result}: ${passed}/${total} checks${learnedText ? `; learned in ${learnedText}` : ''}${shots.length ? `; ${shots.length} screenshot(s)${big ? ` (${big} over 2 MB)` : ''}` : ''}.`;
+    ? `Verificación ${v.result}: ${passed}/${total} comprobaciones${learnedText ? `; aprendido en ${learnedText}` : ''}`
+      + `${shots.length ? `; ${shots.length} captura(s)${big ? ` (${big} de más de 2 MB)` : ''}` : ''}.`
+    : `Verification ${v.result}: ${passed}/${total} checks${learnedText ? `; learned in ${learnedText}` : ''}`
+      + `${shots.length ? `; ${shots.length} screenshot(s)${big ? ` (${big} over 2 MB)` : ''}` : ''}.`;
   return json({
     task, result: v.result, passed, total, learned, ...(skipped.length ? { skipped } : {}), proposals: v.proposals, cleanup,
     evidence: { mode, dir: path.relative(io.cwd, evidence).split(path.sep).join('/'), shots, previous }, commit, say,
