@@ -1867,4 +1867,23 @@ describe('plugin layout', () => {
     expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('`needs-authorization`');
     for (const f of ['large', 'execution', 'autonomy']) expect(runRef(f), f).not.toContain('«Sí, intégrala en');
   });
+
+  it('the trust in the config commands: trust.md, and triage, the start, auto mode, review and infinite send to it (I-03)', () => {
+    const trust = runRef('trust');
+    for (const w of ['FORGE local set commands allowed --expect <hash> --cwd <trust.cwd>', 'FORGE local set commands denied', '`note: true`', '`untrusted-commands`', 'AskUserQuestion', 'trust.commands']) {
+      expect(trust, w).toContain(w);
+    }
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    expect(run).toContain('`references/trust.md`');
+    expect(Buffer.byteLength(run, 'utf8')).toBeLessThanOrEqual(22528);
+    const exec = runRef('execution');
+    expect(exec).toContain('references/trust.md');
+    const unattended = exec.slice(exec.indexOf('### Unattended'));
+    expect(unattended).toContain('`untrusted-commands`');
+    expect(runRef('autonomy')).toContain('references/trust.md');
+    for (const f of ['review', 'infinite']) expect(read(`plugins/forge/skills/${f}/SKILL.md`), f).toContain('references/trust.md');
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      for (const w of ['local get commands | set commands allowed --expect', 'authorize merge-on-finish', 'hook answer', '`affected_cmd`', 'settings.local.json', 'Bash(*forge.cjs* hook *)']) expect(read(f), `${f}: ${w}`).toContain(w);
+    }
+  });
 });

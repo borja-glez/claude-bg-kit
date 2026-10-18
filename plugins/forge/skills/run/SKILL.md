@@ -38,7 +38,7 @@ forge asks at its gates unless autonomy is `auto`: `FORGE prefs` resolves `auton
 
 `--execute <project>`: no triage, go to `## Execution`.
 
-1. **Run it.** Write the task text to `.forge/work/<id>/task.txt` and run `FORGE triage --task <id> --text-file .forge/work/<id>/task.txt --locale <es|en>` (the person's language: `es` for Spanish, else `en`). It returns `path`, `files`, `sensitive`, `greenfield`, `validators`, `reasons`, `new` (validators seen for the first time, commands in `catalog`), `implementer` (who implements: `role`, `agent`, `self`, `why`), `announce`, `gate` and, while `.forge/.gitignore` is not in git, `untracked`. Pass `--batch` when the task is one request of several in the message (`references/ephemeral.md`).
+1. **Run it.** Write the task text to `.forge/work/<id>/task.txt` and run `FORGE triage --task <id> --text-file .forge/work/<id>/task.txt --locale <es|en>` (the person's language: `es` for Spanish, else `en`). It returns `path`, `files`, `sensitive`, `greenfield`, `validators`, `reasons`, `new` (validators seen for the first time), `implementer`, `announce`, `gate`, `untracked` (while `.forge/.gitignore` is not in git) and `trust` (with it, read `references/trust.md` now). Pass `--batch` when the task is one request of several in the message (`references/ephemeral.md`).
 2. **Raise when needed.** Add your own judgement of ambiguity and risk: you may raise the path, never lower it below the CLI's. The CLI only counts files and words, so read the code the task touches and **raise to at least Medium** when the task:
    - changes behaviour callers rely on: new errors or rejected inputs, a changed signature, different return values;
    - bundles several independent changes;
