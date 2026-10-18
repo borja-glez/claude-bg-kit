@@ -7,6 +7,7 @@ import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs, buildSyncWrites, planHash, planViewFromDocs } from '../src/lib/sync.js';
 import type { States } from '../src/lib/types.js';
 import { compareVersions, WAYPOINT_VERSION } from '../src/lib/waypoint-version.js';
+import { isSyncBatch, syncFiles } from '../src/lib/sync-files.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
 
@@ -182,5 +183,19 @@ describe('the waypoint version (G-13)', () => {
       });
       expect(execFileSync(process.execPath, [out], { encoding: 'utf8' }).trim()).toBe('0.0.0');
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('the files of a sync (A-24)', () => {
+  it('are the ones sync-files names, so sync and doctor agree on them', () => {
+    const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
+    const r = buildSyncWrites(plan, {}, 'out', { nowIso: '2026-10-16T10:00:00.000Z', sessionId: 'main', eventId: 'e1' });
+    const names = Object.keys(r.files).map(f => f.split('/').pop()!);
+    expect(names.length).toBeGreaterThan(1);
+    for (const n of names) {
+      expect(syncFiles(plan).has(n), n).toBe(true);
+      expect(isSyncBatch(n), n).toBe(true);
+    }
+    expect([isSyncBatch('known.json'), isSyncBatch('session.json'), isSyncBatch('plan-x.txt')]).toEqual([false, false, false]);
   });
 });

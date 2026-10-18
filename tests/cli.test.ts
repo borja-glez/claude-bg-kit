@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync, readdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync, readdirSync, symlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -2809,5 +2809,81 @@ describe('waypoint stays apart from forge and the mods (A-19)', () => {
     const bad = readdirSync(cliDir).filter(f => /\.tsx?$/.test(f))
       .flatMap(f => [...readFileSync(path.join(cliDir, f), 'utf8').matchAll(/from '(\.\.\/(?:forge|mod)\/[^']+)'/g)].map(m => `${f}: ${m[1]}`));
     expect(bad).toEqual([]);
+  });
+});
+
+describe('what older passes and versions leave under .waypoint/<project>/ (A-24)', () => {
+  const wp = (...p: string[]) => path.join(dir, '.waypoint', 'demo-shop', ...p);
+  const put = (f: string, text = '{}') => { mkdirSync(path.dirname(f), { recursive: true }); writeFileSync(f, text); };
+  it('sync deletes the earlier batches of its --out inside .waypoint/<project>/ before writing, and nothing else (Review Focus 2)', () => {
+    put(wp('sync', 'plan-old.json'));
+    put(wp('sync', 'meta.json'), '"old"');
+    put(wp('sync', 'notes.txt'), 'x');
+    put(wp('sync', 'other.json'));
+    expect(run(['sync', 'plan.yaml', '--out', '.waypoint/demo-shop/sync'], io).code).toBe(0);
+    expect(existsSync(wp('sync', 'plan-old.json'))).toBe(false);
+    expect(readFileSync(wp('sync', 'meta.json'), 'utf8')).not.toBe('"old"');
+    for (const kept of [wp('sync', 'notes.txt'), wp('sync', 'other.json')]) expect(existsSync(kept), kept).toBe(true);
+    // Outside .waypoint/<project>/, or in that folder itself, nothing is deleted.
+    put(path.join(dir, 'elsewhere', 'plan-old.json'));
+    expect(run(['sync', 'plan.yaml', '--out', 'elsewhere'], io).code).toBe(0);
+    expect(existsSync(path.join(dir, 'elsewhere', 'plan-old.json'))).toBe(true);
+    put(wp('plan-old.json'));
+    expect(run(['sync', 'plan.yaml', '--out', '.waypoint/demo-shop'], io).code).toBe(0);
+    expect(existsSync(wp('plan-old.json'))).toBe(true);
+    // Another project's folder and a ../ that climbs out of the project folder are outside too.
+    put(path.join(dir, '.waypoint', 'other', 'sync', 'plan-old.json'));
+    expect(run(['sync', 'plan.yaml', '--out', '.waypoint/other/sync'], io).code).toBe(0);
+    expect(existsSync(path.join(dir, '.waypoint', 'other', 'sync', 'plan-old.json'))).toBe(true);
+    expect(run(['sync', 'plan.yaml', '--out', '.waypoint/demo-shop/../other/sync'], io).code).toBe(0);
+    expect(existsSync(path.join(dir, '.waypoint', 'other', 'sync', 'plan-old.json'))).toBe(true);
+  });
+  it('a link inside .waypoint/<project>/ that points outside is not followed by sync nor by doctor', () => {
+    const outside = path.join(dir, 'outside');
+    put(path.join(outside, 'plan-old.json'));
+    put(path.join(outside, 'last-head'));
+    mkdirSync(wp(), { recursive: true });
+    symlinkSync(outside, wp('sync'), 'junction');
+    expect(run(['sync', 'plan.yaml', '--out', '.waypoint/demo-shop/sync'], io).code).toBe(0);
+    expect(existsSync(path.join(outside, 'plan-old.json'))).toBe(true);
+    rmSync(wp('sync'), { recursive: true, force: true });
+    mkdirSync(wp('seats'), { recursive: true });
+    symlinkSync(outside, wp('seats', 'linked'), 'junction');
+    symlinkSync(outside, wp('sync'), 'junction');
+    symlinkSync(outside, wp('dbcache'), 'junction');
+    const r = JSON.parse(run(['doctor', 'plan.yaml', '--fix'], io).stdout);
+    expect(r.leftovers).toEqual([]);
+    expect(existsSync(path.join(outside, 'plan-old.json'))).toBe(true);
+    expect(existsSync(path.join(outside, 'last-head'))).toBe(true);
+  });
+  it('doctor lists what older versions left, --fix deletes only that, and what is still read stays (Review Focus 2)', () => {
+    put(wp('last-head'), 'abc\n');
+    put(wp('seats', 'main-2', 'last-head'), 'abc\n');
+    put(wp('last-head.json'));
+    put(wp('sync', 'plan-gone.json'));
+    put(wp('sync', 'meta.json'));
+    put(wp('dbcache', 'fronts', 'a.json'));
+    put(wp('dbcache', 'state', 'T001.json'));
+    put(wp('known.json'));
+    put(wp('stop-ack'), 'h\n');
+    put(path.join(dir, '.waypoint', 'other', 'last-head'), 'x');
+    put(path.join(dir, 'last-head'), 'x');
+    const paths = (r: { leftovers: { path: string }[] }) => r.leftovers.map(l => l.path).sort();
+    const list = JSON.parse(run(['doctor', 'plan.yaml'], io).stdout);
+    expect(list.project).toBe('demo-shop');
+    expect(paths(list)).toEqual([
+      '.waypoint/demo-shop/dbcache/fronts', '.waypoint/demo-shop/last-head', '.waypoint/demo-shop/seats/main-2/last-head', '.waypoint/demo-shop/sync/plan-gone.json',
+    ]);
+    expect(list.removed).toEqual([]);
+    expect(existsSync(wp('last-head'))).toBe(true);
+    const fixed = JSON.parse(run(['doctor', 'plan.yaml', '--fix'], io).stdout);
+    expect([...fixed.removed].sort()).toEqual(paths(list));
+    for (const p of fixed.removed) expect(existsSync(path.join(dir, p)), p).toBe(false);
+    for (const kept of [wp('last-head.json'), wp('sync', 'meta.json'), wp('dbcache', 'state', 'T001.json'), wp('known.json'), wp('stop-ack'),
+      path.join(dir, '.waypoint', 'other', 'last-head'), path.join(dir, 'last-head')]) expect(existsSync(kept), kept).toBe(true);
+    expect(JSON.parse(run(['doctor', 'plan.yaml'], io).stdout).leftovers).toEqual([]);
+  });
+  it('doctor without .waypoint/<project>/ lists nothing', () => {
+    expect(JSON.parse(run(['doctor', 'plan.yaml'], io).stdout)).toEqual({ project: 'demo-shop', leftovers: [], removed: [] });
   });
 });
