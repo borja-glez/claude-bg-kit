@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { mkdirSync, copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { run, type Io } from '../src/cli/run.js';
@@ -8,7 +8,8 @@ const tmp = useTempDirs();
 
 /**
  * Re-review N3: the setup every loop below shares: a temporary repository with the fixture design and plan, driven from
- * another folder (Review Focus 3), and the helpers that run the CLI there. `open` makes a fresh one, `close` removes it.
+ * another folder (Review Focus 3), and the helpers that run the CLI there. `open` makes a fresh one; useTempDirs removes
+ * every one at the end of the file.
  */
 function sandbox(prefix: string) {
   let repo = '';
@@ -49,10 +50,6 @@ function sandbox(prefix: string) {
       writeFileSync(path.join(assets, 'design.template.html'), '<title>__TITLE__</title><script type="application/json" id="wp-design-data">__DATA__</script>');
       io = { cwd: elsewhere, now: () => new Date('2026-10-17T10:00:00.000Z'), rand: () => 0, assetsDir: assets, env: {} };
     },
-    close: () => {
-      rmSync(repo, { recursive: true, force: true });
-      rmSync(elsewhere, { recursive: true, force: true });
-    },
   };
 }
 
@@ -63,7 +60,6 @@ describe('the design loop end to end (§7.3)', () => {
   const { design, plan, wp, json, edit } = box;
   const prop = (n: number, severity: string, section: string, problem: string, change: string) => ({ n, category: 'gap', severity, section, problem, change });
   beforeAll(box.open);
-  afterAll(box.close);
 
   it('round 1, apply, round --verify, approve --auto and amend, and the design page tells each round', () => {
     wp('design-snapshot', design(), '--note', 'borrador', '--round', '0', '--kind', 'draft');
@@ -138,7 +134,6 @@ describe('the design loop through the .waypoint/ route of a project from before 
   const box = sandbox('wp-legacy');
   const { design, wp, json, edit } = box;
   beforeAll(box.open);
-  afterAll(box.close);
 
   it('round 1 from .waypoint/, apply, round --verify in docs/, approve: the gate and the page tell both rounds', () => {
     wp('design-snapshot', design(), '--note', 'Borrador inicial', '--round', '0');
@@ -180,7 +175,6 @@ describe('a reopen restarts the budget in the normal flow, with no --round anywh
   const critique = (out: string, c: object) => { mkdirSync(path.dirname(out), { recursive: true }); writeFileSync(out, JSON.stringify(c)); };
   const rounds = () => JSON.parse(readFileSync(path.join(box.repo(), 'docs/waypoint/demo-shop/design/changelog.json'), 'utf8')).map((e: { round: number }) => e.round);
   beforeEach(box.open);
-  afterEach(box.close);
   // approve (--kind approve), then a reopen whose change is a new section, as /forge:infinite does for a Large task.
   const approveAndReopen = () => {
     edit('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved');
