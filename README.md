@@ -132,8 +132,8 @@ Add to `permissions` in `~/.claude/settings.json`:
 If Claude Code lists `ArtifactData` under another name (for example `mcp__…__ArtifactData`), use that name. Each `allow` entry lets Claude run that tool without asking; leave out any you prefer to approve by hand. `deny` wins over every `allow`, also over a skill's `allowed-tools`.
 
 - **`git -C <dir> …` is left out on purpose**, so Claude Code asks for it: the waypoint skills use it to act on the main checkout from a worktree (the delegation, the phase merge), and that question is your say on a merge into it. A `deny` such as `Bash(git * push *)` would also block a commit whose message says «push», so it is not there.
-- **forge.** `"Bash(node *forge.cjs*)"` in `allow` lets forge run without Claude Code asking. forge asks you itself before it runs the commands of `.forge/config.yaml` (your trust is tied to their hash), but put that entry in `.claude/settings.local.json` of the projects you trust, not in your `~/.claude/settings.json`.
-- **Every final merge asked by Claude Code too** (optional): add `"ask": ["Bash(node *forge.cjs* swarm merge*)"]` next to `allow`. `ask` wins over `allow`.
+- **forge.** `"Bash(node *forge.cjs*)"` in `allow` lets forge run without Claude Code asking. forge asks you itself before it runs the commands of `.forge/config.yaml` (your trust is tied to their hash), but put that entry in `.claude/settings.local.json` of the projects you trust, not in your `~/.claude/settings.json`. With it, add `"deny": ["Bash(*forge.cjs* hook *)"]`, which stops Claude from calling forge's hook commands by hand (for example `hook answer`, which records your answers) and does not touch the real hooks, because permission rules never apply to them.
+- **Every final merge asked by Claude Code too** (optional): add `"ask": ["Bash(*forge.cjs* swarm merge*)", "Bash(*forge.cjs* local set*)"]` next to `allow`: the first asks you before every final merge, the second before Claude records a permission or your trust in the commands of `.forge/config.yaml`. `ask` wins over `allow`.
 
 </details>
 

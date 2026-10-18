@@ -229,7 +229,7 @@ Optional; add them to `permissions` in `~/.claude/settings.json` so the work ski
 `ArtifactData` is the tool name as this plugin's skills call it. If Claude Code lists it under another name (for example `mcp__…__ArtifactData`), use that name. `deny` wins over every `allow`, also over a skill's `allowed-tools`, and each skill lists only the git commands it runs.
 
 - **`git -C <dir> …` is left out on purpose**, so Claude Code asks for it: the work skill uses it to act on the main checkout from a worktree (the delegation, the phase merge), and that question is your say on a merge into it.
-- **With forge**, `"Bash(node *forge.cjs*)"` lets it run without Claude Code asking; put it in `.claude/settings.local.json` of the projects you trust, not in your `~/.claude/settings.json` (forge asks itself before it runs the commands of `.forge/config.yaml`). To be asked before every final merge too, add `"ask": ["Bash(node *forge.cjs* swarm merge*)"]`.
+- **With forge**, `"Bash(node *forge.cjs*)"` lets it run without Claude Code asking; put it in `.claude/settings.local.json` of the projects you trust, not in your `~/.claude/settings.json` (forge asks itself before it runs the commands of `.forge/config.yaml`). With it, add `"deny": ["Bash(*forge.cjs* hook *)"]`, which stops Claude from calling forge's hook commands by hand (for example `hook answer`, which records your answers) and does not touch the real hooks, because permission rules never apply to them. To be asked before every final merge and before Claude records a permission or your trust in those commands, add `"ask": ["Bash(*forge.cjs* swarm merge*)", "Bash(*forge.cjs* local set*)"]`.
 
 ## Develop
 

@@ -20,7 +20,7 @@ elsewhere and are reconstructed from their READMEs.
 
 #### Changed
 - The `PostToolUse` hook starts only for a command that names git (`if: Bash(*git*)`), and also for PowerShell: every other call saves a `node` start (hooks filter, J-22).
-- Each skill's `allowed-tools` lists the git commands it runs instead of `Bash(git *)`, and the README recommends a narrow `allow` list, a `deny` for `git push`, `git reset --hard`, `git clean` and `git -c`, and says why `git -C` is left for Claude Code to ask (I-03).
+- Each skill's `allowed-tools` lists the git commands it runs instead of `Bash(git *)`, and the README recommends a narrow `allow` list, a `deny` for `git push`, `git reset --hard`, `git clean` and `git -c`, and says why `git -C` is left for Claude Code to ask; with forge allowed, it also recommends `deny: Bash(*forge.cjs* hook *)`, as the root README does (I-03).
 - A flag followed by another flag has no value, as in forge: `next --session --track x` exits 2 (J-22).
 - `waypoint:plan` commits `plan.yaml` and `design.md` with pathspecs, and so does the delegation of `waypoint:work` (A-16).
 - Built with esbuild 0.28 (I-17).

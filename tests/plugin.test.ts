@@ -1837,7 +1837,17 @@ describe('plugin layout', () => {
       const p = JSON.parse(block!).permissions as { allow: string[]; deny: string[] };
       expect(p.allow.filter(a => a.startsWith('Bash(git')), f).toEqual(ALLOW);
       expect(p.deny, f).toEqual(DENY);
-      for (const w of ['git -C', 'Bash(node *forge.cjs*)', '.claude/settings.local.json', '"ask": ["Bash(node *forge.cjs* swarm merge*)"]']) expect(md, `${f}: ${w}`).toContain(w);
+      for (const w of ['git -C', 'Bash(node *forge.cjs*)', '.claude/settings.local.json']) expect(md, `${f}: ${w}`).toContain(w);
+    }
+    // Every README that recommends allowing forge also denies its hook commands (a session could record an answer with
+    // `hook answer` unasked), and the ask rule has one spelling.
+    const FORGE_ALLOW = 'Bash(node *forge.cjs*)';
+    const recommending = readmes.filter(f => read(f).includes(FORGE_ALLOW));
+    expect(recommending.sort()).toEqual(['README.es.md', 'README.md', ...['forge', 'waypoint'].flatMap(p => [`plugins/${p}/README.es.md`, `plugins/${p}/README.md`])].sort());
+    for (const f of recommending) {
+      const md = read(f);
+      for (const w of ['"deny": ["Bash(*forge.cjs* hook *)"]', '"ask": ["Bash(*forge.cjs* swarm merge*)", "Bash(*forge.cjs* local set*)"]']) expect(md, `${f}: ${w}`).toContain(w);
+      expect(md, f).not.toContain('Bash(node *forge.cjs* swarm merge*)');
     }
     const GIT: Record<string, string[]> = {
       design: ['Bash(git add *)', 'Bash(git commit *)', 'Bash(git status *)', 'Bash(git diff *)', 'Bash(git log *)'],
