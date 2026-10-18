@@ -2927,6 +2927,66 @@ describe('the conversation (G-17, H-17)', () => {
     app.stop();
   });
 
+  it('a filter click that clears a notice, or brings or takes the read-only one, keeps the focus on the filter clicked (review Important 1)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('notes', NOTES);
+    click(root, '[data-view="talk"]');
+    await settle();
+    const filter = (c: string) => root.querySelector(`[data-action="talk-c"][data-c="${c}"]`) as HTMLButtonElement;
+    const press = async (c: string) => { const b = filter(c); b.focus(); b.click(); await settle(); return b; };
+    // A notice the last action left goes with the click.
+    app.ui.notice = 'failed';
+    f.push('notes', { ...NOTES });
+    await settle();
+    expect(root.innerHTML).toContain('No se pudo guardar');
+    let b = await press('open');
+    expect(root.innerHTML).not.toContain('No se pudo guardar');
+    expect(document.activeElement).toBe(b);
+    expect(document.activeElement).toBe(filter('open'));
+    // The read-only notice of the proposals comes with «Propuestas» and goes with the next filter.
+    app.model.proposalsReadOnly = true;
+    b = await press('proposals');
+    expect(root.innerHTML).toContain('solo lectura');
+    expect(document.activeElement).toBe(b);
+    expect(document.activeElement).toBe(filter('proposals'));
+    b = await press('all');
+    expect(root.innerHTML).not.toContain('solo lectura');
+    expect(document.activeElement).toBe(b);
+    expect(document.activeElement).toBe(filter('all'));
+    app.stop();
+  });
+
+  it('the names of a proposal’s history are looked up too, even of someone who wrote nothing else (review Minor 3)', async () => {
+    const f = fakeDb();
+    const user = fakeUser();
+    const { root, app } = await boot(f, user);
+    f.push('proposals', { p1: { ts: '2026-10-11T10:00:00.000Z', category: 'perf', risk: 'low', title: 'Cache', rationale: 'r', evidence: 'e', pillar: 'x', status: 'approved', source: 'scout', author: 'session:main', decidedBy: 'session:main',
+      history: [{ status: 'rejected', decidedBy: 'user:u3', decidedAt: '2026-10-10T10:00:00Z', reopenedBy: 'user:u2', reopenedAt: '2026-10-10T12:00:00Z' }] } });
+    click(root, '[data-view="talk"]');
+    await settle();
+    const asked = user.profiles.mock.calls.flatMap(c => c[0] as string[]);
+    expect(asked).toEqual(expect.arrayContaining(['u2', 'u3']));
+    expect(root.innerHTML).toMatch(/Ana la reabrió el .+?: estaba rechazada por usuario/);
+    app.stop();
+  });
+
+  it('an author called toString or __proto__ reads as a user, and asking for its name does not repaint for ever (review concern 2)', async () => {
+    const f = fakeDb();
+    const user = fakeUser();
+    const { root, app } = await boot(f, user);
+    f.push('notes', { a: { ts: '2026-10-11T11:00:00Z', type: 'idea', author: 'user:toString', text: 'hola' }, b: { ts: '2026-10-11T11:01:00Z', type: 'idea', author: 'user:__proto__', text: 'adiós' } });
+    click(root, '[data-view="talk"]');
+    await settle();
+    await new Promise(r => setTimeout(r, 300));
+    const calls = user.profiles.mock.calls.length;
+    await new Promise(r => setTimeout(r, 300));
+    expect(user.profiles.mock.calls.length).toBe(calls);
+    expect(root.querySelector('[data-k="n:a"] .nh .k')!.textContent).toMatch(/^usuario/);
+    expect(root.querySelector('[data-k="n:b"] .nh .k')!.textContent).toMatch(/^usuario/);
+    app.stop();
+  });
+
   it('the task a proposal became opens its detail, and closing it gives the focus back to that chip (G-17)', async () => {
     const f = fakeDb();
     const { root, app } = await boot(f, fakeUser());

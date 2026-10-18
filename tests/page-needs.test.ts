@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs } from '../src/lib/sync.js';
 import { DEFERRED_DAYS, needsOf, parseSeen, pruneSeen, seenKey } from '../src/page/needs.js';
+import { proposalDigest, type ApprovalDoc } from '../src/lib/proposals.js';
 import type { Model } from '../src/page/render.js';
 
 const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
@@ -21,6 +22,15 @@ const model = (over: Partial<Model> = {}): Model => ({
 });
 
 describe('needsOf (G-24)', () => {
+  it('the decisions that changed after the mark go apart by whose mark it was: the owner’s, or forge’s policy (carry 4b-3)', () => {
+    const prop = (id: string, title: string) => ({ id, ts: '', category: 'perf' as const, risk: 'low' as const, title, rationale: 'r', evidence: 'e', pillar: 'x', status: 'approved' as const, source: 'scout' as const, author: 'session:main' });
+    const mark = (pid: string, by: ApprovalDoc['by']): ApprovalDoc => ({ status: 'approved', decidedAt: iso(NOW), by, digest: proposalDigest(pid, prop(pid, 'antes')) });
+    const proposals = [prop('p1', 'después'), prop('p2', 'después'), prop('p3', 'después')];
+    const approvals = { p1: mark('p1', 'page'), p2: mark('p2', 'forge:policy'), p3: mark('p3', 'forge:decide') };
+    expect(needsOf(model({ isOwner: true, proposals, approvals }))).toEqual([{ kind: 'changed', count: 2, policy: false }, { kind: 'changed', count: 1, policy: true }]);
+    expect(needsOf(model({ isOwner: true, proposals: [proposals[1]!], approvals }))).toEqual([{ kind: 'changed', count: 1, policy: true }]);
+    expect(needsOf(model({ isOwner: false, proposals, approvals }))).toEqual([]);
+  });
   it('the deferred findings of recent, unmerged, done tasks, unless seen with the same doneAt', () => {
     const states = { T001: done(1), T002: done(DEFERRED_DAYS + 1), T003: done(2, true), T004: done(3) };
     expect(needsOf(model({ states }))).toEqual([{ kind: 'deferred', findings: 4, tasks: [{ id: 'T001', doneAt: states.T001.doneAt }, { id: 'T004', doneAt: states.T004.doneAt }] }]);

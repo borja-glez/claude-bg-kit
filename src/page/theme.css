@@ -162,6 +162,7 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .btn.pri{background:var(--lavender);color:var(--crust);border-color:var(--lavender)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .notice{margin-top:6px;font-size:12px;color:var(--yellow)}
+.notice:empty{margin-top:0}
 .note{background:var(--mantle);border:1px solid var(--s0);border-left:3px solid var(--s1);border-radius:6px;padding:10px;min-width:0}
 .note .nh{font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.12em;text-transform:uppercase;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .note .nh .k{text-transform:none;letter-spacing:0}
@@ -504,5 +505,7 @@ button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-
 .ans .lnk{margin-left:8px}
 .phist{margin-top:8px;font-size:12px;color:var(--sub1)}
 .phist ul{margin:2px 0 0;padding-left:16px}
+/* The proposal's own reason, apart from the line the owner's mark vouches for (review Minor 2). */
+.prsn{margin-top:6px;font-size:12px;color:var(--sub1);white-space:pre-wrap;overflow-wrap:anywhere}
 .prop .nh .chip{margin:0}
 @media (max-width:760px){.tlist{grid-template-columns:1fr}}

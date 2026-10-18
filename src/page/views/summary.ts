@@ -37,7 +37,8 @@ function renderNeeds(m: Model, d: Dict, ui: UiState, dv: Derived): string {
     // Carry 5: «only the owner decides» goes to whoever is known not to be the owner, never while it is being resolved.
     if (n.kind === 'proposals') return `<b>${esc(d.needs.proposals(n.count))}</b> ${go('talk', d.needs.seeProposals, 'proposals')}${m.isOwner === false ? hint(d.needs.onlyOwner) : ''}`;
     if (n.kind === 'unowned') return `<b>${esc(d.needs.unowned(n.count))}</b> ${go('talk', d.needs.seeProposals, 'proposals')}`;
-    if (n.kind === 'changed') return `<b>${esc(d.needs.changed(n.count))}</b> ${go('talk', d.needs.seeProposals, 'proposals')}`;
+    // C26, carry 4b-3: a decision of forge's policy that changed says it was the policy's, never «tu decisión».
+    if (n.kind === 'changed') return `<b>${esc((n.policy ? d.needs.changedPolicy : d.needs.changed)(n.count))}</b> ${go('talk', d.needs.seeProposals, 'proposals')}`;
     if (n.kind === 'escalation') return `<b>${esc(`${n.message.from} → ${n.message.to}`)}</b>: ${esc(n.message.text)}${hint(d.needs.escalation(n.message.to))}`;
     if (n.kind === 'external') return `<b>${esc(d.needs.external)}</b> ${task(n.task, k)} ${esc(n.title)} — ${esc(n.reason ?? d.needs.noReason)}${hint(d.needs.unblock(n.task))}`;
     // H-18: the link opens Plan with the Aplazados filter.

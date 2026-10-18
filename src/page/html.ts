@@ -115,7 +115,8 @@ export const unmarked = (pid: string, p: ProposalDoc, approvals: Readonly<Record
 export function authorLabel(m: Model, d: Dict, author: string): string {
   if (m.me && author === m.me) return d.you;
   if (author === 'user') return d.aUser;
-  if (author.startsWith('user:')) return m.profiles[author.slice(5)] || d.someUser;
+  // Review concern 2: a profile's own key only, as labelOf: an id like toString never reads a function off the prototype.
+  if (author.startsWith('user:')) { const id = author.slice(5); return (Object.hasOwn(m.profiles, id) ? m.profiles[id] : undefined) || d.someUser; }
   if (author.startsWith('session:')) return `${d.claude} · ${author.slice(8)}`;
   return author;
 }

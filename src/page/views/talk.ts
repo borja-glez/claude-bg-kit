@@ -32,7 +32,9 @@ export function renderTalkView(m: Model, d: Dict, ui: UiState, loc: string): str
   const open = loose.filter(isOpenQuestion).length;
   const toDecide = m.proposals.filter(p => canDecide(oneOf(PROPOSAL_STATUSES, p.status, 'done'))).length;
   const meta = `<b>${open}</b> ${esc(d.noteCounts.open)} · <b>${c.decision}</b> ${esc(d.noteCounts.decision)} · <b>${c.idea}</b> ${esc(d.noteCounts.idea)} · <b>${c.debt}</b> ${esc(d.noteCounts.debt)} · <b>${toDecide}</b> ${esc(d.talk.toDecide)}`;
-  const tabs = `<div class="tabs" role="group" aria-label="${esc(d.talk.label)}">${TALK_FILTERS.map(k => `<button type="button" class="tab${k === filter ? ' on' : ''}" data-action="talk-c" data-c="${k}" aria-pressed="${k === filter}">${esc(d.talk.filter[k])}</button>`).join('')}</div>`;
+  // Review Important 1: the filters are keyed (a constant set), so the one clicked keeps its node, and its focus, through a
+  // morph that brings or clears the notice above them.
+  const tabs = `<div class="tabs" role="group" aria-label="${esc(d.talk.label)}">${TALK_FILTERS.map(k => `<button type="button" class="tab${k === filter ? ' on' : ''}" data-action="talk-c" data-c="${k}" aria-pressed="${k === filter}" data-k="tc:${k}">${esc(d.talk.filter[k])}</button>`).join('')}</div>`;
   const list = itemsOf(m, ui, filter, loose).map(x => (x.note ? noteCard(m, d, ui, loc, x.note) : proposalCard(m, d, ui, loc, x.prop!))).join('');
   return `<header class="hd"><h1>${esc(d.views.talk)}</h1><div class="meta">${meta}</div></header>
   ${composer(m, d, ui, filter)}${tabs}${filter === 'proposals' ? proposalFilters(d, ui) : ''}
@@ -62,7 +64,9 @@ function itemsOf(m: Model, ui: UiState, filter: TalkFilter, loose: Note[]): Item
 
 /** The composer of a new note, and what the page has to say about writing: read-only first; else what the last action
  *  left (a failed write, an answer or a decision that came too late, the mark saved without its proposal, with its retry,
- *  review M6); else, under «Propuestas», that the proposals turned read-only (only they did: notes keep working). */
+ *  review M6); else, under «Propuestas», that the proposals turned read-only (only they did: notes keep working). The
+ *  notice box is always there, empty when there is nothing to say: what follows it keeps its place when a notice comes or
+ *  goes (review Important 1), and a screen reader has the live region before its text arrives. */
 function composer(m: Model, d: Dict, ui: UiState, filter: TalkFilter): string {
   const ro = m.readOnly;
   const notice = ro ? d.notice.readonly
@@ -74,7 +78,7 @@ function composer(m: Model, d: Dict, ui: UiState, filter: TalkFilter): string {
     <label class="btn sel">${esc(d.noteTypeLabel)}: <select name="note-type" data-action="note-type"${ro ? ' disabled' : ''}>${NOTE_TYPES.map(t =>
       `<option value="${t}"${t === ui.draft.type ? ' selected' : ''}>${esc(d.noteType[t])}</option>`).join('')}</select></label>
     <button type="button" class="btn pri" data-action="note-add"${ro ? ' disabled' : ''}>${esc(d.add)}</button>
-  </div>${notice ? `<div class="notice" role="status">${esc(notice)}${retry}</div>` : ''}`;
+  </div><div class="notice" role="status">${notice ? `${esc(notice)}${retry}` : ''}</div>`;
 }
 
 /** The status, category and risk filters of the proposals, under «Propuestas» only. */
@@ -82,7 +86,7 @@ function proposalFilters(d: Dict, ui: UiState): string {
   const f = ui.proposalFilter;
   const row = <K extends ProposalFilterKind>(kind: K, label: (v: Exclude<ProposalFilter[K], 'all'>) => string) =>
     `<div class="pfil"><span class="lbl">${esc(d.pfilter[kind])}</span>${PROPOSAL_FILTERS[kind].map(v =>
-      `<button type="button" class="tab ${f[kind] === v ? 'on' : ''}" data-action="pfilter" data-kind="${kind}" data-value="${v}" aria-pressed="${f[kind] === v}">${esc(v === 'all' ? d.pfilter.all : label(v as Exclude<ProposalFilter[K], 'all'>))}</button>`).join('')}</div>`;
+      `<button type="button" class="tab ${f[kind] === v ? 'on' : ''}" data-action="pfilter" data-kind="${kind}" data-value="${v}" aria-pressed="${f[kind] === v}" data-k="pfl:${kind}:${v}">${esc(v === 'all' ? d.pfilter.all : label(v as Exclude<ProposalFilter[K], 'all'>))}</button>`).join('')}</div>`;
   return row('status', v => d.pstatus[v]) + row('category', v => d.pcategory[v]) + row('risk', v => d.prisk[v]);
 }
 
@@ -103,8 +107,10 @@ function noteCard(m: Model, d: Dict, ui: UiState, loc: string, n: Note): string 
   // H-17: a question a decision closed names that decision, and «Ver la decisión» brings it into view. Only a loose
   // decision (not a proposal's comment, not a note of another kind) is one the list shows and the link can reach.
   const by = n.answeredByNote ? m.notes.find(x => x.id === n.answeredByNote && x.type === 'decision' && !x.proposalId) : undefined;
+  // Review Minor 1: the viewer's own decision reads «tu decisión», not «la decisión de tú».
+  const whose = !by ? d.talk.resolvedByUnknown : m.me !== null && by.author === m.me ? d.talk.resolvedByYou : d.talk.resolvedBy(authorLabel(m, d, by.author));
   const answer = n.answeredByNote
-    ? `<div class="ans res"><span class="k">${esc(by ? d.talk.resolvedBy(authorLabel(m, d, by.author)) : d.talk.resolvedByUnknown)}</span>${n.answer ? esc(n.answer) : ''}${by ? `<button type="button" class="lnk" data-action="note-go" data-id="${esc(by.id)}">${esc(d.talk.seeDecision)}</button>` : ''}</div>`
+    ? `<div class="ans res"><span class="k">${esc(whose)}</span>${n.answer ? esc(n.answer) : ''}${by ? `<button type="button" class="lnk" data-action="note-go" data-id="${esc(by.id)}">${esc(d.talk.seeDecision)}</button>` : ''}</div>`
     : n.answer ? `<div class="ans"><span class="k">${esc(d.answeredBy)} · ${esc(authorLabel(m, d, n.answeredBy ?? ''))}</span>${esc(n.answer)}</div>` : '';
   const reply = !open || m.readOnly ? '' : ui.answering === n.id
     ? `<div class="areply"><textarea name="answer" data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" aria-label="${esc(d.answerPlaceholder)}" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea>
@@ -129,7 +135,8 @@ const markOf = (m: Model, pid: string): ApprovalDoc | undefined =>
  *  is one: the page or /forge:decide is the owner («tú» to them, once the page knows they are), forge's policy is the policy
  *  and never the owner; with the mark's time, and the status it marked when the proposal now says another. Without a mark,
  *  the proposal's own decidedBy, which anyone who writes proposals/ can set: an approval still waiting for the owner's mark
- *  never reads as the viewer's own. '' when nothing says who decided. */
+ *  names nobody («sin verificar»). The proposal's reason is not part of this line (see proposalCard). '' when nothing says
+ *  who decided. */
 function decidedLine(m: Model, d: Dict, p: Prop, status: ProposalStatus, a: ApprovalDoc | undefined, loc: string): string {
   let who: string;
   let at: string | undefined;
@@ -143,12 +150,14 @@ function decidedLine(m: Model, d: Dict, p: Prop, status: ProposalStatus, a: Appr
     if (a.status !== status) marked = labelOf(d.pstatus, a.status);
   } else {
     if (!p.decidedBy && !p.decidedAt) return '';
+    // Review Minor 4: an approval still waiting for the owner's mark names nobody, so a decidedBy forged with the owner's
+    // id never puts the owner's name (nor «tú») next to «sin la marca del dueño».
     const awaiting = (status === 'approved' || status === 'auto_approved') && p.taskId === undefined;
-    who = (awaiting ? named : authorLabel)(m, d, p.decidedBy ?? '');
+    who = awaiting ? d.owner.by.unverified : authorLabel(m, d, p.decidedBy ?? '');
     at = p.decidedAt;
   }
   const date = at ? fmt(at, loc) : '';
-  return `<div class="pdec"><span class="k">${esc(d.pfield.decided)} · ${esc(who)}${marked ? ` · ${esc(marked)}` : ''}${date ? ` · ${esc(date)}` : ''}</span>${p.reason ? `<div>${esc(p.reason)}</div>` : ''}</div>`;
+  return `<div class="pdec"><span class="k">${esc(d.pfield.decided)} · ${esc(who)}${marked ? ` · ${esc(marked)}` : ''}${date ? ` · ${esc(date)}` : ''}</span></div>`;
 }
 
 /** A proposal: its category, risk and status, the task it became (G-17), its text, who decided it (C26), the owner's mark
@@ -163,6 +172,9 @@ function proposalCard(m: Model, d: Dict, ui: UiState, loc: string, p: Prop): str
   const comments = m.notes.filter(n => n.proposalId === p.id).sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
   const a = markOf(m, p.id);
   const decided = decidedLine(m, d, p, status, a, loc);
+  // Review Minor 2: the reason is free text anyone who writes proposals/ can change (the mark's digest does not cover it):
+  // it goes on its own line, labelled as the proposal's, never inside the line the owner's mark vouches for.
+  const reason = p.reason ? `<div class="prsn"><span class="k">${esc(d.pfield.reason)}</span> ${esc(p.reason)}</div>` : '';
   const thread = comments.length ? `<div class="pcom"><div class="lbl">${esc(d.pfield.comments)}</div>${comments.map(n =>
     `<div class="mnote"><span class="k">${esc(authorLabel(m, d, n.author))}${fmt(n.ts, loc) ? ` · ${esc(fmt(n.ts, loc))}` : ''}</span><div>${esc(n.text)}</div></div>`).join('')}</div>` : '';
   // §4.1: an approval the owner's mark does not back never becomes a task. Without a mark (from before the marks) the owner
@@ -211,7 +223,7 @@ function proposalCard(m: Model, d: Dict, ui: UiState, loc: string, p: Prop): str
     ${p.rationale ? `<p>${esc(p.rationale)}</p>` : ''}
     ${p.evidence ? `<div class="lbl">${esc(d.pfield.evidence)}</div><pre class="evid" data-scroll-key="evid:${id}">${esc(p.evidence)}</pre>` : ''}
     ${p.estimate || p.path ? `<div class="mono">${p.estimate ? `${esc(d.pfield.estimate)}: ${esc(p.estimate)}` : ''}${p.estimate && p.path ? ' · ' : ''}${p.path ? `${esc(d.pfield.path)}: ${esc(p.path)}` : ''}</div>` : ''}
-    ${decided}${mark}${history}
+    ${decided}${reason}${mark}${history}
     ${thread}
     ${actions}
   </div>`;

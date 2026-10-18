@@ -477,22 +477,30 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   // Writes are not gated on can('data.write'): it answers for the root rule (admin), while notes/
   // only needs interact. The page goes read-only when there is no user id or a write is refused.
 
-  // Display names for user:<id> authors, asked on every render pass for the ids in the notes
-  // (the runtime caches profiles). Re-render only when a name actually changed.
+  // Display names for user:<id> authors, asked on every render pass for the ids in the notes and the proposals, their
+  // history included (review Minor 3: who reopened one and who had decided it) (the runtime caches profiles). Re-render
+  // only when a name actually changed.
   const lookupProfiles = async () => {
     const u = await getUser();
     if (!u || typeof u.profiles !== 'function') return;
-    const ids = [...new Set([...model.notes.flatMap(n => [n.author, n.answeredBy ?? '']), ...model.proposals.flatMap(p => [p.author, p.decidedBy ?? ''])])]
+    const ids = [...new Set([...model.notes.flatMap(n => [n.author, n.answeredBy ?? '']),
+      ...model.proposals.flatMap(p => [p.author, p.decidedBy ?? '', ...(p.history ?? []).flatMap(h => [h.reopenedBy, h.decidedBy ?? ''])])])]
       .filter(a => a.startsWith('user:') && a !== model.me).map(a => a.slice(5)).filter(Boolean);
     if (!ids.length) return;
     try {
       const res = (await u.profiles(ids)) as Record<string, { name?: unknown } | undefined> | null;
       let changedName = false;
+      // Review concern 2: only own keys, of the answer and of the names, so an id like toString or __proto__ reads nothing
+      // off the prototype (which never equals a name, and repainted for ever); a name is defined as an own property, which
+      // an assignment to __proto__ would not make.
+      const own = (o: unknown, k: string): boolean => !!o && typeof o === 'object' && Object.hasOwn(o, k);
       for (const id of ids) {
-        const raw = res && typeof res === 'object' ? res[id]?.name : undefined;
+        const entry = own(res, id) ? res![id] : undefined;
+        const raw = entry && typeof entry === 'object' ? entry.name : undefined;
         const name = typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, 80) : undefined;
-        if (name !== model.profiles[id]) {
-          if (name) model.profiles[id] = name; else delete model.profiles[id];
+        if (name !== (own(model.profiles, id) ? model.profiles[id] : undefined)) {
+          if (name) Object.defineProperty(model.profiles, id, { value: name, writable: true, enumerable: true, configurable: true });
+          else delete model.profiles[id];
           changedName = true;
         }
       }

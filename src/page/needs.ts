@@ -1,7 +1,7 @@
 // G-24: «Te necesita», what the person has to do now: open questions, proposals to decide, approvals without the owner's
-// mark and decisions changed after the owner's mark (only to the owner), open escalations, external blocks with their
-// reason, recent deferred findings, a stalled run, an infinite run without its coordinator and a page older than the
-// plan's waypoint. Pure: the page decides each entry from
+// mark and decisions changed after their mark, the owner's or forge's policy's (only to the owner), open escalations,
+// external blocks with their reason, recent deferred findings, a stalled run, an infinite run without its coordinator and
+// a page older than the plan's waypoint. Pure: the page decides each entry from
 // its model; the view says what to do and links the object. Nothing here changes shared state.
 import { liveness } from '../lib/coordination.js';
 import { isPlanId } from '../lib/ids.js';
@@ -24,7 +24,8 @@ export type Need =
   | { kind: 'question'; note: NoteDoc & { id: string } }
   | { kind: 'proposals'; count: number }
   | { kind: 'unowned'; count: number }
-  | { kind: 'changed'; count: number }
+  /** Decisions that changed after their mark; `policy` when the mark was forge's policy's, not the owner's (carry 4b-3). */
+  | { kind: 'changed'; count: number; policy: boolean }
   | { kind: 'escalation'; message: MessageDoc & { id: string } }
   | { kind: 'external'; task: string; title: string; reason: string | null }
   | { kind: 'deferred'; findings: number; tasks: { id: string; doneAt: string }[] }
@@ -60,9 +61,12 @@ export function needsOf(m: Model, pageVersion: string = WAYPOINT_VERSION): Need[
   if (m.isOwner === true) {
     const why = m.proposals.map(p => unmarkedReason(p.id, p, m.approvals));
     const unowned = why.filter(r => r === 'no-mark').length;
-    const changed = why.filter(r => r === 'changed').length;
+    // C26, carry 4b-3: a decision forge's policy took that changed afterwards was not the owner's; it goes on its own line.
+    const changed = m.proposals.filter((_, i) => why[i] === 'changed');
+    const policy = changed.filter(p => m.approvals && Object.hasOwn(m.approvals, p.id) && m.approvals[p.id]!.by === 'forge:policy').length;
     if (unowned) out.push({ kind: 'unowned', count: unowned });
-    if (changed) out.push({ kind: 'changed', count: changed });
+    if (changed.length > policy) out.push({ kind: 'changed', count: changed.length - policy, policy: false });
+    if (policy) out.push({ kind: 'changed', count: policy, policy: true });
   }
   for (const g of m.messages) if (g.type === 'escalation' && g.status === 'open') out.push({ kind: 'escalation', message: g });
   for (const t of m.plan.tasks) {
