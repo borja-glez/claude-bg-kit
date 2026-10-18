@@ -758,6 +758,19 @@ describe('design commands', () => {
     expect(data.meta.title).toBe('A __DATA__ b __TITLE__');
   });
 
+  it('design-page embeds the HTML of the last 5 versions; the earlier ones stay as their changelog notes (A-24)', () => {
+    const text = readFileSync(path.join(dir, rel), 'utf8');
+    mkdirSync(hist(), { recursive: true });
+    for (let v = 1; v <= 6; v++) writeFileSync(path.join(hist(), `v${v}.md`), text);
+    writeFileSync(path.join(ddir(), 'design', 'changelog.json'), JSON.stringify(Array.from({ length: 7 }, (_, i) => ({ version: i + 1, date: `2026-10-0${i + 1}`, note: `nota ${i + 1}`, words: 10, round: 0 }))));
+    expect(run(['design-page', rel, '--out', 'p.html'], io).code).toBe(0);
+    const data = JSON.parse(/id="wp-design-data">(.*?)<\/script>/s.exec(readFileSync(path.join(dir, 'p.html'), 'utf8'))![1]);
+    expect(data.versions.map((x: { version: number }) => x.version)).toEqual([3, 4, 5, 6, 7]);
+    expect(data.earlier).toEqual([{ version: 1, date: '2026-10-01', note: 'nota 1' }, { version: 2, date: '2026-10-02', note: 'nota 2' }]);
+    // The first embedded version still says what it changed against the one before it.
+    expect(data.versions[0].diff).toEqual({ changed: [], added: [], removed: [] });
+  });
+
   it('design-page embeds a hostile critique text without executable markup and the data round-trips', () => {
     const text = '</script><script>alert(1)</script><img src=x onerror=1><!-- ' + String.fromCharCode(0x2028, 0x2029);
     mkdirSync(path.join(dir, '.waypoint', 'demo-shop'), { recursive: true });

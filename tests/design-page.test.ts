@@ -382,3 +382,17 @@ describe('theme of the design page (K3-11)', () => {
     expect(coarse?.[2]).toContain('min-height:44px');
   });
 });
+
+describe('the versions before the embedded ones (A-24)', () => {
+  const summary = (locale: string) => (locale.startsWith('es') ? 'Versiones anteriores' : 'Earlier versions');
+  it('are listed under the versions, folded, with their date and note escaped', () => {
+    const html = renderDesignPage({ ...data, earlier: [{ version: 1, date: '2026-10-01', note: 'nota <1>' }] }, data.current);
+    expect(html).toContain('<details class="earlier">');
+    expect(html).toContain(`<summary>${summary(data.meta.locale)}</summary>`);
+    expect(html).toContain('nota &lt;1&gt;');
+  });
+  it('without them there is no list', () => {
+    expect(renderDesignPage({ ...data, earlier: [] }, data.current)).not.toContain('class="earlier"');
+    expect(renderDesignPage(data, data.current)).not.toContain('class="earlier"');
+  });
+});

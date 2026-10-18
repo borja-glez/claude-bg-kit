@@ -9,7 +9,7 @@ type StatusKey = 'draft' | 'approved' | 'amended' | 'parked';
 
 interface Dict {
   eyebrow: string; version: string; words: string; rounds: string; source: string; prompt: string; copy: string; copied: string;
-  versions: string; toc: string; current: string; imported: string; intro: string; round: string; none: string;
+  versions: string; earlier: string; toc: string; current: string; imported: string; intro: string; round: string; none: string;
   moreRounds: string; moreProposals: string; pillars: string;
   /** Carry 9 and 10: the pending count, a diff across a history gap, a critique of an unknown version, the version shown. */
   pending: string; gap: string; unknownVersion: string; shown: string;
@@ -24,7 +24,7 @@ interface Dict {
 const DICT: Record<string, Dict> = {
   en: {
     eyebrow: 'DESIGN DOCUMENT · EXECUTABLE SPECIFICATION', version: 'Version', words: 'Words', rounds: 'Rounds', source: 'Source', prompt: 'Start prompt',
-    copy: 'Copy prompt', copied: 'Copied', versions: 'Versions', toc: 'Contents', current: 'current', imported: 'Imported from',
+    copy: 'Copy prompt', copied: 'Copied', versions: 'Versions', earlier: 'Earlier versions', toc: 'Contents', current: 'current', imported: 'Imported from',
     intro: 'Intro', round: 'Round', none: 'No proposals: nothing critical or major is left.',
     moreRounds: '{n} older rounds not shown', moreProposals: '{n} older proposals not shown', pillars: 'Pillars',
     pending: 'Pending', gap: 'against v{v}: versions missing from the history', unknownVersion: 'unknown version', shown: 'Showing v{v}',
@@ -38,7 +38,7 @@ const DICT: Record<string, Dict> = {
   },
   es: {
     eyebrow: 'DOCUMENTO DE DISEÑO · ESPECIFICACIÓN EJECUTABLE', version: 'Versión', words: 'Palabras', rounds: 'Rondas', source: 'Fuente', prompt: 'Prompt de arranque',
-    copy: 'Copiar prompt', copied: 'Copiado', versions: 'Versiones', toc: 'Índice', current: 'actual', imported: 'Importado de',
+    copy: 'Copiar prompt', copied: 'Copiado', versions: 'Versiones', earlier: 'Versiones anteriores', toc: 'Índice', current: 'actual', imported: 'Importado de',
     intro: 'Introducción', round: 'Ronda', none: 'Sin propuestas: no queda nada crítico ni mayor.',
     moreRounds: '{n} rondas anteriores no se muestran', moreProposals: '{n} propuestas anteriores no se muestran', pillars: 'Pilares',
     pending: 'Pendientes', gap: 'frente a v{v}: faltan versiones en la historia', unknownVersion: 'versión desconocida', shown: 'Mostrando v{v}',
@@ -130,6 +130,8 @@ export function renderDesignPage(data: DesignPageData, version: number, open: Re
   }).join('');
   const pillars = data.meta.pillars.map(p => `<div class="p"><b>${esc(p.title)}</b><span>${esc(p.text)}</span></div>`).join('');
   const toc = (v?.toc ?? []).map(t => `<a class="l${esc(t.level)}" href="#${esc(t.slug)}">${esc(t.heading)}</a>`).join('');
+  // A-24: the versions before the embedded ones, with their date and note only.
+  const earlier = (data.earlier ?? []).map(x => `<li><b>v${esc(x.version)}</b>${x.date ? ` · ${esc(x.date)}` : ''}${x.note ? ` — ${esc(x.note)}` : ''}</li>`).join('');
   return `<header>
 <div class="eb">${esc(d.eyebrow)}${v?.date ? ` · ${esc(v.date)}` : ''}${badge(data, d)}</div>
 <h1>${esc(data.meta.title)}<span class="dot">.</span></h1>
@@ -137,7 +139,7 @@ ${data.meta.source ? `<p class="imp">${esc(d.imported)} <code>${esc(data.meta.so
 <div class="met"><div><b>v${esc(no)}</b>${esc(d.version)}</div><div><b>${esc(v?.words ?? data.words)}</b>${esc(d.words)}</div><div><b>${esc(data.rounds)}</b>${esc(d.rounds)}</div><div><b>${esc(data.pending ?? 0)}</b>${esc(d.pending)}</div><div><b class="src">${esc(data.source)}</b>${esc(d.source)}</div></div>
 </header>
 <main>
-<section class="vers" aria-labelledby="wp-l-versions">${label('wp-l-versions', d.versions)}<div class="vl">${vers}</div>${diffLine(v?.diff, d)}${v?.note ? `<p class="note">${esc(v.note)}</p>` : ''}</section>
+<section class="vers" aria-labelledby="wp-l-versions">${label('wp-l-versions', d.versions)}<div class="vl">${vers}</div>${diffLine(v?.diff, d)}${v?.note ? `<p class="note">${esc(v.note)}</p>` : ''}${earlier ? `<details class="earlier"><summary>${esc(d.earlier)}</summary><ol>${earlier}</ol></details>` : ''}</section>
 <section class="pil" aria-label="${esc(d.pillars)}">${pillars}</section>
 <section class="pr" aria-labelledby="wp-l-prompt"><div>${label('wp-l-prompt', d.prompt)}<code>${esc(data.meta.start_prompt)}</code></div><button type="button" class="cp" data-action="copy">${esc(d.copy)}</button></section>
 ${renderRounds(data, d, open)}<div class="doc"><nav class="toc" aria-labelledby="wp-l-toc">${label('wp-l-toc', d.toc)}${toc}</nav><article class="body">${v?.html ?? ''}</article></div>

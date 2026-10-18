@@ -4,6 +4,9 @@ import { renderMarkdown } from '../lib/markdown.js';
 import { verdictOf, type Critique, type Proposal, type Verdict } from '../lib/critique.js';
 import { appliedVersion, pendingProposals, resolvedIn, rewroteRound, line, GATE_LIST_MAX, type Dismissed, type GateCritique } from '../lib/design-gate.js';
 
+/** A-24: the page embeds the HTML of this many versions, the newest; the earlier ones stay as their changelog notes. */
+export const VERSIONS_EMBEDDED = 5;
+
 /** K3-09: what became of a proposal. */
 export type Fate = 'applied' | 'resolved' | 'dismissed' | 'rewritten' | 'pending';
 export interface PageProposal extends Proposal {
@@ -43,6 +46,8 @@ export interface DesignPageData {
   /** How many older critiques `critiques` left out; present only when not 0. */
   critiquesMore?: number;
   versions: { version: number; date: string; note: string; words: number; html: string; toc: { level: 2 | 3; heading: string; slug: string }[]; diff: VersionDiff | null }[];
+  /** A-24: the changelog entries before the embedded versions: their date and note only. */
+  earlier?: { version: number; date: string; note: string }[];
 }
 
 /**
@@ -87,7 +92,9 @@ export function buildDesignPageData(input: {
   const numbers = [...new Set([...Object.keys(texts).map(Number), ...input.changelog.map(c => c.version)])]
     .filter(n => texts[n] !== undefined)
     .sort((a, b) => a - b);
-  const versions = numbers.map((n, i) => {
+  const from = Math.max(0, numbers.length - VERSIONS_EMBEDDED);
+  const versions = numbers.slice(from).map((n, j) => {
+    const i = from + j;
     const d = parseDesign(texts[n]);
     const entry = input.changelog.find(c => c.version === n);
     return {
@@ -100,6 +107,7 @@ export function buildDesignPageData(input: {
       diff: i === 0 ? null : { ...versionDiff(texts[numbers[i - 1]], texts[n]), ...(numbers[i - 1] !== n - 1 ? { against: numbers[i - 1] } : {}) },
     };
   });
+  const earlier = input.changelog.filter(c => c.version < (numbers[from] ?? Infinity)).map(({ version, date, note }) => ({ version, date, note }));
   const dismissed = input.dismissed ?? {};
   const known = new Set([...input.changelog.map(e => e.version), currentNo]);
   // The page data stays bounded and clean like the gate's lists: the newest GATE_LIST_MAX rounds and, in each, the newest
@@ -132,5 +140,6 @@ export function buildDesignPageData(input: {
     critiques,
     ...(critiquesMore ? { critiquesMore } : {}),
     versions,
+    earlier,
   };
 }
