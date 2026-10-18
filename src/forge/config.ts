@@ -48,19 +48,30 @@ export interface ForgeConfig {
 }
 export class ConfigError extends Error {}
 
+// I-03: a command runs as the person trusted it (src/forge/trust.ts hashes it with CRLF as LF), so CRLF is LF here too.
+const lf = (s: string) => s.replace(/\r\n/g, '\n');
+
 const Schema = z.object({
   profile: z.enum(['balanced', 'economy', 'quality']).default('balanced'),
   detect: z.boolean().default(true),
   exclude: z.array(z.string().regex(NAME)).default([]),
   validators: z.array(z.object({
     name: z.string().regex(NAME),
-    cmd: z.string().min(1),
+    cmd: z.string().min(1).transform(lf),
     kind: z.string().regex(NAME).optional(),
     affects: z.array(z.string().min(1)).optional(),
     when: z.enum(['always', 'medium', 'final']).optional(),
     cache: z.boolean().optional(),
-    affected_cmd: z.string().min(1).max(500).refine(s => /\{(files|tests|packages)\}/.test(s), { message: 'must contain {files}, {tests} or {packages}' }).optional(),
-  }).strict()).optional(),
+    affected_cmd: z.string().min(1).max(500).refine(s => /\{(files|tests|packages)\}/.test(s), { message: 'must contain {files}, {tests} or {packages}' }).transform(lf).optional(),
+  }).strict()).superRefine((list, ctx) => {
+    // I-03: one name, one validator. A second one of a name would replace the first (or a detected one) when it runs,
+    // and hide behind it in the trust question: the whole config is refused, so none of its commands runs.
+    const seen = new Set<string>();
+    for (const [i, v] of list.entries()) {
+      if (seen.has(v.name)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [i, 'name'], message: `duplicate name ${v.name}: each validator needs its own name` });
+      seen.add(v.name);
+    }
+  }).optional(),
   verify: z.object({
     limits: z.object({
       checks: z.number().int().min(1).max(20).default(8),
@@ -98,7 +109,7 @@ const Schema = z.object({
       effort: z.enum(EFFORTS).default('medium'),
       model: z.enum(MODELS).optional(),
     }).strict().default({ effort: 'medium' }),
-    setup: z.string().min(1).max(500).optional(),
+    setup: z.string().min(1).max(500).transform(lf).optional(),
     validateJobs: z.number().int().min(1).max(8).default(2),
   }).strict().default({ parallel: 3, launcher: 'bg', member: { effort: 'medium' }, validateJobs: 2 }),
 }).strict();

@@ -1,5 +1,5 @@
 // .forge/local.yaml: what forge knows about this machine (surface permissions, validators already announced, drafts
-// already proposed, workflow, autonomy, the trust in the config's commands), and .forge/learned.jsonl: the lines `surfaces learn` appended to a surface.
+// already proposed, workflow, autonomy), and .forge/learned.jsonl: the lines `surfaces learn` appended to a surface.
 // Both live in the main checkout, so every worktree of the repository shares them (outside git: the directory itself).
 // .forge/.gitignore keeps them out of git; committing one anyway is the committer's call. local.yaml is read leniently,
 // written atomically, unknown keys kept.
@@ -15,15 +15,12 @@ import { lineDigest } from './surfaces.js';
 // An allowance also keeps the git blob of the file as allowed and the commit then (when git was there), so a changed
 // surface can be shown as a diff.
 export interface SurfacePermission { state: 'allowed' | 'denied'; hash: string | null; blob?: string; commit?: string }
-/** I-03: the person's answer about the commands of .forge/config.yaml (src/forge/trust.ts): the last answer with its hash
- *  and its commands (to show what changed next time), and every set of commands allowed so far. */
-export interface CommandsTrust { state: 'allowed' | 'denied'; hash: string; list: { name: string; cmd: string }[]; at: string; allowed: string[] }
 
 /** A git object id (sha1 or sha256): what a stored blob or commit must be before it reaches git. */
 export const OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 export interface LocalState {
   surfaces: Record<string, SurfacePermission>; known: string[]; proposed: string[];
-  workflow?: Workflow; autonomy?: Autonomy; commands?: CommandsTrust; commandsAsked?: string[];
+  workflow?: Workflow; autonomy?: Autonomy;
   [key: string]: unknown;
 }
 
@@ -47,20 +44,6 @@ export const localFile = (root: string) => path.join(mainCheckout(root), '.forge
 const names = (x: unknown): string[] =>
   Array.isArray(x) ? [...new Set(x.filter((s): s is string => typeof s === 'string' && NAME.test(s)))] : [];
 
-const HASH = /^[0-9a-f]{64}$/;
-/** I-03: a commands record as written; anything malformed counts as no answer (forge asks again). */
-function commandsTrustOf(x: unknown): CommandsTrust | undefined {
-  if (!x || typeof x !== 'object' || Array.isArray(x)) return undefined;
-  const o = x as Record<string, unknown>;
-  if ((o.state !== 'allowed' && o.state !== 'denied') || typeof o.hash !== 'string' || !HASH.test(o.hash)) return undefined;
-  const list = (Array.isArray(o.list) ? o.list : [])
-    .filter((c): c is { name: string; cmd: string } => !!c && typeof c === 'object' && typeof (c as { name?: unknown }).name === 'string' && typeof (c as { cmd?: unknown }).cmd === 'string')
-    .slice(0, 100).map(c => ({ name: c.name.slice(0, 200), cmd: c.cmd.slice(0, 4000) }));
-  const allowed = [...new Set((Array.isArray(o.allowed) ? o.allowed : []).filter((h): h is string => typeof h === 'string' && HASH.test(h)))];
-  if (o.state === 'allowed' && !allowed.includes(o.hash)) allowed.push(o.hash);
-  return { state: o.state, hash: o.hash, list, at: typeof o.at === 'string' ? o.at : '', allowed: allowed.slice(-20) };
-}
-
 export function readLocal(root: string): LocalState {
   let raw: unknown = null;
   try { raw = parse(readFileSync(localFile(root), 'utf8')); } catch { raw = null; }
@@ -80,14 +63,11 @@ export function readLocal(root: string): LocalState {
     }
   }
   // workflow and autonomy: a value that is not one of theirs is ignored, so config.yaml or `ask` decides.
-  const { workflow, autonomy, commands, commandsAsked, ...rest } = o;
+  const { workflow, autonomy, ...rest } = o;
   return {
     ...rest, surfaces, known: names(o.known), proposed: names(o.proposed),
     ...((WORKFLOWS as readonly unknown[]).includes(workflow) ? { workflow: workflow as Workflow } : {}),
     ...((AUTONOMIES as readonly unknown[]).includes(autonomy) ? { autonomy: autonomy as Autonomy } : {}),
-    ...(commandsTrustOf(commands) ? { commands: commandsTrustOf(commands) } : {}),
-    ...(Array.isArray(commandsAsked) && commandsAsked.some(h => typeof h === 'string' && HASH.test(h))
-      ? { commandsAsked: commandsAsked.filter((h): h is string => typeof h === 'string' && HASH.test(h)).slice(-20) } : {}),
   };
 }
 

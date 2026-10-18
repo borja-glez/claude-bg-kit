@@ -1,14 +1,17 @@
 // I-03: forge runs the commands .forge/config.yaml defines (each validator's cmd and affected_cmd, and swarm.setup) only
 // once the person trusts them on this machine, as a surface of verify: the trust is tied to a hash of those commands, so
-// a new or changed command asks again, also in a branch or a task's worktree. The answer lives in .forge/local.yaml of
-// the main checkout (`commands`), and every set of commands allowed stays allowed. The validators forge detects by itself
-// and the install from a lockfile need no trust: they are what the person already runs by hand. A local.yaml that git
-// tracks came with the repository, not from the person: its record is no answer. Like a surface's permission, a hand
-// edit of local.yaml gets past it: it stops a command that changed unseen, not a deliberate forgery on this machine.
+// a new or changed command asks again, also in a branch or a task's worktree. Every set of commands allowed stays allowed.
+// The validators forge detects by itself and the install from a lockfile need no trust: they are what the person already
+// runs by hand.
+// The answer lives in the repository's git directory (<git common dir>/forge/trust.json), outside every working tree: no
+// checkout, clone or archive of the repository writes it, so a repository cannot ship its own answer, and the worktrees of
+// a clone share it. Outside a git repository forge keeps no answer and asks every time. A hand edit of that file (or the
+// model answering for the person) still gets past it: it stops a command that changed unseen, not a forgery on this machine.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { loadConfig, type ForgeConfig } from './config.js';
-import { mainCheckout, readLocal, updateLocal, type CommandsTrust, type LocalState } from './local.js';
 
 export interface ConfigCommand { name: string; cmd: string }
 export interface CommandChange { name: string; before: string | null; after: string | null }
@@ -18,16 +21,21 @@ export interface TrustAsk { question: string; header: string; options: { label: 
 export interface TrustOutput {
   state: 'ask' | 'changed'; hash: string; cwd: string; commands: ConfigCommand[]; changed?: CommandChange[]; ask: TrustAsk; note?: boolean;
 }
+/** The person's last answer with its hash and its commands (to show what changed next time), and every set allowed so far. */
+export interface CommandsTrust { state: 'allowed' | 'denied'; hash: string; list: ConfigCommand[]; at: string; allowed: string[] }
+/** trust.json: the answer, and the hashes already asked about (one question note per hash). */
+export interface TrustRecord { commands?: CommandsTrust; commandsAsked?: string[] }
 
 /** The label of the yes of the trust question. */
 export const TRUST_YES = { es: 'Sí, confío', en: 'Yes, I trust them' } as const;
 const MAX_KEPT = 20;
 const MAX_LINES = 12;
 const MAX_SHOWN = 200;
+const HASH = /^[0-9a-f]{64}$/;
 
 let assumeTrusted = false;
 /** Tests only (tests/setup/trust-commands.ts, a vitest setup file): every config command counts as trusted, so the suites
- *  that write a .forge/config.yaml with commands need no local.yaml. tests/forge-trust.test.ts turns it off. */
+ *  that write a .forge/config.yaml with commands need no answer. tests/forge-trust.test.ts turns it off. */
 export function assumeTrustedForTests(on: boolean): void { assumeTrusted = on; }
 
 export class UntrustedCommandsError extends Error {
@@ -39,10 +47,11 @@ export class UntrustedCommandsError extends Error {
 }
 
 const byName = (a: { name: string }, b: { name: string }) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-// CRLF as LF: a config saved on Windows hashes as the same one. A lone CR stays: it is no line break to a shell.
+// CRLF as LF (parseConfig folds it in what runs too). A lone CR stays: it is no line break to a shell.
 const lf = (s: string) => s.replace(/\r\n/g, '\n');
 
-/** The commands of a config forge would run: validators.<v>.cmd, validators.<v>.affected_cmd and swarm.setup. */
+/** The commands of a config forge would run: validators.<v>.cmd, validators.<v>.affected_cmd and swarm.setup. Every entry
+ *  counts: parseConfig refuses two validators of one name, and the sort is stable (one name twice keeps file order). */
 export function configCommands(config: Pick<ForgeConfig, 'validators' | 'swarm'>): ConfigCommand[] {
   const out: ConfigCommand[] = [];
   for (const v of [...(config.validators ?? [])].sort(byName)) {
@@ -57,47 +66,54 @@ export function configCommands(config: Pick<ForgeConfig, 'validators' | 'swarm'>
 export const commandsHash = (list: ConfigCommand[]): string =>
   createHash('sha256').update(JSON.stringify(list.map(c => [c.name, c.cmd]))).digest('hex');
 
+const uniqueNames = (l: ConfigCommand[]) => new Set(l.map(c => c.name)).size === l.length;
+
+/** What changed from a list the person allowed; none when a name repeats in either list (no pair can be trusted). */
 function diff(before: ConfigCommand[], after: ConfigCommand[]): CommandChange[] {
+  if (!uniqueNames(before) || !uniqueNames(after)) return [];
   const names = [...new Set([...before.map(c => c.name), ...after.map(c => c.name)])].sort();
   const of = (l: ConfigCommand[], n: string) => l.find(c => c.name === n)?.cmd ?? null;
   return names.map(n => ({ name: n, before: of(before, n), after: of(after, n) })).filter(c => c.before !== c.after);
 }
 
-/** The person's trust in the commands of a config: free (none), allowed, denied, ask (never answered) or changed. */
-export function trustOf(config: Pick<ForgeConfig, 'validators' | 'swarm'>, local: Pick<LocalState, 'commands'>): Trust {
+/**
+ * The person's trust in the commands of a config: free (none), allowed, denied, ask (never answered) or changed. A hash
+ * the last answer denied is never allowed, whatever `allowed` holds. `changed` lists what changed only from a set the
+ * person allowed: after a No there is nothing to compare with, and the question lists every command.
+ */
+export function trustOf(config: Pick<ForgeConfig, 'validators' | 'swarm'>, record: Pick<TrustRecord, 'commands'>): Trust {
   const commands = configCommands(config);
   if (!commands.length) return { state: 'free', hash: null, commands, changed: [] };
   const hash = commandsHash(commands);
-  const rec = local.commands;
-  let state: TrustState = !rec ? 'ask' : rec.allowed.includes(hash) ? 'allowed' : rec.state === 'denied' && rec.hash === hash ? 'denied' : 'changed';
+  const rec = record.commands;
+  let state: TrustState = !rec ? 'ask' : rec.state === 'denied' && rec.hash === hash ? 'denied' : rec.allowed.includes(hash) ? 'allowed' : 'changed';
   if (assumeTrusted && (state === 'ask' || state === 'changed')) state = 'allowed';
-  return { state, hash, commands, changed: state === 'changed' && rec ? diff(rec.list, commands) : [] };
+  return { state, hash, commands, changed: state === 'changed' && rec?.state === 'allowed' ? diff(rec.list, commands) : [] };
 }
 
-// What the person trusts is what they read: a line break separates two commands, and a character they cannot see (a C0
-// or C1 control, a zero-width or bidi character, a tag character) can hide or reorder what a command does. Both are shown
-// for what they are, never folded away. Built from code points, so this file holds no invisible character.
-const cp = (n: number) => String.fromCodePoint(n);
-const span = (a: number, b: number) => `${cp(a)}-${cp(b)}`;
-const BREAK = new RegExp(`\\r\\n|[\\r\\n${cp(0x2028)}${cp(0x2029)}]`, 'g');
-const HIDDEN = new RegExp(`[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f${cp(0xad)}${cp(0x61c)}${cp(0x180e)}${span(0x200b, 0x200f)}${span(0x202a, 0x202e)}`
-  + `${span(0x2060, 0x206f)}${cp(0xfeff)}${span(0xfff9, 0xfffb)}${span(0xe0000, 0xe007f)}]`, 'gu');
+// What the person trusts is what they read. A command shows every character outside printable ASCII as <U+XXXX> (a
+// control, a zero-width or bidi character, a look-alike letter, a space a shell does not split on), and a line break,
+// which separates two commands, as ⏎; only runs of plain spaces fold.
 const codeOf = (c: string) => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}>`;
 
-/** A command on one line of the question: its line breaks as ⏎, hidden characters as <U+XXXX>, cut at 200 (`cut`). */
+/** A command on one line of the question, cut at 200 characters (`cut`). */
 function shown(cmd: string): { text: string; cut: boolean } {
-  const one = Array.from(cmd.replace(BREAK, ' ⏎ ').replace(HIDDEN, codeOf).replace(/\s+/g, ' ').trim());
-  return one.length > MAX_SHOWN ? { text: `${one.slice(0, MAX_SHOWN - 1).join('')}…`, cut: true } : { text: one.join(''), cut: false };
+  const text = Array.from(cmd, c => (c === '\n' ? ' ⏎ ' : c >= ' ' && c <= '~' ? c : codeOf(c))).join('').replace(/ +/g, ' ').trim();
+  const one = Array.from(text);
+  return one.length > MAX_SHOWN ? { text: `${one.slice(0, MAX_SHOWN - 1).join('')}…`, cut: true } : { text, cut: false };
 }
 
-/** The question for the person: the commands (or what changed) and whether they trust them; the yes first. When the
- *  question cannot show every command whole, it says where to read them. */
+/** The question for the person: every command of the set they are asked to trust, what changed since the set they last
+ *  allowed first (before → after); and whether they trust them, the yes first. When the question cannot show every
+ *  command whole, it says where to read them. */
 export function trustAsk(t: Trust, es: boolean): TrustAsk {
   let cut = false;
   const show = (cmd: string | null) => { if (cmd === null) return '—'; const s = shown(cmd); cut ||= s.cut; return s.text; };
-  const lines = t.state === 'changed' && t.changed.length
-    ? t.changed.map(c => `${c.name}: ${show(c.before)} → ${show(c.after)}`)
-    : t.commands.map(c => `${c.name}: ${show(c.cmd)}`);
+  const moved = new Set(t.changed.map(c => c.name));
+  const lines = [
+    ...t.changed.map(c => `${c.name}: ${show(c.before)} → ${show(c.after)}`),
+    ...t.commands.filter(c => !moved.has(c.name)).map(c => `${c.name}: ${show(c.cmd)}`),
+  ];
   const head = t.state === 'changed'
     ? (es ? 'Han cambiado los comandos de .forge/config.yaml que forge ejecuta en esta máquina:' : 'The commands of .forge/config.yaml that forge runs on this machine changed:')
     : (es ? '.forge/config.yaml define comandos que forge ejecutará en esta máquina:' : '.forge/config.yaml defines commands forge will run on this machine:');
@@ -134,30 +150,63 @@ function withTrust(config: ForgeConfig, t: Trust): ForgeConfig {
 }
 
 /** A config whose commands may run: as it is when trusted (or without commands), without them when denied; else it throws. */
-export const trustedConfig = (config: ForgeConfig, local: Pick<LocalState, 'commands'>): ForgeConfig => withTrust(config, trustOf(config, local));
+export const trustedConfig = (config: ForgeConfig, record: Pick<TrustRecord, 'commands'>): ForgeConfig => withTrust(config, trustOf(config, record));
 
 /**
- * Whether git tracks the .forge/local.yaml forge reads for `dir` (in its main checkout), or .forge itself as a link or a
- * submodule: then it came with the repository, and a record in it is none of this machine's. False when git cannot say
- * (no repository, no git).
+ * The file that keeps the answer for the repository `dir` is in: <git common dir>/forge/trust.json, one for the main
+ * checkout and its worktrees. Git keeps its own directory out of every checkout (also through the aliases of `.git`), so
+ * no clone or pull writes it. Null outside a git repository, or when git cannot say (then nothing is kept).
  */
-export function localTracked(dir: string): boolean {
-  let listed: string;
+export function trustFile(dir: string): string | null {
+  let common: string;
   try {
-    listed = execFileSync('git', ['ls-files', '-z', '--', ':(top,icase).forge'], { cwd: mainCheckout(dir), encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
-  } catch { return false; }
-  return listed.split('\0').some(p => ['.forge', '.forge/local.yaml'].includes(p.toLowerCase()));
+    common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: dir, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
+  } catch { return null; }
+  return common ? path.join(path.resolve(dir, common), 'forge', 'trust.json') : null;
 }
 
-/** The person's answer about the commands as forge counts it for `dir`: the record of .forge/local.yaml in its main
- *  checkout, unless git tracks that file (localTracked). */
-export function commandsAnswer(dir: string): Pick<LocalState, 'commands'> {
-  const { commands } = readLocal(dir);
-  return commands && !localTracked(dir) ? { commands } : {};
+/** A commands record as written; anything malformed counts as no answer (forge asks again). A denied hash is never in
+ *  `allowed`; an allowed one always is. */
+function commandsTrustOf(x: unknown): CommandsTrust | undefined {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return undefined;
+  const o = x as Record<string, unknown>;
+  if ((o.state !== 'allowed' && o.state !== 'denied') || typeof o.hash !== 'string' || !HASH.test(o.hash)) return undefined;
+  const list = (Array.isArray(o.list) ? o.list : [])
+    .filter((c): c is ConfigCommand => !!c && typeof c === 'object' && typeof (c as { name?: unknown }).name === 'string' && typeof (c as { cmd?: unknown }).cmd === 'string')
+    .slice(0, 100).map(c => ({ name: c.name.slice(0, 200), cmd: c.cmd.slice(0, 4000) }));
+  const allowed = [...new Set((Array.isArray(o.allowed) ? o.allowed : []).filter((h): h is string => typeof h === 'string' && HASH.test(h) && (o.state === 'allowed' || h !== o.hash)))];
+  if (o.state === 'allowed' && !allowed.includes(o.hash)) allowed.push(o.hash);
+  return { state: o.state, hash: o.hash, list, at: typeof o.at === 'string' ? o.at : '', allowed: allowed.slice(-MAX_KEPT) };
+}
+
+function readAt(file: string | null): TrustRecord {
+  if (!file) return {};
+  let raw: unknown;
+  try { raw = JSON.parse(readFileSync(file, 'utf8')); } catch { return {}; }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const o = raw as Record<string, unknown>;
+  const commands = commandsTrustOf(o.commands);
+  const asked = Array.isArray(o.commandsAsked) ? o.commandsAsked.filter((h): h is string => typeof h === 'string' && HASH.test(h)).slice(-MAX_KEPT) : [];
+  return { ...(commands ? { commands } : {}), ...(asked.length ? { commandsAsked: asked } : {}) };
+}
+
+/** The answer kept for the repository `dir` is in (trustFile); nothing outside a git repository. */
+export const readTrust = (dir: string): TrustRecord => readAt(trustFile(dir));
+
+/** Changes the record of the repository `dir` is in, written atomically; false outside a git repository (nothing kept). */
+export function updateTrust(dir: string, fn: (r: TrustRecord) => TrustRecord): boolean {
+  const file = trustFile(dir);
+  if (!file) return false;
+  const next = fn(readAt(file));
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`);
+  renameSync(tmp, file);
+  return true;
 }
 
 /** The trust in a config of `dir`; the answer is read only when the config has commands. */
-export const trustIn = (dir: string, config: ForgeConfig): Trust => trustOf(config, configCommands(config).length ? commandsAnswer(dir) : {});
+export const trustIn = (dir: string, config: ForgeConfig): Trust => trustOf(config, configCommands(config).length ? readTrust(dir) : {});
 
 /** loadConfig for a command that runs the config's commands: the config of `dir` as it may run (withTrust), and its state. */
 export function loadTrusted(dir: string): { config: ForgeConfig; state: TrustState } {
@@ -166,37 +215,37 @@ export function loadTrusted(dir: string): { config: ForgeConfig; state: TrustSta
   return { config: withTrust(config, t), state: t.state };
 }
 
-/** loadConfig for a command that runs the config's commands: the config of `dir`, checked against local.yaml. */
+/** loadConfig for a command that runs the config's commands: the config of `dir`, checked against the answer. */
 export const loadTrustedConfig = (dir: string): ForgeConfig => loadTrusted(dir).config;
 
 /** The first of `dirs` whose config has commands without the person's trust (a config that does not parse is skipped:
  *  nothing runs with it). `dirs` are a main checkout and worktrees of it, which share one answer (that of `dirs[0]`). */
 export function untrustedFor(dirs: string[]): { dir: string; trust: Trust } | null {
-  let answer: Pick<LocalState, 'commands'> | undefined;
+  let record: TrustRecord | undefined;
   for (const dir of dirs) {
     let config: ForgeConfig;
     try { config = loadConfig(dir); } catch { continue; }
     if (!configCommands(config).length) continue;
-    answer ??= commandsAnswer(dirs[0]);
-    const t = trustOf(config, answer);
+    record ??= readTrust(dirs[0]);
+    const t = trustOf(config, record);
     if (t.state === 'ask' || t.state === 'changed') return { dir, trust: t };
   }
   return null;
 }
 
-/** True the first time forge asks about these commands (with nobody to answer: one question note per hash). */
-export function noteOnce(root: string, hash: string): boolean {
-  let first = false;
-  updateLocal(root, s => {
-    const asked = s.commandsAsked ?? [];
-    if (asked.includes(hash)) return s;
-    first = true;
-    return { ...s, commandsAsked: [...asked, hash].slice(-MAX_KEPT) };
+/** True the first time forge asks about these commands (with nobody to answer: one question note per hash); always true
+ *  outside a git repository, where nothing is kept. */
+export function noteOnce(dir: string, hash: string): boolean {
+  let first = true;
+  updateTrust(dir, r => {
+    const asked = r.commandsAsked ?? [];
+    if (asked.includes(hash)) { first = false; return r; }
+    return { ...r, commandsAsked: [...asked, hash].slice(-MAX_KEPT) };
   });
   return first;
 }
 
-/** The local.yaml record of the person's answer; allowed adds the hash to every set allowed so far. */
+/** The record of the person's answer; allowed adds the hash to every set allowed so far, denied takes it out. */
 export function recordTrust(prev: CommandsTrust | undefined, state: 'allowed' | 'denied', list: ConfigCommand[], hash: string, at: string): CommandsTrust {
   const allowed = (prev?.allowed ?? []).filter(h => h !== hash);
   return { state, hash, list, at, allowed: state === 'allowed' ? [...allowed, hash].slice(-MAX_KEPT) : allowed };

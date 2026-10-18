@@ -44,7 +44,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
 import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJECT_ID, type SurfacePermission } from '../local.js';
-import { commandsAnswer, commandsHash, configCommands, loadTrusted, localTracked, noteOnce, recordTrust, trustIn, trustOutput, UntrustedCommandsError } from '../trust.js';
+import { commandsHash, configCommands, loadTrusted, noteOnce, readTrust, recordTrust, trustIn, trustOutput, updateTrust, UntrustedCommandsError } from '../trust.js';
 import { memberForHook, allMembersOf, memberFile } from '../members.js';
 import { hookLive } from '../live.js';
 import { hookRoute } from '../route-hooks.js';
@@ -1031,7 +1031,7 @@ function runCommand(argv: string[], io: Io): Result {
         // `trust`, with its question in the announcement's language and `note` the first time this hash is asked.
         const trust = trustIn(repoDir, loadConfig(repoDir));
         const asked = trust.state === 'ask' || trust.state === 'changed'
-          ? { trust: trustOutput(trust, t.locale === 'es', repoDir, noteOnce(io.cwd, trust.hash!)) } : {};
+          ? { trust: trustOutput(trust, t.locale === 'es', repoDir, noteOnce(repoDir, trust.hash!)) } : {};
         return json({ ...t.output, ...work, ...untracked, ...asked });
       }
       case 'validate': {
@@ -1634,25 +1634,24 @@ function runCommand(argv: string[], io: Io): Result {
       }
       case 'local': {
         const [sub, key, value] = args;
-        // I-03: the answer forge counts (none from a local.yaml that git tracks: localTracked).
-        if (sub === 'get' && key === 'commands') return json(commandsAnswer(io.cwd).commands ?? null);
+        // I-03: the answer about the commands of .forge/config.yaml, kept in the git directory of the repository of the code
+        // checked (--cwd), where every check reads it (src/forge/trust.ts), never in local.yaml.
+        if (sub === 'get' && key === 'commands') return json(readTrust(repoDir).commands ?? null);
         if (sub === 'set' && key === 'commands') {
-          // I-03: the person's answer about the commands of .forge/config.yaml (of the code checked, --cwd). allowed needs
-          // --expect, the hash the question showed, so commands changed since then are never allowed.
+          // allowed needs --expect, the hash the question showed, so commands changed since then are never allowed.
           if (value !== 'allowed' && value !== 'denied' && value !== 'none') throw new UsageError('local set commands: the value must be allowed|denied|none');
-          if (localTracked(io.cwd)) throw new UsageError('local set commands: git tracks .forge/local.yaml, so forge takes no answer from it (it came with the repository): untrack it with git rm --cached .forge/local.yaml and answer again');
-          if (value === 'none') {
-            updateLocal(io.cwd, s => { const next = { ...s }; delete next.commands; return next; });
+          const kept = (fn: Parameters<typeof updateTrust>[1]) => {
+            if (!updateTrust(repoDir, fn)) throw new UsageError(`local set commands: ${repoDir} is not in a git repository, so forge keeps no answer for it and asks each time`);
             return ok('ok');
-          }
+          };
+          if (value === 'none') return kept(({ commands: _gone, ...r }) => r);
           const list = configCommands(loadConfig(repoDir));
           if (!list.length) throw new UsageError('local set commands: .forge/config.yaml defines no commands');
           const hash = commandsHash(list);
           const expected = flag('expect');
           if (value === 'allowed' && expected === undefined) throw new UsageError('local set commands allowed: --expect <hash> is required (the hash FORGE triage printed)');
           if (expected !== undefined && expected !== hash) throw new UsageError('local set commands: the commands of .forge/config.yaml changed since forge showed them: run FORGE triage again');
-          updateLocal(io.cwd, s => ({ ...s, commands: recordTrust(s.commands, value, list, hash, ts()) }));
-          return ok('ok');
+          return kept(r => ({ ...r, commands: recordTrust(r.commands, value, list, hash, ts()) }));
         }
         if (sub === 'get') {
           const s = readLocal(io.cwd);
