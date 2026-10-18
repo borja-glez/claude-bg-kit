@@ -26,9 +26,14 @@ export interface AuthRecord {
   answeredAt?: string; answer?: 'yes' | 'no' | 'other'; answeredBy?: string | null; usedAt?: string;
   /** The note the person added to their choice in AskUserQuestion, when there was one. */
   note?: string;
+  /**
+   * Set only on the stand-in readAuths gives for a file named like a record that could not be read (still busy after
+   * the retries): its kind and run come from the name, nothing else is known, and the checks refuse while it is there.
+   */
+  unreadable?: true;
 }
-export type MergeAuthReason = 'no session id' | 'no answer recorded' | 'answered no' | 'expired' | 'other session' | 'other run' | 'other branch' | 'already used';
-export type MofReason = 'no answer recorded' | 'answered no' | 'other run' | 'other branch' | 'already used';
+export type MergeAuthReason = 'no session id' | 'record unreadable' | 'no answer recorded' | 'answered no' | 'expired' | 'other session' | 'other run' | 'other branch' | 'already used';
+export type MofReason = 'record unreadable' | 'no answer recorded' | 'answered no' | 'other run' | 'other branch' | 'already used';
 
 /** A merge record allows the merge for this long after its answer. */
 export const MERGE_AUTH_TTL_MS = 60 * 60_000;
@@ -100,42 +105,76 @@ export function retryBusy<T>(f: () => T, wait: (ms: number) => void = sleepSync)
   }
 }
 
+const isGone = (e: unknown) => (e as NodeJS.ErrnoException)?.code === 'ENOENT';
+
 /**
  * The files of `dir` worth reading, by name: plain files named <authId>.json of a record's size, the MAX_RECORDS
- * written last (a sort by name would drop the newest once there are more).
+ * written last (a sort by name would drop the newest once there are more). `failed`: the names whose lstat still
+ * failed after the retries (not a file that is gone).
  */
-function recordFiles(dir: string): string[] {
+function recordFiles(dir: string): { names: string[]; failed: string[] } {
   let names: string[];
-  try { names = readdirSync(dir); } catch { return []; }
+  try { names = readdirSync(dir); } catch { return { names: [], failed: [] }; }
   const found: { name: string; mtime: number }[] = [];
+  const failed: string[] = [];
   for (const name of names) {
     if (!name.endsWith('.json') || !AUTH_ID.test(name.slice(0, -'.json'.length))) continue;
     try {
-      const st = lstatSync(path.join(dir, name));
+      const st = retryBusy(() => lstatSync(path.join(dir, name)));
       if (st.isFile() && st.size <= MAX_RECORD_BYTES) found.push({ name, mtime: st.mtimeMs });
-    } catch { /* gone meanwhile */ }
+    } catch (e) {
+      if (!isGone(e)) failed.push(name);
+    }
   }
   found.sort((a, b) => b.mtime - a.mtime || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  return found.slice(0, MAX_RECORDS).map(f => f.name).sort();
+  return { names: found.slice(0, MAX_RECORDS).map(f => f.name).sort(), failed };
+}
+
+/** How a record file is read: as UTF-8 text (the tests give a reader that fails). */
+export type AuthReader = (file: string) => string;
+const readUtf8: AuthReader = file => readFileSync(file, 'utf8');
+
+/** The stand-in for a file named <authId>.json that could not be read: its kind and run, as far as its name tells. */
+function standIn(name: string): AuthRecord {
+  const authId = name.slice(0, -'.json'.length);
+  const kind: AuthKind = authId.startsWith('merge-') ? 'merge' : 'merge-on-finish';
+  const middle = authId.slice(kind === 'merge' ? 'merge-'.length : 'mof-'.length, -'-0000'.length);
+  return {
+    authId, kind, runId: kind === 'merge-on-finish' && middle === 'launch' ? null : middle, target: '', question: '', yes: '', createdAt: '', session: null,
+    unreadable: true,
+  };
 }
 
 /**
- * The records of an auth directory, each with the text it was read from; one that does not read back, or whose file
- * name is not its authId, is skipped.
+ * What an auth directory holds: the records that read back, each with the text it was read from, and a stand-in for
+ * each file named like a record that could not be read (still busy after the retries). A file that is not a record
+ * (not JSON, a bad field, a name that is not its authId, too big, a directory or a link) is ignored; one that is gone
+ * by the time it is read is absent.
  */
-function readEntries(dir: string): { rec: AuthRecord; text: string }[] {
-  const out: { rec: AuthRecord; text: string }[] = [];
-  for (const n of recordFiles(dir)) {
+function scanDir(dir: string, read: AuthReader = readUtf8): { entries: { rec: AuthRecord; text: string }[]; unreadable: AuthRecord[] } {
+  const entries: { rec: AuthRecord; text: string }[] = [];
+  const { names, failed } = recordFiles(dir);
+  const unreadable = failed.map(standIn);
+  for (const n of names) {
+    let text: string;
     try {
-      const text = retryBusy(() => readFileSync(path.join(dir, n), 'utf8'));
+      text = retryBusy(() => read(path.join(dir, n)));
+    } catch (e) {
+      if (!isGone(e)) unreadable.push(standIn(n));
+      continue;
+    }
+    try {
       const rec = normalizeAuth(JSON.parse(text));
-      if (rec && `${rec.authId}.json` === n) out.push({ rec, text });
-    } catch { /* skipped */ }
+      if (rec && `${rec.authId}.json` === n) entries.push({ rec, text });
+    } catch { /* not a record: ignored */ }
   }
-  return out;
+  return { entries, unreadable };
 }
 
-const readAuthsIn = (dir: string): AuthRecord[] => readEntries(dir).map(e => e.rec);
+const readAuthsIn = (dir: string, read?: AuthReader): AuthRecord[] => {
+  const { entries, unreadable } = scanDir(dir, read);
+  return [...entries.map(e => e.rec), ...unreadable];
+};
 
 /** Whether `file` still holds `expected` (null: there is no such file). */
 function unchanged(file: string, expected: string | null): boolean {
@@ -153,8 +192,10 @@ function unchanged(file: string, expected: string | null): boolean {
 
 /**
  * Writes a record under its authId, atomically: a temporary file, then a rename, tried again while Windows reports the
- * file busy. With `expected` it writes only when the file still holds that text (null: only when there is none) and
- * otherwise returns false and leaves the file as it is: a writer that lost a race keeps the winner's record, whole.
+ * file busy. With `expected` it writes only when the file still holds that text (null: only when there is none),
+ * checked again before each try of the rename, and otherwise returns false and leaves the file as it is. There is no
+ * lock: a write re-checks the record first, so it never lands on an answer written before that check, but two answers
+ * at the same instant can both land (the last rename stays), each the person's own and each a whole record.
  * A record that would not read back (a bad id, branch or date) throws.
  */
 function writeAuthIn(dir: string, r: AuthRecord, expected?: string | null): boolean {
@@ -165,16 +206,22 @@ function writeAuthIn(dir: string, r: AuthRecord, expected?: string | null): bool
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     writeFileSync(tmp, `${JSON.stringify(rec, null, 2)}\n`);
-    if (expected !== undefined && !unchanged(file, expected)) return false;
-    retryBusy(() => renameSync(tmp, file));
-    return true;
+    return retryBusy(() => {
+      if (expected !== undefined && !unchanged(file, expected)) return false;
+      renameSync(tmp, file);
+      return true;
+    });
   } finally {
     try { rmSync(tmp, { force: true }); } catch { /* a .tmp is never read as a record */ }
   }
 }
 
-/** The records of the main checkout; one that does not read back, or whose file name is not its authId, is skipped. */
-export const readAuths = (root: string): AuthRecord[] => readAuthsIn(authDir(root));
+/**
+ * The records of the main checkout. A file that is not a record, or whose name is not its authId, is skipped; one that
+ * cannot be read (busy after the retries) gives a stand-in (`unreadable`), which makes the checks refuse for its kind
+ * and run. `read` reads a file (the tests give one that fails).
+ */
+export const readAuths = (root: string, read?: AuthReader): AuthRecord[] => readAuthsIn(authDir(root), read);
 
 export function writeAuth(root: string, r: AuthRecord): void {
   writeAuthIn(authDir(root), r);
@@ -237,8 +284,8 @@ export function pendingAuth(root: string, o: {
   const dir = authDir(root);
   const recs = readAuthsIn(dir);
   const nowMs = o.now.getTime();
-  const open = recs.find(r => r.kind === o.kind && r.runId === o.runId && r.target === o.target && r.session === o.session && !r.answer && !r.usedAt
-    && !aheadOf(r, nowMs) && (o.kind !== 'merge' || nowMs - Date.parse(r.createdAt) < MERGE_AUTH_TTL_MS));
+  const open = recs.find(r => !r.unreadable && r.kind === o.kind && r.runId === o.runId && r.target === o.target && r.session === o.session && !r.answer
+    && !r.usedAt && !aheadOf(r, nowMs) && (o.kind !== 'merge' || nowMs - Date.parse(r.createdAt) < MERGE_AUTH_TTL_MS));
   if (open) {
     const b = o.build(open.authId);
     if (b.ask.question === open.question) return { authId: open.authId, ask: b.ask };
@@ -264,12 +311,20 @@ const newestFirst = (a: AuthRecord, b: AuthRecord) =>
  * used record dated ahead still decides, so that leaving it out never lets an older yes through.
  */
 const deciding = (recs: AuthRecord[], kind: AuthKind, nowMs: number) =>
-  recs.filter(r => r.kind === kind && r.answer && !(r.answer === 'yes' && !r.usedAt && aheadOf(r, nowMs)));
+  recs.filter(r => !r.unreadable && r.kind === kind && r.answer && !(r.answer === 'yes' && !r.usedAt && aheadOf(r, nowMs)));
+/**
+ * Whether a record file of `kind` that could not be read may be about run `runId`, as far as its name tells (a
+ * merge-on-finish one named `launch` may be the asking session's when `launch` is true). It may hold a newer no, so
+ * it refuses rather than let an older yes decide.
+ */
+const unreadableFor = (recs: AuthRecord[], kind: AuthKind, runId: string, launch: boolean) =>
+  recs.some(r => r.unreadable && r.kind === kind && (r.runId === runId || (launch && r.runId === null)));
 
 /** Whether `swarm merge --yes` may merge run `runId` into `target` for the session `session`, and why not. */
 export function checkMergeAuth(recs: AuthRecord[], o: { runId: string; target: string; session: string | null; now: number }):
   { ok: true; record: AuthRecord } | { ok: false; reason: MergeAuthReason } {
   if (!o.session) return { ok: false, reason: 'no session id' };
+  if (unreadableFor(recs, 'merge', o.runId, false)) return { ok: false, reason: 'record unreadable' };
   const answered = deciding(recs, 'merge', o.now);
   const r = answered.filter(x => x.runId === o.runId && x.target === o.target).sort(newestFirst)[0];
   if (!r) {
@@ -289,6 +344,7 @@ export function checkMergeAuth(recs: AuthRecord[], o: { runId: string; target: s
  */
 export function checkMofAuth(recs: AuthRecord[], o: { runId: string; target: string; session: string | null; now?: number }):
   { ok: true; record: AuthRecord } | { ok: false; reason: MofReason } {
+  if (unreadableFor(recs, 'merge-on-finish', o.runId, o.session !== null)) return { ok: false, reason: 'record unreadable' };
   const mof = deciding(recs, 'merge-on-finish', o.now ?? Date.now());
   const r = mof.filter(x => x.runId === o.runId || (x.runId === null && o.session !== null && x.session === o.session)).sort(newestFirst)[0];
   if (!r) return { ok: false, reason: mof.some(x => x.answer === 'yes' && !x.usedAt && x.runId !== null && x.runId !== o.runId) ? 'other run' : 'no answer recorded' };
@@ -391,7 +447,8 @@ function resultFromTranscript(file: unknown, toolUseId: unknown): Record<string,
  * - a result the person did not submit (sent while they were away, a follow-up, a reply);
  * - a question that more than one record carries (a copy beside the real one);
  * - a record dated ahead of now;
- * - a record that changed since it was read (another hook answered it first: its answer stays).
+ * - a record that changed since it was read (another hook answered it before this write's re-check: its answer
+ *   stays; two answers at the same instant can both land, each the person's own).
  * It prints nothing and fails open: bad input, another tool or event, no pending record or any error records nothing.
  * The answers come from tool_response; only an input without one reads the transcript, and then only the line of
  * this call (`tool_use_id`).
@@ -406,7 +463,8 @@ export function hookAnswer(io: { cwd: string; stdin?: string; env?: Record<strin
     const root = projectDir || (typeof o.cwd === 'string' && o.cwd ? o.cwd : io.cwd);
     const dir = authDir(root);
     if (!existsSync(dir)) return '';
-    const entries = readEntries(dir);
+    // A file that cannot be read is neither answered nor counted: the checks refuse while it is there.
+    const { entries } = scanDir(dir);
     const carriers = new Map<string, number>();
     for (const e of entries) carriers.set(e.rec.question, (carriers.get(e.rec.question) ?? 0) + 1);
     // One answer answers one record: a question that two records carry answers neither.
@@ -422,7 +480,7 @@ export function hookAnswer(io: { cwd: string; stdin?: string; env?: Record<strin
       if (typeof a !== 'string' || aheadOf(r, now.getTime())) continue;
       const note = submitted.notes.get(r.question);
       const answer = a !== r.yes ? 'no' : note ? 'other' : 'yes';
-      // Written only over the text read: a record another hook answered meanwhile keeps that answer.
+      // A write re-checks the record first: one another hook answered before it keeps that answer.
       writeAuthIn(dir, { ...r, answeredAt: at, answer, answeredBy: by, ...(note ? { note } : {}) }, text);
     }
   } catch { /* fail open: a hook never breaks the session */ }

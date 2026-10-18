@@ -177,6 +177,63 @@ describe('authorization records (I-03)', () => {
     expect(pendingAuth(root, { ...o, session: 's2', rand: () => 0.5 }).authId).not.toBe(b.authId);
     expect(pendingAuth(root, { ...o, now: new Date(at(80)), rand: () => 0.125 }).authId).not.toBe(b.authId);
   });
+  it('a record file that cannot be read (still busy after the retries) refuses for its kind and run, never counts as absent', () => {
+    const root = tmp('forge-auth-');
+    const fail = (code: string, names: string[], times = Infinity) => {
+      const left = new Map(names.map(n => [n, times]));
+      return (file: string) => {
+        const n = path.basename(file);
+        const t = left.get(n) ?? 0;
+        if (t > 0) { left.set(n, t - 1); throw Object.assign(new Error(code), { code }); }
+        return readFileSync(file, 'utf8');
+      };
+    };
+    writeAuth(root, merge({ answeredAt: at(1) }));
+    writeAuth(root, merge({ authId: 'merge-shop-r1-zz99', answer: 'no', answeredAt: at(2) }));
+    const o = { runId: 'shop-r1', target: 'main', session: 's1', now: Date.parse(at(30)) };
+    expect(checkMergeAuth(readAuths(root), o)).toEqual({ ok: false, reason: 'answered no' });
+    // The newer no busy: skipping it would let the older yes decide.
+    const recs = readAuths(root, fail('EBUSY', ['merge-shop-r1-zz99.json']));
+    expect(recs.find(r => r.authId === 'merge-shop-r1-zz99')).toEqual({
+      authId: 'merge-shop-r1-zz99', kind: 'merge', runId: 'shop-r1', target: '', question: '', yes: '', createdAt: '', session: null, unreadable: true,
+    });
+    expect(checkMergeAuth(recs, o)).toEqual({ ok: false, reason: 'record unreadable' });
+    expect(checkMergeAuth(readAuths(root, fail('EPERM', ['merge-shop-r1-zz99.json'])), o)).toEqual({ ok: false, reason: 'record unreadable' });
+    // Busy for a moment: read on a retry.
+    expect(checkMergeAuth(readAuths(root, fail('EBUSY', ['merge-shop-r1-zz99.json'], 2)), o)).toEqual({ ok: false, reason: 'answered no' });
+    // Gone between the listing and the read: absent, as a deleted file is (the known limit).
+    expect(readAuths(root, fail('ENOENT', ['merge-shop-r1-zz99.json'])).map(r => r.authId)).toEqual(['merge-shop-r1-ab12']);
+    // A stand-in is never written back.
+    expect(() => writeAuth(root, recs.find(r => r.unreadable)!)).toThrow();
+    // Another run's file, or a merge-on-finish file, that cannot be read is no refusal for this merge.
+    const other = tmp('forge-auth-');
+    writeAuth(other, merge());
+    writeAuth(other, merge({ authId: 'merge-shop-r2-cd34', runId: 'shop-r2', answer: 'no' }));
+    writeAuth(other, mof({ answer: 'no' }));
+    const busyOthers = readAuths(other, fail('EBUSY', ['merge-shop-r2-cd34.json', 'mof-shop-r1-cd34.json']));
+    expect(busyOthers.filter(r => r.unreadable)).toHaveLength(2);
+    expect(checkMergeAuth(busyOthers, o)).toMatchObject({ ok: true });
+  });
+  it('a merge-on-finish file that cannot be read refuses for its run, and one named launch for a session that may have asked it', () => {
+    const root = tmp('forge-auth-');
+    const busy = (names: string[]) => (file: string) => {
+      if (names.includes(path.basename(file))) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+      return readFileSync(file, 'utf8');
+    };
+    writeAuth(root, mof());
+    writeAuth(root, mof({ authId: 'mof-shop-r1-zz99', answer: 'no', answeredAt: at(1) }));
+    writeAuth(root, mof({ authId: 'mof-launch-ef56', runId: null, session: 'auto-1', answer: 'no' }));
+    writeAuth(root, mof({ authId: 'mof-shop-r2-ab12', runId: 'shop-r2' }));
+    const o = { runId: 'shop-r1', target: 'main', session: null as string | null, now: Date.parse(at(30)) };
+    const recs = readAuths(root, busy(['mof-shop-r1-zz99.json']));
+    expect(checkMofAuth(recs, o)).toEqual({ ok: false, reason: 'record unreadable' });
+    expect(checkMofAuth(readAuths(root), o)).toEqual({ ok: false, reason: 'answered no' });
+    const launch = readAuths(root, busy(['mof-launch-ef56.json']));
+    expect(launch.find(r => r.unreadable)).toMatchObject({ authId: 'mof-launch-ef56', kind: 'merge-on-finish', runId: null });
+    expect(checkMofAuth(launch, { ...o, runId: 'shop-r2', session: 'auto-2' })).toEqual({ ok: false, reason: 'record unreadable' });
+    expect(checkMofAuth(launch, { ...o, runId: 'shop-r2' })).toMatchObject({ ok: true });
+    expect(checkMofAuth(readAuths(root, busy(['mof-shop-r1-zz99.json'])), { ...o, runId: 'shop-r2' })).toMatchObject({ ok: true });
+  });
   it('pendingAuth does not reuse an open question dated more than 5 minutes ahead of now', () => {
     const root = tmp('forge-auth-');
     const build = (id: string) => mergeAsk(id, 'forge/run-shop', 'main', false);
