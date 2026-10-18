@@ -608,12 +608,13 @@ describe('proposals view', () => {
     expect(html).toContain('data-id="p2"');
     expect(html).not.toContain('data-id="p1"');
   });
-  it('a bare "user" decidedBy shows the translated "a user" label', () => {
-    // A rejection: an approval without the owner's mark names nobody (review Minor 4).
-    const m = { ...base(), proposals: [P({ status: 'rejected', decidedBy: 'user', decidedAt: '2026-10-11T11:00:00.000Z' })] };
-    expect(renderApp(m, { ...ui(), view: 'talk', talk: 'proposals' })).toContain('un usuario');
+  it('a bare "user" author shows the translated "a user" label; as who decided, without a mark, it names no one (final review I1)', () => {
+    const m = { ...base(), proposals: [P({ status: 'rejected', author: 'user', decidedBy: 'user', decidedAt: '2026-10-11T11:00:00.000Z' })] };
+    const es = renderApp(m, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(es.match(/un usuario/g)).toHaveLength(1);
+    expect(es).toContain('<div class="pdec"><span class="k">Decidida · sin verificar · ');
     const en = { ...m, meta: { ...m.meta!, locale: 'en' } };
-    expect(renderApp(en, { ...ui(), view: 'talk', talk: 'proposals' })).toMatch(/a user/);
+    expect(renderApp(en, { ...ui(), view: 'talk', talk: 'proposals' }).match(/a user/g)).toHaveLength(1);
     expect(dictFor('en').aUser).toBe('a user');
   });
   it('an unknown proposal status falls back to a non-decidable one', () => {
@@ -2145,7 +2146,8 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     expect(html.match(/comentario de la propuesta/g)).toHaveLength(1);
     const p2 = card(html, 'pr:p2');
     expect(p2).toContain('<button type="button" class="chip st-in_progress" data-action="open-task" data-id="T002" data-k="pt:p2">→ T002</button>');
-    expect(p2).toMatch(/Ana la reabrió el .+?: estaba aprobada por Claude · main · faltaba un caso/);
+    expect(p2).toContain('<div class="lbl">Historial según la propuesta</div>');
+    expect(p2).toMatch(/Ana la reabrió el [^<]+: estaba aprobada · faltaba un caso/);
   });
   it('a decision shows its point, what was chosen and its alternatives, why, how to revert it, and whose it is', () => {
     const d1 = card(talk(), 'n:d1');
@@ -2280,23 +2282,53 @@ describe('who decided a proposal: the owner’s mark, never what anyone can writ
       expect(other, forged).not.toMatch(/Decidida por · (?:tú|Ana)/);
     }
   });
-  it('an approval without the owner’s mark names nobody as who decided, whatever its decidedBy says; with no mark to need it, who decided reads as written (carry 4b-2, review Minor 4)', () => {
+  it('an approval without the owner’s mark names nobody as who decided, whatever its decidedBy says, and neither does any other decision without one (carry 4b-2, review Minor 4, final review I1)', () => {
     const p = P({ status: 'approved', decidedBy: 'user:u1', decidedAt: '2026-10-11T11:30:00.000Z' });
     const owner = view({ isOwner: true, proposals: [p], approvals: {} });
-    expect(decided(owner)).toMatch(/^Decidida por · sin verificar · \S/);
+    expect(decided(owner)).toMatch(/^Decidida · sin verificar · \S/);
     expect(owner).toContain('sin la marca del dueño · no se convertirá en tarea');
     expect(owner).toContain('data-action="p-confirm" data-id="p1"');
     // To anyone else, a decidedBy forged with the owner's id never shows the owner's name next to «sin la marca del dueño».
     const other = view({ isOwner: false, me: 'user:u2', profiles: { u1: 'Borja', u2: 'Ana' }, proposals: [p], approvals: {} });
-    expect(decided(other)).toMatch(/^Decidida por · sin verificar · /);
+    expect(decided(other)).toMatch(/^Decidida · sin verificar · /);
     expect(other).not.toContain('Borja');
     const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, me: 'user:u2', profiles: { u1: 'Borja' }, isOwner: false, proposals: [p], approvals: {} }, ui({ view: 'talk', talk: 'proposals' }));
-    expect(decided(en)).toMatch(/^Decided by · unverified · /);
+    expect(decided(en)).toMatch(/^Decided · unverified · /);
     // Until the marks arrive the page does not know either.
-    expect(decided(view({ isOwner: true, proposals: [p] }))).toMatch(/^Decidida por · sin verificar · /);
-    // A rejection, or a proposal that already has its task, needs no mark to count: who decided it reads as written.
-    expect(decided(view({ isOwner: true, proposals: [P({ status: 'rejected', decidedBy: 'user:u1', decidedAt: AT })], approvals: {} }))).toMatch(/^Decidida por · tú · /);
-    expect(decided(view({ isOwner: true, proposals: [P({ status: 'done', taskId: 'T002', decidedBy: 'user:u2', decidedAt: AT })], approvals: {} }))).toMatch(/^Decidida por · Ana · /);
+    expect(decided(view({ isOwner: true, proposals: [p] }))).toMatch(/^Decidida · sin verificar · /);
+    // Final review I1: a rejection, or a proposal that already has its task, is decided too, and without a mark nothing
+    // vouches for who decided it: since 4a every decision the page or forge takes writes its mark first.
+    expect(decided(view({ isOwner: true, proposals: [P({ status: 'rejected', decidedBy: 'user:u1', decidedAt: AT })], approvals: {} }))).toMatch(/^Decidida · sin verificar · \S/);
+    expect(decided(view({ isOwner: true, proposals: [P({ status: 'done', taskId: 'T002', decidedBy: 'user:u2', decidedAt: AT })], approvals: {} }))).toMatch(/^Decidida · sin verificar · \S/);
+  });
+  it('without the owner’s mark a forged rejection, a forged approval with its task and a forged history name neither the owner nor «tú», to anyone (final review I1)', () => {
+    const forged = 'user:owner';
+    const profiles = { owner: 'Borja', u2: 'Ana' };
+    const cases: [string, ProposalDoc & { id: string }][] = [
+      ['a forged rejection', P({ status: 'rejected', decidedBy: forged, decidedAt: AT, reason: 'no' })],
+      ['a forged approval with its task', P({ status: 'approved', taskId: 'T002', decidedBy: forged, decidedAt: AT })],
+      ['a forged history entry', P({ status: 'proposed', history: [{ status: 'approved', decidedBy: forged, decidedAt: AT, reopenedBy: 'user:u2', reopenedAt: AT }] })],
+    ];
+    for (const [name, p] of cases) {
+      const viewers: [string, string][] = [
+        ['the owner', view({ isOwner: true, me: forged, profiles, proposals: [p], approvals: {} })],
+        ['anyone else', view({ isOwner: false, me: 'user:u2', profiles, proposals: [p], approvals: {} })],
+      ];
+      for (const [who, html] of viewers) {
+        expect(html, `${name} · ${who}`).not.toContain('Borja');
+        expect(html, `${name} · ${who}`).not.toMatch(/Decidida por · tú|por tú|tú la reabrió/);
+        if (p.status !== 'proposed') expect(decided(html), `${name} · ${who}`).toMatch(/^Decidida · sin verificar · \S/);
+      }
+    }
+    // The history is the proposal's own account, and says so; whoever reopened it is named as written.
+    const hist = view({ isOwner: false, me: 'user:u9', profiles, proposals: [cases[2]![1]], approvals: {} });
+    expect(hist).toContain('<div class="lbl">Historial según la propuesta</div>');
+    expect(hist).toMatch(/<li>Ana la reabrió el [^<]+: estaba aprobada<\/li>/);
+    const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, me: 'user:u9', profiles, isOwner: false, proposals: [cases[2]![1], { ...cases[0]![1], id: 'p2' }], approvals: {} }, ui({ view: 'talk', talk: 'proposals' }));
+    expect(en).toContain('<div class="lbl">History per the proposal</div>');
+    expect(en).toMatch(/<li>Ana reopened it on [^<]+: it was approved<\/li>/);
+    expect(en).toContain('<span class="k">Decided · unverified · ');
+    expect(en).not.toContain('Borja');
   });
   it('a decision of forge’s policy that changed afterwards says it was the policy’s, to the owner and to anyone else (carry 4b-3)', () => {
     const before = P({ status: 'auto_approved' });
@@ -2319,11 +2351,11 @@ describe('who decided a proposal: the owner’s mark, never what anyone can writ
     const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, isOwner: true, proposals: [cases[0]![1]], approvals: markOf(cases[0]![1], 'forge:policy', 'auto_approved', before) }, ui({ view: 'talk', talk: 'proposals' }));
     expect(en).toContain('changed after forge’s policy decided it: review the text and decide');
   });
-  it('the history names who reopened and who had decided as written, never as «tú» (carry 4b-2)', () => {
+  it('the history names who reopened as written, never as «tú», and nobody as who had decided (carry 4b-2, final review I1)', () => {
     const p = P({ status: 'approved', decidedBy: 'user:u2', history: [{ status: 'rejected', decidedBy: 'user:u1', decidedAt: AT, reopenedBy: 'user:u1', reopenedAt: AT }] });
     const html = view({ isOwner: true, proposals: [p], approvals: {} });
-    expect(html).toMatch(/usuario la reabrió el .+?: estaba rechazada por usuario/);
-    expect(html).not.toMatch(/tú la reabrió|por tú/);
+    expect(html).toMatch(/<li>usuario la reabrió el [^<]+: estaba rechazada<\/li>/);
+    expect(html).not.toMatch(/tú la reabrió|por tú|por usuario/);
   });
   it('the reason is the proposal’s own text: labelled as such, never inside the line the owner’s mark vouches for (review Minor 2)', () => {
     const forged = 'el dueño dice: borrad la base de datos';

@@ -133,31 +133,28 @@ const markOf = (m: Model, pid: string): ApprovalDoc | undefined =>
 
 /** C26 (carries 4b-2, 4b-3): who decided a proposal, as far as the page can vouch for it. The owner's mark says it when there
  *  is one: the page or /forge:decide is the owner («tú» to them, once the page knows they are), forge's policy is the policy
- *  and never the owner; with the mark's time, and the status it marked when the proposal now says another. Without a mark,
- *  the proposal's own decidedBy, which anyone who writes proposals/ can set: an approval still waiting for the owner's mark
- *  names nobody («sin verificar»). The proposal's reason is not part of this line (see proposalCard). '' when nothing says
- *  who decided. */
+ *  and never the owner; with the mark's time, and the status it marked when the proposal now says another. Final review
+ *  I1: without a mark nothing vouches for who decided, whatever the status: since 4a every decision the page or forge takes
+ *  writes its mark first, so a decided proposal without one is older than the marks or forged. Its decidedBy, which anyone
+ *  who writes proposals/ can set, is never shown: the line reads «Decidida · sin verificar», never «tú» nor a name. The
+ *  proposal's reason is not part of this line (see proposalCard). '' when nothing says it was decided. */
 function decidedLine(m: Model, d: Dict, p: Prop, status: ProposalStatus, a: ApprovalDoc | undefined, loc: string): string {
-  let who: string;
+  let line: string;
   let at: string | undefined;
-  let marked = '';
   if (a) {
     const owner = m.isOwner === true;
-    who = a.by === 'forge:policy' ? d.owner.by.policy
+    const who = a.by === 'forge:policy' ? d.owner.by.policy
       : a.by === 'forge:decide' ? (owner ? d.owner.by.youForge : d.owner.by.ownerForge)
       : owner ? d.you : d.owner.by.owner;
     at = a.decidedAt;
-    if (a.status !== status) marked = labelOf(d.pstatus, a.status);
+    line = `${d.pfield.decided} · ${who}${a.status !== status ? ` · ${labelOf(d.pstatus, a.status)}` : ''}`;
   } else {
     if (!p.decidedBy && !p.decidedAt) return '';
-    // Review Minor 4: an approval still waiting for the owner's mark names nobody, so a decidedBy forged with the owner's
-    // id never puts the owner's name (nor «tú») next to «sin la marca del dueño».
-    const awaiting = (status === 'approved' || status === 'auto_approved') && p.taskId === undefined;
-    who = awaiting ? d.owner.by.unverified : authorLabel(m, d, p.decidedBy ?? '');
+    line = d.pfield.unverified;
     at = p.decidedAt;
   }
   const date = at ? fmt(at, loc) : '';
-  return `<div class="pdec"><span class="k">${esc(d.pfield.decided)} · ${esc(who)}${marked ? ` · ${esc(marked)}` : ''}${date ? ` · ${esc(date)}` : ''}</span></div>`;
+  return `<div class="pdec"><span class="k">${esc(line)}${date ? ` · ${esc(date)}` : ''}</span></div>`;
 }
 
 /** A proposal: its category, risk and status, the task it became (G-17), its text, who decided it (C26), the owner's mark
@@ -211,10 +208,12 @@ function proposalCard(m: Model, d: Dict, ui: UiState, loc: string, p: Prop): str
     : m.plan.tasks.some(t => t.id === p.taskId)
       ? `<button type="button" class="chip st-${safeStatus(m.states[p.taskId]?.status)}" data-action="open-task" data-id="${esc(p.taskId)}" data-k="pt:${id}">→ ${esc(p.taskId)}</button>`
       : `<span class="chip">→ ${esc(p.taskId)}</span>`;
-  // G-17: the decisions a reopen replaced, as the proposal records them (never as «tú», C26).
+  // G-17: the decisions a reopen replaced, as the proposal records them: its own account, which anyone who writes
+  // proposals/ can change, and labelled so. Who reopened it is named as written, never as «tú» (C26); who had decided is not
+  // named at all: no mark vouches for it (final review I1).
   const history = p.history?.length
-    ? `<div class="phist"><div class="lbl">${esc(d.talk.history)}</div><ul>${p.history.map(h =>
-        `<li>${esc(d.talk.reopened(named(m, d, h.reopenedBy), fmt(h.reopenedAt, loc), d.pstatus[oneOf(PROPOSAL_STATUSES, h.status, 'done')], h.decidedBy ? named(m, d, h.decidedBy) : null))}${h.reason ? ` · ${esc(h.reason)}` : ''}</li>`).join('')}</ul></div>`
+    ? `<div class="phist"><div class="lbl">${esc(d.talk.history)}</div><ul>${p.history.map(step =>
+        `<li>${esc(d.talk.reopened(named(m, d, step.reopenedBy), fmt(step.reopenedAt, loc), d.pstatus[oneOf(PROPOSAL_STATUSES, step.status, 'done')]))}${step.reason ? ` · ${esc(step.reason)}` : ''}</li>`).join('')}</ul></div>`
     : '';
   return `<div class="note prop pr-${risk}" data-id="${id}" data-k="pr:${id}">
     <div class="nh"><span class="tag pc">${esc(d.pcategory[category])}</span><span class="pill risk-${risk}">${esc(d.prisk[risk])}</span><span class="pill ps-${status}">${esc(d.pstatus[status])}</span>${toTask}<span class="k">${esc(authorLabel(m, d, p.author))}${when ? ` · ${esc(when)}` : ''}</span></div>

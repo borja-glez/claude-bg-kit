@@ -2957,17 +2957,19 @@ describe('the conversation (G-17, H-17)', () => {
     app.stop();
   });
 
-  it('the names of a proposal’s history are looked up too, even of someone who wrote nothing else (review Minor 3)', async () => {
+  it('the name of who reopened a proposal is looked up too, even of someone who wrote nothing else; who decided, which the page never names without a mark, is not (review Minor 3, final review I1)', async () => {
     const f = fakeDb();
     const user = fakeUser();
     const { root, app } = await boot(f, user);
-    f.push('proposals', { p1: { ts: '2026-10-11T10:00:00.000Z', category: 'perf', risk: 'low', title: 'Cache', rationale: 'r', evidence: 'e', pillar: 'x', status: 'approved', source: 'scout', author: 'session:main', decidedBy: 'session:main',
+    f.push('proposals', { p1: { ts: '2026-10-11T10:00:00.000Z', category: 'perf', risk: 'low', title: 'Cache', rationale: 'r', evidence: 'e', pillar: 'x', status: 'approved', source: 'scout', author: 'session:main', decidedBy: 'user:u4',
       history: [{ status: 'rejected', decidedBy: 'user:u3', decidedAt: '2026-10-10T10:00:00Z', reopenedBy: 'user:u2', reopenedAt: '2026-10-10T12:00:00Z' }] } });
     click(root, '[data-view="talk"]');
     await settle();
     const asked = user.profiles.mock.calls.flatMap(c => c[0] as string[]);
-    expect(asked).toEqual(expect.arrayContaining(['u2', 'u3']));
-    expect(root.innerHTML).toMatch(/Ana la reabrió el .+?: estaba rechazada por usuario/);
+    expect(asked).toContain('u2');
+    expect(asked).not.toContain('u3');
+    expect(asked).not.toContain('u4');
+    expect(root.innerHTML).toMatch(/<li>Ana la reabrió el [^<]+: estaba rechazada<\/li>/);
     app.stop();
   });
 

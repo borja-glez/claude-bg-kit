@@ -478,13 +478,13 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   // only needs interact. The page goes read-only when there is no user id or a write is refused.
 
   // Display names for user:<id> authors, asked on every render pass for the ids in the notes and the proposals, their
-  // history included (review Minor 3: who reopened one and who had decided it) (the runtime caches profiles). Re-render
-  // only when a name actually changed.
+  // history included (review Minor 3: who reopened one) (the runtime caches profiles). Who decided a proposal is never
+  // named from its text (final review I1), so its decidedBy is not asked for. Re-render only when a name actually changed.
   const lookupProfiles = async () => {
     const u = await getUser();
     if (!u || typeof u.profiles !== 'function') return;
     const ids = [...new Set([...model.notes.flatMap(n => [n.author, n.answeredBy ?? '']),
-      ...model.proposals.flatMap(p => [p.author, p.decidedBy ?? '', ...(p.history ?? []).flatMap(h => [h.reopenedBy, h.decidedBy ?? ''])])])]
+      ...model.proposals.flatMap(p => [p.author, ...(p.history ?? []).map(step => step.reopenedBy)])])]
       .filter(a => a.startsWith('user:') && a !== model.me).map(a => a.slice(5)).filter(Boolean);
     if (!ids.length) return;
     try {
