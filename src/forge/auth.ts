@@ -282,8 +282,10 @@ export function mofAsk(authId: string, target: string, es: boolean, isDefault: b
 
 /**
  * A question that waits for its answer: the open record of the same kind, run, branch, session and project (a merge one
- * younger than MERGE_AUTH_TTL_MS, none dated ahead of now) when its question still reads the same, else a new record
- * under an id no file has.
+ * younger than MERGE_AUTH_TTL_MS, none dated ahead of now) when its question still reads the same and no other record
+ * carries it, else a new record under an id no file has, with a question no record carries. The hook answers no
+ * question two records carry, so a copy of the open one (a forgery) must not keep it unanswerable: the fresh question
+ * names its own id, and the copies are ignored.
  */
 export function pendingAuth(root: string, o: {
   kind: AuthKind; runId: string | null; target: string; session: string | null; now: Date; rand: () => number;
@@ -292,8 +294,11 @@ export function pendingAuth(root: string, o: {
   const dir = authDir(root);
   const recs = readAuthsIn(dir);
   const nowMs = o.now.getTime();
+  const carriers = new Map<string, number>();
+  for (const r of recs) if (!r.unreadable) carriers.set(r.question, (carriers.get(r.question) ?? 0) + 1);
   const open = recs.find(r => !r.unreadable && r.kind === o.kind && r.runId === o.runId && r.target === o.target && r.session === o.session
-    && r.project === o.project && !r.answer && !r.usedAt && !aheadOf(r, nowMs) && (o.kind !== 'merge' || nowMs - Date.parse(r.createdAt) < MERGE_AUTH_TTL_MS));
+    && r.project === o.project && !r.answer && !r.usedAt && !aheadOf(r, nowMs) && (o.kind !== 'merge' || nowMs - Date.parse(r.createdAt) < MERGE_AUTH_TTL_MS)
+    && carriers.get(r.question) === 1);
   if (open) {
     const b = o.build(open.authId);
     if (b.ask.question === open.question) return { authId: open.authId, ask: b.ask };
@@ -303,6 +308,7 @@ export function pendingAuth(root: string, o: {
     if (!AUTH_ID.test(authId)) throw new Error('auth: the run id cannot name an authorization');
     if (existsSync(path.join(dir, `${authId}.json`))) continue;
     const b = o.build(authId);
+    if (carriers.has(b.ask.question)) continue;
     const rec: AuthRecord = {
       authId, kind: o.kind, runId: o.runId, target: o.target, question: b.ask.question, yes: b.yes, createdAt: o.now.toISOString(), session: o.session,
       ...(o.project ? { project: o.project } : {}),

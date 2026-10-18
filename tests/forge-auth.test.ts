@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
-  authDir, checkMergeAuth, checkMofAuth, isForgeBranch, mergeAsk, mofAsk, newAuthId, normalizeAuth, pendingAuth, readAuths, retryBusy, useAuth, writeAuth, type AuthRecord,
+  authDir, checkMergeAuth, checkMofAuth, hookAnswer, isForgeBranch, mergeAsk, mofAsk, newAuthId, normalizeAuth, pendingAuth, readAuths, retryBusy, useAuth, writeAuth, type AuthRecord,
 } from '../src/forge/auth.js';
+import { hookAnswerStdin } from './helpers/hook-answer.js';
 import { useTempDirs } from './helpers/tmp.js';
 
 const tmp = useTempDirs();
@@ -277,6 +278,28 @@ describe('authorization records (I-03)', () => {
     const p = pendingAuth(root, { kind: 'merge', runId: 'shop-r1', target: 'main', session: 's1', now: new Date(T), rand: () => 0.5, build });
     expect(p.authId).not.toBe('merge-shop-r1-0000');
     expect(readAuths(root)).toContainEqual(ahead);
+  });
+  it('pendingAuth never reuses a question another record carries too (a forged copy): it asks a fresh one, which the answer reaches (carry 5)', () => {
+    const root = tmp('forge-auth-');
+    const o = { kind: 'merge-on-finish' as const, runId: 'shop-r1', target: 'main', session: null, now: new Date(T), rand: () => 0.25, build: (id: string) => mofAsk(id, 'main', false, true) };
+    const a = pendingAuth(root, o);
+    // A copy of the open record under another id: the hook answers neither of two records that carry one question.
+    writeAuth(root, { ...readAuths(root)[0], authId: 'mof-shop-r1-zzzz' });
+    const b = pendingAuth(root, { ...o, rand: () => 0.75 });
+    expect(b.authId).not.toBe(a.authId);
+    expect(b.ask.question).toContain(`[${b.authId}]`);
+    expect(readAuths(root).filter(r => r.question === b.ask.question).map(r => r.authId)).toEqual([b.authId]);
+    // Asked again, the fresh one is the open question (the copies stay ignored).
+    expect(pendingAuth(root, { ...o, rand: () => 0.5 })).toEqual(b);
+    hookAnswer({ cwd: root, now: () => new Date(at(1)), stdin: hookAnswerStdin({ cwd: root, session: 'design', answers: { [b.ask.question]: 'Yes, merge it into main' } }) });
+    expect(checkMofAuth(readAuths(root), { runId: 'shop-r1', target: 'main', session: null, now: Date.parse(at(2)) })).toMatchObject({ ok: true, record: { authId: b.authId } });
+    // A fresh id whose question a record already carries is not used either.
+    const root2 = tmp('forge-auth-');
+    const pre = mof({ authId: 'mof-shop-r1-zzzy', question: mofAsk('mof-shop-r1-0000', 'main', false, true).ask.question, answer: undefined, answeredAt: undefined, answeredBy: undefined });
+    writeAuth(root2, pre);
+    const c = pendingAuth(root2, { ...o, rand: () => 0 });
+    expect(c.authId).not.toBe('mof-shop-r1-0000');
+    expect(c.ask.question).not.toBe(pre.question);
   });
   it('pendingAuth never writes over a record whose id it drew again', () => {
     const root = tmp('forge-auth-');
