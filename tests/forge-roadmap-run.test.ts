@@ -4,13 +4,14 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { appendEvent } from '../src/forge/ledger.js';
-import { saveExecution, writePublicTask } from '../src/forge/execution.js';
+import { writePublicTask } from '../src/forge/execution.js';
 import { writeMember } from '../src/forge/members.js';
 import { normalizeRunSummary, RUN_SUMMARY_MAX } from '../src/lib/run-summary.js';
 import { byteLength } from '../src/lib/roadmap-doc.js';
 import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
 import { MEDIUM_T1, ROADMAP_AT } from './fixtures/roadmap-ledger.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 let root: string;
@@ -50,7 +51,7 @@ beforeEach(() => {
   writeFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'deferred.json'), JSON.stringify([{ problem: 'a' }, { problem: 'b' }]));
   appendEvent(root, { ts: ROADMAP_AT(100), kind: 'decision', point: 'safe-path', what: 'skip', chosen: 'skip', why: 'unattended', by: 'unattended', weight: 'minor', runId: RUN });
   appendEvent(root, { ts: ROADMAP_AT(190), kind: 'verdict', task: 'shop-final', dir: '.forge/work/shop/final-1', action: 'accept', score: 0.9, signature: 'f', critical: 0, important: 1, minor: 2 });
-  saveExecution(root, execution());
+  seedExecution(root, execution());
   pub('T1', 'main', 'subagents');
   pub('T2', 'ui', 'sessions');
   pub('T4', 'ui2', 'sessions');
@@ -78,7 +79,7 @@ describe('FORGE roadmap-run (G-07, G-04)', () => {
     // Run B starts after T1's two rounds and its deferred.json (both of an earlier run, MEDIUM_T1 up to minute 45).
     const deferred = path.join(root, '.forge', 'work', 'shop', 'T1', 'deferred.json');
     utimesSync(deferred, new Date(ROADMAP_AT(45)), new Date(ROADMAP_AT(45)));
-    saveExecution(root, execution({ startedAt: ROADMAP_AT(50) }));
+    seedExecution(root, execution({ startedAt: ROADMAP_AT(50) }));
     const t1 = () => JSON.parse(readFileSync(out(run(['roadmap-run', '--run', RUN], io)).write.file_path, 'utf8')).tasks[0];
     expect(t1()).toEqual({ id: 'T1', title: 'Cart', status: 'integrated', seconds: 2700 });
     // This run's own round and a deferred.json entry dated in it count; the earlier one's still do not.
@@ -115,12 +116,12 @@ describe('FORGE roadmap-run (G-07, G-04)', () => {
     expect(run(['roadmap-run', '--run', RUN, '--task', 'T1'], io).code).toBe(2);
     appendEvent(root, { ts: ROADMAP_AT(250), kind: 'triage', task: 'T8', path: 'trivial', reasons: [] });
     expect(run(['roadmap-run', '--task', 'T8'], io).code).toBe(2);
-    saveExecution(root, execution({ active: true, stopReason: null, closedAt: null, closedBy: null }));
+    seedExecution(root, execution({ active: true, stopReason: null, closedAt: null, closedBy: null }));
     expect(run(['roadmap-run', '--run', RUN], io).code).toBe(2);
   });
   it('a summary over 8 KB drops tasks from the end and says so', () => {
     const tasks = Object.fromEntries(Array.from({ length: 80 }, (_, i) => [`T${100 + i}`, task('integrated', { title: `A task with a long title number ${i} `.padEnd(190, 'x') })]));
-    saveExecution(root, execution({ tasks }));
+    seedExecution(root, execution({ tasks }));
     const r = out(run(['roadmap-run', '--run', RUN], io));
     const doc = JSON.parse(readFileSync(r.write.file_path, 'utf8'));
     expect(doc.tasks.length).toBeLessThan(60);
@@ -129,7 +130,7 @@ describe('FORGE roadmap-run (G-07, G-04)', () => {
     expect(r.dropped).toEqual(['tasks>60', `tasks:${doc.tasks.length}`]);
   });
   it('swarm close prints the summary of the run it closes, for /forge:stop to publish', () => {
-    saveExecution(root, execution({ closedAt: null, closedBy: null }));
+    seedExecution(root, execution({ closedAt: null, closedBy: null }));
     const c = out(run(['swarm', 'close'], io));
     expect(c).toMatchObject({ closed: true, runs: { write: { collection: 'runs', doc_id: RUN } } });
     expect(c.runs.cleanup.map((x: { doc_id: string }) => x.doc_id)).toEqual(['ui', 'ui2', 'ui3']);
@@ -149,7 +150,7 @@ describe('roadmap-run: the final wave\'s carry 3', () => {
   const summary = (...a: string[]) => { const r = out(run(['roadmap-run', ...a], io)); return { r, doc: JSON.parse(readFileSync(r.write.file_path, 'utf8')) }; };
   it('titles, branch and target are cleaned of control and bidi characters, by the writer and by normalizeRunSummary', () => {
     // The execution refuses such a branch on read; a title is plan text.
-    saveExecution(root, execution({ tasks: { T1: task('integrated', { title: `Ca${rlo}rt${bell}\nnow` }) } }));
+    seedExecution(root, execution({ tasks: { T1: task('integrated', { title: `Ca${rlo}rt${bell}\nnow` }) } }));
     const { doc } = summary('--run', RUN);
     expect(doc).toMatchObject({ branch: 'forge/run-shop', target: 'main', tasks: [{ id: 'T1', title: 'Cartnow' }] });
     const raw = { ...doc, branch: `x${rlo}y`, target: `a${bell}b`, tasks: [{ id: 'T1', status: 'integrated', title: `t${rlo}u` }] };
@@ -195,7 +196,7 @@ describe('roadmap-run: the final wave\'s carry 3', () => {
   it('cleanup: more than 50 executor members, never the coordinator (listed as a member or as the by of a sessions task), a running member included', () => {
     for (let i = 0; i < 52; i++) writeMember(root, { sessionId: `ex${i}`, role: 'executor', runId: RUN, task: 'T3', name: null, since: ROADMAP_AT(0), hookSession: null });
     writeMember(root, { sessionId: 'main', role: 'executor', runId: RUN, task: 'T3', name: null, since: ROADMAP_AT(0), hookSession: null });
-    saveExecution(root, execution({ tasks: { ...execution().tasks, T5: task('running', { stage: 'review', executor: 'sessions' }), T6: task('stopped', { executor: 'sessions' }) } }));
+    seedExecution(root, execution({ tasks: { ...execution().tasks, T5: task('running', { stage: 'review', executor: 'sessions' }), T6: task('stopped', { executor: 'sessions' }) } }));
     pub('T5', 'live', 'sessions');
     pub('T6', 'main', 'sessions');
     const ids = out(run(['roadmap-run', '--run', RUN], io)).cleanup.map((x: { doc_id: string }) => x.doc_id);
@@ -204,7 +205,7 @@ describe('roadmap-run: the final wave\'s carry 3', () => {
     expect(ids.filter((x: string) => /^ex\d+$/.test(x))).toHaveLength(52);
   });
   it('swarm close still closes when the summary cannot be written: runsError', () => {
-    saveExecution(root, execution({ closedAt: null, closedBy: null }));
+    seedExecution(root, execution({ closedAt: null, closedBy: null }));
     rmSync(path.join(root, '.forge', 'work', 'run'), { recursive: true, force: true });
     writeFileSync(path.join(root, '.forge', 'work', 'run'), 'not a folder');
     const c = out(run(['swarm', 'close'], io));

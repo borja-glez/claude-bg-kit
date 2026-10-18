@@ -58,7 +58,8 @@ function writeAtomic(file: string, text: string): void {
   try { writeFileSync(tmp, text); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
 }
 
-export function saveExecution(root: string, e: ExecutionState): void {
+/** I-15: private. updateExecution is the only writer of execution.json (and readExecution's one-time migration of swarm.json). */
+function saveExecution(root: string, e: ExecutionState): void {
   forgeDir(root);
   writeAtomic(executionFile(root), JSON.stringify(e, null, 2) + '\n');
 }

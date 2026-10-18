@@ -9,6 +9,7 @@ const waypoint = JSON.parse(readFileSync('plugins/waypoint/.claude-plugin/plugin
 // when plan 5a started, slowest first, and those 5a added that take longer (forge-trust, about 20 s).
 export const SLOW = [
   'tests/forge-swarm-integrate.test.ts',
+  'tests/forge-execution-lock.test.ts',
   'tests/forge-swarm-step.test.ts',
   'tests/forge-exec-cli.test.ts',
   'tests/forge-review-cli.test.ts',

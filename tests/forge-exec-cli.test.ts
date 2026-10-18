@@ -3,7 +3,7 @@ import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, utimesSync 
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { run as cli, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
-import { readExecution, saveExecution, executionTaskFile, executionLock, writePublicTask } from '../src/forge/execution.js';
+import { readExecution, executionTaskFile, executionLock, writePublicTask } from '../src/forge/execution.js';
 import { appendEvent, readStatus } from '../src/forge/ledger.js';
 import { saveRun, startRun } from '../src/forge/run.js';
 import { withJob } from '../src/forge/jobs.js';
@@ -20,6 +20,7 @@ import { normalizeRun } from '../src/page/normalize.js';
 import { mergingFile } from '../src/forge/merging.js';
 import { STEP_WAIT_SECONDS } from '../src/forge/schedule.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 // swarm start and takeover bind Claude's session id (C1). The tests run inside Claude Code, which sets
@@ -87,13 +88,13 @@ describe('forge swarm (execution)', () => {
     const at = NOW.toISOString();
     const task = (executor: 'subagents' | 'sessions' | 'manual', status: 'running' | 'integrated') =>
       ({ status, stage: 'implement' as const, round: 1, worktree: '', branch: 'task/x', executor, attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null });
-    saveExecution(root, { ...e, tasks: { T1: task('subagents', 'running'), T2: task('sessions', 'running'), T3: task('subagents', 'integrated') } });
+    seedExecution(root, { ...e, tasks: { T1: task('subagents', 'running'), T2: task('sessions', 'running'), T3: task('subagents', 'integrated') } });
     const calls: string[][] = [];
     const deps = { git: (a: string[]) => { calls.push(a); return null; }, exec: defaultExec(root), repo: repoReader(root), at: (): never => { throw new Error('no git'); } };
     expect(() => swarmCommand(['close'], io, deps)).toThrow(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
     // An active run frees nothing.
     expect(JSON.parse(swarmCommand(['status'], io, deps).stdout).publish).not.toHaveProperty('release');
-    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T2 is blocked' });
+    seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T2 is blocked' });
     // Carry 10: the release is the printed write, as forge stop prints it; the skill never composes it.
     const del = { __delete__: true };
     const free = (id: string) => ({ task: id, write: { op: 'update', collection: 'state', doc_id: id, data: { status: 'free', owner: del, claimedAt: del, startedAt: del, exec: del } } });
@@ -473,8 +474,8 @@ describe('forge swarm (execution)', () => {
     return { ...io, sleep: () => {
       if (done) return;
       done = true;
-      saveExecution(root, change(readExecution(root)!));
       rmSync(executionLock(root));
+      seedExecution(root, change(readExecution(root)!));
     } };
   };
   const onT1 = (c: Partial<ExecTask>) => (e: ExecutionState): ExecutionState => ({ ...e, tasks: { ...e.tasks, T1: { ...e.tasks.T1, ...c } } });
@@ -494,7 +495,7 @@ describe('forge swarm (execution)', () => {
     out(run(['swarm', 'worktree', 'T1'], io));
     const stall = () => {
       out(run(['swarm', 'task', 'T1', '--status', 'blocked'], io));
-      saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked' });
+      seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked' });
     };
     stall();
     // The coordinator's own retry (its Claude session, hook-main) revives it, its conversation open or not.
@@ -528,7 +529,7 @@ describe('forge swarm (execution)', () => {
   it('the retry --adopt gate holds under the lock too (R5)', () => {
     sessionsRun();
     out(run(['swarm', 'worktree', 'T1'], io));
-    saveExecution(root, onT1({ status: 'conflict', detail: 'merge conflict' })(readExecution(root)!));
+    seedExecution(root, onT1({ status: 'conflict', detail: 'merge conflict' })(readExecution(root)!));
     const r = run(['swarm', 'retry', 'T1', '--adopt', '--hook-session', 'hook-other'], meanwhile(e => ({ ...e, active: false, stopReason: 'stalled' })));
     expect(r.code).toBe(2);
     expect(r.stderr).toContain('is bound to another Claude session (hook-main, alive)');
@@ -547,7 +548,7 @@ describe('forge swarm (execution)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     out(run(['swarm', 'worktree', 'T1'], io));
     out(run(['swarm', 'task', 'T1', '--stage', 'integrate', '--status', 'blocked'], io));
-    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked' });
+    seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked' });
     out(run(['swarm', 'close'], io));
     const file = path.join(root, '.forge', 'execution.json');
     const before = readFileSync(file, 'utf8');
@@ -567,7 +568,7 @@ describe('forge swarm (execution)', () => {
   it('sleep clears sleepUntil only when a newer sleep did not replace it', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const newer = '2026-10-12T13:00:00.000Z';
-    const overlap = () => { const e = readExecution(root)!; saveExecution(root, { ...e, sleepUntil: newer }); };
+    const overlap = () => { const e = readExecution(root)!; seedExecution(root, { ...e, sleepUntil: newer }); };
     expect(run(['swarm', 'sleep', '60'], { ...io, sleep: overlap }).code).toBe(0);
     expect(readExecution(root)!.sleepUntil).toBe(newer);
     expect(run(['swarm', 'sleep', '60'], io).code).toBe(0);
@@ -618,7 +619,7 @@ describe('forge swarm (execution)', () => {
     git('branch', 'task/T2', 'forge/run-shop');
     git('worktree', 'add', mine, 'task/T2');
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, tasks: {
+    seedExecution(root, { ...e, tasks: {
       ...e.tasks,
       T1: { ...e.tasks.T1, status: 'conflict', detail: 'merge conflict with task/T1' },
       T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' },
@@ -641,7 +642,7 @@ describe('forge swarm (execution)', () => {
   it('retry --adopt takes over the task as it is under the lock: a write since its read is kept (I-15)', () => {
     sessionsRun();
     out(run(['swarm', 'worktree', 'T1'], io));
-    saveExecution(root, onT1({ status: 'conflict', detail: 'merge conflict' })(readExecution(root)!));
+    seedExecution(root, onT1({ status: 'conflict', detail: 'merge conflict' })(readExecution(root)!));
     const r = out(run(['swarm', 'retry', 'T1', '--adopt'], meanwhile(onT1({ round: 4, detail: 'merge conflict with task/T2' }))));
     expect(r).toMatchObject({ task: 'T1', adopted: true, previous: 'sessions' });
     expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', executor: 'subagents', attempts: 1, round: 4, detail: 'merge conflict with task/T2' });
@@ -650,7 +651,7 @@ describe('forge swarm (execution)', () => {
   it('retry --adopt is refused under the lock once the execution was stopped meanwhile: the task stays as it was (K2-02)', () => {
     sessionsRun();
     out(run(['swarm', 'worktree', 'T1'], io));
-    saveExecution(root, onT1({ status: 'conflict', detail: 'merge conflict' })(readExecution(root)!));
+    seedExecution(root, onT1({ status: 'conflict', detail: 'merge conflict' })(readExecution(root)!));
     const r = run(['swarm', 'retry', 'T1', '--adopt'], meanwhile(e => ({ ...e, active: false, stopReason: 'stopped' })));
     expect(r.code).toBe(2);
     expect(r.stderr).toContain('is stopped (forge stop)');
@@ -662,10 +663,10 @@ describe('forge swarm (execution)', () => {
     writeDocs(path.join(root, 'db', 'sessions'), {});
     out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io));
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, tasks: { ...e.tasks, T1: { ...e.tasks.T1, status: 'conflict' }, T2: { ...e.tasks.T2, executor: 'sessions' } } });
+    seedExecution(root, { ...e, tasks: { ...e.tasks, T1: { ...e.tasks.T1, status: 'conflict' }, T2: { ...e.tasks.T2, executor: 'sessions' } } });
     expect(run(['swarm', 'retry', 'T1', '--adopt'], io).stderr).toMatch(/--adopt takes a member's task in conflict/);
     expect(run(['swarm', 'retry', 'T2', '--adopt'], io).code).toBe(2);
-    saveExecution(root, { ...readExecution(root)!, tasks: { ...readExecution(root)!.tasks, T2: { ...e.tasks.T2, executor: 'sessions', status: 'conflict' } } });
+    seedExecution(root, { ...readExecution(root)!, tasks: { ...readExecution(root)!.tasks, T2: { ...e.tasks.T2, executor: 'sessions', status: 'conflict' } } });
     expect(run(['swarm', 'retry', 'T2', '--adopt'], io).stderr).toMatch(/task\/T2 does not exist/);
   });
   it('retry --adopt refuses with code 2 when the worktree it would take over has uncommitted edits', () => {
@@ -675,7 +676,7 @@ describe('forge swarm (execution)', () => {
     git('worktree', 'add', mine, 'task/T2');
     writeFileSync(path.join(mine, 'wip.txt'), 'unsaved');
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, tasks: { ...e.tasks, T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' } } });
+    seedExecution(root, { ...e, tasks: { ...e.tasks, T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' } } });
     const r = run(['swarm', 'retry', 'T2', '--adopt'], io);
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/uncommitted/);
@@ -689,7 +690,7 @@ describe('forge swarm (execution)', () => {
     git('branch', 'task/T2', 'forge/run-shop');
     git('worktree', 'add', mine, 'task/T2');
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, tasks: { ...e.tasks, T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' } } });
+    seedExecution(root, { ...e, tasks: { ...e.tasks, T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' } } });
     const real = defaultGit(root);
     const deps = { git: real, exec: undefined, repo: undefined, at: () => ({ git: () => null, exec: undefined, repo: undefined }) } as never;
     expect(() => swarmCommand(['retry', 'T2', '--adopt'], io, deps)).toThrow(/could not read the worktree status/);
@@ -760,7 +761,7 @@ describe('forge swarm (execution)', () => {
   it('relaunch resets startedAt and nudgedAt and the note lists commits on the task branch', () => {
     sessionsRun();
     const e0 = readExecution(root)!;
-    saveExecution(root, { ...e0, tasks: { ...e0.tasks, T1: { ...e0.tasks.T1, startedAt: '2026-10-12T00:00:00.000Z', nudgedAt: '2026-10-12T01:00:00.000Z' } } });
+    seedExecution(root, { ...e0, tasks: { ...e0.tasks, T1: { ...e0.tasks.T1, startedAt: '2026-10-12T00:00:00.000Z', nudgedAt: '2026-10-12T01:00:00.000Z' } } });
     const tree = git('rev-parse', 'forge/run-shop^{tree}');
     const sha = git('commit-tree', tree, '-p', 'forge/run-shop', '-m', 'work on t1');
     git('branch', '-f', 'task/T1', sha);
@@ -786,7 +787,7 @@ describe('forge swarm (execution)', () => {
     expect(out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io))).toMatchObject({ task: 'T1', work: '.forge/work/shop/T1' });
     // A task an earlier version started keeps its folder while its brief is there and the ledger gives it this project.
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, tasks: { ...e.tasks, T9: { ...e.tasks.T1, branch: 'task/T9', worktree: '' } } });
+    seedExecution(root, { ...e, tasks: { ...e.tasks, T9: { ...e.tasks.T1, branch: 'task/T9', worktree: '' } } });
     mkdirSync(path.join(root, '.forge', 'work', 'T9'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'work', 'T9', 'brief-1.md'), '# T9\n');
     appendEvent(root, { ts: NOW.toISOString(), kind: 'triage', task: 'T9', project: 'shop' });
@@ -798,7 +799,7 @@ describe('forge swarm (execution)', () => {
     sessionsRun();
     for (const status of ['blocked', 'accepted'] as const) {
       const e = readExecution(root)!;
-      saveExecution(root, { ...e, tasks: { ...e.tasks, T1: { ...e.tasks.T1, status } } });
+      seedExecution(root, { ...e, tasks: { ...e.tasks, T1: { ...e.tasks.T1, status } } });
       expect(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io).code).toBe(2);
     }
   });
@@ -821,7 +822,7 @@ describe('forge swarm (execution)', () => {
   it('takeover replaces a stopped coordinator and refuses a live one', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, hookSession: 'old' });
+    seedExecution(root, { ...e, hookSession: 'old' });
     mkdirSync(path.join(root, '.forge', 'live'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'live', 'old.json'), JSON.stringify({ sessionId: 'old', role: 'coordinator', runId: e.runId, task: null, event: 'Stop', ts: NOW.toISOString(), agents: [], ended: false }));
     expect(out(run(['swarm', 'takeover', '--session', 'new'], io))).toMatchObject({ took: false, previous: 'old', liveness: 'alive', joinAs: 'manual' });
@@ -837,7 +838,7 @@ describe('forge swarm (execution)', () => {
   });
   it('takeover decides by the run band\'s rule alone: an ended conversation is gone whatever its roadmap lease, which the band cannot read (--db is still accepted)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
-    saveExecution(root, { ...readExecution(root)!, hookSession: 'old' });
+    seedExecution(root, { ...readExecution(root)!, hookSession: 'old' });
     const later = { ...io, now: () => new Date(NOW.getTime() + 5 * 60000) };
     // No signal: a start 5 minutes ago with no step is alive.
     expect(out(run(['swarm', 'takeover', '--session', 'new'], later))).toMatchObject({ took: false, liveness: 'alive' });
@@ -957,7 +958,7 @@ describe('forge swarm (execution)', () => {
       out(start());
       const e = readExecution(root)!;
       const at = NOW.toISOString();
-      saveExecution(root, { ...e, active: false, stopReason: 'stopped', tasks: { 'fix-a': { status: 'running', stage: 'implement', round: 1, worktree: '', branch: 'task/fix-a', executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
+      seedExecution(root, { ...e, active: false, stopReason: 'stopped', tasks: { 'fix-a': { status: 'running', stage: 'implement', round: 1, worktree: '', branch: 'task/fix-a', executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
       expect(out(run(['swarm', 'close'], io))).toMatchObject({ closed: true, kind: 'ephemeral', release: [], members: [] });
     });
     it('start keeps the user branch, creates no run worktree and records the loose tasks', () => {
@@ -1030,7 +1031,7 @@ describe('forge swarm (execution)', () => {
       // First run: both ids end up merged into main.
       out(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', ids], io));
       finish('a', 'a1.txt'); finish('b', 'b1.txt');
-      saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
+      seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
       expect(git('branch', '--list', 'task/a')).toContain('task/a');
       // Second run reuses the same ids.
       out(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', ids], io));
@@ -1241,7 +1242,7 @@ describe('forge swarm (execution)', () => {
     it('report from a member worktree prints a publish file with an absolute path under that worktree\'s work folder; --claim refuses a status that is not running', () => {
       const e = readExecution(root)!;
       const at = NOW.toISOString();
-      saveExecution(root, { ...e, tasks: { T2: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T2', executor: 'sessions', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
+      seedExecution(root, { ...e, tasks: { T2: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T2', executor: 'sessions', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
       writeMember(root, { sessionId: 'M2', role: 'executor', runId: e.runId, task: 'T2', name: null, since: at, hookSession: null });
       const r = out(run(['swarm', 'report', 'T2', '--session', 'M2', '--stage', 'review'], wio));
       expect(path.isAbsolute(r.publish.file_path)).toBe(true);
@@ -1298,7 +1299,7 @@ describe('forge swarm (execution)', () => {
       // A flag without a value counts as absent: the member keeps the id it recorded (J-01).
       expect(out(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1', '--hook-session'], wio)).warning).toBeUndefined();
       expect(member().hookSession).toBe(HOOK);
-      saveExecution(root, { ...readExecution(root)!, hookSession: 'coord-hook' });
+      seedExecution(root, { ...readExecution(root)!, hookSession: 'coord-hook' });
       expect(run(['swarm', 'join', '--session', 'M1', '--role', 'manual', '--hook-session', 'coord-hook'], wio).code).toBe(2);
       expect(member().hookSession).toBe(HOOK);
     });
@@ -1426,7 +1427,7 @@ describe('forge stop stops the execution of the main checkout for real, from any
   it('running tasks become stopped, their leases end, the run members go, and it prints what to release', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, tasks: { T1: task('subagents'), T2: task('sessions'), T3: task('subagents', 'integrated') } });
+    seedExecution(root, { ...e, tasks: { T1: task('subagents'), T2: task('sessions'), T3: task('subagents', 'integrated') } });
     writePublicTask(root, { task: 'T1', runId: e.runId, stage: 'implement', status: 'running', agent: 'forge-impl', round: 1, since: at, updatedAt: at, leaseUntil: '2026-10-12T13:00:00.000Z', by: 'main', mode: 'subagents' });
     writeMember(root, { sessionId: 'ui', role: 'executor', runId: e.runId, task: 'T2', name: 'wp-shop-T2', since: at, hookSession: 'h2' });
     writeMember(root, { sessionId: 'old', role: 'manual', runId: 'another-run', task: null, name: null, since: at });
@@ -1483,7 +1484,7 @@ describe('forge stop stops the execution of the main checkout for real, from any
   it('names the background jobs of this run still running (the coordinator\'s, a member\'s or of no session): stop kills nothing, they finish their current step', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, tasks: { T2: task('sessions') } });
+    seedExecution(root, { ...e, tasks: { T2: task('sessions') } });
     writeMember(root, { sessionId: 'ui', role: 'executor', runId: e.runId, task: 'T2', name: 'wp-shop-T2', since: at, hookSession: 'h2' });
     const wt = path.join(root, '.claude', 'worktrees', 'run');
     const w = { ...io, cwd: wt, git: defaultGit(wt) };
@@ -1517,15 +1518,15 @@ describe('forge stop stops the execution of the main checkout for real, from any
   it('a stopped or closed execution stays as it is: swarm task (but --drop) and swarm worktree exit 2; a stalled one still takes them; no task leaves stopped', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, tasks: { T1: task('subagents'), T2: task('subagents', 'stopped') } });
+    seedExecution(root, { ...e, tasks: { T1: task('subagents'), T2: task('subagents', 'stopped') } });
     // Even in an execution that runs, a stopped task stays stopped.
     expect(run(['swarm', 'task', 'T2', '--status', 'running'], io).code).toBe(2);
     expect(readExecution(root)!.tasks.T2.status).toBe('stopped');
     // Stalled is only inactive: its tasks still move and it takes worktrees (swarm retry revives it).
-    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled' });
+    seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled' });
     expect(out(run(['swarm', 'task', 'T1', '--stage', 'validate'], io))).toMatchObject({ status: 'running', stage: 'validate' });
     expect(out(run(['swarm', 'worktree', 'T3'], io))).toHaveProperty('worktree');
-    saveExecution(root, { ...readExecution(root)!, active: true, stopReason: null });
+    seedExecution(root, { ...readExecution(root)!, active: true, stopReason: null });
     out(run(['stop'], io));
     for (const argv of [['swarm', 'task', 'T1', '--stage', 'review'], ['swarm', 'task', 'T1', '--status', 'running'], ['swarm', 'worktree', 'T2']]) {
       const r = run(argv, io);
@@ -1549,7 +1550,7 @@ describe('forge stop stops the execution of the main checkout for real, from any
     const e = readExecution(root)!;
     git('branch', 'task/T2', 'forge/run-shop');
     const tasks = { T1: { ...task('subagents'), status: 'conflict' as const }, T2: { ...task('sessions'), status: 'conflict' as const, branch: 'task/T2' } };
-    saveExecution(root, { ...e, tasks });
+    seedExecution(root, { ...e, tasks });
     out(run(['stop'], io));
     const file = path.join(root, '.forge', 'execution.json');
     const before = readFileSync(file, 'utf8');
@@ -1561,7 +1562,7 @@ describe('forge stop stops the execution of the main checkout for real, from any
     expect(readFileSync(file, 'utf8')).toBe(before);
     expect(existsSync(path.join(root, '.claude', 'worktrees', 'task-T2'))).toBe(false);
     // Stalled is only inactive: the coordinator's retry revives it.
-    saveExecution(root, { ...readExecution(root)!, stopReason: 'stalled', stallReason: 'T1 is in conflict' });
+    seedExecution(root, { ...readExecution(root)!, stopReason: 'stalled', stallReason: 'T1 is in conflict' });
     expect(run(['swarm', 'retry', 'T1', '--hook-session', 'hook-main'], io).code).toBe(0);
     expect(readExecution(root)).toMatchObject({ active: true, stopReason: null });
     expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', attempts: 1 });
@@ -1569,7 +1570,7 @@ describe('forge stop stops the execution of the main checkout for real, from any
   it('swarm close of an execution nobody stopped lists the members of its run in sessions and removes their files (K2-02)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, active: false, stopReason: 'stalled', tasks: { T2: task('sessions') } });
+    seedExecution(root, { ...e, active: false, stopReason: 'stalled', tasks: { T2: task('sessions') } });
     writeMember(root, { sessionId: 'ui', role: 'executor', runId: e.runId, task: 'T2', name: 'wp-shop-T2', since: at, hookSession: 'h2' });
     writeMember(root, { sessionId: 'old', role: 'manual', runId: 'another-run', task: null, name: null, since: at });
     expect(out(run(['swarm', 'close'], io))).toMatchObject({ closed: true, members: ['T2'], sessions: [{ sessionId: 'ui', name: 'wp-shop-T2', role: 'executor', task: 'T2' }] });
@@ -1594,7 +1595,7 @@ describe('forge stop stops the execution of the main checkout for real, from any
   it('forge stop lists and removes every member of the run, and names the jobs of each, past the 50 newest member files', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, tasks: { T2: task('sessions') } });
+    seedExecution(root, { ...e, tasks: { T2: task('sessions') } });
     const ours = crowd(e.runId);
     const wt = path.join(root, '.claude', 'worktrees', 'run');
     const w = { ...io, cwd: wt, git: defaultGit(wt) };
@@ -1608,7 +1609,7 @@ describe('forge stop stops the execution of the main checkout for real, from any
   it('swarm close lists and removes every member of the run, past the 50 newest member files', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const e = readExecution(root)!;
-    saveExecution(root, { ...e, active: false, stopReason: 'stalled', tasks: { T2: task('sessions') } });
+    seedExecution(root, { ...e, active: false, stopReason: 'stalled', tasks: { T2: task('sessions') } });
     const ours = crowd(e.runId);
     expect(sids(out(run(['swarm', 'close'], io)).sessions)).toEqual([...ours].sort());
     for (const sid of ours) expect(existsSync(memberPath(sid)), sid).toBe(false);
@@ -1670,7 +1671,7 @@ describe('rebinding a run needs the bound conversation to have stopped (wave 0 h
     expect(readExecution(root)).toMatchObject({ coordinator: 'old', hookSession: 'hook-main' });
     // Its process died (only this side checks the pid), the binding ended, or it lapsed: gone, 20 minutes after its last step.
     for (const over of [{ pid: 2147483646 }, { endedAt: at(18), endReason: 'other' }, { seenAt: at(14) }]) {
-      saveExecution(root, e0);
+      seedExecution(root, e0);
       bind(over);
       expect(out(run(['swarm', 'takeover', '--session', 'new'], after(20))), JSON.stringify(over)).toMatchObject({ took: true, previous: 'hook-main' });
     }
@@ -1687,7 +1688,7 @@ describe('rebinding a run needs the bound conversation to have stopped (wave 0 h
       const first = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
       out(run(['swarm', 'worktree', 'T1'], io));
       out(run(['swarm', 'task', 'T1', '--status', 'blocked'], io));
-      saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked', lastStepAt: at(-30) });
+      seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked', lastStepAt: at(-30) });
       return first.runId as string;
     };
     it('swarm retry from another Claude session exits 2 before any write while the bound one is alive, and revives the run once it ended', () => {
@@ -1707,7 +1708,7 @@ describe('rebinding a run needs the bound conversation to have stopped (wave 0 h
       expect(run(['swarm', 'retry', 'T1', '--hook-session', 'hook-main'], io).code).toBe(0);
       expect(readExecution(root)).toMatchObject({ active: true, stopReason: null });
       // Its conversation ended: another session's retry revives the run.
-      saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', tasks: { ...readExecution(root)!.tasks, T1: { ...readExecution(root)!.tasks.T1, status: 'blocked' } } });
+      seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', tasks: { ...readExecution(root)!.tasks, T1: { ...readExecution(root)!.tasks.T1, status: 'blocked' } } });
       bind({ endedAt: at(-1), endReason: 'other' });
       expect(run(['swarm', 'retry', 'T1', '--hook-session', 'hook-other'], io).code).toBe(0);
       expect(readExecution(root)).toMatchObject({ active: true, stopReason: null, hookSession: 'hook-main' });
@@ -1716,7 +1717,7 @@ describe('rebinding a run needs the bound conversation to have stopped (wave 0 h
     it("after /clear the coordinator's own conversation takes its stalled run up at once: the SessionEnd of its bound session ends its signal (R4, M4)", () => {
       stalled();
       // Its last step 2 minutes ago: by the step clock alone it would hold the run for 10 more minutes.
-      saveExecution(root, { ...readExecution(root)!, lastStepAt: at(-2) });
+      seedExecution(root, { ...readExecution(root)!, lastStepAt: at(-2) });
       const ended = (sid: string) => run(['hook', 'live'], { ...io, stdin: JSON.stringify({ session_id: sid, hook_event_name: 'SessionEnd', reason: 'clear' }) });
       // Another session's end says nothing of the coordinator: the run stays held.
       ended('hook-x');
@@ -1750,7 +1751,7 @@ describe('rebinding a run needs the bound conversation to have stopped (wave 0 h
       expect(out(run(['swarm', 'takeover', '--session', 'other-sid', '--hook-session', 'hook-other'], io))).toMatchObject({ took: false, previous: 'hook-main' });
       // A tick stalls it again: another CSID's retry is still refused.
       const e = readExecution(root)!;
-      saveExecution(root, { ...e, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked', tasks: { ...e.tasks, T1: { ...e.tasks.T1, status: 'blocked' } } });
+      seedExecution(root, { ...e, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked', tasks: { ...e.tasks, T1: { ...e.tasks.T1, status: 'blocked' } } });
       expect(run(['swarm', 'retry', 'T1', '--hook-session', 'hook-other'], io).code).toBe(2);
     });
     it('swarm status prints the coordinator of a run that is not closed, with its liveness as if it were active', () => {
@@ -1760,7 +1761,7 @@ describe('rebinding a run needs the bound conversation to have stopped (wave 0 h
       bind({ endedAt: at(-1), endReason: 'other' });
       expect(out(run(['swarm', 'status'], io)).coordinator).toEqual({ hookSession: 'hook-main', liveness: 'stopped' });
       // An unbound run has no coordinator on it.
-      saveExecution(root, { ...readExecution(root)!, hookSession: null });
+      seedExecution(root, { ...readExecution(root)!, hookSession: null });
       expect(out(run(['swarm', 'status'], io)).coordinator).toEqual({ hookSession: null, liveness: 'stopped' });
       out(run(['swarm', 'close'], io));
       expect(out(run(['swarm', 'status'], io))).not.toHaveProperty('coordinator');
@@ -1769,14 +1770,14 @@ describe('rebinding a run needs the bound conversation to have stopped (wave 0 h
   it('an active run no session is bound to has lost its coordinator at once: swarm takeover from another SID takes it (final review, item 9)', () => {
     const first = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const twoMinAgo = new Date(NOW.getTime() - 2 * 60000).toISOString();
-    saveExecution(root, { ...readExecution(root)!, hookSession: null, lastStepAt: twoMinAgo });
+    seedExecution(root, { ...readExecution(root)!, hookSession: null, lastStepAt: twoMinAgo });
     expect(out(run(['swarm', 'takeover', '--session', 'other-sid', '--hook-session', 'hook-new'], io))).toMatchObject({ took: true, previous: 'main', runId: first.runId });
     expect(readExecution(root)).toMatchObject({ coordinator: 'other-sid', hookSession: 'hook-new' });
   });
   it('swarm status and infinite status say when no session drives the active run (§4.6)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     expect(out(run(['swarm', 'status'], io))).not.toHaveProperty('unbound');
-    saveExecution(root, { ...readExecution(root)!, hookSession: null });
+    seedExecution(root, { ...readExecution(root)!, hookSession: null });
     const warning = 'no session is bound to it: run /forge:run --resume (or /forge:infinite) in the session that should drive it';
     expect(out(run(['swarm', 'status'], io))).toMatchObject({ unbound: true, warning });
     saveRun(root, { ...startRun(NOW, { cycles: 2 }), sessionId: null });
@@ -1798,7 +1799,7 @@ describe('an ephemeral run is closed by the tick that finishes it (wave 0 handof
   };
   it('finished: closed with closedBy merge, since its work is in the branch already', () => {
     const e = startLoose();
-    saveExecution(root, { ...e, tasks: loose('integrated') });
+    seedExecution(root, { ...e, tasks: loose('integrated') });
     expect(out(run(['swarm', 'tick'], io)).actions).toContainEqual({ type: 'finish' });
     expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'finished', closedAt: at, closedBy: 'merge' });
   });
@@ -1806,13 +1807,13 @@ describe('an ephemeral run is closed by the tick that finishes it (wave 0 handof
     const e = startLoose();
     const first = new Date(NOW.getTime() - 60000).toISOString();
     // The state a concurrent tick that finished and closed the run first leaves under the lock.
-    saveExecution(root, { ...e, tasks: loose('integrated'), closedAt: first, closedBy: 'merge' });
+    seedExecution(root, { ...e, tasks: loose('integrated'), closedAt: first, closedBy: 'merge' });
     out(run(['swarm', 'tick'], io));
     expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'finished', closedAt: first, closedBy: 'merge' });
   });
   it('stalled: it stays open until /forge:stop', () => {
     const e = startLoose();
-    saveExecution(root, { ...e, tasks: loose('blocked') });
+    seedExecution(root, { ...e, tasks: loose('blocked') });
     out(run(['swarm', 'tick'], io));
     expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stalled', closedAt: null });
   });
@@ -1977,7 +1978,7 @@ describe('the swarm commands print the state/T write the CLI builds (J-15)', () 
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const e = readExecution(root)!;
     const at = NOW.toISOString();
-    saveExecution(root, { ...e, tasks: { T2: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T2', executor: 'sessions', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
+    seedExecution(root, { ...e, tasks: { T2: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T2', executor: 'sessions', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
     writeMember(root, { sessionId: 'ui', role: 'executor', runId: e.runId, task: 'T2', name: 'wp-shop-T2', since: at, hookSession: 'h2' });
     const r = out(run(['swarm', 'report', 'T2', '--session', 'ui', '--stage', 'review', '--claim'], io));
     expect(doc(r.publish)).toMatchObject({ status: 'in_progress', owner: 'ui', forge: { v: 2, stage: 'review' }, exec: { runId: e.runId, mode: 'sessions', by: 'ui', stage: 'review' } });

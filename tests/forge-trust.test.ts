@@ -5,12 +5,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { parseConfig } from '../src/forge/config.js';
-import { readExecution, runWorktree, saveExecution, taskWorktree } from '../src/forge/execution.js';
+import { readExecution, runWorktree, taskWorktree } from '../src/forge/execution.js';
 import { assumeTrustedForTests, commandsHash, configCommands, readTrust, trustAsk, trustFile, trustOf, trustPlace } from '../src/forge/trust.js';
 import type { ExecTask } from '../src/lib/execution-state.js';
 import { walk } from './helpers/files.js';
 import { hookAnswerStdin } from './helpers/hook-answer.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 
 const tmp = useTempDirs();
 const NOW = new Date('2026-10-16T10:00:00.000Z');
@@ -138,7 +139,7 @@ describe('trusting the commands of .forge/config.yaml (I-03)', () => {
     const first = tick();
     expect(first.actions).toEqual([expect.objectContaining({ type: 'stalled', reason: 'untrusted-commands', note: true, trust: expect.objectContaining({ state: 'changed', cwd: root }) })]);
     expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stalled', stallReason: 'untrusted-commands' });
-    saveExecution(root, { ...readExecution(root)!, active: true, stopReason: null, stallReason: null });
+    seedExecution(root, { ...readExecution(root)!, active: true, stopReason: null, stallReason: null });
     expect(tick().actions[0]).toMatchObject({ type: 'stalled', note: false });
   });
   it('a hand-edited or broken commands record counts as no answer; one with the shape of the spec counts', () => {
@@ -331,7 +332,7 @@ describe('the other commands that run them, without trust (I-03)', () => {
     expect(existsSync(taskWorktree(root, 't1'))).toBe(false);
     const tips = () => [git(root, 'rev-parse', 'forge/run-shop'), git(root, 'rev-parse', 'forge/base')];
     const before = tips();
-    saveExecution(root, { ...readExecution(root)!, tasks: { t1: task({ branch: 'forge/base' }) } });
+    seedExecution(root, { ...readExecution(root)!, tasks: { t1: task({ branch: 'forge/base' }) } });
     expect(run(['swarm', 'integrate', 't1']).code).toBe(2);
     expect(run(['swarm', 'merge']).code).toBe(2);
     expect(tips()).toEqual(before);
@@ -359,7 +360,7 @@ describe('the other commands that run them, without trust (I-03)', () => {
     config(wt, `${UNIT}  - name: evil\n    cmd: node -e "require('fs').writeFileSync('pwned', '')"\n`);
     git(wt, 'commit', '-qam', 'a new validator');
     const tip = git(root, 'rev-parse', 'forge/run-shop');
-    saveExecution(root, { ...readExecution(root)!, tasks: { t1: task({ worktree: wt }) } });
+    seedExecution(root, { ...readExecution(root)!, tasks: { t1: task({ worktree: wt }) } });
     const r = out(run(['swarm', 'integrate', 't1']));
     expect(r.result).toBe('conflict');
     expect(r.detail).toContain('not trusted on this machine (changed)');

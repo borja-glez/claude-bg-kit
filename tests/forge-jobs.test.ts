@@ -4,9 +4,9 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { jobsDir, liveJobs, withJob, slotFor, normalizeJob, JOB_MAX_AGE_MS, SLOT_POLL_MS, type JobDoc } from '../src/forge/jobs.js';
 import { run, type Io } from '../src/forge/cli/run.js';
-import { saveExecution } from '../src/forge/execution.js';
 import { readEvents } from '../src/forge/ledger.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 let root: string;
@@ -74,7 +74,7 @@ describe('jobs (C-03)', () => {
 
 describe('the forge Stop hook and the jobs (C-03, Review Focus 2)', () => {
   it('a live job of the coordinator\'s session, or of none, holds the block back; one of another session or whose process died does not', () => {
-    saveExecution(root, {
+    seedExecution(root, {
       runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
       coordinator: 'main', hookSession: 's1', active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {},
     });
@@ -91,7 +91,7 @@ describe('the forge Stop hook and the jobs (C-03, Review Focus 2)', () => {
     expect(jobFiles()).toEqual([]);
   });
   it('waits about 2 s for an execution.lock a live process holds, then lets the session stop without blocking or writing', () => {
-    saveExecution(root, {
+    seedExecution(root, {
       runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
       coordinator: 'main', hookSession: 's1', active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {},
     });

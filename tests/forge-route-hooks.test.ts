@@ -4,11 +4,11 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { inForgeWorktree, looksLikeCoding, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
 import { listRoutes, readRoute, writeRoute } from '../src/forge/route.js';
-import { saveExecution } from '../src/forge/execution.js';
 import { writeMember } from '../src/forge/members.js';
 import { saveRun, startRun } from '../src/forge/run.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 const NOW = new Date('2026-10-13T10:00:00.000Z');
@@ -96,7 +96,7 @@ describe('forge hook route-session and route-prompt', () => {
     // An invalid local value is ignored, so forge routes again.
     personal('workflow: maybe\n');
     expect(hook('route-prompt', PROMPT).stdout).not.toBe('');
-    saveExecution(root, {
+    seedExecution(root, {
       runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
       coordinator: 'main', hookSession: 'S1', active: true, stopReason: null, stallReason: null, startedAt: NOW.toISOString(), lastStepAt: null,
       lastBlockStep: null, sleepUntil: null, tasks: {},

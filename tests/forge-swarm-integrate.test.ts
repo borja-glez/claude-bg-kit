@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { run, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
 import { swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
-import { readExecution, saveExecution } from '../src/forge/execution.js';
+import { readExecution } from '../src/forge/execution.js';
 import { readLocal } from '../src/forge/local.js';
 import { readEvents } from '../src/forge/ledger.js';
 import { loadConfig } from '../src/forge/config.js';
@@ -13,6 +13,7 @@ import { mergingFile, readMerging, readMergingFile, removeMergingIf, takeMerging
 import { authDir, mergeAsk, readAuths, useAuth, writeAuth, type AuthRecord } from '../src/forge/auth.js';
 import { hookAnswerStdin } from './helpers/hook-answer.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 let root: string;
@@ -78,7 +79,7 @@ describe('forge swarm integrate (into the run branch)', () => {
   it('merge closes the ended execution it merged; needs-authorization closes nothing (C2, D-05)', () => {
     accept('T1', 'a.txt', 'a\n');
     out(run(['swarm', 'integrate', 'T1'], io));
-    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
+    seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
     expect(out(run(['swarm', 'merge'], io))).toMatchObject({ result: 'needs-authorization' });
     expect(readExecution(root)!.closedAt).toBeNull();
     expect(out(mergeYes())).toMatchObject({ result: 'merged', closed: true });
@@ -790,7 +791,7 @@ describe('forge swarm integrate (into the run branch)', () => {
       forge: { v: 2, stage: 'done', integration: { branch: 'forge/run-shop', sha: r.sha, merged: false, target: 'main' } },
     });
     expect(r.metrics).toEqual({ op: 'update', collection: 'meta', doc_id: 'metrics', data: { lastCommit: { sha: r.sha, ts: r.commit.ts }, updatedAt: '2026-10-12T12:00:00.000Z' } });
-    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
+    seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
     const m = out(mergeYes());
     expect(m.publish).toHaveLength(1);
     const merged = JSON.parse(readFileSync(m.publish[0].file_path, 'utf8'));
@@ -802,7 +803,7 @@ describe('forge swarm integrate (into the run branch)', () => {
     accept('T2', 'b.txt', 'b\n');
     out(run(['swarm', 'integrate', 'T1'], io));
     out(run(['swarm', 'integrate', 'T2'], io));
-    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
+    seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
     const work = path.join(root, '.forge', 'work', 'shop', 'T2');
     rmSync(work, { recursive: true, force: true });
     writeFileSync(work, 'not a folder');
@@ -1094,7 +1095,7 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
   it('into a branch of forge (forge/infinite-…) it merges without a question', () => {
     finished();
     git('checkout', '-q', '-b', 'forge/infinite-20261012');
-    saveExecution(root, { ...readExecution(root)!, base: 'forge/infinite-20261012' });
+    seedExecution(root, { ...readExecution(root)!, base: 'forge/infinite-20261012' });
     expect(merge([])).toMatchObject({ result: 'merged' });
     expect(git('log', '-1', '--format=%s')).toBe('forge: merge forge/run-shop');
   });
@@ -1182,12 +1183,12 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
   };
   it('a yes to the start question allows the one final merge of the finished run once its final review accepts: none before, none after', () => {
     finished();
-    saveExecution(root, { ...readExecution(root)!, mergeOnFinish: true });
+    seedExecution(root, { ...readExecution(root)!, mergeOnFinish: true });
     // Active: the run has not finished, so the merge asks as any other does.
     expect(merge([])).toMatchObject({ result: 'needs-authorization' });
-    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stopped' });
+    seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stopped' });
     expect(merge([])).toMatchObject({ result: 'needs-authorization' });
-    saveExecution(root, { ...readExecution(root)!, stopReason: 'finished' });
+    seedExecution(root, { ...readExecution(root)!, stopReason: 'finished' });
     // Finished, but no final review yet, then one that asks for a fix: it asks, and keeps the start yes for later.
     expect(merge([])).toMatchObject({ result: 'needs-authorization' });
     expect(finalReview(false)).toBe('fix');
@@ -1212,7 +1213,7 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     expect(finalReview(true)).toBe('accept');
     accept('T2', 'b.txt', 'b\n');
     expect(out(run(['swarm', 'integrate', 'T2'], when('12:05')))).toMatchObject({ result: 'integrated' });
-    saveExecution(root, { ...readExecution(root)!, mergeOnFinish: true, active: false, stopReason: 'finished' });
+    seedExecution(root, { ...readExecution(root)!, mergeOnFinish: true, active: false, stopReason: 'finished' });
     expect(merge([], when('12:06'))).toMatchObject({ result: 'needs-authorization' });
     expect(finalReview(true, when('12:07'))).toBe('accept');
     expect(merge([], when('12:08'))).toMatchObject({ result: 'merged', closed: true });
@@ -1221,11 +1222,11 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
   it('the merge on finish is claimed under the lock: a run another merge claimed since it was read asks its question', () => {
     finished();
     expect(finalReview(true)).toBe('accept');
-    saveExecution(root, { ...readExecution(root)!, mergeOnFinish: true, active: false, stopReason: 'finished' });
+    seedExecution(root, { ...readExecution(root)!, mergeOnFinish: true, active: false, stopReason: 'finished' });
     const mainGit = defaultGit(root);
     // Another merge of the run claims it while this one reads which branch the main checkout is on.
     const deps: SwarmDeps = {
-      git: a => { if (a[0] === 'rev-parse' && a[1] === '--abbrev-ref') saveExecution(root, { ...readExecution(root)!, mergeOnFinish: false }); return mainGit(a); },
+      git: a => { if (a[0] === 'rev-parse' && a[1] === '--abbrev-ref') seedExecution(root, { ...readExecution(root)!, mergeOnFinish: false }); return mainGit(a); },
       exec: defaultExec(root), repo: repoReader(root), at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
     };
     expect(out(swarmCommand(['merge', '--hook-session', 'hook-main'], io, deps))).toMatchObject({ result: 'needs-authorization' });

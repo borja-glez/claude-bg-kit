@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { readExecution, saveExecution, executionFile, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, updateExecution, executionLock, LOCK_STALE_MS, createIfAbsent } from '../src/forge/execution.js';
+import { fileURLToPath } from 'node:url';
+import { readExecution, executionFile, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, updateExecution, executionLock, LOCK_STALE_MS, createIfAbsent } from '../src/forge/execution.js';
 import { run } from '../src/forge/cli/run.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 let root: string;
@@ -22,7 +24,7 @@ describe('execution store', () => {
   it('is null without a file and round-trips a saved state', () => {
     expect(readExecution(root)).toBeNull();
     const e = { runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false, coordinator: 'main', hookSession: null, active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {} } as const;
-    saveExecution(root, { ...e, tasks: {} });
+    seedExecution(root, { ...e, tasks: {} });
     expect(readExecution(root)).toEqual({ ...e, tasks: {}, closedAt: null, closedBy: null });
   });
   it('migrates an active swarm.json once: stopped, renamed, never relaunched', () => {
@@ -55,7 +57,7 @@ describe('updateExecution and execution.lock (I-15)', () => {
   const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid!;
 
   it('reads the execution as it is now, writes what fn returns and releases the lock', () => {
-    saveExecution(root, e());
+    seedExecution(root, e());
     expect(updateExecution(root, cur => cur && { ...cur, parallel: 2 }, { now })?.parallel).toBe(2);
     expect(readExecution(root)?.parallel).toBe(2);
     expect(existsSync(executionLock(root))).toBe(false);
@@ -63,12 +65,12 @@ describe('updateExecution and execution.lock (I-15)', () => {
     expect(readExecution(root)?.parallel).toBe(2);
   });
   it('releases the lock when fn throws', () => {
-    saveExecution(root, e());
+    seedExecution(root, e());
     expect(() => updateExecution(root, () => { throw new Error('boom'); }, { now })).toThrow('boom');
     expect(existsSync(executionLock(root))).toBe(false);
   });
   it('waits for a lock a live process holds and goes on once it is released', () => {
-    saveExecution(root, e());
+    seedExecution(root, e());
     lock({ pid: process.pid, at: T });
     let waits = 0;
     const sleep = () => { waits++; if (waits === 3) rmSync(executionLock(root)); };
@@ -77,7 +79,7 @@ describe('updateExecution and execution.lock (I-15)', () => {
     expect(readExecution(root)?.parallel).toBe(1);
   });
   it('takes over a lock whose pid died, one older than 30 s and one left empty that long (Review Focus 1)', () => {
-    saveExecution(root, e());
+    seedExecution(root, e());
     let waits = 0;
     const sleep = () => { waits++; };
     lock({ pid: deadPid(), at: T });
@@ -90,7 +92,7 @@ describe('updateExecution and execution.lock (I-15)', () => {
     expect(existsSync(executionLock(root))).toBe(false);
   });
   it('gives up after 10 s of a live lock with a usage error that names its pid; the CLI exits 2 and writes nothing', () => {
-    saveExecution(root, e());
+    seedExecution(root, e());
     const before = readFileSync(executionFile(root), 'utf8');
     lock({ pid: process.pid, at: T });
     let waits = 0;
@@ -100,7 +102,7 @@ describe('updateExecution and execution.lock (I-15)', () => {
     expect(readFileSync(executionFile(root), 'utf8')).toBe(before);
   });
   it('a stale lock that changed since it was read is not removed: the new holder keeps it and the caller waits for it', () => {
-    saveExecution(root, e());
+    seedExecution(root, e());
     lock({ pid: 999_999_991, at: T });
     const fresher = JSON.stringify({ pid: 999_999_992, at: T });
     let waits = 0;
@@ -112,7 +114,7 @@ describe('updateExecution and execution.lock (I-15)', () => {
     expect(readExecution(root)?.parallel).toBe(1);
   });
   it('a takeover is serialized by execution.lock.takeover: while another process holds it the lock is not removed; one left behind 30 s is cleared', () => {
-    saveExecution(root, e());
+    seedExecution(root, e());
     const gate = `${executionLock(root)}.takeover`;
     lock({ pid: 999_999_991, at: T });
     writeFileSync(gate, JSON.stringify({ pid: 999_999_993, at: T }));
@@ -128,13 +130,13 @@ describe('updateExecution and execution.lock (I-15)', () => {
     expect(existsSync(executionLock(root))).toBe(false);
   });
   it('releases only its own lock: one another process took over meanwhile stays', () => {
-    saveExecution(root, e());
+    seedExecution(root, e());
     const other = JSON.stringify({ pid: 999_999_994, at: T });
     updateExecution(root, cur => { lock(other); return cur; }, { now });
     expect(readFileSync(executionLock(root), 'utf8')).toBe(other);
   });
   it('waitMs bounds the wait for a live lock (the Stop hook waits about 2 s)', () => {
-    saveExecution(root, e());
+    seedExecution(root, e());
     lock({ pid: process.pid, at: T });
     let waits = 0;
     expect(() => updateExecution(root, cur => cur, { now, sleep: () => { waits++; }, waitMs: 2000 })).toThrow(`execution.json is locked by ${process.pid}`);
@@ -146,9 +148,18 @@ describe('updateExecution and execution.lock (I-15)', () => {
     expect(readFileSync(executionFile(root), 'utf8')).toBe('{"a":1}\n');
     expect(readdirSync(path.join(root, '.forge')).filter(f => f.includes('.tmp'))).toEqual([]);
   });
-  it('no command writes execution.json without the lock: no saveExecution( left in the CLI or the live hook', () => {
-    for (const f of ['src/forge/cli/swarm.ts', 'src/forge/cli/run.ts', 'src/forge/cli/review.ts', 'src/forge/cli/step.ts', 'src/forge/live.ts']) {
-      expect(readFileSync(new URL(`../${f}`, import.meta.url), 'utf8'), f).not.toMatch(/\bsaveExecution\(/);
-    }
+  it('the raw writer of execution.json is private to src/forge/execution.ts: not exported, and no other file of src/ or tests/ names it (I-15)', async () => {
+    const name = 'save' + 'Execution';
+    expect(Object.keys(await import('../src/forge/execution.js'))).not.toContain(name);
+    const repo = fileURLToPath(new URL('..', import.meta.url));
+    const walk = (dir: string): string[] => readdirSync(dir).flatMap(n => {
+      const p = path.join(dir, n);
+      return statSync(p).isDirectory() ? walk(p) : [p];
+    });
+    const own = path.join(repo, 'src', 'forge', 'execution.ts');
+    const named = ['src', 'tests'].flatMap(d => walk(path.join(repo, d)))
+      .filter(f => /\.(ts|tsx|mts|mjs)$/.test(f) && f !== own && readFileSync(f, 'utf8').includes(name))
+      .map(f => path.relative(repo, f).split(path.sep).join('/'));
+    expect(named).toEqual([]);
   });
 });

@@ -5,8 +5,8 @@ import path from 'node:path';
 import { addDecision, allDecisions, decisionsFile, listDecisions, readDecisionsDoc, renderDecisionsMd, DecisionInputError } from '../src/forge/decisions.js';
 import { appendEvent, readEvents, withEventContext } from '../src/forge/ledger.js';
 import { run, type Io } from '../src/forge/cli/run.js';
-import { saveExecution } from '../src/forge/execution.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 let root: string;
@@ -116,7 +116,7 @@ describe('forge decision CLI', () => {
     expect(run(['decision', 'show', 'x'], io).code).toBe(2);
   });
   it('add takes the run of the active execution', () => {
-    saveExecution(root, {
+    seedExecution(root, {
       runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
       coordinator: 'main', hookSession: null, active: true, stopReason: null, stallReason: null, startedAt: at(0), lastStepAt: null,
       lastBlockStep: null, sleepUntil: null, tasks: {},

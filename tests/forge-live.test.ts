@@ -4,12 +4,13 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { nextLive, liveFile } from '../src/forge/live.js';
-import { saveExecution, readExecution, writePublicTask, executionTaskFile } from '../src/forge/execution.js';
+import { readExecution, writePublicTask, executionTaskFile } from '../src/forge/execution.js';
 import { writeMember } from '../src/forge/members.js';
 import { saveRun, startRun } from '../src/forge/run.js';
 import { executionFromFiles } from '../src/lens/model.js';
 import { buildBandModel } from '../src/mod/model.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 const T = '2026-10-12T12:00:00.000Z';
@@ -44,7 +45,7 @@ describe('forge hook live', () => {
     io = { cwd: root, now: () => new Date(T), git: defaultGit(root), env: {} };
   });
   const hook = (input: object) => run(['hook', 'live'], { ...io, stdin: JSON.stringify(input) });
-  const exec = (over: object = {}) => saveExecution(root, {
+  const exec = (over: object = {}) => seedExecution(root, {
     runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
     coordinator: 'main', hookSession: 's1', active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, ...over,
   });

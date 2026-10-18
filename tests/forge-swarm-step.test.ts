@@ -3,11 +3,12 @@ import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, readdirSync
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
-import { readExecution, saveExecution } from '../src/forge/execution.js';
+import { readExecution } from '../src/forge/execution.js';
 import * as ledger from '../src/forge/ledger.js';
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { publishOf, swarmStep, stepSay } from '../src/forge/cli/step.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 const spyOrig = ledger.readEvents;
@@ -526,7 +527,7 @@ describe('swarm step: a member task adopted after a conflict (I3)', () => {
     g(root, 'branch', 'task/T1', 'forge/run-shop');
     const e = readExecution(root)!;
     const iso = NOW.toISOString();
-    saveExecution(root, { ...e, tasks: { T1: { status: 'conflict', stage: 'integrate', round: 1, worktree: '', branch: 'task/T1', executor: 'manual', attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: 'conflict', title: 'T1' } } });
+    seedExecution(root, { ...e, tasks: { T1: { status: 'conflict', stage: 'integrate', round: 1, worktree: '', branch: 'task/T1', executor: 'manual', attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: 'conflict', title: 'T1' } } });
     const adopted = out(run(['swarm', 'retry', 'T1', '--adopt'], io));
     // D-08: adopt prints the task's work folder, where the coordinator writes its brief.
     expect(adopted.work).toBe('.forge/work/shop/T1');

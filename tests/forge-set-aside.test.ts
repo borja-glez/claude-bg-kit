@@ -4,11 +4,11 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { run, defaultExec, defaultGit, repoReader, type Io } from '../src/forge/cli/run.js';
 import { swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
-import { saveExecution } from '../src/forge/execution.js';
 import { appendEvent } from '../src/forge/ledger.js';
 import { keepEvidence } from '../src/forge/evidence-copy.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 // Carry 3 and its residuals: a new execution of a plan task (run B) restarts brief 1 in the same work folder, and the
@@ -54,7 +54,7 @@ beforeEach(() => {
   g(root, 'branch', 'forge/run-shop');
   wt = path.join(root, '.claude', 'worktrees', 'task-T1');
   g(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt, 'forge/run-shop');
-  saveExecution(root, exec());
+  seedExecution(root, exec());
 });
 afterEach(() => { try { g(root, 'worktree', 'prune'); } catch { /* ignore */ } });
 
@@ -69,7 +69,7 @@ describe('readers keyed by a round folder see only this execution (R3, M3)', () 
     appendEvent(root, { ts: at(2), kind: 'verdict', task: 'T1-1', dir, action: 'accept', score: 0.9, project: 'shop' });
     expect(last().verdict).toMatchObject({ ts: at(2), action: 'accept' });
     // Outside the execution that holds the task, the whole ledger counts, as before.
-    saveExecution(root, exec({ tasks: {} }));
+    seedExecution(root, exec({ tasks: {} }));
     expect(last()).toMatchObject({ round: { ts: at(-59) } });
   });
   it("prep sets aside the root-level files of the rounds it moves: B's round never overwrites A's findings", () => {
@@ -176,7 +176,7 @@ describe('an earlier run\'s evidence is never overwritten nor lost (R1, M1)', ()
     expect(read(W(root, 'earlier-shop-B', 'reviews-1-1', 'verify.json'))).toBe('"A"');
     // Once B ended, cleanup copies what the worktree holds, its set-aside rounds included, before it removes it.
     rmSync(W(root, 'earlier-shop-B'), { recursive: true });
-    saveExecution(root, exec({ active: false, stopReason: 'finished', closedAt: at(5), closedBy: 'merge' }));
+    seedExecution(root, exec({ active: false, stopReason: 'finished', closedAt: at(5), closedBy: 'merge' }));
     const out = JSON.parse(swarmCommand(['cleanup'], io(root, 10), deps()).stdout);
     expect(out.removed.worktrees).toContain('.claude/worktrees/task-T1');
     expect(existsSync(wt)).toBe(false);

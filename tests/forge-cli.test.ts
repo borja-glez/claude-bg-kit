@@ -11,9 +11,9 @@ import { saveProposal, loadProposals, saveApproval, loadApproval, loadApprovals 
 import { proposalDigest, type ProposalDoc, type ApprovalDoc } from '../src/lib/proposals.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { parseStatus } from '../src/forge/tree.js';
-import { saveExecution } from '../src/forge/execution.js';
 import { LEASE_MINUTES } from '../src/lib/coordination.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 // infinite start binds Claude's session id (C1, K5-03). The tests run inside Claude Code, which sets
@@ -2614,7 +2614,7 @@ describe('every event a command writes carries its session, run and project (C4)
     expect(log('T1-1').code).toBe(0);
     expect(readEvents(root).at(-1)).toMatchObject({ task: 'T1-1', session: 'c1', project: 'shop' });
     expect(readEvents(root).at(-1)).not.toHaveProperty('runId');
-    saveExecution(root, {
+    seedExecution(root, {
       runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
       coordinator: 'main', hookSession: 'h1', active: true, stopReason: null, stallReason: null, startedAt: at, lastStepAt: null, lastBlockStep: null, sleepUntil: null,
       tasks: { T1: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T1', executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } },
@@ -2636,7 +2636,7 @@ describe('every event a command writes carries its session, run and project (C4)
   });
   it('an ephemeral run stamps its loose tasks\' events, never a plan task\'s of the same id', () => {
     const at = '2026-10-11T09:00:00.000Z';
-    saveExecution(root, {
+    seedExecution(root, {
       runId: 'e1', kind: 'ephemeral', mode: 'subagents', parallel: 3, project: 'loose', base: 'main', branch: 'main', mergeOnFinish: false,
       coordinator: 'main', hookSession: 'h1', active: true, stopReason: null, stallReason: null, startedAt: at, lastStepAt: null, lastBlockStep: null, sleepUntil: null,
       tasks: { L1: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/L1', executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } },

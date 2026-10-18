@@ -6,12 +6,13 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { appendEvent } from '../src/forge/ledger.js';
-import { saveExecution, writePublicTask } from '../src/forge/execution.js';
+import { writePublicTask } from '../src/forge/execution.js';
 import { normalizeForgeV1, normalizeInfinite, normalizeRun, normalizeRunSummary, normalizeState } from '../src/page/normalize.js';
 import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
 import { MEDIUM_T1, ROADMAP_AT, largeWithDeferred, writeVerify } from './fixtures/roadmap-ledger.js';
 import { hookAnswerStdin } from './helpers/hook-answer.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 let root: string;
@@ -71,7 +72,7 @@ beforeEach(() => {
     { path: `${work}/evidence/1-2/01-home.png`, id: 'a1', url: 'https://claude.ai/_blob/a1' },
     { path: `${work}/evidence/1-2/02-cart.png`, id: 'a2', url: 'https://claude.ai/_blob/a2' },
   ]));
-  saveExecution(root, execution());
+  seedExecution(root, execution());
   writePublicTask(root, { task: 'T4', runId: RUN, stage: 'implement', status: 'running', agent: 'forge-impl', round: 1, since: ROADMAP_AT(170), updatedAt: ROADMAP_AT(170), leaseUntil: ROADMAP_AT(400), by: 'main', mode: 'subagents' });
   out(run(['roadmap-doc', 'T1', '--project', 'shop', '--assets', 'up.json'], io));
 });
@@ -113,7 +114,7 @@ describe('the roadmap contract (C7, wave 4)', () => {
     const d = drops();
     const runDoc = out(run(['swarm', 'status'], io)).publish.run;
     expect(normalizeRun(runDoc, d.rep)).toEqual(runDoc);
-    saveExecution(root, execution({ active: false, stopReason: 'stopped', closedAt: ROADMAP_AT(250), closedBy: 'close' }));
+    seedExecution(root, execution({ active: false, stopReason: 'stopped', closedAt: ROADMAP_AT(250), closedBy: 'close' }));
     const summary = JSON.parse(readFileSync(out(run(['roadmap-run', '--run', RUN], io)).write.file_path, 'utf8'));
     expect(normalizeRunSummary(summary, d.rep)).toEqual(summary);
     const infinite = out(run(['infinite', 'start', '--cycles', '2', '--session', 'c1'], io)).publish.infinite;
@@ -161,7 +162,7 @@ describe('the roadmap contract (C7, wave 4)', () => {
     const closed = out(run(['swarm', 'close'], io));
     expect(closed.release).toEqual(ended.publish.release);
     walk(closed);
-    saveExecution(root, execution({ active: false, stopReason: 'stopped', closedAt: ROADMAP_AT(250), closedBy: 'close' }));
+    seedExecution(root, execution({ active: false, stopReason: 'stopped', closedAt: ROADMAP_AT(250), closedBy: 'close' }));
     walk(out(run(['roadmap-run', '--run', RUN], io)));
     // meta/metrics: an integrate in a run of its own.
     const root2 = tmp('roadmap-contract-integ-');

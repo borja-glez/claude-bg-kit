@@ -4,13 +4,13 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { run, defaultExec, defaultGit, repoReader, type Io } from '../src/forge/cli/run.js';
 import { swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
-import { saveExecution } from '../src/forge/execution.js';
 import { forgeBranches, forgeWorktrees } from '../src/forge/cleanup.js';
 import { EVIDENCE_FILES_MAX } from '../src/forge/evidence-copy.js';
 import { UsageError } from '../src/forge/cli/errors.js';
 import { withJob } from '../src/forge/jobs.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
 
 let root: string;
@@ -52,7 +52,7 @@ beforeEach(() => {
   writeFileSync(path.join(wt('task-T3'), 'loose.txt'), 'x');
   for (const b of ['task/T4', 'track/ui', 'feature/x']) g(root, 'branch', b);
   for (const d of ['execution/baseline', 'members', 'live', 'work/shop/T1']) mkdirSync(forge(d), { recursive: true });
-  saveExecution(root, exec());
+  seedExecution(root, exec());
   writeFileSync(forge('execution', 'T1.json'), JSON.stringify({ task: 'T1', runId: 'r1', stage: 'integrate', status: 'integrated', agent: null, round: 1, since: at, updatedAt: at, leaseUntil: at, by: 'main', mode: 'subagents' }));
   writeFileSync(forge('execution', 'merging.json'), '{"x":1}');
   writeFileSync(forge('members', 'ui.json'), JSON.stringify({ sessionId: 'ui', role: 'manual', runId: 'r1', task: null, name: null, since: at, hookSession: null }));
@@ -98,13 +98,13 @@ describe('forge swarm cleanup (D-03, D-18)', () => {
     expect(calls.flat().filter(a => a === '-D' || a === '--force' || a === '-f' || a === 'reset')).toEqual([]);
   });
   it('refuses while the execution is active', () => {
-    saveExecution(root, exec({ active: true, stopReason: null, closedAt: null, closedBy: null }));
+    seedExecution(root, exec({ active: true, stopReason: null, closedAt: null, closedBy: null }));
     const r = run(['swarm', 'cleanup'], io);
     expect(r.code).toBe(2);
     expect(r.stderr).toContain('swarm cleanup: the execution r1 is active; stop or close it first');
   });
   it('an ended execution that is still open keeps its own state', () => {
-    saveExecution(root, exec({ stopReason: 'stalled', closedAt: null, closedBy: null }));
+    seedExecution(root, exec({ stopReason: 'stalled', closedAt: null, closedBy: null }));
     swarmCommand(['cleanup'], io, spyDeps([]));
     expect(existsSync(forge('members', 'ui.json'))).toBe(true);
     expect(existsSync(forge('execution', 'T1.json'))).toBe(true);
@@ -318,7 +318,7 @@ describe('swarm cleanup never loses evidence, a waypoint track or a run that sta
   });
   const startsMeanwhile = (when: (a: string[]) => boolean): SwarmDeps => {
     const base = spyDeps([]);
-    const active = () => saveExecution(root, exec({ runId: 'r2', active: true, stopReason: null, closedAt: null, closedBy: null }));
+    const active = () => seedExecution(root, exec({ runId: 'r2', active: true, stopReason: null, closedAt: null, closedBy: null }));
     return { ...base, git: a => { const r = base.git(a); if (when(a)) active(); return r; }, at: dir => { const d = base.at(dir); return { ...d, git: a => { const r = d.git(a); if (when(a)) active(); return r; } }; } };
   };
   it('stops with exit 2 when the execution becomes active between two removals, and says what it already removed (final review 5)', () => {
