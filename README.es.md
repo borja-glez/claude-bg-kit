@@ -7,9 +7,9 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 [English](README.md) · **Español** · [Historial de cambios](CHANGELOG.md)
 
-![waypoint 0.28.0](https://img.shields.io/badge/waypoint-0.28.0-cba6f7?style=flat-square)
-![forge 0.22.2](https://img.shields.io/badge/forge-0.22.2-fab387?style=flat-square)
-![lens 0.13.3](https://img.shields.io/badge/lens-0.13.3-b4befe?style=flat-square)
+![waypoint 0.29.0](https://img.shields.io/badge/waypoint-0.29.0-cba6f7?style=flat-square)
+![forge 0.22.3](https://img.shields.io/badge/forge-0.22.3-fab387?style=flat-square)
+![lens 0.13.4](https://img.shields.io/badge/lens-0.13.4-b4befe?style=flat-square)
 ![Marketplace de Claude Code](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -78,7 +78,7 @@ Añade el marketplace directamente desde GitHub e instala los plugins que quiera
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # instala waypoint ^0.28.0 como dependencia
+claude plugin install forge@bg-kit     # instala waypoint ^0.29.0 como dependencia
 claude plugin install lens@bg-kit
 ```
 

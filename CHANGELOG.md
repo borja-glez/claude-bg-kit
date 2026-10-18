@@ -13,6 +13,19 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.29.0 — 2026-10-18
+
+#### Added
+- Plan is a vertical list of the plan's phases, the one in progress open: each says its state, version, a bar of its tasks and its counts, with its goal under it, and each task is a row with its state (also «done · not merged» and «No executor»), track, forge summary and evidence, grouped by category only when the plan has categories; tasks outside every phase go under «No phase». Its filters (free, in progress, blocked, done, not merged; committed or provisional phase; deferred findings, over the cap; track) add up to the plan and travel in the address (`pf=`); «Needs you» opens Plan on the deferred findings. The table of versions, with their targets, heads it.
+- Runs keeps the history of `runs/`: each finished run with its date, duration, integrated tasks and where it merged, and, opened, how it ended, its final review, deferred findings, decisions and each task; a task closed outside a run has its own label. The active run lists its tasks as rows of «In progress», and a stalled one says why and which command resumes or closes it.
+- Sessions are grouped by the run they work for (an ended run's folded, and the stopped sessions of a live group folded apart); each card lists every task its session runs, and the active run's coordinator its slots and the free ones.
+- Conversation mixes notes and proposals in one list with one set of filters (everything, open questions, decisions, proposals, ideas and debt, mine): a proposal carries its comments, the task it became, its history and the owner's mark, and a question a decision closed says whose decision it was, with a link to it. «Decided by» and the wording of a changed decision follow the owner's mark; forge's policy is never credited to the owner.
+
+#### Changed
+- One forecast end for the whole page, from a schedule of the work left that follows the dependencies, with the real parallelism (the coordinator of a run counts its slots) and the real pace against the estimates: the strip, the timeline and the analysis show the same date, and `waypoint status` too.
+- The schedule opens fitted to the plan, with the phases in progress open (a click on a bar keeps the fit), unless the address says otherwise. The burndown draws at its real width, its labels in HTML, and its ideal line only towards a version's `target`; the code zones go by directory, with a legend, and one that two running tasks share is marked. The analysis is computed once per change.
+- In the light theme, labels, metadata, legends and coloured text use darker text tokens that reach 4.5:1; every toggle says whether it is pressed, every fold whether it is open, and every text box carries a label. The Versions board and its code are gone.
+
 ### 0.28.0 — 2026-10-17
 
 #### Added
@@ -305,6 +318,11 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.22.3 — 2026-10-18
+
+#### Changed
+- Depends on waypoint ^0.29.0, whose roadmap shows the history of the runs forge publishes in `runs/`, one forecast end and Plan's filters for deferred findings and rounds over the cap.
 
 ### 0.22.2 — 2026-10-17
 
@@ -749,6 +767,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.13.4 — 2026-10-18
+
+#### Changed
+- Rebuilt with waypoint 0.29.0's metrics, which no longer carry the old ETA; nothing lens shows changes.
 
 ### 0.13.3 — 2026-10-17
 

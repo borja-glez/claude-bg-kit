@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.28.0](https://img.shields.io/badge/versi%C3%B3n-0.28.0-cba6f7?style=flat-square)
+![versión 0.29.0](https://img.shields.io/badge/versi%C3%B3n-0.29.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -94,11 +94,11 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 | Vista | Qué enseña |
 | --- | --- |
 | **Resumen** | Lo que te necesita, lo que está en curso (una fila por tarea: etapa, ronda, validadores, tiempo, agente y quién la ejecuta), las siguientes tareas libres, el progreso por versión y fase, la actividad reciente y las sesiones vivas. |
-| **Plan** | Qué cubre cada versión del plan y cuánto llevan sus fases. |
-| **Cronograma** | Una línea temporal con zoom por fases, frentes, sesiones o categorías, con dependencias, filtros, minimapa y exportación, y el análisis: burndown, camino crítico y zonas de código. |
-| **Ejecuciones** | La ejecución de forge activa con sus plazas, y las tareas sueltas de una efímera. |
-| **Sesiones** | Las sesiones con su rol (coordinadora, ejecutora o manual), su vida, su frente, su tarea y sus mensajes. |
-| **Conversación** | Las notas (decisiones, ideas, deudas y preguntas, que se pueden responder) y las propuestas, con sus filtros. |
+| **Plan** | Las fases una debajo de otra, la que está en curso abierta, cada una con su estado, objetivo, barra de progreso y tareas (por categorías si el plan las tiene); filtros por estado de la tarea, fase, aplazados, rondas sobre el tope y frente, que suman el plan y se quedan en la dirección (`pf=`). |
+| **Cronograma** | Una línea temporal que se abre ajustada al plan con las fases en curso desplegadas, por fases, frentes, sesiones o categorías, con dependencias, filtros, minimapa y exportación, y el análisis: un solo fin previsto y cómo se calcula, un burndown frente al `target` de la versión, el camino crítico y las zonas de código por directorio. |
+| **Ejecuciones** | La ejecución de forge activa con sus tareas, una atascada con el comando que la reanuda o la cierra, y el historial de las terminadas, guardado en `runs/`. |
+| **Sesiones** | Las sesiones agrupadas por la ejecución para la que trabajan, con su rol, su vida, su frente, todas las tareas que llevan, las plazas de la coordinadora y sus mensajes. |
+| **Conversación** | Notas y propuestas en una sola lista con un solo juego de filtros: una propuesta lleva sus comentarios, la tarea en la que se convirtió y su historial, y una pregunta que cerró una decisión dice cuál. |
 
 **Franja de estado.** Arriba en todas las vistas: si la página está en vivo (o, antes de que conteste la base, la fecha de los estados con los que se publicó), una píldora para la ejecución de forge y otra para el modo infinito (amarilla si su coordinadora está en silencio, roja si se paró), el % de la versión actual, el fin previsto, cuándo se sincronizaron los estados y un enlace al diseño. En el móvil, las vistas son una barra de pestañas abajo.
 
@@ -116,7 +116,7 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 
 **forge en la página.** Cuando forge lleva una tarea, su fila en «En curso» y la pestaña Forge de su detalle enseñan su camino, su etapa, la ronda de revisión frente al tope, los validadores, el agente y quién la ejecuta. Mientras hay una ejecución infinita activa, la franja de estado enseña `∞ ciclo N` (con `/M` si la ejecución tiene presupuesto de ciclos). Mientras hay una ejecución de forge activa, la franja de estado enseña la píldora `▶ ejecución · subagentes 2/3` (modo, tareas en marcha sobre el máximo); añade `sin señal desde 12:40` cuando la coordinadora lleva 7 minutos en silencio y `parada desde 12:40` pasados 12, y marca las integraciones de la ejecución en la línea temporal.
 
-**Ejecución.** La vista Ejecuciones enseña la ejecución activa: una línea por tarea en marcha con su etapa, agente y cuánto lleva (`lleva 12 min`), las plazas usadas sobre el máximo (`2/3 plazas`) y las libres. Las tarjetas de sesión llevan una etiqueta de rol (coordinadora, ejecutora, manual) y un punto de vida. Una tarea en curso cuya ejecutora dejó de renovar su concesión se marca **Sin ejecutor** y cuenta como bloqueada en los filtros, para que lo notes y otra sesión pueda recuperarla. La página lee todo esto del documento `meta/run` del roadmap (`runId`, `mode`, `parallel`, `branch`, `mergeOnFinish`, `active`, `stopReason`, `coordinator` y una plaza por tarea en marcha con su `task`, `stage`, `agent`, `by` y `since`), que forge mantiene al día.
+**Ejecución.** La vista Ejecuciones enseña la ejecución activa: una línea por tarea en marcha con su etapa, agente y cuánto lleva (`lleva 12 min`), las plazas usadas sobre el máximo (`2/3 plazas`); la tarjeta de la coordinadora en Sesiones lista sus plazas y las libres, y una ejecución terminada se queda en el historial. Las tarjetas de sesión llevan una etiqueta de rol (coordinadora, ejecutora, manual) y un punto de vida. Una tarea en curso cuya ejecutora dejó de renovar su concesión se marca **Sin ejecutor** y cuenta como bloqueada en los filtros, para que lo notes y otra sesión pueda recuperarla. La página lee todo esto del documento `meta/run` del roadmap (`runId`, `mode`, `parallel`, `branch`, `mergeOnFinish`, `active`, `stopReason`, `coordinator` y una plaza por tarea en marcha con su `task`, `stage`, `agent`, `by` y `since`), que forge mantiene al día.
 
 **Datos del roadmap.** Las métricas viven en `meta/metrics` (el último commit y el número de tests, escritos aparte del batch de una tarea; la CLI lo imprime sin `if_version`, que se envía así solo para crear el documento: cuando ya existe, las skills lo fijan a su versión listada); la página también las lee de `meta/project.metrics` en un roadmap que escribió un forge anterior. `meta/page` dice qué waypoint publicó la página y con qué reglas. `waypoint sync --db` lee los listados del roadmap: nunca escribe sobre un documento cuya versión no conoce, conserva lo que era una tarea cuando el plan la quita y escribe `meta/project` al final. Sale con 2, sin imprimir nada, ante un listado que puede estar cortado en 1000 documentos y ante una fase o un `meta/project` que la base tiene y `known.json` no lista (vuelve a listar la base); e imprime `republish` cuando la página publicada es más antigua que el plugin o sus `rules` son anteriores a la regla de aprobaciones del dueño. El snapshot de la página lleva los estados listados (`page --states`), y forge escribe él mismo el bloque forge, la evidencia, las ejecuciones y el modo infinito de cada tarea.
 

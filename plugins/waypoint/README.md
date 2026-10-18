@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.28.0](https://img.shields.io/badge/version-0.28.0-cba6f7?style=flat-square)
+![version 0.29.0](https://img.shields.io/badge/version-0.29.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -94,11 +94,11 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 | View | What it shows |
 | --- | --- |
 | **Summary** | What needs you, what is in progress (one row per task: stage, round, validators, time, agent and who runs it), the next free tasks, the progress by version and phase, the recent activity and the live sessions. |
-| **Plan** | What each version covers and how far along its phases are. |
-| **Schedule** | A zoomable timeline by phase, track, session or category, with dependencies, filters, a minimap and export, and the analysis: burndown, critical path and code zones. |
-| **Runs** | The active forge execution with its slots, and the loose tasks of an ephemeral one. |
-| **Sessions** | The sessions with their role (coordinator, executor or manual), their liveness, their track, their task and their messages. |
-| **Conversation** | The notes (decisions, ideas, debts and questions, which can be answered) and the proposals, with their filters. |
+| **Plan** | The phases one under the other, the one in progress open, each with its state, goal, progress bar and tasks (grouped by category when the plan has them); filters by task state, phase, deferred findings, rounds over the cap and track that add up to the plan and stay in the address (`pf=`). |
+| **Schedule** | A timeline that opens fitted to the plan with the phases in progress open, by phase, track, session or category, with dependencies, filters, a minimap and export, and the analysis: one forecast end and how it is reckoned, a burndown against the version's `target`, the critical path and the code zones by directory. |
+| **Runs** | The active forge execution with its tasks, a stalled one with the command that resumes or closes it, and the history of the finished ones, kept in `runs/`. |
+| **Sessions** | The sessions grouped by the run they work for, with their role, liveness, track, every task they run, the coordinator's slots and their messages. |
+| **Conversation** | Notes and proposals in one list with one set of filters: a proposal carries its comments, the task it became and its history, and a question a decision closed says which decision. |
 
 **Status strip.** On top of every view: whether the page is live (or, before the database answers, the date of the states it was published with), one pill for the forge execution and one for the infinite mode (yellow when its coordinator is silent, red when it stopped), the current version's percent, the forecast end, when the states last synced and a link to the design. On a phone the views are a tab bar at the bottom.
 
@@ -116,7 +116,7 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 
 **forge on the page.** When forge drives a task, its row in «In progress» and the Forge tab of its detail show its path, stage, review round against the cap, validators, agent and who runs it. While an infinite run is active, the status strip shows `∞ cycle N` (with `/M` when the run has a cycle budget). While a forge execution is active, the status strip shows the pill `▶ execution · subagents 2/3` (mode, tasks running out of the maximum); it adds `no signal since 12:40` when the coordinator has been silent for 7 minutes and `stopped since 12:40` after 12, and it marks the execution's integrations on the timeline.
 
-**Execution.** The Runs view shows the active execution: one line per running task with its stage, agent and how long it has been running (`running for 12 min`), the slots in use out of the maximum (`2/3 slots`) and the free ones. Session cards carry a role tag (coordinator, executor, manual) and a liveness dot. A task that is in progress but whose executor stopped renewing its lease is marked **No executor** and counts as blocked in the filters, so you notice it and another session can recover it. The page reads all of this from the roadmap's `meta/run` document (`runId`, `mode`, `parallel`, `branch`, `mergeOnFinish`, `active`, `stopReason`, `coordinator` and one slot per running task with its `task`, `stage`, `agent`, `by` and `since`), which forge keeps up to date.
+**Execution.** The Runs view shows the active execution: one line per running task with its stage, agent and how long it has been running (`running for 12 min`), the slots in use out of the maximum (`2/3 slots`); the coordinator's card in Sessions lists its slots and the free ones, and a finished run stays in the history. Session cards carry a role tag (coordinator, executor, manual) and a liveness dot. A task that is in progress but whose executor stopped renewing its lease is marked **No executor** and counts as blocked in the filters, so you notice it and another session can recover it. The page reads all of this from the roadmap's `meta/run` document (`runId`, `mode`, `parallel`, `branch`, `mergeOnFinish`, `active`, `stopReason`, `coordinator` and one slot per running task with its `task`, `stage`, `agent`, `by` and `since`), which forge keeps up to date.
 
 **Data of the roadmap.** The metrics live in `meta/metrics` (the last commit and the test count, written apart from a task's batch; the CLI prints it without `if_version`, which is sent only to create the document: once it exists, the skills pin it to its listed version); the page also reads them from `meta/project.metrics` for a roadmap an older forge wrote. `meta/page` says which waypoint published the page and with which rules. `waypoint sync --db` reads the roadmap's listings: it never writes over a document whose version it does not know, keeps what a task was when the plan drops it and writes `meta/project` last. It stops with exit 2, printing nothing, on a listing that may be cut at 1000 documents and on a phase or `meta/project` the database holds and `known.json` does not list (list the database again); and it prints `republish` when the published page is older than the plugin or its `rules` are older than the owner's approvals rule. The page's snapshot carries the listed states (`page --states`), and forge writes each task's forge block, evidence, runs and infinite run itself.
 
