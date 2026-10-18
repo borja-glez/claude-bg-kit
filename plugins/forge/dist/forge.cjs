@@ -13199,26 +13199,33 @@ function mainCheckout(root) {
   }
 }
 var localFile = (root) => import_node_path8.default.join(mainCheckout(root), ".forge", "local.yaml");
-function localTracked(root, name) {
-  let listed;
+var gitEnv = () => ({ ...process.env, LC_ALL: "C", LANGUAGE: "C" });
+var gitFailure = (e) => /not a git repository/i.test(String(e?.stderr ?? "")) ? "no-repo" : "git-failed";
+var lsForge = (cwd2) => {
   try {
-    listed = (0, import_node_child_process.execFileSync)("git", ["ls-files", "-z", "--", ":(top,icase).forge"], {
-      cwd: mainCheckout(root),
+    return { out: (0, import_node_child_process.execFileSync)("git", ["ls-files", "-z", "--", ":(top,icase).forge"], {
+      cwd: cwd2,
       encoding: "utf8",
       timeout: 5e3,
-      stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true
-    });
-  } catch {
-    return false;
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      env: gitEnv()
+    }) };
+  } catch (e) {
+    return { fail: gitFailure(e) };
   }
-  return listed.split("\0").some((f) => {
+};
+function trackedState(root, name, ls = lsForge) {
+  const r2 = ls(mainCheckout(root));
+  if ("fail" in r2) return r2.fail === "no-repo" ? "untracked" : "unknown";
+  return r2.out.split("\0").some((f) => {
     const l = f.toLowerCase();
     return l === ".forge" || l === `.forge/${name}`;
-  });
+  }) ? "tracked" : "untracked";
 }
-function surfacePermissions(root, s2 = readLocal(root)) {
-  return Object.keys(s2.surfaces).length && localTracked(root, "local.yaml") ? {} : s2.surfaces;
+var localTracked = (root, name, ls) => trackedState(root, name, ls) !== "untracked";
+function surfacePermissions(root, s2 = readLocal(root), ls) {
+  return Object.keys(s2.surfaces).length && localTracked(root, "local.yaml", ls) ? {} : s2.surfaces;
 }
 var names = (x) => Array.isArray(x) ? [...new Set(x.filter((s2) => typeof s2 === "string" && NAME.test(s2)))] : [];
 function readLocal(root) {
@@ -13279,7 +13286,7 @@ function recordLearned(root, surface, lines, ts) {
     lead = "";
   }
 }
-function readLearned(root) {
+function readLearned(root, ls) {
   const out = /* @__PURE__ */ new Map();
   let text3 = "";
   try {
@@ -13287,7 +13294,7 @@ function readLearned(root) {
   } catch {
     return out;
   }
-  if (text3.trim() && localTracked(root, "learned.jsonl")) return out;
+  if (text3.trim() && localTracked(root, "learned.jsonl", ls)) return out;
   for (const line3 of text3.split("\n")) {
     let r2;
     try {
@@ -17140,10 +17147,10 @@ function trustPlace(dir) {
       timeout: 5e3,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      env: { ...process.env, LC_ALL: "C", LANGUAGE: "C" }
+      env: gitEnv()
     }).trim();
   } catch (e) {
-    return { file: null, why: /not a git repository/i.test(String(e.stderr ?? "")) ? "no-repo" : "git-failed" };
+    return { file: null, why: gitFailure(e) };
   }
   return common ? { file: import_node_path23.default.join(import_node_path23.default.resolve(dir, common), "forge", "trust.json") } : { file: null, why: "git-failed" };
 }
@@ -25174,8 +25181,12 @@ function runCommand(argv, io) {
           if (has("expect") && !expected) throw new UsageError("local set: --expect needs the hash verify-plan gave");
           const surface = readSurfaces(repoDir, readLearned(io.cwd)).find((x) => x.name === m[1]);
           if (value === "allowed" && !surface) throw new UsageError(`local set: .forge/verify/${m[1]}.md does not exist`);
-          if (value === "allowed" && localTracked(io.cwd, "local.yaml")) {
+          const tracked = value === "allowed" ? trackedState(io.cwd, "local.yaml") : "untracked";
+          if (tracked === "tracked") {
             throw new UsageError("local set: git tracks .forge/local.yaml, so a permission in it grants nothing: untrack it with git rm --cached .forge/local.yaml (the file stays) and answer again");
+          }
+          if (tracked === "unknown") {
+            throw new UsageError("local set: git could not tell whether .forge/local.yaml is tracked (it refused to run here, or failed), so a permission in it grants nothing and forge asks each time");
           }
           if (value === "allowed" && expected !== void 0 && expected !== surface.hash) {
             throw new UsageError(`local set: .forge/verify/${m[1]}.md changed since verify-plan showed it: run verify-plan again`);
