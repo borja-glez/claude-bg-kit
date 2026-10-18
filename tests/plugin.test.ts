@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, existsSync, mkdtempSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ENTRY_KINDS } from '../src/lib/history.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 // A reference of forge:run (plugins/forge/skills/run/references/<name>.md).
@@ -486,7 +487,7 @@ describe('plugin layout', () => {
     expect(main).toMatch(/process\.argv\[2\] === 'hook' && !process\.stdin\.isTTY/);
     expect(read('plugins/forge/dist/forge.cjs')).toContain('process.stdin.isTTY');
     // Piped stdin (how Claude Code runs the hook) is still read: a garbage payload prints nothing.
-    const cwd = mkdtempSync(path.join(tmpdir(), 'forge-main-'));
+    const cwd = tmp('forge-main-');
     const r = spawnSync(process.execPath, [fileURLToPath(new URL('../plugins/forge/dist/forge.cjs', import.meta.url)), 'hook', 'stop'], { cwd, input: 'garbage', encoding: 'utf8', timeout: 20000 });
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');

@@ -1,9 +1,10 @@
-import { describe, it, expect, afterAll, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, it, expect, vi } from 'vitest';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { designFilesOf, readCritiques, readDismissedOf, readHistory, repoRootOf, writeDismissed } from '../src/cli/design-files.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 // Carry 5: a crash between the write of the temp file and its rename, for the atomic-write test. Everything else is
 // node:fs as it is.
@@ -20,9 +21,7 @@ vi.mock('node:fs', async importOriginal => {
   return { ...fs, default: { ...fs, renameSync }, renameSync };
 });
 
-const made: string[] = [];
-const temp = () => { const d = mkdtempSync(path.join(tmpdir(), 'wp-files-')); made.push(d); return d; };
-afterAll(() => { for (const d of made) rmSync(d, { recursive: true, force: true }); });
+const temp = () => tmp('wp-files-');
 const crit = (round: number, count: number) => JSON.stringify({ round, version: 1, scope: 'full',
   proposals: Array.from({ length: count }, (_, i) => ({ n: i + 1, category: 'gap', severity: 'major', section: '_intro', problem: 'p', change: 'c' })) });
 

@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { attribute, baseOf, eventsOf, idChain, isTask, projectOf, projectOfDir, readWorkDir, resolveProject, stampEvent, taskLine, workDir, workRel } from '../src/forge/task-ref.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import { roundDecision } from '../src/forge/round.js';
 import { briefStats } from '../src/forge/stats.js';
 import type { LedgerEvent } from '../src/forge/ledger.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const ev = (min: number, kind: LedgerEvent['kind'], task: string, extra: Record<string, unknown> = {}): LedgerEvent =>
   ({ ts: `2026-10-16T10:${String(min).padStart(2, '0')}:00.000Z`, kind, task, ...extra });
@@ -47,7 +48,7 @@ describe('task-ref: a task is the pair (project, task) (D-08)', () => {
     expect(resolveProject({ task: 'T9', events })).toBeNull();
   });
   it("work folders: the project's, the older one while the ledger says it is that project's, and never an unsafe name", () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'forge-task-ref-'));
+    const root = tmp('forge-task-ref-');
     const at = (...p: string[]) => path.join(root, '.forge', 'work', ...p);
     expect(workDir(root, { project: 'shop', task: 'T1' })).toBe(at('shop', 'T1'));
     expect(workRel({ project: null, task: 'fix-a' })).toBe('.forge/work/fix-a');
@@ -62,7 +63,7 @@ describe('task-ref: a task is the pair (project, task) (D-08)', () => {
     expect(readWorkDir(root, { project: 'shop', task: 'T1' }, events)).toBe(at('shop', 'T1'));
   });
   it('a folder a command only made never takes a task away from the folder that holds its brief', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'forge-task-ref-'));
+    const root = tmp('forge-task-ref-');
     const at = (...p: string[]) => path.join(root, '.forge', 'work', ...p);
     const shop = { project: 'shop', task: 'T1' };
     const events = [ev(1, 'triage', 'T1', { project: 'shop' })];

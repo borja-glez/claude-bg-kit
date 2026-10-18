@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, appendFileSync, lstatSync, symlinkSync, statSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, appendFileSync, lstatSync, symlinkSync, statSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
 import { swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
@@ -11,6 +10,8 @@ import { readEvents } from '../src/forge/ledger.js';
 import { loadConfig } from '../src/forge/config.js';
 import { SLOT_MAX_WAIT_MS } from '../src/forge/jobs.js';
 import { mergingFile, readMerging, readMergingFile, removeMergingIf, takeMerging, MERGING_UNREADABLE_MS } from '../src/forge/merging.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
 let io: Io;
@@ -22,7 +23,7 @@ const runWt = () => path.join(root, '.claude', 'worktrees', 'run');
 const NOBAD = 'validators:\n  - name: nobad\n    cmd: node -e "process.exit(require(\'fs\').existsSync(\'bad.txt\')?1:0)"\n';
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'forge-integ-'));
+  root = tmp('forge-integ-');
   git('init', '-q', '-b', 'main'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 't'); git('config', 'core.autocrlf', 'false');
   writeFileSync(path.join(root, '.gitignore'), '.forge/\n.claude/\n');
   git('add', '.gitignore');
@@ -32,7 +33,7 @@ beforeEach(() => {
   io = { cwd: root, now: () => new Date('2026-10-12T12:00:00.000Z'), git: defaultGit(root), env: {} };
   out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--hook-session', 'hook-main'], io));
 });
-afterEach(() => { try { git('worktree', 'prune'); } catch { /* ignore */ } rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { try { git('worktree', 'prune'); } catch { /* ignore */ } });
 
 const accept = (task: string, file: string, text: string) => {
   const w = out(run(['swarm', 'worktree', task], io)).worktree;

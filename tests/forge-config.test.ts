@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseConfig, loadConfig, configValue, agentFor, ROLES, ConfigError, NAME } from '../src/forge/config.js';
 import { selectValidators } from '../src/forge/validators.js';
 import { cacheable } from '../src/forge/validate-cache.js';
 import { run, type Io } from '../src/forge/cli/run.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 describe('forge config', () => {
   it('defaults: detect on, nothing excluded, verify limits, evidence upload', () => {
@@ -134,7 +135,7 @@ describe('forge config', () => {
     expect(map('quality')).toEqual(['forge-impl-light', 'forge-impl', 'forge-impl-heavy', 'forge-impl-heavy', 'forge-impl-heavy']);
   });
   it('FORGE agents lists impl-high for the configured profile', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'forge-agents-'));
+    const root = tmp('forge-agents-');
     expect(JSON.parse(run(['agents'], { cwd: root, now: () => new Date() }).stdout).agents['impl-high']).toBe('forge-impl-high');
     mkdirSync(path.join(root, '.forge'));
     writeFileSync(path.join(root, '.forge', 'config.yaml'), 'profile: economy\n');
@@ -158,7 +159,7 @@ describe('forge config get', () => {
   const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   const writeConfig = (text: string) => { mkdirSync(path.join(root, '.forge'), { recursive: true }); writeFileSync(path.join(root, '.forge', 'config.yaml'), text); };
   beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'forge-config-'));
+    root = tmp('forge-config-');
     io = { cwd: root, now: () => new Date('2026-10-11T10:00:00.000Z') };
   });
   it('prints evidence upload with no file, and local once the person creates it mid-run', () => {

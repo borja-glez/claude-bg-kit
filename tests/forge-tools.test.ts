@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { checkTools, mcpInventory, toolGaps, toolKeys } from '../src/forge/tools.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readLocal } from '../src/forge/local.js';
 import { surfaceHash } from '../src/forge/surfaces.js';
+import { tmpdir } from 'node:os';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const exec = (out: string, code = 0) => () => ({ code, output: out, ms: 1, timedOut: false });
 
@@ -66,9 +68,9 @@ describe('mcpInventory', () => {
   const inv = () => mcpInventory({ configDir: cfg, homeDir: home, projectDir: project });
   const fwd = (p: string) => path.resolve(p).replace(/\\/g, '/');
   beforeEach(() => {
-    cfg = mkdtempSync(path.join(tmpdir(), 'mcp-cfg-'));
-    home = mkdtempSync(path.join(tmpdir(), 'mcp-home-'));
-    project = mkdtempSync(path.join(tmpdir(), 'mcp-proj-'));
+    cfg = tmp('mcp-cfg-');
+    home = tmp('mcp-home-');
+    project = tmp('mcp-proj-');
   });
   it('enabled plugins give their name and their servers, from plugin.json and .mcp.json', () => {
     registry({
@@ -128,7 +130,7 @@ describe('mcpInventory', () => {
 
 describe('forge local', () => {
   let root: string; let io: Io;
-  beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-localcli-')); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
+  beforeEach(() => { root = tmp('forge-localcli-'); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
   it('set and get a surface permission tied to its content, in .forge/local.yaml; none removes it', () => {
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\nRun it.\n');
@@ -146,7 +148,7 @@ describe('forge local', () => {
     expect(run(['local', 'set', 'surfaces.bad name', 'allowed'], io).code).toBe(2);
   });
   it('tools reports the tools of every surface, or of one', () => {
-    const cfg = mkdtempSync(path.join(tmpdir(), 'forge-tools-cfg-'));
+    const cfg = tmp('forge-tools-cfg-');
     io = { ...io, env: { CLAUDE_CONFIG_DIR: cfg } };
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '---\ntools: [chrome-mcp]\n---\n');
@@ -157,8 +159,8 @@ describe('forge local', () => {
     expect(JSON.parse(run(['tools'], io).stdout)).not.toHaveProperty('warning');
   });
   it('tools --cwd reads the surfaces of that directory', () => {
-    const other = mkdtempSync(path.join(tmpdir(), 'forge-tools-other-'));
-    io = { ...io, env: { CLAUDE_CONFIG_DIR: mkdtempSync(path.join(tmpdir(), 'forge-tools-cfg-')) } };
+    const other = tmp('forge-tools-other-');
+    io = { ...io, env: { CLAUDE_CONFIG_DIR: tmp('forge-tools-cfg-') } };
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '---\ntools: [chrome-mcp]\n---\n');
     mkdirSync(path.join(other, '.forge', 'verify'), { recursive: true });
@@ -167,7 +169,7 @@ describe('forge local', () => {
     expect(run(['tools', '--cwd', other, '--surface', 'web'], io).code).toBe(2);
   });
   it('tools finds an MCP server of an installed plugin through CLAUDE_CONFIG_DIR, and .claude.json inside it', () => {
-    const cfg = mkdtempSync(path.join(tmpdir(), 'forge-tools-cfg-'));
+    const cfg = tmp('forge-tools-cfg-');
     const p = path.join(cfg, 'plugins', 'cache', 'claude-plugins-official', 'chrome-devtools-mcp', '1.0.0');
     mkdirSync(path.join(p, '.claude-plugin'), { recursive: true });
     writeFileSync(path.join(p, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'chrome-devtools-mcp', mcpServers: { 'chrome-devtools': { command: 'npx' } } }));

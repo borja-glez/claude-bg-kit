@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { readExecution, saveExecution, executionFile, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, updateExecution, executionLock, LOCK_STALE_MS, createIfAbsent } from '../src/forge/execution.js';
 import { run } from '../src/forge/cli/run.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
-beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-exec-')); mkdirSync(path.join(root, '.forge')); });
+beforeEach(() => { root = tmp('forge-exec-'); mkdirSync(path.join(root, '.forge')); });
 const T = '2026-10-12T12:00:00.000Z';
 
 describe('execution store', () => {

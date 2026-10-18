@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { planLocale, replyIn, sessionReply } from '../src/lib/locale.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 describe('replyIn', () => {
   it('names the plan language so a hook text does not drag the session into English', () => {
@@ -32,7 +33,7 @@ describe('sessionReply', () => {
 describe('planLocale', () => {
   const plan = (locale: string) => `project: demo\nlocale: ${locale}\nversion: "0.1"\nversions: [{ id: "0.1", phases: [F1] }]\ntracks: [{ id: a, name: A, color: blue }]\nphases: [{ id: F1, name: One, plan_status: committed }]\ntasks:\n  - { id: T001, title: x, track: a, phase: F1, done_when: y, zones: ["src/**"], estimate_min: 10 }\n`;
   it('reads the named project, else the only one, and is null without a plan', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'locale-'));
+    const root = tmp('locale-');
     expect(planLocale(root)).toBeNull();
     mkdirSync(path.join(root, 'docs', 'waypoint', 'demo'), { recursive: true });
     writeFileSync(path.join(root, 'docs', 'waypoint', 'demo', 'plan.yaml'), plan('es'));
@@ -41,7 +42,7 @@ describe('planLocale', () => {
     expect(planLocale(root, 'other')).toBeNull();
   });
   it('is null for a plan without locale (no English default)', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'locale-'));
+    const root = tmp('locale-');
     mkdirSync(path.join(root, 'docs', 'waypoint', 'demo'), { recursive: true });
     writeFileSync(path.join(root, 'docs', 'waypoint', 'demo', 'plan.yaml'), plan('es').replace('locale: es\n', ''));
     expect(planLocale(root, 'demo')).toBeNull();

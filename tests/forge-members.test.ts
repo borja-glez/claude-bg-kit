@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, utimesSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { writeFileSync, mkdirSync, existsSync, utimesSync } from 'node:fs';
 import path from 'node:path';
 import { normalizeMember, readMember, writeMember, listMembers, memberFile, isMemberId, findMemberByHook, memberForHook } from '../src/forge/members.js';
 import { MEMBERS_MAX, newestMemberFiles } from '../src/lib/member-doc.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const T = '2026-10-12T12:00:00.000Z';
 describe('members', () => {
   let root: string;
-  beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-members-')); });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  beforeEach(() => { root = tmp('forge-members-'); });
   it('normalizes and drops junk', () => {
     expect(normalizeMember({ sessionId: 's2', role: 'manual', runId: 'r1', task: 'T009', name: 'me', since: T }))
       .toEqual({ sessionId: 's2', role: 'manual', runId: 'r1', task: 'T009', name: 'me', since: T, hookSession: null });

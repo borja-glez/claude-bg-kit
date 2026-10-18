@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, readdirSync, renameSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, readdirSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { readExecution, saveExecution } from '../src/forge/execution.js';
 import * as ledger from '../src/forge/ledger.js';
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { publishOf, swarmStep, stepSay } from '../src/forge/cli/step.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const spyOrig = ledger.readEvents;
 
@@ -56,7 +57,7 @@ const stepWith = (fail: (argv: string[]) => boolean, ...extra: string[]) => {
 const stageOf = (task: string) => readExecution(root)!.tasks[task].stage;
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'forge-step-'));
+  root = tmp('forge-step-');
   g(root, 'init', '-q', '-b', 'main'); g(root, 'config', 'user.email', 'a@b.c'); g(root, 'config', 'user.name', 't'); g(root, 'config', 'core.autocrlf', 'false');
   writeFileSync(path.join(root, 'plan.yaml'), PLAN);
   writeFileSync(path.join(root, '.gitignore'), '.forge/\n.claude/\n');
@@ -67,7 +68,7 @@ beforeEach(() => {
   out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
   for (const c of ['state', 'sessions']) mkdirSync(path.join(root, 'db', c), { recursive: true });
 });
-afterEach(() => { try { g(root, 'worktree', 'prune'); } catch { /* ignore */ } rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { try { g(root, 'worktree', 'prune'); } catch { /* ignore */ } });
 
 describe('forge swarm step (D-12)', () => {
   it('starts the tasks of the tick with their worktree, brief, triage and prep, and publishes their claim', () => {

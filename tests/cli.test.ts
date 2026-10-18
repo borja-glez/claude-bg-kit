@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { run, isCommitCommand, type Io } from '../src/cli/run.js';
@@ -12,13 +11,15 @@ import { buildDocs, planHash } from '../src/lib/sync.js';
 import { parseDesign } from '../src/lib/design.js';
 import { PAGE_RULES } from '../src/lib/publish.js';
 import { run as forgeRun } from '../src/forge/cli/run.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const FIXTURE = new URL('./fixtures/plan.yaml', import.meta.url);
 let dir: string;
 let io: Io;
 
 beforeEach(() => {
-  dir = mkdtempSync(path.join(tmpdir(), 'wp-'));
+  dir = tmp('wp-');
   copyFileSync(FIXTURE, path.join(dir, 'plan.yaml'));
   const assets = path.join(dir, 'assets');
   mkdirSync(assets);
@@ -325,7 +326,7 @@ describe('multi-session commands', () => {
     it('adds .claude/worktrees/ to info/exclude once when nothing ignores it, so git status stays clean (A-08)', () => {
       init();
       // No global ignore file either: the user's own may already ignore .claude/.
-      const none = path.join(mkdtempSync(path.join(tmpdir(), 'wp-noexcl-')), 'excludes');
+      const none = path.join(tmp('wp-noexcl-'), 'excludes');
       writeFileSync(none, '');
       git(dir, 'config', 'core.excludesFile', none);
       expect(run(['launch', 'plan.yaml', 'ui'], io).code).toBe(0);
@@ -1179,7 +1180,7 @@ describe('design commands', () => {
       expect(run(['design-snapshot', rel, '--note', 'r', '--kind', 'reopen'], io).code).toBe(2);
       writeFileSync(p(), readFileSync(p(), 'utf8').replace('status: approved', 'status: draft'));
       // a draft that was never approved has nothing to reopen
-      const never = mkdtempSync(path.join(tmpdir(), 'wp-never-'));
+      const never = tmp('wp-never-');
       mkdirSync(path.join(never, 'docs/waypoint/demo-shop'), { recursive: true });
       copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(never, rel));
       const neverIo = { ...io, cwd: never };
@@ -1220,7 +1221,7 @@ describe('design commands', () => {
       expect(r.stderr).toBe('');
       expect(JSON.parse(r.stdout)).toMatchObject({ version: 3, kind: 'reopen' });
       // A changelog whose approval only its note records (the history says draft) still counts.
-      const other = mkdtempSync(path.join(tmpdir(), 'wp-note-'));
+      const other = tmp('wp-note-');
       mkdirSync(path.join(other, 'docs/waypoint/demo-shop'), { recursive: true });
       copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(other, rel));
       expect(run(['design-snapshot', rel, '--note', 'aprobado'], { ...io, cwd: other }).code).toBe(0);
@@ -1570,7 +1571,7 @@ describe('classic hooks', () => {
     });
     it('resolves the project from CLAUDE_PROJECT_DIR, then the input cwd, then the process cwd', () => {
       setup();
-      const elsewhere = mkdtempSync(path.join(tmpdir(), 'wp-else-'));
+      const elsewhere = tmp('wp-else-');
       const at = (stdin: object, env: Record<string, string> = {}) =>
         run(['hook', 'session-start'], { ...io, cwd: elsewhere, env, stdin: JSON.stringify(stdin) }).stdout.trim();
       expect(at({})).toBe('');
@@ -1639,7 +1640,7 @@ describe('classic hooks', () => {
     it('reads HEAD in the worktree of the command, with a base of its own', () => {
       setup(); gitInit(); bindAs('A'); ownTask('T002');
       hook('session-start', { session_id: 'A', cwd: dir });
-      const wt = path.join(mkdtempSync(path.join(tmpdir(), 'wp-wt-')), 'wt');
+      const wt = path.join(tmp('wp-wt-'), 'wt');
       git('worktree', 'add', '-q', '-b', 'other', wt);
       writeFileSync(path.join(wt, 'w.txt'), 'w');
       gitAt(wt, 'add', 'w.txt');
@@ -2346,7 +2347,7 @@ describe('critiques in docs/ (K3-10), dismissed with a reason (K3-05) and resolv
   });
   it('design-gate finds the critiques in docs/ from another working directory; a round only .waypoint/ has is read too, and docs/ wins a round both have (Review Focus 3)', () => {
     crit(docs(), 'r1.json', 1, 1, ['major']);
-    const elsewhere = mkdtempSync(path.join(tmpdir(), 'wp-else-'));
+    const elsewhere = tmp('wp-else-');
     expect(JSON.parse(run(['design-gate', path.join(dir, rel)], { ...io, cwd: elsewhere }).stdout)).toMatchObject({ rounds: 1, latestRound: 1, majorPending: [{ round: 1, n: 1 }] });
     rmSync(elsewhere, { recursive: true, force: true });
     crit(legacy(), 'critique-r1.json', 1, 1, ['critical', 'critical']);

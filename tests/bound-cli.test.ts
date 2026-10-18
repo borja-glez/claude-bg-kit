@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, copyFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync, mkdirSync, copyFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { run, type Io } from '../src/cli/run.js';
@@ -8,6 +7,8 @@ import { pidAlive } from '../src/lib/pid.js';
 import { pidAlive as forgePidAlive } from '../src/forge/pid.js';
 import { boundLive, pidAlive as seatPidAlive, pidFromEnv, settleBinding } from '../src/lib/bound-fs.js';
 import { BOUND_MAX_BYTES, type BoundDoc } from '../src/lib/bound.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const FIXTURE = new URL('./fixtures/plan.yaml', import.meta.url);
 const NOW = Date.parse('2026-10-15T12:00:00.000Z');
@@ -30,7 +31,7 @@ const openTask = (task: string, owner: string) => {
 };
 
 beforeEach(() => {
-  dir = mkdtempSync(path.join(tmpdir(), 'wp-bind-'));
+  dir = tmp('wp-bind-');
   mkdirSync(path.join(dir, 'docs', 'waypoint', 'demo-shop'), { recursive: true });
   copyFileSync(FIXTURE, path.join(dir, PLAN));
   io = { cwd: dir, now: () => new Date(NOW), rand: () => 0, assetsDir: dir, env: {} };

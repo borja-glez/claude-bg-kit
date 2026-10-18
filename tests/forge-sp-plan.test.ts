@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { checkSpTask, markDone, parseSpPlan, renderSpBrief, sddComplete, SpPlanError } from '../src/lib/sp-plan.js';
 import { run, type Io } from '../src/forge/cli/run.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 // LF here whatever git checked out; the CRLF case is built from it.
 const PLAN = readFileSync(new URL('./fixtures/sp-plan.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
@@ -119,7 +120,7 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
   let root: string;
   let io: Io;
   beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'forge-sp-'));
+    root = tmp('forge-sp-');
     mkdirSync(path.join(root, 'docs', 'superpowers', 'plans'), { recursive: true });
     writeFileSync(path.join(root, F), PLAN.replace(/\n/g, '\r\n'));
     io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z'), git: () => null };

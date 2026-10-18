@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { jobsDir, liveJobs, withJob, slotFor, normalizeJob, JOB_MAX_AGE_MS, SLOT_POLL_MS, type JobDoc } from '../src/forge/jobs.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { saveExecution } from '../src/forge/execution.js';
 import { readEvents } from '../src/forge/ledger.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
 const T = '2026-10-12T12:00:00.000Z';
@@ -16,7 +17,7 @@ const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid!;
 const job = (over: Partial<JobDoc> = {}): JobDoc => ({ name: 'prep-T1-1-1', cmd: 'prep', task: 'T1-1', pid: process.pid, startedAt: T, out: 'x.json', session: null, ...over });
 const put = (j: JobDoc) => { mkdirSync(jobsDir(root), { recursive: true }); writeFileSync(path.join(jobsDir(root), `${j.name}.json`), JSON.stringify(j)); };
 const jobFiles = () => (existsSync(jobsDir(root)) ? readdirSync(jobsDir(root)).sort() : []);
-beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-jobs-')); });
+beforeEach(() => { root = tmp('forge-jobs-'); });
 
 describe('jobs (C-03)', () => {
   it('liveJobs keeps the live ones and removes the files of a dead pid or of a job older than 2 h (Review Focus 2)', () => {

@@ -1,9 +1,8 @@
 // The contract of the roadmap (C7, wave 4): what forge's CLI generates goes through the page's normalizers whole, with
 // nothing dropped (?debug=1 empty), and a page published before wave 4 (its v1 normalizer) still reads every block.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { appendEvent } from '../src/forge/ledger.js';
@@ -11,6 +10,8 @@ import { saveExecution, writePublicTask } from '../src/forge/execution.js';
 import { normalizeForgeV1, normalizeInfinite, normalizeRun, normalizeRunSummary, normalizeState } from '../src/page/normalize.js';
 import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
 import { MEDIUM_T1, ROADMAP_AT, largeWithDeferred, writeVerify } from './fixtures/roadmap-ledger.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
 let io: Io;
@@ -47,7 +48,7 @@ const execution = (over: Partial<ExecutionState> = {}): ExecutionState => ({
 const doc = (t: string) => JSON.parse(readFileSync(out(run(['roadmap-doc', t, '--project', 'shop'], io)).file, 'utf8'));
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'roadmap-contract-'));
+  root = tmp('roadmap-contract-');
   g('init', '-q', '-b', 'main'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't'); g('config', 'core.autocrlf', 'false');
   writeFileSync(path.join(root, '.gitignore'), '.forge/\n');
   g('add', '.'); g('commit', '-qm', 'init');
@@ -73,7 +74,6 @@ beforeEach(() => {
   writePublicTask(root, { task: 'T4', runId: RUN, stage: 'implement', status: 'running', agent: 'forge-impl', round: 1, since: ROADMAP_AT(170), updatedAt: ROADMAP_AT(170), leaseUntil: ROADMAP_AT(400), by: 'main', mode: 'subagents' });
   out(run(['roadmap-doc', 'T1', '--project', 'shop', '--assets', 'up.json'], io));
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe('the roadmap contract (C7, wave 4)', () => {
   it('state/T of a Medium with its evidence, a Large with deferred findings, a blocked and a running task pass normalizeState whole', () => {
@@ -163,7 +163,7 @@ describe('the roadmap contract (C7, wave 4)', () => {
     saveExecution(root, execution({ active: false, stopReason: 'stopped', closedAt: ROADMAP_AT(250), closedBy: 'close' }));
     walk(out(run(['roadmap-run', '--run', RUN], io)));
     // meta/metrics: an integrate in a run of its own.
-    const root2 = mkdtempSync(path.join(tmpdir(), 'roadmap-contract-integ-'));
+    const root2 = tmp('roadmap-contract-integ-');
     const g2 = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim();
     try {
       g2(root2, 'init', '-q', '-b', 'main'); g2(root2, 'config', 'user.email', 'a@b.c'); g2(root2, 'config', 'user.name', 't'); g2(root2, 'config', 'core.autocrlf', 'false');

@@ -1,15 +1,16 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { addDecision, allDecisions, decisionsFile, listDecisions, readDecisionsDoc, renderDecisionsMd, DecisionInputError } from '../src/forge/decisions.js';
 import { appendEvent, readEvents, withEventContext } from '../src/forge/ledger.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { saveExecution } from '../src/forge/execution.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
-beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-dec-')); });
+beforeEach(() => { root = tmp('forge-dec-'); });
 const at = (m: number) => new Date(Date.parse('2026-10-13T10:00:00.000Z') + m * 60_000).toISOString();
 const INPUT = { point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', why: 'ronda 2 sin critical', by: 'auto', undo: { type: 'design-reopen', project: 'reparto' } };
 
@@ -79,7 +80,7 @@ describe('listDecisions', () => {
     expect(JSON.parse(run(['decision', 'list', '--task', 'T001', '--project', 'web'], io).stdout).map((d: { n: number }) => d.n)).toEqual([4]);
   });
   it('is empty with no decision', () => {
-    expect(listDecisions(mkdtempSync(path.join(tmpdir(), 'forge-dec-')), {})).toEqual([]);
+    expect(listDecisions(tmp('forge-dec-'), {})).toEqual([]);
   });
 });
 
@@ -147,7 +148,7 @@ describe('forge decision CLI', () => {
     expect(run(['decision', 'md', '--scope', 'ns:task', '--out', 'x.txt'], io).code).toBe(2);
   });
   it('a session in a linked worktree (a run member) records and reads decisions in the main checkout', () => {
-    const main = mkdtempSync(path.join(tmpdir(), 'forge-dec-main-'));
+    const main = tmp('forge-dec-main-');
     const git = (...a: string[]) => execFileSync('git', a, { cwd: main, stdio: 'ignore' });
     git('init', '-q', '-b', 'main');
     writeFileSync(path.join(main, 'a.txt'), 'a');

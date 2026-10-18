@@ -1,16 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { copyTree, evidenceOf, keepEvidence, EVIDENCE_FILES_MAX } from '../src/forge/evidence-copy.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
-const dirs = () => ({ from: mkdtempSync(path.join(tmpdir(), 'forge-ev-from-')), to: mkdtempSync(path.join(tmpdir(), 'forge-ev-to-')) });
-const outsideDir = () => mkdtempSync(path.join(tmpdir(), 'forge-ev-out-'));
+const dirs = () => ({ from: tmp('forge-ev-from-'), to: tmp('forge-ev-to-') });
+const outsideDir = () => tmp('forge-ev-out-');
 
 // A forge task worktree as ledgerRoot tells one, without git: <main>/.claude/worktrees/task-T1 whose .git file points
 // into <main>/.git/worktrees.
 const taskWorktree = () => {
-  const main = mkdtempSync(path.join(tmpdir(), 'forge-ev-main-'));
+  const main = tmp('forge-ev-main-');
   const wt = path.join(main, '.claude', 'worktrees', 'task-T1');
   mkdirSync(wt, { recursive: true });
   writeFileSync(path.join(wt, '.git'), `gitdir: ${path.join(main, '.git', 'worktrees', 'task-T1').split(path.sep).join('/')}\n`);
@@ -37,7 +38,7 @@ describe('copyTree (K2-04)', () => {
   });
   it('never follows a link', () => {
     const { from, to } = dirs();
-    const outside = mkdtempSync(path.join(tmpdir(), 'forge-ev-out-'));
+    const outside = tmp('forge-ev-out-');
     writeFileSync(path.join(outside, 'secret.txt'), 's');
     try { symlinkSync(path.join(outside, 'secret.txt'), path.join(from, 'link.txt')); } catch { return; /* no symlinks here (Windows without the privilege) */ }
     expect(copyTree(from, to, ['link.txt']).copied).toEqual([]);

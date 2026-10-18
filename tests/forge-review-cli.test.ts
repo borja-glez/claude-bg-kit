@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, rmSync, openSync, ftruncateSync, closeSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, rmSync, openSync, ftruncateSync, closeSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { EVIDENCE_COPY_MAX, keepEvidence } from '../src/forge/evidence-copy.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
 let wt: string;
@@ -22,7 +23,7 @@ const review = {
 };
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'forge-review-'));
+  root = tmp('forge-review-');
   wt = path.join(root, 'wt');
   mkdirSync(path.join(wt, '.forge'), { recursive: true });
   writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(0)"\n');
@@ -205,7 +206,7 @@ describe('forge review-prep', () => {
   });
 
   it('without a triage review it is a usage error', () => {
-    const fresh = mkdtempSync(path.join(tmpdir(), 'forge-review-'));
+    const fresh = tmp('forge-review-');
     const r = run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', base, '--baseline', path.join(work(), 'baseline-1.json'), '--dir', 'w', '--cwd', wt], { ...io, cwd: fresh });
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/triage/);
@@ -233,7 +234,7 @@ describe('forge review-prep', () => {
   });
 
   it('the parent fallback reads only the parent id, not a sibling brief', () => {
-    const fresh = mkdtempSync(path.join(tmpdir(), 'forge-review-'));
+    const fresh = tmp('forge-review-');
     appendEvent(fresh, { ts: '2026-10-14T09:00:00.000Z', kind: 'triage', task: 'T1-3', path: 'medium', sensitive: [], review });
     const r = run(['review-prep', '--task', 'T1-2-1', '--path', 'medium', '--base', base, '--baseline', path.join(work(), 'baseline-1.json'), '--dir', 'w', '--cwd', wt], { ...io, cwd: fresh });
     expect(r.code).toBe(2);
@@ -1607,7 +1608,7 @@ describe('prep without --dir writes into the work folder of the task (D-08)', ()
 
 describe('a verification in a forge task worktree reaches the main checkout (D-10, K2-04)', () => {
   it('verify-result copies verify.json and the evidence and logs in the main ledger', () => {
-    const main = mkdtempSync(path.join(tmpdir(), 'forge-k204-'));
+    const main = tmp('forge-k204-');
     const g = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8' }).trim();
     g(main, 'init', '-q', '-b', 'main'); writeFileSync(path.join(main, '.gitignore'), '.forge/\n.claude/\n'); g(main, 'add', '.'); g(main, 'commit', '-qm', 'init');
     const task = path.join(main, '.claude', 'worktrees', 'task-T1');
@@ -1629,7 +1630,7 @@ describe('a verification in a forge task worktree reaches the main checkout (D-1
   });
 
   it('review-close copies them too, and a file over the 50 MB cap stays out and is named as evidenceSkipped', () => {
-    const main = mkdtempSync(path.join(tmpdir(), 'forge-k204-close-'));
+    const main = tmp('forge-k204-close-');
     const g = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8' }).trim();
     g(main, 'init', '-q', '-b', 'main'); writeFileSync(path.join(main, '.gitignore'), '.forge/\n.claude/\n'); writeFileSync(path.join(main, 'a.txt'), 'one\n');
     g(main, 'add', '.'); g(main, 'commit', '-qm', 'init');

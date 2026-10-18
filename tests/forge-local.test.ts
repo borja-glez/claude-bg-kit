@@ -1,16 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { readLocal, writeLocal, updateLocal, localFile, mainCheckout } from '../src/forge/local.js';
 import { forgeDir } from '../src/forge/ledger.js';
 import { surfaceHash } from '../src/forge/surfaces.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { samePath } from '../src/lib/worktree.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
-beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-local-')); });
+beforeEach(() => { root = tmp('forge-local-'); });
 const vp = (cwd: string) => JSON.parse(run(['verify-plan', '--task', 't', '--path', 'medium', '--base', 'x'], { cwd, now: () => new Date(), git: () => null }).stdout);
 
 describe('local.yaml', () => {

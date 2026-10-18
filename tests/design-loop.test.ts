@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { run, type Io } from '../src/cli/run.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 /**
  * Re-review N3: the setup every loop below shares: a temporary repository with the fixture design and plan, driven from
@@ -37,8 +38,8 @@ function sandbox(prefix: string) {
       writeFileSync(file, text.replace(from, to));
     },
     open: () => {
-      repo = mkdtempSync(path.join(tmpdir(), `${prefix}-`));
-      elsewhere = mkdtempSync(path.join(tmpdir(), `${prefix}-cwd-`));
+      repo = tmp(`${prefix}-`);
+      elsewhere = tmp(`${prefix}-cwd-`);
       execFileSync('git', ['init', '-q'], { cwd: repo });
       mkdirSync(path.dirname(design()), { recursive: true });
       copyFileSync(new URL('./fixtures/design.md', import.meta.url), design());

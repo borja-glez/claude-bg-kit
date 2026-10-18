@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, utimesSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync, utimesSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { claudeConfigDir, locateSuperpowers, spPlans, spSkillPath, spSpecs } from '../src/forge/superpowers.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { parsePlan } from '../src/lib/plan.js';
+import { tmpdir } from 'node:os';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let cfg: string;
 let project: string;
@@ -21,8 +23,8 @@ const registry = (plugins: Record<string, unknown>) => {
   writeFileSync(path.join(cfg, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins }));
 };
 beforeEach(() => {
-  cfg = mkdtempSync(path.join(tmpdir(), 'sp-cfg-'));
-  project = mkdtempSync(path.join(tmpdir(), 'sp-proj-'));
+  cfg = tmp('sp-cfg-');
+  project = tmp('sp-proj-');
 });
 
 describe('locateSuperpowers', () => {
@@ -87,7 +89,7 @@ describe('sp-specs and sp-plans', () => {
     for (const [n, d] of [['a', 1], ['b', 2], ['c', 3], ['d', 4], ['old', 20]] as const) file(`docs/superpowers/specs/${n}.md`, `# Spec ${n} — design\n\n## A\n`, d);
     file('docs/waypoint/shop/design.md', '---\ntitle: S\nproject: shop\nsummary: s\nsource: docs/superpowers/specs/a.md\n---\n\n## X\n', 0);
     expect(spSpecs(project, NOW)).toEqual(['b', 'c', 'd'].map((n, i) => ({ path: `docs/superpowers/specs/${n}.md`, title: `Spec ${n}`, modified: new Date(NOW - (i + 2) * DAY).toISOString() })));
-    expect(spSpecs(mkdtempSync(path.join(tmpdir(), 'sp-none-')), NOW)).toEqual([]);
+    expect(spSpecs(tmp('sp-none-'), NOW)).toEqual([]);
   });
   it('lists the recent plans with tasks left, with their counts', () => {
     const plan = (box: string) => `# P Implementation Plan\n\n### Task 1: one\n\n- [x] a\n\n### Task 2: two\n\n- [${box}] b\n`;

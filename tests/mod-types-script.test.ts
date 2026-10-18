@@ -1,17 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/forge/config.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const script = fileURLToPath(new URL('../scripts/mod-types.mjs', import.meta.url));
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const read = (p: string) => readFileSync(path.join(repo, p), 'utf8');
 let box: string;
-beforeEach(() => { box = mkdtempSync(path.join(tmpdir(), 'mod-types-')); });
-afterEach(() => { rmSync(box, { recursive: true, force: true }); });
+beforeEach(() => { box = tmp('mod-types-'); });
 const types = (dir: string, version: string) => {
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, 'index.d.ts'), `// Written by Claude Code ${version}.\nexport {};\n`);

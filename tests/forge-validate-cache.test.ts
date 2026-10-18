@@ -1,11 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync, utimesSync } from 'node:fs';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { writeFileSync, mkdirSync, rmSync, readdirSync, existsSync, utimesSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { cleanTree, indexTree, untrackedPaths, lockHash, cacheKey, envKey, readCached, writeCached, pruneCache, cacheDir, cacheable, runWithCache, checkoutPrefix, type CachedResult, type CacheCtx } from '../src/forge/validate-cache.js';
 import { defaultGit, repoReader } from '../src/forge/cli/run.js';
 import type { Validator, ValidatorResult } from '../src/forge/validators.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
 const g = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8' }).trim();
@@ -20,14 +21,13 @@ const ctx = (over: Partial<CacheCtx> = {}): CacheCtx => ({
 });
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'forge-vcache-'));
+  root = tmp('forge-vcache-');
   g('init', '-q', '-b', 'main'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't'); g('config', 'core.autocrlf', 'false');
   mkdirSync(path.join(root, 'dist'));
   writeFileSync(path.join(root, 'a.txt'), 'a\n');
   writeFileSync(path.join(root, 'dist', 'bundle.js'), 'built\n');
   g('add', '-A'); g('commit', '-qm', 'init');
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe('the tree a validator sees (C6)', () => {
   it('is HEAD^{tree} with nothing uncommitted; an untracked or a modified file makes it null', () => {
@@ -49,8 +49,8 @@ describe('the tree a validator sees (C6)', () => {
     expect(cleanTree(defaultGit(root), ['dist/**'])).toBe(g('rev-parse', 'HEAD^{tree}'));
   });
   it('is null outside a git repository', () => {
-    const plain = mkdtempSync(path.join(tmpdir(), 'forge-vcache-plain-'));
-    try { expect(cleanTree(defaultGit(plain), [])).toBeNull(); } finally { rmSync(plain, { recursive: true, force: true }); }
+    const plain = tmp('forge-vcache-plain-');
+    expect(cleanTree(defaultGit(plain), [])).toBeNull();
   });
   it('the index tree: the staged tree while the work tree matches the index and no untracked path appeared', () => {
     writeFileSync(path.join(root, 'a.txt'), 'merged\n');
@@ -94,8 +94,8 @@ describe('the cache key and its entries (C6)', () => {
     mkdirSync(path.join(root, 'sub a', 'deep'), { recursive: true });
     expect(checkoutPrefix(defaultGit(root))).toBe('');
     expect(checkoutPrefix(defaultGit(path.join(root, 'sub a', 'deep')))).toBe('sub a/deep/');
-    const plain = mkdtempSync(path.join(tmpdir(), 'forge-vcache-plain-'));
-    try { expect(checkoutPrefix(defaultGit(plain))).toBeNull(); } finally { rmSync(plain, { recursive: true, force: true }); }
+    const plain = tmp('forge-vcache-plain-');
+    expect(checkoutPrefix(defaultGit(plain))).toBeNull();
   });
   it('lockHash is empty without lockfiles and follows their content', () => {
     expect(lockHash(repoReader(root))).toBe('');

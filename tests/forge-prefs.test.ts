@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolvePrefs } from '../src/forge/prefs.js';
 import { run, type Io } from '../src/forge/cli/run.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 describe('resolvePrefs', () => {
   it('takes the request, then local.yaml, then config.yaml, then ask, and says where each came from', () => {
@@ -18,7 +19,7 @@ describe('forge prefs and local set', () => {
   let root: string;
   let io: Io;
   beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'forge-prefs-'));
+    root = tmp('forge-prefs-');
     io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z') };
   });
   it('prints the resolved preferences and their sources', () => {

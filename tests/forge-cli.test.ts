@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { parseDocument } from 'yaml';
-import { appendFileSync, mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, symlinkSync, rmSync } from 'node:fs';
+import { appendFileSync, writeFileSync, mkdirSync, existsSync, readFileSync, symlinkSync, rmSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run as cli, defaultExec, defaultExecMany, type Io } from '../src/forge/cli/run.js';
 import { startRun, saveRun } from '../src/forge/run.js';
@@ -14,6 +13,8 @@ import { parsePlan } from '../src/lib/plan.js';
 import { parseStatus } from '../src/forge/tree.js';
 import { saveExecution } from '../src/forge/execution.js';
 import { LEASE_MINUTES } from '../src/lib/coordination.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 // infinite start binds Claude's session id (C1, K5-03). The tests run inside Claude Code, which sets
 // CLAUDE_CODE_SESSION_ID: io.env is {} so nothing leaks from it, and the id comes as --session s1 unless a test gives its own.
@@ -29,7 +30,7 @@ const writePlan = (dir: string, tasks: string) => {
     `project: demo\nlocale: en\nversion: "0.1"\ntracks:\n  - { id: backend, name: Backend, color: blue }\nphases:\n  - { id: PX, name: Improvements }\ntasks:\n${tasks}`);
 };
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'forge-cli-'));
+  root = tmp('forge-cli-');
   io = { cwd: root, now: () => new Date('2026-10-11T10:00:00.000Z'), env: {} };
 });
 
@@ -448,7 +449,7 @@ describe('forge CLI', () => {
     expect(sp.announce).toMatch(/^Medium → forge-impl: .*superpowers plan: the Medium path, its tasks in order\. I show you a short plan/);
   });
   it('triage names .forge/.gitignore as untracked until it is committed', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'forge-untracked-'));
+    const dir = tmp('forge-untracked-');
     const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' });
     git('init', '-q');
     for (const f of ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts']) writeFileSync(path.join(dir, f), 'export {};\n');
@@ -466,7 +467,7 @@ describe('forge CLI', () => {
     expect(JSON.parse(run(['triage', 'fix the typo in a.ts'], { ...dio, git: () => null }).stdout)).not.toHaveProperty('untracked');
   });
   it('triage does not name .forge/.gitignore when the repository ignores .forge/', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'forge-ignored-'));
+    const dir = tmp('forge-ignored-');
     const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' });
     git('init', '-q');
     for (const f of ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts']) writeFileSync(path.join(dir, f), 'export {};\n');
@@ -570,7 +571,7 @@ describe('forge CLI', () => {
     expect(run(['validate', '--all', '--path', 'huge'], io).code).toBe(2);
   });
   it('--cwd runs a command in another directory without moving the caller', () => {
-    const other = mkdtempSync(path.join(tmpdir(), 'forge-cwd-'));
+    const other = tmp('forge-cwd-');
     writeFileSync(path.join(other, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }));
     const r = run(['validate', '--all', '--cwd', other], { ...io, exec: undefined, git: undefined });
     expect(r.code).toBe(0);
@@ -581,7 +582,7 @@ describe('forge CLI', () => {
     expect(run(['validate', '--all', '--cwd', path.join(other, 'nope')], io).code).toBe(2);
   });
   it('--cwd keeps file flags relative to the caller: a baseline in the caller marks preexisting failures', () => {
-    const other = mkdtempSync(path.join(tmpdir(), 'forge-cwd-'));
+    const other = tmp('forge-cwd-');
     writeFileSync(path.join(other, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(1)"' } }));
     mkdirSync(path.join(root, '.forge', 'work', 'T'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'work', 'T', 'baseline-1.json'), JSON.stringify([{ validator: 'test', ok: false, flaky: false, failures: ['> test', '> node -e "process.exit(1)"'] }]));
@@ -782,7 +783,7 @@ describe('forge infinite', () => {
     expect(hook('{"session_id":"s2"}').stdout).toBe('');
     expect(readRun().active).toBe(true);
     expect(JSON.parse(hook('{"session_id":"s1"}').stdout)).toEqual(ended('stop-file'));
-    const other = mkdtempSync(path.join(tmpdir(), 'forge-cli-'));
+    const other = tmp('forge-cli-');
     expect(run(['infinite', 'start', '--cycles', '1', '--session'], { ...io, cwd: other }).code).toBe(2);
     expect(run(['infinite', 'start', '--cycles', '1', '--session', 'abc'], { ...io, cwd: other }).code).toBe(0);
     expect(run(['hook', 'stop'], { ...io, cwd: other, stdin: '{"session_id":"zzz"}' }).stdout).toBe('');
@@ -1488,7 +1489,7 @@ tasks:
 describe('forge waypoint-cli', () => {
   const touch = (f: string) => { mkdirSync(path.dirname(f), { recursive: true }); writeFileSync(f, ''); };
   it('finds waypoint next to forge in the dev layout', () => {
-    const base = mkdtempSync(path.join(tmpdir(), 'forge-wp-'));
+    const base = tmp('forge-wp-');
     touch(path.join(base, 'plugins', 'forge', 'dist', 'forge.cjs'));
     touch(path.join(base, 'plugins', 'waypoint', 'dist', 'waypoint.cjs'));
     const r = run(['waypoint-cli'], { cwd: base, now: () => new Date(), scriptPath: path.join(base, 'plugins', 'forge', 'dist', 'forge.cjs') });
@@ -1496,7 +1497,7 @@ describe('forge waypoint-cli', () => {
     expect(r.stdout.trim()).toBe(path.join(base, 'plugins', 'waypoint', 'dist', 'waypoint.cjs'));
   });
   it('finds the highest waypoint version in the cache layout', () => {
-    const base = mkdtempSync(path.join(tmpdir(), 'forge-wp-'));
+    const base = tmp('forge-wp-');
     touch(path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs'));
     for (const v of ['0.7.0', '0.10.0', '0.9.1']) touch(path.join(base, 'waypoint', v, 'dist', 'waypoint.cjs'));
     const r = run(['waypoint-cli'], { cwd: base, now: () => new Date(), scriptPath: path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs') });
@@ -1504,7 +1505,7 @@ describe('forge waypoint-cli', () => {
     expect(r.stdout.trim()).toBe(path.join(base, 'waypoint', '0.10.0', 'dist', 'waypoint.cjs'));
   });
   it('exits 2 when waypoint is not found', () => {
-    const base = mkdtempSync(path.join(tmpdir(), 'forge-wp-'));
+    const base = tmp('forge-wp-');
     touch(path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs'));
     const r = run(['waypoint-cli'], { cwd: base, now: () => new Date(), scriptPath: path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs') });
     expect(r.code).toBe(2);
@@ -2307,7 +2308,7 @@ describe('validate and the tree cache (C6)', () => {
   let ran: string[];
   let vio: Io;
   beforeEach(() => {
-    repo = mkdtempSync(path.join(tmpdir(), 'forge-vcache-'));
+    repo = tmp('forge-vcache-');
     const g = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' });
     g('init', '-q'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't');
     writeFileSync(path.join(repo, 'a.txt'), 'a\n');
@@ -2405,7 +2406,7 @@ describe('validate --affected (C-02)', () => {
   let aio: Io;
   const q = (f: string) => (process.platform === 'win32' ? `"${f}"` : `'${f}'`);
   beforeEach(() => {
-    repo = mkdtempSync(path.join(tmpdir(), 'forge-affected-'));
+    repo = tmp('forge-affected-');
     const g = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' });
     g('init', '-q'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't');
     mkdirSync(path.join(repo, 'src'));

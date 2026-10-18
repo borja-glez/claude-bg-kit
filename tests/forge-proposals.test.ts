@@ -1,16 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { proposalId, saveProposal, loadProposals, decideLocal, decideDoc, saveApproval, loadApproval, loadApprovals, removeApproval } from '../src/forge/proposals.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const doc = (over: Partial<ProposalDoc> = {}): ProposalDoc => ({
   ts: '2026-10-11T10:00:00.000Z', category: 'quality', risk: 'low', title: 'T', rationale: 'r', evidence: 'e', pillar: 'p',
   status: 'proposed', source: 'scout', author: 'session', ...over,
 });
 let root: string;
-beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-prop-')); });
+beforeEach(() => { root = tmp('forge-prop-'); });
 
 describe('forge proposals mirror', () => {
   it('proposalId has the expected shape', () => {

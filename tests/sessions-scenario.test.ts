@@ -1,14 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, copyFileSync, readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { run, type Io } from '../src/cli/run.js';
 import { loadBandModel, type Engine } from '../src/mod/files.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 describe('two conversations on one checkout (spec §1, criteria 1 to 3)', () => {
   it('B inherits nothing of A; after /clear, C is offered the task and takes it only when it asks', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'wp-scenario-'));
+    const dir = tmp('wp-scenario-');
     const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' }).trim();
     const PLAN = 'docs/waypoint/demo-shop/plan.yaml';
     mkdirSync(path.join(dir, 'docs', 'waypoint', 'demo-shop'), { recursive: true });
@@ -73,7 +74,7 @@ function diskEngine(root: string, id: string, at: number): Engine {
 
 /** A temporary repository with the demo plan, the CLI and the hooks over it, and the band as each conversation sees it. */
 function scenario() {
-    const dir = mkdtempSync(path.join(tmpdir(), 'wp-scenario-band-'));
+    const dir = tmp('wp-scenario-band-');
     const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' }).trim();
     const PLAN = 'docs/waypoint/demo-shop/plan.yaml';
     mkdirSync(path.join(dir, 'docs', 'waypoint', 'demo-shop'), { recursive: true });

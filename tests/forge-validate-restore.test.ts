@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, appendFileSync, unlinkSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, appendFileSync, unlinkSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { restoringRegenerated } from '../src/forge/cli/swarm.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
 let io: Io;
@@ -14,7 +15,7 @@ const git = (...a: string[]) => g(root, ...a);
 const GEN = 'validators:\n  - name: gen\n    cmd: node -e "require(\'fs\').writeFileSync(\'gen.txt\',String(Date.now()))"\n';
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'forge-regen-'));
+  root = tmp('forge-regen-');
   git('init', '-q', '-b', 'main'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 't'); git('config', 'core.autocrlf', 'false');
   writeFileSync(path.join(root, '.gitignore'), '.forge/\n.claude/\n');
   writeFileSync(path.join(root, 'gen.txt'), 'committed\n');
@@ -23,7 +24,7 @@ beforeEach(() => {
   git('add', '.gitignore', 'gen.txt', 'other.txt', 'del.txt'); git('commit', '-qm', 'init');
   io = { cwd: root, now: () => new Date('2026-10-14T12:00:00.000Z'), git: defaultGit(root) };
 });
-afterEach(() => { try { git('worktree', 'prune'); } catch { /* ignore */ } rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { try { git('worktree', 'prune'); } catch { /* ignore */ } });
 
 describe('restoringRegenerated', () => {
   it('puts back the tracked files the run modified or deleted, never one already modified before it nor an untracked one', () => {

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { removeDir, useTempDirs } from './helpers/tmp.js';
 import setup, { stamp } from './setup/temp-root.js';
 
@@ -70,5 +71,22 @@ describe('removeDir (I-01)', () => {
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('EBUSY'));
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('bgkit-busy-AbC123'));
     } finally { warn.mockRestore(); }
+  });
+});
+
+const walk = (dir: string): string[] => readdirSync(dir).flatMap(n => {
+  const p = path.join(dir, n);
+  return statSync(p).isDirectory() ? walk(p) : [p];
+});
+
+describe('no test makes a temp directory by hand (I-01)', () => {
+  it('mkdtempSync appears in tests/ only in tests/helpers/tmp.ts', () => {
+    const needle = 'mkdtemp' + 'Sync(';
+    const root = fileURLToPath(new URL('.', import.meta.url));
+    const offenders = walk(root)
+      .filter(f => /\.(ts|mts|js|mjs)$/.test(f))
+      .map(f => path.relative(root, f).split(path.sep).join('/'))
+      .filter(rel => rel !== 'helpers/tmp.ts' && readFileSync(path.join(root, rel), 'utf8').includes(needle));
+    expect(offenders).toEqual([]);
   });
 });

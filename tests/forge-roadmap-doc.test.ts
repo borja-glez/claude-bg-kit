@@ -1,7 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buildRoadmapData, type DocInput } from '../src/forge/roadmap-doc.js';
 import { parseVerifyFile } from '../src/forge/verdict.js';
@@ -11,6 +10,8 @@ import { deriveStatuses, statusKey, type StatusMap } from '../src/lib/forge-stat
 import { fitForgeDoc, parseForgeDocV2, STAGE_KEYS } from '../src/lib/roadmap-doc.js';
 import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
 import { MEDIUM_T1, ROADMAP_AT, writeVerify } from './fixtures/roadmap-ledger.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const NOW = new Date(ROADMAP_AT(60));
 const statusOf = (events: readonly LedgerEvent[], task = 'T1', project: string | null = 'shop') =>
@@ -223,7 +224,7 @@ describe('FORGE roadmap-doc (G-03, G-06)', () => {
   const out = (r: { code: number; stdout: string; stderr: string }) => { if (r.code !== 0) throw new Error(r.stderr); return JSON.parse(r.stdout); };
   const data = () => JSON.parse(readFileSync(path.join(root, WORK, 'roadmap-doc.json'), 'utf8'));
   const initRepo = (): string => {
-    root = mkdtempSync(path.join(tmpdir(), 'forge-roadmap-doc-'));
+    root = tmp('forge-roadmap-doc-');
     g('init', '-q', '-b', 'main'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't'); g('config', 'core.autocrlf', 'false');
     writeFileSync(path.join(root, '.gitignore'), '.forge/\n');
     g('add', '.'); g('commit', '-qm', 'init');
@@ -236,7 +237,6 @@ describe('FORGE roadmap-doc (G-03, G-06)', () => {
     io ={ cwd: root, now: () => NOW, env: {} };
     for (const e of MEDIUM_T1) appendEvent(root, e);
   });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
 
   it('writes the data of update state/T to <WORK>/roadmap-doc.json and prints the write; outside a run the integration is HEAD on the default branch', () => {
     const r = out(cli('roadmap-doc', 'T1', '--project', 'shop'));
@@ -385,7 +385,7 @@ describe('FORGE roadmap-doc (G-03, G-06)', () => {
   });
   it('deferred.json is looked up where the review dirs are: here, the caller and the main checkout', () => {
     const wt = path.join(path.dirname(root), `${path.basename(root)}-wt`);
-    const elsewhere = mkdtempSync(path.join(tmpdir(), 'forge-roadmap-here-'));
+    const elsewhere = tmp('forge-roadmap-here-');
     try {
       g('worktree', 'add', '-q', '-b', 'wt', wt);
       mkdirSync(path.join(wt, WORK), { recursive: true });

@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, utimesSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, utimesSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run as cli, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
 import { readExecution, saveExecution, executionTaskFile, executionLock, writePublicTask } from '../src/forge/execution.js';
@@ -17,6 +16,8 @@ import { codeSpan, integratedSay, keptFilesSay } from '../src/forge/swarm.js';
 import { normalizeRun } from '../src/page/normalize.js';
 import { mergingFile } from '../src/forge/merging.js';
 import { STEP_WAIT_SECONDS } from '../src/forge/schedule.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 // swarm start and takeover bind Claude's session id (C1). The tests run inside Claude Code, which sets
 // CLAUDE_CODE_SESSION_ID: io.env is {} so nothing leaks from it, and the id comes as a flag unless a test gives its own.
@@ -46,7 +47,7 @@ const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'u
 const out = (r: { stdout: string; code: number; stderr: string }) => { if (r.code !== 0) throw new Error(r.stderr); return JSON.parse(r.stdout); };
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'forge-exec-cli-'));
+  root = tmp('forge-exec-cli-');
   git('init', '-q', '-b', 'main'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 't'); git('config', 'core.autocrlf', 'false');
   writeFileSync(path.join(root, 'plan.yaml'), PLAN);
   writeFileSync(path.join(root, '.gitignore'), '.forge/\n.claude/\n');
@@ -55,7 +56,7 @@ beforeEach(() => {
   writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\n');
   io = { cwd: root, now: () => NOW, git: defaultGit(root), sleep: () => undefined, env: {} };
 });
-afterEach(() => { try { git('worktree', 'prune'); } catch { /* ignore */ } rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { try { git('worktree', 'prune'); } catch { /* ignore */ } });
 const writeDocs = (dir: string, docs: Record<string, unknown>) => {
   mkdirSync(dir, { recursive: true });
   for (const [id, d] of Object.entries(docs)) writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(d));
@@ -343,7 +344,7 @@ describe('forge swarm (execution)', () => {
   });
   it('start from a subdirectory of the main checkout writes the union line into the repository git dir and nowhere else', () => {
     // Nested, so that a path resolved against the wrong directory lands inside this box.
-    const box = mkdtempSync(path.join(tmpdir(), 'forge-sub-'));
+    const box = tmp('forge-sub-');
     const repo = path.join(box, 'a', 'repo');
     const sub = path.join(repo, 'sub');
     mkdirSync(sub, { recursive: true });
@@ -1360,7 +1361,7 @@ describe('forge swarm (execution)', () => {
   it('swarm start and swarm worktree add .claude/worktrees/ to info/exclude once when nothing ignores it (A-08)', () => {
     writeFileSync(path.join(root, '.gitignore'), '.forge/\n');
     git('add', '.gitignore'); git('commit', '-qm', 'no .claude in .gitignore');
-    const none = path.join(mkdtempSync(path.join(tmpdir(), 'forge-noexcl-')), 'excludes');
+    const none = path.join(tmp('forge-noexcl-'), 'excludes');
     writeFileSync(none, '');
     git('config', 'core.excludesFile', none);
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
@@ -1377,7 +1378,7 @@ describe('forge swarm (execution)', () => {
     expect(excludeText()).toBe(before);
     writeFileSync(path.join(root, '.gitignore'), '.forge/\n');
     git('add', '.gitignore'); git('commit', '-qm', 'no .claude in .gitignore');
-    const global = path.join(mkdtempSync(path.join(tmpdir(), 'forge-glob-')), 'excludes');
+    const global = path.join(tmp('forge-glob-'), 'excludes');
     writeFileSync(global, '.claude/\n');
     git('config', 'core.excludesFile', global);
     out(run(['swarm', 'worktree', 'T2'], io));
@@ -1388,7 +1389,7 @@ describe('forge swarm (execution)', () => {
     // Anchored at the top: only the main checkout's .claude/ is ignored, which a git run in a subdirectory would miss.
     writeFileSync(path.join(root, '.gitignore'), '.forge/\n/.claude/\n');
     git('add', '.gitignore'); git('commit', '-qm', 'anchored');
-    const none = path.join(mkdtempSync(path.join(tmpdir(), 'forge-noexcl-')), 'excludes');
+    const none = path.join(tmp('forge-noexcl-'), 'excludes');
     writeFileSync(none, '');
     git('config', 'core.excludesFile', none);
     const sub = path.join(root, 'src');

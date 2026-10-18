@@ -1,16 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { addCase, buildCase, startShadow } from '../src/forge/shadow.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
 let io: Io;
 const state = () => JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8'));
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'forge-shadow-cli-'));
+  root = tmp('forge-shadow-cli-');
   io = { cwd: root, now: () => new Date('2026-10-14T10:00:00.000Z'), env: {} };
 });
 

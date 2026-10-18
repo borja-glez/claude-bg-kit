@@ -1,7 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { appendEvent } from '../src/forge/ledger.js';
@@ -11,6 +10,8 @@ import { normalizeRunSummary, RUN_SUMMARY_MAX } from '../src/lib/run-summary.js'
 import { byteLength } from '../src/lib/roadmap-doc.js';
 import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
 import { MEDIUM_T1, ROADMAP_AT } from './fixtures/roadmap-ledger.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
 let io: Io;
@@ -38,7 +39,7 @@ const pub = (t: string, by: string, mode: 'subagents' | 'sessions' | 'manual') =
   writePublicTask(root, { task: t, runId: RUN, stage: 'review', status: 'running', agent: null, round: 1, since: ROADMAP_AT(0), updatedAt: ROADMAP_AT(0), leaseUntil: ROADMAP_AT(10), by, mode });
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'forge-roadmap-run-'));
+  root = tmp('forge-roadmap-run-');
   g('init', '-q', '-b', 'main'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't'); g('config', 'core.autocrlf', 'false');
   writeFileSync(path.join(root, '.gitignore'), '.forge/\n');
   g('add', '.'); g('commit', '-qm', 'init');
@@ -56,7 +57,6 @@ beforeEach(() => {
   writeMember(root, { sessionId: 'ui3', role: 'executor', runId: RUN, task: 'T3', name: 'wp-shop-T3', since: ROADMAP_AT(0), hookSession: 'h3' });
   writeMember(root, { sessionId: 'mm', role: 'manual', runId: RUN, task: null, name: null, since: ROADMAP_AT(0), hookSession: 'h4' });
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe('FORGE roadmap-run (G-07, G-04)', () => {
   it('--run summarizes the ended run: each task with its status (stopped too), seconds, rounds and deferred, the final review and the decisions', () => {

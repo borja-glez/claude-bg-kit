@@ -1,8 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { addDecision, allDecisions } from '../src/forge/decisions.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 // Another session appends its own decision right after ours, before addDecision reads the ledger back.
 vi.mock('../src/forge/ledger.js', async importOriginal => {
@@ -20,7 +19,7 @@ vi.mock('../src/forge/ledger.js', async importOriginal => {
 
 describe('addDecision under a concurrent append', () => {
   it('prints the number of its own event, not the count after the other one', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'forge-dec-race-'));
+    const root = tmp('forge-dec-race-');
     const r = addDecision(root, { point: 'ruling', what: 'mine', chosen: 'a', why: 'b', by: 'unattended' }, { ts: '2026-10-13T10:00:00.000Z' });
     expect(allDecisions(root).map(d => d.what)).toEqual(['mine', 'theirs']);
     expect(r.n).toBe(1);

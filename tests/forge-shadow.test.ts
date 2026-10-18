@@ -1,15 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Finding } from '../src/forge/verdict.js';
 import {
   readShadow, startShadow, stopShadow, takeBrief, addCase, shadowFile,
   findingsMatch, buildCase, shadowReport, renderShadowReport, type ShadowCase,
 } from '../src/forge/shadow.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tempDir = useTempDirs();
 
-const tmp = () => mkdtempSync(path.join(tmpdir(), 'forge-shadow-'));
+const tmp = () => tempDir('forge-shadow-');
 const f = (severity: Finding['severity'], problem: string, file?: string, line?: number): Finding => ({ severity, problem, file, line });
 
 describe('shadow state', () => {

@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { appendFileSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines } from '../src/forge/verify.js';
 import { surfaceHash, type Surface, type Draft } from '../src/forge/surfaces.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readEvents } from '../src/forge/ledger.js';
 import { readLocal, writeLocal, type SurfacePermission } from '../src/forge/local.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const surf = (name: string, affects: string[] | null, tools: string[] = []): Surface => ({ name, file: `.forge/verify/${name}.md`, title: name, affects, tools, hash: `h-${name}` });
 // An allowance made for the surface as surf() builds it (same hash), and the drafts already proposed.
@@ -109,9 +110,9 @@ describe('forge verify-plan: what the question about a surface shows', () => {
   const vp = (extra: string[] = [], at: Io = io) => JSON.parse(run(['verify-plan', '--task', 't-1', '--path', 'medium', '--base', 'HEAD', ...extra], at).stdout);
   const file = () => path.join(root, '.forge', 'verify', 'web.md');
   beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'forge-vp-git-'));
+    root = tmp('forge-vp-git-');
     // A fixture config dir, so the user's own MCP servers are never read.
-    io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z'), env: { CLAUDE_CONFIG_DIR: mkdtempSync(path.join(tmpdir(), 'forge-vp-cfg-')) } };
+    io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z'), env: { CLAUDE_CONFIG_DIR: tmp('forge-vp-cfg-') } };
     git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     git('init', '-q', '-b', 'main');
     git('config', 'user.email', 'a@b.c');
@@ -205,7 +206,7 @@ describe('forge verify-plan: what the question about a surface shows', () => {
   it('the whole diff is never written through a link (a commit can ship .forge/work as one): the file is null', () => {
     run(['local', 'set', 'surfaces.web', 'allowed'], io);
     writeFileSync(file(), `${SURFACE}${Array.from({ length: 200 }, (_, i) => `step ${i}\n`).join('')}`);
-    const outside = mkdtempSync(path.join(tmpdir(), 'forge-vp-outside-'));
+    const outside = tmp('forge-vp-outside-');
     // A junction on Windows (no privilege needed), a directory symlink elsewhere.
     symlinkSync(outside, path.join(root, '.forge', 'work'), 'junction');
     expect(vp(['--locale', 'en']).surfaces[0]).toMatchObject({ diffTruncated: true, diffFile: null });
@@ -254,7 +255,7 @@ describe('forge verify-plan: what the question about a surface shows', () => {
     expect(run(['verify-plan', '--task', 't-1', '--path', 'medium', '--base', 'HEAD', '--locale', 'fr'], io).code).toBe(2);
   });
   it('--cwd reads the surfaces of that directory', () => {
-    const caller = mkdtempSync(path.join(tmpdir(), 'forge-vp-caller-'));
+    const caller = tmp('forge-vp-caller-');
     const at: Io = { ...io, cwd: caller };
     expect(vp([], at).surfaces).toEqual([]);
     expect(vp(['--cwd', root], at).surfaces.map((s: { name: string }) => s.name)).toEqual(['web']);
@@ -263,7 +264,7 @@ describe('forge verify-plan: what the question about a surface shows', () => {
 
 describe('forge verify-plan', () => {
   let root: string; let io: Io;
-  beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-vp-')); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
+  beforeEach(() => { root = tmp('forge-vp-'); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
   it('reads surfaces, permissions and the diff, logs a verify event', () => {
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '---\naffects: ["src/**"]\n---\n# Web\n');
@@ -291,7 +292,7 @@ describe('forge verify-plan', () => {
 
 describe('verdict with verify.json and verify-cleanup', () => {
   let root: string; let io: Io;
-  beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-vv-')); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
+  beforeEach(() => { root = tmp('forge-vv-'); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
   it('the verdict reads verify.json and logs the verify result with the evidence dir', () => {
     const dir = path.join(root, '.forge', 'work', 't', 'reviews-1-1');
     mkdirSync(dir, { recursive: true });

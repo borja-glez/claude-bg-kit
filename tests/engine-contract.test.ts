@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/cli/run.js';
 import { run as forge } from '../src/forge/cli/run.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const SOURCES = ['startup', 'resume', 'clear', 'compact', 'fork'] as const;
 const REASONS = ['clear', 'resume', 'logout', 'prompt_input_exit', 'other'] as const;
@@ -19,7 +20,7 @@ const bindA = (over: Record<string, unknown> = {}) => {
 const context = (r: { stdout: string }) => JSON.parse(r.stdout).hookSpecificOutput.additionalContext as string;
 
 beforeEach(() => {
-  dir = mkdtempSync(path.join(tmpdir(), 'wp-contract-'));
+  dir = tmp('wp-contract-');
   mkdirSync(path.join(dir, 'docs', 'waypoint', 'demo-shop'), { recursive: true });
   copyFileSync(new URL('./fixtures/plan.yaml', import.meta.url), path.join(dir, 'docs', 'waypoint', 'demo-shop', 'plan.yaml'));
 });

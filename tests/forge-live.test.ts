@@ -1,7 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { nextLive, liveFile } from '../src/forge/live.js';
@@ -10,6 +9,8 @@ import { writeMember } from '../src/forge/members.js';
 import { saveRun, startRun } from '../src/forge/run.js';
 import { executionFromFiles } from '../src/lens/model.js';
 import { buildBandModel } from '../src/mod/model.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const T = '2026-10-12T12:00:00.000Z';
 describe('nextLive', () => {
@@ -36,13 +37,12 @@ describe('forge hook live', () => {
   let root: string; let io: Io;
   const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8' }).trim();
   beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'forge-live-'));
+    root = tmp('forge-live-');
     git('init', '-q', '-b', 'main'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 't');
     writeFileSync(path.join(root, 'x.txt'), 'x'); git('add', '.'); git('commit', '-qm', 'init');
     mkdirSync(path.join(root, '.forge'), { recursive: true });
     io = { cwd: root, now: () => new Date(T), git: defaultGit(root), env: {} };
   });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
   const hook = (input: object) => run(['hook', 'live'], { ...io, stdin: JSON.stringify(input) });
   const exec = (over: object = {}) => saveExecution(root, {
     runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,

@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { PRICES, priceOf, groupOf, splitCost, readUsageDir, byAgent, bySession, report, checkoutOf } from '../scripts/usage-report.mjs';
 import { priceFor } from '../src/lib/prices.js';
 import { groupOf as lensGroupOf } from '../src/lens/usage-summary.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tempDir = useTempDirs();
 
 const dir = path.join('tests', 'fixtures', 'usage');
 const script = path.join('scripts', 'usage-report.mjs');
@@ -94,7 +95,7 @@ describe('usage-report', () => {
     expect(report(files, [dir])).toContain('| usage | alpha | 9.40 | — | 3 |');
   });
   it('adds a time-by-stage table per checkout from FORGE stats --json, or one line when the CLI is missing (C-09)', () => {
-    const tmp = mkdtempSync(path.join(tmpdir(), 'usage-report-'));
+    const tmp = tempDir('usage-report-');
     try {
       const usage = path.join(tmp, 'shop', '.forge', 'usage');
       mkdirSync(usage, { recursive: true });

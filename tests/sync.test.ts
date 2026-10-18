@@ -1,13 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buildSync } from 'esbuild';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs, buildSyncWrites, planHash, planViewFromDocs } from '../src/lib/sync.js';
 import type { States } from '../src/lib/types.js';
 import { compareVersions, WAYPOINT_VERSION } from '../src/lib/waypoint-version.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const WP = (JSON.parse(readFileSync('plugins/waypoint/.claude-plugin/plugin.json', 'utf8')) as { version: string }).version;
 
@@ -172,7 +173,7 @@ describe('the waypoint version (G-13)', () => {
     expect(compareVersions(undefined, '0.0.0')).toBe(0);
   });
   it('carry 9: a bundle built without the define says 0.0.0 and does not throw', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'wp-version-'));
+    const dir = tmp('wp-version-');
     try {
       const out = path.join(dir, 'v.cjs');
       buildSync({

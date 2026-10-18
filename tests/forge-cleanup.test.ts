@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultExec, defaultGit, repoReader, type Io } from '../src/forge/cli/run.js';
 import { swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
@@ -11,6 +10,8 @@ import { EVIDENCE_FILES_MAX } from '../src/forge/evidence-copy.js';
 import { UsageError } from '../src/forge/cli/errors.js';
 import { withJob } from '../src/forge/jobs.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
 let io: Io;
@@ -31,7 +32,7 @@ const spyDeps = (calls: string[][]): SwarmDeps => {
 };
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'forge-cleanup-'));
+  root = tmp('forge-cleanup-');
   g(root, 'init', '-q', '-b', 'main'); g(root, 'config', 'user.email', 'a@b.c'); g(root, 'config', 'user.name', 't'); g(root, 'config', 'core.autocrlf', 'false');
   writeFileSync(path.join(root, '.gitignore'), '.forge/\n.claude/\n');
   // Committed, so every worktree ignores .forge/ as the main checkout does.
@@ -65,7 +66,7 @@ beforeEach(() => {
   writeFileSync(forge('work', 'shop', 'T1', 'diff-1.patch'), 'd');
   writeFileSync(forge('work', 'shop', 'T1', 'brief-1.md'), 'b');
 });
-afterEach(() => { try { g(root, 'worktree', 'prune'); } catch { /* ignore */ } rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { try { g(root, 'worktree', 'prune'); } catch { /* ignore */ } });
 
 describe('forge swarm cleanup (D-03, D-18)', () => {
   it('--dry-run says what would go and changes nothing', () => {
@@ -241,7 +242,7 @@ describe('swarm cleanup leaves what is still in use, or not yet kept anywhere el
     expect(existsSync(wt('task-T1'))).toBe(false);
   });
   it('keeps a task worktree whose evidence cannot reach the main checkout', () => {
-    const outside = mkdtempSync(path.join(tmpdir(), 'forge-cleanup-out-'));
+    const outside = tmp('forge-cleanup-out-');
     try {
       symlinkSync(outside, forge('work', 'shop', 'T1', 'evidence'), 'junction');
       const r = JSON.parse(swarmCommand(['cleanup'], io, spyDeps([])).stdout);

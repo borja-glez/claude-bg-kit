@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, readdirSync, existsSync, writeFileSync, type PathLike } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, copyFileSync, readFileSync, readdirSync, existsSync, writeFileSync, type PathLike } from 'node:fs';
 import path from 'node:path';
 import { run, type Io } from '../src/cli/run.js';
 import { checkoutSid, readBinding } from '../src/lib/bound-fs.js';
 import type { BoundDoc } from '../src/lib/bound.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const race = vi.hoisted(() => ({ rival: null as string | null, failRenames: 0, boundReads: 0, torn: false }));
 
@@ -59,7 +60,7 @@ beforeEach(() => {
   race.failRenames = 0;
   race.boundReads = 0;
   race.torn = false;
-  dir = mkdtempSync(path.join(tmpdir(), 'wp-bind-race-'));
+  dir = tmp('wp-bind-race-');
   mkdirSync(path.join(dir, 'docs', 'waypoint', 'demo-shop'), { recursive: true });
   copyFileSync(new URL('./fixtures/plan.yaml', import.meta.url), path.join(dir, PLAN));
   io = { cwd: dir, now: () => new Date(NOW), rand: () => 0, assetsDir: dir, env: {} };

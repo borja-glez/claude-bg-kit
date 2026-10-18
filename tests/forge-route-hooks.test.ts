@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { inForgeWorktree, looksLikeCoding, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
 import { listRoutes, readRoute, writeRoute } from '../src/forge/route.js';
@@ -9,6 +8,8 @@ import { saveExecution } from '../src/forge/execution.js';
 import { writeMember } from '../src/forge/members.js';
 import { saveRun, startRun } from '../src/forge/run.js';
 import { run, type Io } from '../src/forge/cli/run.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const NOW = new Date('2026-10-13T10:00:00.000Z');
 const context = (r: { stdout: string }) => (r.stdout ? JSON.parse(r.stdout).hookSpecificOutput : null);
@@ -46,8 +47,8 @@ describe('forge hook route-session and route-prompt', () => {
   let root: string;
   let cfg: string;
   beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'forge-route-hook-'));
-    cfg = mkdtempSync(path.join(tmpdir(), 'forge-route-hook-cfg-'));
+    root = tmp('forge-route-hook-');
+    cfg = tmp('forge-route-hook-cfg-');
   });
   const io = (stdin: string): Io => ({ cwd: root, now: () => NOW, stdin, env: { CLAUDE_CONFIG_DIR: cfg } });
   const hook = (which: string, input: unknown) => run(['hook', which], io(typeof input === 'string' ? input : JSON.stringify(input)));
@@ -117,8 +118,8 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
   let root: string;
   let cfg: string;
   beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'forge-route-sess-hook-'));
-    cfg = mkdtempSync(path.join(tmpdir(), 'forge-route-sess-cfg-'));
+    root = tmp('forge-route-sess-hook-');
+    cfg = tmp('forge-route-sess-cfg-');
   });
   const io = (stdin: unknown, at = NOW): Io => ({ cwd: root, now: () => at, stdin: JSON.stringify(stdin), env: { CLAUDE_CONFIG_DIR: cfg } });
   const ctx = (r: { stdout: string }) => (r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext as string : '');
@@ -295,8 +296,8 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
 
 describe('route-prompt reads every forge task of the session (K1-12 with C5)', () => {
   it("a task of this session keeps the hint away although another session's task changed later and is the alias", () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'forge-k112-'));
-    const cfg = mkdtempSync(path.join(tmpdir(), 'forge-k112-cfg-'));
+    const dir = tmp('forge-k112-');
+    const cfg = tmp('forge-k112-cfg-');
     const at = (min: number) => new Date(NOW.getTime() - min * 60_000).toISOString();
     const status = (task: string, session: string, lastAt: string, doneAt: string | null = null) => ({
       ts: lastAt, task, path: 'medium', phase: 'implement', agent: null, validators: [], verdict: null, round: null, cap: null, brief: 1,

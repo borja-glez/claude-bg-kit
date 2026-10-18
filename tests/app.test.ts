@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs } from '../src/lib/sync.js';
@@ -12,6 +11,8 @@ import { morphInto } from '../src/page/morph.js';
 import { fitWindow } from '../src/lib/timeline.js';
 import { timelineWindow } from '../src/page/render.js';
 import { decodeView } from '../src/page/urlstate.js';
+import { removeDir, useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const plan = parsePlan(readFileSync(join(process.cwd(), 'tests', 'fixtures', 'plan.yaml'), 'utf8'));
 const snapshot: Snapshot = buildDocs(plan, '2026-10-11T09:00:00Z');
@@ -1286,14 +1287,14 @@ describe('proposals', () => {
     const written = f.set.mock.calls[0]![1] as Record<string, unknown>;
     expect(written.digest).toMatch(/^[0-9a-f]{64}$/);
     // forge's own `proposals decide <pid> confirm --from <doc>` on the same document.
-    const dir = mkdtempSync(join(tmpdir(), 'page-mark-'));
+    const dir = tmp('page-mark-');
     let r: ReturnType<typeof forgeCli>;
     try {
       writeFileSync(join(dir, 'db.json'), JSON.stringify(doc));
       r = forgeCli(['proposals', 'decide', pid, 'confirm', '--from', 'db.json'], { cwd: dir, now: () => new Date(NOW), env: {} });
     } finally {
       // Carry 5: the test leaves nothing behind.
-      rmSync(dir, { recursive: true, force: true });
+      removeDir(dir);
     }
     expect(existsSync(dir)).toBe(false);
     expect(r.code).toBe(0);

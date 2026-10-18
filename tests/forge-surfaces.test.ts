@@ -1,13 +1,14 @@
 // tests/forge-surfaces.test.ts
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseSurface, readSurfaces, detectDrafts, appendLearned, surfaceHash, permissionHash, lineDigest } from '../src/forge/surfaces.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readLocal, writeLocal, readLearned, learnedFile } from '../src/forge/local.js';
 import type { RepoReader } from '../src/forge/validators.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const repo = (files: Record<string, string>): RepoReader => ({
   exists: f => f in files || Object.keys(files).some(k => k.startsWith(`${f}/`)), read: f => files[f] ?? null,
@@ -94,14 +95,14 @@ describe('permissionHash', () => {
 
 describe('readSurfaces', () => {
   it('lists .forge/verify/*.md with valid names, sorted', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'forge-surf-'));
+    const root = tmp('forge-surf-');
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\n');
     writeFileSync(path.join(root, '.forge', 'verify', 'app.md'), '# App\n');
     writeFileSync(path.join(root, '.forge', 'verify', 'bad name.md'), '# no\n');
     writeFileSync(path.join(root, '.forge', 'verify', 'notes.txt'), 'no');
     expect(readSurfaces(root).map(s => s.name)).toEqual(['app', 'web']);
-    expect(readSurfaces(mkdtempSync(path.join(tmpdir(), 'forge-surf-')))).toEqual([]);
+    expect(readSurfaces(tmp('forge-surf-'))).toEqual([]);
   });
 });
 
@@ -162,7 +163,7 @@ describe('appendLearned headings', () => {
 
 describe('forge surfaces CLI', () => {
   let root: string; let io: Io;
-  beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-surf-cli-')); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
+  beforeEach(() => { root = tmp('forge-surf-cli-'); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
   it('lists surfaces and drafts not yet existing or proposed', () => {
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { dev: 'vite' }, devDependencies: { vite: '5' } }));
     writeFileSync(path.join(root, 'capacitor.config.ts'), '');

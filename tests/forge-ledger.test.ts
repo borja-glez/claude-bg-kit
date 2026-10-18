@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, readFileSync, appendFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, utimesSync } from 'node:fs';
+import { readFileSync, appendFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, utimesSync } from 'node:fs';
 import { execFile, execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -11,9 +10,11 @@ import { appendEvent, appendPhase, readEvents, readStatus, readStatuses, forgeDi
 import { deriveStatuses, type StatusMap } from '../src/lib/forge-status.js';
 import { INTERLEAVED } from './fixtures/interleaved-ledger.js';
 import { parseConfig, agentFor, ConfigError } from '../src/forge/config.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 let root: string;
-beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-')); });
+beforeEach(() => { root = tmp('forge-'); });
 
 describe('ledger', () => {
   it('creates .forge with a gitignore that keeps config.yaml and verify/*.md', () => {
@@ -178,7 +179,7 @@ describe('parseConfig swarm', () => {
 
 describe('the ledger of a forge task worktree (D-10)', () => {
   it('an event appended in <main>/.claude/worktrees/task-T1 goes to the main ledger; its status lands beside it, and the worktree keeps its status.json too', () => {
-    const main = mkdtempSync(path.join(tmpdir(), 'forge-ledger-main-'));
+    const main = tmp('forge-ledger-main-');
     const g = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: main, encoding: 'utf8' });
     g('init', '-q', '-b', 'main'); writeFileSync(path.join(main, '.gitignore'), '.forge/\n.claude/\n'); g('add', '.'); g('commit', '-qm', 'init');
     const wt = path.join(main, '.claude', 'worktrees', 'task-T1');
@@ -202,7 +203,7 @@ describe('the ledger of a forge task worktree (D-10)', () => {
 
   // A main checkout with a forge task worktree at <main>/.claude/worktrees/task-T1.
   const memberWorktree = () => {
-    const main = mkdtempSync(path.join(tmpdir(), 'forge-ledger-two-'));
+    const main = tmp('forge-ledger-two-');
     const g = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: main, encoding: 'utf8' });
     g('init', '-q', '-b', 'main'); writeFileSync(path.join(main, '.gitignore'), '.forge/\n.claude/\n'); g('add', '.'); g('commit', '-qm', 'init');
     const wt = path.join(main, '.claude', 'worktrees', 'task-T1');
@@ -236,7 +237,7 @@ describe('the ledger of a forge task worktree (D-10)', () => {
   it('a member and the coordinator appending at the same time leave whole lines, each event once', async () => {
     const { main, wt } = memberWorktree();
     // appendEvent run by separate node processes, as a member and the coordinator run it: ledger.ts bundled for node.
-    const bundle = path.join(mkdtempSync(path.join(tmpdir(), 'forge-ledger-bundle-')), 'ledger.cjs');
+    const bundle = path.join(tmp('forge-ledger-bundle-'), 'ledger.cjs');
     buildSync({ entryPoints: [fileURLToPath(new URL('../src/forge/ledger.ts', import.meta.url))], bundle: true, platform: 'node', format: 'cjs', outfile: bundle, logLevel: 'silent' });
     const N = 150;
     const code = `const { appendEvent } = require(${JSON.stringify(bundle)});
@@ -312,10 +313,10 @@ describe('one status per task in .forge/status/ (C5)', () => {
     forgeDir(root);
     writeFileSync(path.join(root, '.forge', 'status.json'), JSON.stringify({ ts: '1', task: 'T1', path: 'small', phase: '', agent: null, validators: [], verdict: null, project: 'shop' }));
     expect(Object.keys(readStatuses(root))).toEqual(['shop__T1']);
-    expect(readStatuses(mkdtempSync(path.join(tmpdir(), 'forge-none-')))).toEqual({});
+    expect(readStatuses(tmp('forge-none-'))).toEqual({});
   });
   it("an event of a forge task worktree leaves its task's status beside the main ledger, and the worktree's status.json too (D-10)", () => {
-    const main = mkdtempSync(path.join(tmpdir(), 'forge-c5-main-'));
+    const main = tmp('forge-c5-main-');
     const g = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: main, encoding: 'utf8' });
     g('init', '-q', '-b', 'main'); writeFileSync(path.join(main, '.gitignore'), '.forge/\n.claude/\n'); g('add', '.'); g('commit', '-qm', 'init');
     const wt = path.join(main, '.claude', 'worktrees', 'task-T002');

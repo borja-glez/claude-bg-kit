@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadBandFiles, loadBandModel, renewBindings, RENEW_MS, type Engine } from '../src/mod/files.js';
 import { openTasksFrom, seatsOf } from '../src/mod/model.js';
@@ -9,6 +8,8 @@ import { BOUND_REREAD_MS } from '../src/lib/bound.js';
 import { eventId } from '../src/lib/ids.js';
 import { designGate } from '../src/lib/design-gate.js';
 import { designFilesOf, readCritiques, readDismissedOf } from '../src/cli/design-files.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const plan = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8');
 /** The Claude conversation looking at the band ($.session.id()). */
@@ -66,7 +67,7 @@ function fake(root: string, files: Record<string, string>, o: FakeOptions = {}):
 
 /** The same files on disk, under a new temporary folder standing for `root`: the CLI's readers see what the band sees. */
 function onDisk(files: Record<string, string>, root: string): string {
-  const dir = mkdtempSync(path.join(tmpdir(), 'band-disk-'));
+  const dir = tmp('band-disk-');
   for (const [p, text] of Object.entries(files)) {
     const to = path.join(dir, p.slice(root.length + 1));
     mkdirSync(path.dirname(to), { recursive: true });

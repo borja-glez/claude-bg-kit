@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultExec, defaultGit, repoReader, type Io } from '../src/forge/cli/run.js';
 import { swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
@@ -9,6 +8,8 @@ import { saveExecution } from '../src/forge/execution.js';
 import { appendEvent } from '../src/forge/ledger.js';
 import { keepEvidence } from '../src/forge/evidence-copy.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 // Carry 3 and its residuals: a new execution of a plan task (run B) restarts brief 1 in the same work folder, and the
 // review rounds an earlier one (run A) left there are set aside by B, never read as B's nor lost.
@@ -43,7 +44,7 @@ const runA = () => {
 const prepB = (cwd = wt) => run(['prep', '--task', 'T1-1', '--path', 'large', '--no-baseline', '--project', 'shop'], io(cwd));
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'forge-set-aside-'));
+  root = tmp('forge-set-aside-');
   g(root, 'init', '-q', '-b', 'main'); g(root, 'config', 'user.email', 'a@b.c'); g(root, 'config', 'user.name', 't'); g(root, 'config', 'core.autocrlf', 'false');
   writeFileSync(path.join(root, '.gitignore'), '.forge/\n.claude/\n');
   writeFileSync(path.join(root, 'a.txt'), 'a\n');
@@ -55,7 +56,7 @@ beforeEach(() => {
   g(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt, 'forge/run-shop');
   saveExecution(root, exec());
 });
-afterEach(() => { try { g(root, 'worktree', 'prune'); } catch { /* ignore */ } rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { try { g(root, 'worktree', 'prune'); } catch { /* ignore */ } });
 
 describe('readers keyed by a round folder see only this execution (R3, M3)', () => {
   it("FORGE last in run B does not return A's verdict and round on reviews-1-1; B's own are", () => {

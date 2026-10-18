@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseRun, startRun, recordCycle, stopReason, saveRun, endRun, type RunState } from '../src/forge/run.js';
 import { LEASE_CAP_MINUTES, LEASE_MINUTES } from '../src/lib/coordination.js';
 import { infiniteDocOf, seatOf } from '../src/forge/infinite-doc.js';
 import { runDocOf } from '../src/forge/run-doc.js';
+import { tmpdir } from 'node:os';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const T0 = new Date('2026-10-11T10:00:00.000Z');
 const ctx = (over: Partial<{ now: Date; stopFile: boolean; approvedPending: number; pendingProposals: number }> = {}) =>
@@ -130,7 +132,7 @@ describe('stopReason', () => {
 
 describe('saveRun', () => {
   it('removes its temp file when the write fails', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'forge-run-'));
+    const root = tmp('forge-run-');
     mkdirSync(path.join(root, '.forge', 'run.json'), { recursive: true });
     expect(() => saveRun(root, startRun(T0, {}))).toThrow();
     expect(readdirSync(path.join(root, '.forge')).filter(n => n.endsWith('.tmp'))).toEqual([]);
@@ -174,7 +176,7 @@ describe('seatOf: the seat of the run\'s Claude session (G-08)', () => {
   const NOW = Date.parse('2026-10-16T10:00:00.000Z');
   const min = (n: number) => new Date(NOW - n * 60_000).toISOString();
   // A seat of project `proj` in a temp main checkout; the checkout seat is the first one, the others live under seats/.
-  const mk = () => mkdtempSync(path.join(tmpdir(), 'seat-of-'));
+  const mk = () => tmp('seat-of-');
   const bind = (main: string, proj: string, sid: string, o: { claude?: string; seenAt?: string; endedAt?: string | null; pid?: number | null; checkout?: boolean }) => {
     const wp = path.join(main, '.waypoint', proj);
     const dir = o.checkout ? wp : path.join(wp, 'seats', sid);

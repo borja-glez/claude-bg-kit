@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { firstStage, listRoutes, normalizeRoute, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute } from '../src/forge/route.js';
 import { resolvePrefs } from '../src/forge/prefs.js';
 import { readLocal } from '../src/forge/local.js';
 import { allDecisions } from '../src/forge/decisions.js';
 import { run, cleanProbe, type Io } from '../src/forge/cli/run.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const PREFS = resolvePrefs({}, {}, {});
 const SP = { installed: true, version: '6.4.1' };
@@ -83,8 +84,8 @@ describe('forge route CLI', () => {
   let cfg: string;
   let io: Io;
   beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'forge-route-'));
-    cfg = mkdtempSync(path.join(tmpdir(), 'forge-route-cfg-'));
+    root = tmp('forge-route-');
+    cfg = tmp('forge-route-cfg-');
     io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z'), env: { CLAUDE_CONFIG_DIR: cfg, CLAUDE_CODE_SESSION_ID: 'sess-0' } };
   });
   const installSuperpowers = () => {
@@ -244,7 +245,7 @@ describe('one route per session (K1-04, K1-05)', () => {
   let root: string;
   let io: Io;
   beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'forge-route-sess-'));
+    root = tmp('forge-route-sess-');
     io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z'), env: {} };
   });
   it('route set of A and B leave two files, and route stage of B never touches the route of A', () => {

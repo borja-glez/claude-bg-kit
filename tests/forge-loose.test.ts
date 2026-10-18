@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, it, expect, beforeEach } from 'vitest';
 import path from 'node:path';
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, looseFile, LOOSE_MAX_TASKS, type LooseTask } from '../src/forge/loose.js';
 import { schedule } from '../src/forge/schedule.js';
 import type { ExecutionState, ExecTask } from '../src/lib/execution-state.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
 
 const NOW = Date.parse('2026-10-12T12:00:00.000Z');
 const T = (id: string, over: Partial<LooseTask> = {}) => ({ id, title: `do ${id}`, path: 'small', zones: [`src/${id}.ts`], depends_on: [], ...over });
@@ -60,8 +60,7 @@ describe('loose tasks', () => {
   });
   describe('file', () => {
     let root: string;
-    beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-loose-')); });
-    afterEach(() => rmSync(root, { recursive: true, force: true }));
+    beforeEach(() => { root = tmp('forge-loose-'); });
     it('writes and reads back only for its own run', () => {
       writeLoose(root, { runId: 'loose-1', tasks: ok([T('a'), T('b')]) });
       expect(looseFile(root)).toBe(path.join(root, '.forge', 'loose.json'));
