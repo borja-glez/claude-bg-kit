@@ -668,10 +668,10 @@ describe('plugin layout', () => {
     for (const s of [md, inf]) expect(s).not.toContain('task.json');
     expect(inf).not.toContain('lastTickAt');
   });
-  it('the plan skill declares assets only with evidence upload', () => {
+  it('the plan skill declares assets only with --assets (A-19)', () => {
     const md = read('plugins/waypoint/skills/plan/SKILL.md');
     expect(md).toContain('"assets": {}');
-    expect(md).toMatch(/evidence: local/);
+    expect(md).toContain('--assets');
   });
   it('run and infinite record decisions with decision add, and every report lists them', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
@@ -1660,7 +1660,7 @@ describe('plugin layout', () => {
     }
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
       const md = read(f);
-      for (const s of ['approvals/', '`owner`', 'meta/metrics', 'meta/page', 'sync [--db DIR]', 'page [--publish-info --capabilities F [--page P]] [--states DIR]', 'validate [--design D]']) expect(md, `${f}: ${s}`).toContain(s);
+      for (const s of ['approvals/', '`owner`', 'meta/metrics', 'meta/page', 'sync [--db DIR]', 'page [--publish-info --capabilities F [--page P] [--assets]] [--states DIR]', 'validate [--design D]']) expect(md, `${f}: ${s}`).toContain(s);
     }
   });
   it('waypoint:design runs the converging loop: critique-next, round --verify, the budget, reasons, resolved, amend and reopen, critiques in docs/ (wave 4d)', () => {
@@ -1932,5 +1932,10 @@ describe('plugin layout', () => {
     expect(runRef('task-steps')).toContain(label);
     expect(read('plugins/forge/skills/member/SKILL.md')).toContain(label);
     for (const w of ['FORGE prep', 'FORGE validate', 'FORGE review-prep', 'FORGE local set commands']) expect(runRef('task-steps').split(label)[1], w).toContain(w);
+  });
+  it('the roadmap declares assets only when forge asks for it: --assets in waypoint:plan, from FORGE config get evidence in Large (A-19)', () => {
+    expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('--assets');
+    const large = runRef('large');
+    for (const w of ['FORGE config get evidence', '/waypoint:plan assets']) expect(large, w).toContain(w);
   });
 });

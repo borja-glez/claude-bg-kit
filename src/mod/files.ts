@@ -1,6 +1,7 @@
 import type { EngineInterface } from 'claude-code';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
-import { buildBandModel, checkoutSidOf, executionViewer, noneBand, pickProject, seatsOf, type BandFiles, type BandModel, type BandSeat, type ProjectEntry } from './model.js';
+import { buildBandModel, checkoutSidOf, executionViewer, noneBand, seatsOf, type BandFiles, type BandModel, type BandSeat } from './model.js';
+import { pickProject, type ProjectEntry } from '../lib/project-pick.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
 import { BOUND_MAX_BYTES, BOUND_REREAD_MS, CACHE_DOCS_MAX, MAX_PROJECTS, MAX_SEATS, parseBound, SESSION_MAX_BYTES, type BoundDoc } from '../lib/bound.js';
 import { FORGE_DOC_MAX_BYTES, isSafeId, parseExecution } from '../lib/execution-state.js';

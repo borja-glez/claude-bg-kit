@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { run, isCommitCommand, type Io } from '../src/cli/run.js';
@@ -2523,7 +2524,7 @@ describe('page --publish-info and the sync line', () => {
   const caps = { db: { rules: [{ path: '', read: 'view', write: 'admin' }, { path: 'notes', read: 'view', write: 'interact' }, { path: 'proposals', read: 'view', write: 'interact' }, { path: 'approvals', read: 'view', write: 'owner' }] }, user: { scopes: ['profile'] }, downloads: true };
   // The capabilities the skill passed to the Artifact publish, in the file it hands --publish-info (final review I5).
   const capsFile = (value: unknown = caps) => { writeFileSync(path.join(dir, 'caps.json'), JSON.stringify(value)); return 'caps.json'; };
-  const info = () => JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile()], io).stdout);
+  const info = (...extra: string[]) => JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(), ...extra], io).stdout);
   const WP = (JSON.parse(readFileSync(path.join(process.cwd(), 'plugins', 'waypoint', '.claude-plugin', 'plugin.json'), 'utf8')) as { version: string }).version;
   // meta/page carries the roadmap id (the plan's project: known before the first publish) so the approvals warning keys on it
   const pageInfo = () => ({ pageVersion: WP, rules: PAGE_RULES, write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WP, rules: PAGE_RULES, assets: false, roadmap: 'demo-shop', publishedAt: io.now().toISOString() } } });
@@ -2532,20 +2533,31 @@ describe('page --publish-info and the sync line', () => {
     expect(info()).toEqual({ out: path.join(dir, 'r.html'), capabilities: caps, internal: false, say: null, ...pageInfo() });
     expect(existsSync(path.join(dir, 'r.html'))).toBe(true);
   });
-  it('with forge evidence uploaded it declares assets and tells the person once, in the plan language', () => {
-    mkdirSync(path.join(dir, '.forge'));
-    expect(info()).toEqual({ out: path.join(dir, 'r.html'), capabilities: { ...caps, assets: {} }, internal: true,
+  it('with --assets it declares assets and tells the person once, in the plan language (A-19)', () => {
+    expect(info('--assets')).toEqual({ out: path.join(dir, 'r.html'), capabilities: { ...caps, assets: {} }, internal: true,
       say: 'El roadmap lleva las capturas de verificación de forge, así que queda interno de tu organización y no se puede compartir públicamente (con evidence: local en .forge/config.yaml no se suben).', ...pageInfo() });
     const p = path.join(dir, 'plan.yaml');
     writeFileSync(p, readFileSync(p, 'utf8').replace('locale: es', 'locale: en'));
-    expect(info().say).toBe("The roadmap carries forge's verification screenshots, so it stays internal to your organization and cannot be shared publicly (with evidence: local in .forge/config.yaml they are not uploaded).");
+    expect(info('--assets').say).toBe("The roadmap carries forge's verification screenshots, so it stays internal to your organization and cannot be shared publicly (with evidence: local in .forge/config.yaml they are not uploaded).");
     setArtifact('https://claude.ai/artifact/r1');
-    expect(info()).toMatchObject({ internal: true, say: null });
+    expect(info('--assets')).toMatchObject({ internal: true, say: null });
   });
-  it('evidence: local leaves assets out', () => {
+  it('without --assets there are no assets, whatever .forge/config.yaml says: waypoint reads no forge config (A-19, I-18)', () => {
     mkdirSync(path.join(dir, '.forge'));
-    writeFileSync(path.join(dir, '.forge', 'config.yaml'), 'evidence: local\n');
+    writeFileSync(path.join(dir, '.forge', 'config.yaml'), 'evidence: upload\n');
     expect(info()).toMatchObject({ capabilities: caps, internal: false, say: null });
+    expect(info('--assets')).toMatchObject({ capabilities: { ...caps, assets: {} }, internal: true });
+  });
+  it('a roadmap already published with assets keeps them without --assets, and that is no change (R6)', () => {
+    const pub = (page?: unknown, caps2: unknown = caps) => {
+      const args = ['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(caps2)];
+      if (page !== undefined) { writeFileSync(path.join(dir, 'page.json'), JSON.stringify(page)); args.push('--page', 'page.json'); }
+      return JSON.parse(run(args, io).stdout);
+    };
+    setArtifact('https://claude.ai/artifact/r1');
+    expect(pub({ assets: true }, { ...caps, assets: {} })).toMatchObject({ capabilities: { ...caps, assets: {} }, internal: true, capabilitiesChanged: false, ask: null });
+    expect(pub({ assets: false })).toMatchObject({ capabilities: caps, internal: false });
+    expect(pub()).toMatchObject({ capabilities: caps, internal: false });
   });
   it('without the flag page prints the bare path as before', () => {
     expect(run(['page', 'plan.yaml', '--out', 'r.html'], io).stdout).toBe(`${path.join(dir, 'r.html')}\n`);
@@ -2797,5 +2809,14 @@ describe('listings: a missing --states and unreadable documents (A-06, I-14)', (
     expect(r.code).toBe(3);
     expect(JSON.parse(r.stdout)).toEqual({ held: 'be', use: 'be-2' });
     expect(r.stderr.split('\n').filter(Boolean)).toEqual(skipped('se', ['x.json']));
+  });
+});
+
+describe('waypoint stays apart from forge and the mods (A-19)', () => {
+  it('no file of src/cli imports ../forge/ or ../mod/', () => {
+    const cliDir = fileURLToPath(new URL('../src/cli/', import.meta.url));
+    const bad = readdirSync(cliDir).filter(f => /\.tsx?$/.test(f))
+      .flatMap(f => [...readFileSync(path.join(cliDir, f), 'utf8').matchAll(/from '(\.\.\/(?:forge|mod)\/[^']+)'/g)].map(m => `${f}: ${m[1]}`));
+    expect(bad).toEqual([]);
   });
 });

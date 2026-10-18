@@ -31,7 +31,6 @@ import { blockBatch, claimBatch, cleanText, doneBatch, freeBatch, heartbeatBatch
 import { BOUND_VIAS, MAX_SEATS, isBoundVia, type BoundDoc } from '../lib/bound.js';
 import { boundFile, boundLive, checkoutSid, leftSeatOf, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, settleBinding, writeAtomic, writeBinding } from '../lib/bound-fs.js';
 import { isSafeId } from '../lib/execution-state.js';
-import { loadConfig } from '../forge/config.js';
 import type { Commit, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState, TaskStatus } from '../lib/types.js';
 
 // The classic hooks live in hooks.ts; the tests import isCommitCommand from here.
@@ -197,7 +196,14 @@ export function run(argv: string[], io: Io): Result {
         mkdirSync(path.dirname(out), { recursive: true });
         writeFileSync(out, html);
         if (!args.includes('--publish-info')) return ok(out);
-        const internal = evidenceUploaded(io.cwd);
+        // Re-review I1: --page, the listed meta/page.json, says whether the published roadmap declared `assets`.
+        let listed: unknown = null;
+        if (pageArg) { try { listed = JSON.parse(readFileSync(abs(pageArg), 'utf8')); } catch { listed = null; } }
+        const before = listed && typeof listed === 'object' && typeof (listed as { assets?: unknown }).assets === 'boolean' ? (listed as { assets: boolean }).assets : undefined;
+        // A-19: the roadmap carries forge's screenshots (the assets capability) only when its caller says so: forge asks
+        // for it from its own config; waypoint reads none. A roadmap already published with assets keeps them: forge's
+        // sync-only /waypoint:plan calls pass no `assets`, and a republish without them would ask to change who can see the page.
+        const internal = args.includes('--assets') || before === true;
         // G-13, §4.1: meta/page, the version and the rules of what is published (sync --db compares it; infinite reads rules).
         // `capabilities` is what this checkout should publish; `rules`, what the published file grants (rulesOf).
         // `roadmap` is the plan's project, the id known before the first publish: the approvals warning keys on it.
@@ -207,9 +213,6 @@ export function run(argv: string[], io: Io): Result {
         const assets = declaresAssets(published);
         let changed: Record<string, unknown> = {};
         if (pageArg) {
-          let listed: unknown = null;
-          try { listed = JSON.parse(readFileSync(abs(pageArg), 'utf8')); } catch { listed = null; }
-          const before = listed && typeof listed === 'object' && typeof (listed as { assets?: unknown }).assets === 'boolean' ? (listed as { assets: boolean }).assets : undefined;
           const capabilitiesChanged = sharingChanged(p, assets, before);
           changed = { capabilitiesChanged, ask: capabilitiesChanged ? sharingChangeAsk(p, assets) : null };
         }
@@ -1144,13 +1147,6 @@ function statesOf(dir: string, taskIds: readonly string[]): { states: Record<str
 /** G-26: the roadmap lists at most this many documents per call, with no cursor. */
 const LIST_LIMIT = 1000;
 const jsonFiles = (dir: string): string[] => (existsSync(dir) ? readdirSync(dir).filter(f => f.endsWith('.json')) : []);
-
-// forge uploads its verification screenshots to the roadmap (the `assets` capability) when the repository has a .forge/
-// directory and its config does not say `evidence: local`. An unreadable config counts as forge's default, upload.
-function evidenceUploaded(root: string): boolean {
-  if (!existsSync(path.join(root, '.forge'))) return false;
-  try { return loadConfig(root).evidence !== 'local'; } catch { return true; }
-}
 
 function readChangelog(designDir: string) {
   const f = path.join(designDir, 'design', 'changelog.json');

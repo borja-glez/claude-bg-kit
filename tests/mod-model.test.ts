@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { buildBandModel, NO_VIEWER, openTasksFrom, pickProject, type BandFiles } from '../src/mod/model.js';
+import { buildBandModel, NO_VIEWER, openTasksFrom, type BandFiles } from '../src/mod/model.js';
+import { pickProject } from '../src/lib/project-pick.js';
 import { bandLine, clip } from '../src/mod/band-line.js';
 
 const plan = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8')

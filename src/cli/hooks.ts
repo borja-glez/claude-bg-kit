@@ -19,7 +19,7 @@ import { newestMemberFiles, normalizeMember, type MemberDoc } from '../lib/membe
 import { endReasonOf, MAX_PROJECTS, parseBound, type BoundDoc } from '../lib/bound.js';
 import { bindingLive, describeViewer, type Viewer } from '../lib/viewer-role.js';
 import { boundFile, claudeBindings, headOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readSeats, recordBase, settleBinding, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
-import { pickProject, type ProjectEntry } from '../mod/model.js';
+import { pickProject, type ProjectEntry } from '../lib/project-pick.js';
 import { readDocs } from '../lib/read-docs.js';
 import { normalizeMessage } from '../page/normalize.js';
 import type { Plan } from '../lib/types.js';

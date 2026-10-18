@@ -41,7 +41,7 @@ describe('forge activity, read by waypoint without importing forge (A-07)', () =
   });
   it('waypoint reads forge only through src/lib: src/cli/run.ts gains no import of src/forge', () => {
     const src = readFileSync(new URL('../src/cli/run.ts', import.meta.url), 'utf8');
-    expect([...src.matchAll(/from '(\.\.\/forge\/[^']+)'/g)].map(m => m[1])).toEqual(['../forge/config.js']);
+    expect([...src.matchAll(/from '(\.\.\/forge\/[^']+)'/g)].map(m => m[1])).toEqual([]);
     const lib = readFileSync(new URL('../src/lib/forge-activity.ts', import.meta.url), 'utf8');
     expect(lib).not.toMatch(/from 'node:/);
     expect(lib).not.toMatch(/from '\.\.\/forge\//);
