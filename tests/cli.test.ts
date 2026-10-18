@@ -2780,4 +2780,32 @@ describe('listings: a missing --states and unreadable documents (A-06, I-14)', (
     expect(r.stderr.split('\n').filter(Boolean)).toEqual(['T001.json', 'T002.json', 'T003.json', 'T004.json'].map(f => `warning: skipped st/${f} (unreadable)`));
     expect(run(['status', 'plan.yaml', '--states', 'st'], io).code).toBe(0);
   });
+  const put = (sub: string, files: Record<string, string>) => {
+    mkdirSync(path.join(dir, sub), { recursive: true });
+    for (const [f, body] of Object.entries(files)) writeFileSync(path.join(dir, sub, f), body);
+  };
+  const skipped = (sub: string, files: string[]) => files.map(f => `warning: skipped ${sub}/${f} (unreadable)`);
+  it('recover skips a bad sessions document and says it, with the same result and exit 0', () => {
+    put('st', { 'T001.json': JSON.stringify({ status: 'in_progress', owner: 'be' }) });
+    put('se', { 'be.json': JSON.stringify({ name: 'be', heartbeatAt: '2026-10-11T09:00:00.000Z', status: 'active' }), 'a-null.json': 'null', 'b-broken.json': '{oops' });
+    const r = run(['recover', 'plan.yaml', '--states', 'st', '--sessions', 'se'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual([{ taskId: 'T001', owner: 'be' }]);
+    expect(r.stderr.split('\n').filter(Boolean)).toEqual(skipped('se', ['a-null.json', 'b-broken.json']));
+  });
+  it('inbox skips a bad messages document and says it, with the same result and exit 0', () => {
+    const msg = { ts: '2026-10-11T09:30:00Z', from: 'ui', to: 'be', type: 'overlap_warning', taskId: 'T001', text: 'x', status: 'open' };
+    put('ms', { 'm1.json': JSON.stringify(msg), 'm2.json': '[1]' });
+    const r = run(['inbox', '--messages', 'ms', '--session', 'be'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout).map((m: { id: string }) => m.id)).toEqual(['m1']);
+    expect(r.stderr.split('\n').filter(Boolean)).toEqual(skipped('ms', ['m2.json']));
+  });
+  it('a command that answers through out() says the skipped documents too (heartbeat --register held elsewhere)', () => {
+    put('se', { 'be.json': JSON.stringify({ name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', status: 'active', claude: 'c-9', worktree: '/other' }), 'x.json': '{oops' });
+    const r = run(['heartbeat', '--register', '--session', 'be', '--name', 'b', '--agent', 'a', '--branch', 'main', '--worktree', '/repo/wt', '--claude', 'c-1', '--sessions', 'se'], io);
+    expect(r.code).toBe(3);
+    expect(JSON.parse(r.stdout)).toEqual({ held: 'be', use: 'be-2' });
+    expect(r.stderr.split('\n').filter(Boolean)).toEqual(skipped('se', ['x.json']));
+  });
 });

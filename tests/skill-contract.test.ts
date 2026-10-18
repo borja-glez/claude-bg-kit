@@ -20,7 +20,6 @@ const READERS = [
   'need', // waypoint heartbeat --register: need('name'), need('agent'), need('branch'), need('worktree'), need('track')
   'posInt', // waypoint: posInt('session-version') in heartbeat and release, posInt('state-version') in release --free
   'idsArg', // forge review-close: idsArg('out-of-model'), idsArg('defer')
-  'docs', // waypoint inbox and escalations: docs('messages', normalizeMessage), which reads flag('messages')
 ];
 const ARGV = /(?:\b(?:includes|indexOf|val)\(\s*|[!=]==\s*)['"`]--([a-z][a-z0-9-]*)['"`]/g;
 // Flags a CLI reads in a way those two patterns do not see (a loop over names), each with the source text that reads it
@@ -31,6 +30,7 @@ const INDIRECT: Record<Cli, [flag: string, site: string][]> = {
     ['version', "for (const name of ['round', 'version']"], // critique-check: flag(name) for each
     ['state-version', "taskFlags('claim', ['state-version', 'session-version'])"], // claim, done and block: posInt(name) for each
     ['resolved', "for (const name of ['applied', 'resolved']"], // design-snapshot: the value of --applied and --resolved
+    ['messages', "docs('messages', normalizeMessage)"], // inbox and escalations: --messages through docs()
   ],
 };
 // Each command that dispatches on a subcommand, and where the code does it: its file and the two markers around the

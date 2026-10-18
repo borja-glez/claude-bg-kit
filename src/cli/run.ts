@@ -52,15 +52,15 @@ export function run(argv: string[], io: Io): Result {
   };
   const abs = (p: string) => path.resolve(io.cwd, p);
   // I-14: the documents this call skipped, said on stderr with any result (the exit code stays as it is).
-  const notes: string[] = [];
-  const ok = (stdout: string, stderr = notes.join('')): Result => ({ code: 0, stdout: stdout.endsWith('\n') ? stdout : `${stdout}\n`, stderr });
-  const fail = (stderr: string, code = 1): Result => ({ code, stdout: '', stderr: `${notes.join('')}${stderr}\n` });
+  const warnings: string[] = [];
+  const ok = (stdout: string, stderr = warnings.join('')): Result => ({ code: 0, stdout: stdout.endsWith('\n') ? stdout : `${stdout}\n`, stderr });
+  const fail = (stderr: string, code = 1): Result => ({ code, stdout: '', stderr: `${warnings.join('')}${stderr}\n` });
   const loadPlan = () => parsePlan(readFileSync(abs(args[0]), 'utf8'));
   // I-14: a listing's documents, normalized; an unreadable one is skipped and said on stderr.
   const docsIn = <T>(dir: string | undefined, normalize?: (x: unknown) => T | null): Record<string, T> => {
     if (!dir) return {};
     const r = readDocs<T>(abs(dir), normalize);
-    for (const f of r.skipped) notes.push(`warning: skipped ${dir.replace(/[\\/]+$/, '')}/${f} (unreadable)\n`);
+    for (const f of r.skipped) warnings.push(`warning: skipped ${dir.replace(/[\\/]+$/, '')}/${f} (unreadable)\n`);
     return r.docs;
   };
   const docs = <T>(name: string, normalize?: (x: unknown) => T | null) => docsIn<T>(flag(name), normalize);
@@ -87,7 +87,7 @@ export function run(argv: string[], io: Io): Result {
     return { view: planViewFromDocs(meta, phases), project: p.project, version: meta.version || p.version };
   };
   // A-14: the flags every task batch takes; a wrong one is exit 2. A code-3 or code-4 answer prints its JSON on stdout.
-  const out = (code: number, value: unknown): Result => ({ code, stdout: `${JSON.stringify(value)}\n`, stderr: '' });
+  const out = (code: number, value: unknown): Result => ({ code, stdout: `${JSON.stringify(value)}\n`, stderr: warnings.join('') });
   const posInt = (name: string): number | null => { const v = flag(name); return v !== undefined && /^[1-9]\d{0,9}$/.test(v) ? Number(v) : null; };
   // No leading "-" (sessionIdFrom never makes one): `--session $SID --task …` with an empty SID reads `--task`, not an id.
   const SID_RE = /^[A-Za-z0-9_.~:@+][A-Za-z0-9_\-.~:@+]{0,79}$/;
@@ -431,7 +431,7 @@ export function run(argv: string[], io: Io): Result {
       case 'status': {
         const { view: p, project, version } = loadView();
         const states = optStates();
-        const m =computeMetrics(p, states, io.now().getTime());
+        const m = computeMetrics(p, states, io.now().getTime());
         const title = (id: string) => `${id} ${p.tasks.find(t => t.id === id)?.title ?? ''}`;
         const lines = [
           `${project} · v${version} · ${m.percent}% (${m.done}/${m.total}) · phases ${m.phasesDone}/${m.phaseCount}`,
