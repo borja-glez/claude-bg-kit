@@ -12811,7 +12811,9 @@ var REFUSED = {
   "record unreadable": { es: "no pude leer un registro de autorizaci\xF3n", en: "an authorization record could not be read" },
   "no answer recorded": { es: "no hay ninguna respuesta tuya registrada", en: "no answer of yours is recorded" },
   "answered no": { es: "respondiste que no", en: "you answered no" },
+  "expired": { es: "la respuesta tiene m\xE1s de 24 horas", en: "the answer is more than 24 hours old" },
   "other run": { es: "la respuesta era para otra ejecuci\xF3n", en: "the answer was for another run" },
+  "other project": { es: "la respuesta era para otro proyecto", en: "the answer was for another project" },
   "other branch": { es: "la respuesta era para otra rama", en: "the answer was for another branch" },
   "already used": { es: "esa respuesta ya se us\xF3", en: "that answer was already used" }
 };
@@ -13197,6 +13199,27 @@ function mainCheckout(root) {
   }
 }
 var localFile = (root) => import_node_path8.default.join(mainCheckout(root), ".forge", "local.yaml");
+function localTracked(root, name) {
+  let listed;
+  try {
+    listed = (0, import_node_child_process.execFileSync)("git", ["ls-files", "-z", "--", ":(top,icase).forge"], {
+      cwd: mainCheckout(root),
+      encoding: "utf8",
+      timeout: 5e3,
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true
+    });
+  } catch {
+    return false;
+  }
+  return listed.split("\0").some((f) => {
+    const l = f.toLowerCase();
+    return l === ".forge" || l === `.forge/${name}`;
+  });
+}
+function surfacePermissions(root, s2 = readLocal(root)) {
+  return Object.keys(s2.surfaces).length && localTracked(root, "local.yaml") ? {} : s2.surfaces;
+}
 var names = (x) => Array.isArray(x) ? [...new Set(x.filter((s2) => typeof s2 === "string" && NAME.test(s2)))] : [];
 function readLocal(root) {
   let raw = null;
@@ -13264,6 +13287,7 @@ function readLearned(root) {
   } catch {
     return out;
   }
+  if (text3.trim() && localTracked(root, "learned.jsonl")) return out;
   for (const line3 of text3.split("\n")) {
     let r2;
     try {
@@ -16652,6 +16676,7 @@ function readLoose(root, runId) {
 var import_node_fs22 = require("node:fs");
 var import_node_path22 = __toESM(require("node:path"), 1);
 var MERGE_AUTH_TTL_MS = 60 * 6e4;
+var MOF_LAUNCH_TTL_MS = 24 * 60 * 6e4;
 var AUTH_CLOCK_SKEW_MS = 5 * 6e4;
 var MAX_RECORDS = 200;
 var MAX_RECORD_BYTES = 64 * 1024;
@@ -16690,6 +16715,7 @@ function normalizeAuth(x) {
     yes,
     createdAt,
     session: isSafeId(o.session) ? o.session : null,
+    ...isSafeId(o.project) ? { project: o.project } : {},
     ...iso3(o.answeredAt) ? { answeredAt: iso3(o.answeredAt) } : {},
     ...o.answer === "yes" || o.answer === "no" || o.answer === "other" ? { answer: o.answer } : {},
     ...o.answeredBy === null || isSafeId(o.answeredBy) ? { answeredBy: o.answeredBy } : {},
@@ -16831,13 +16857,14 @@ function mergeAsk(authId, branch, target, es2) {
     }
   };
 }
-function mofAsk(authId, target, es2, isDefault) {
+function mofAsk(authId, target, es2, isDefault, project) {
   const yes = es2 ? `S\xED, int\xE9grala en ${target}` : `Yes, merge it into ${target}`;
   const where3 = isDefault ? es2 ? `${target} es la rama por defecto del repositorio` : `${target} is the repository's default branch` : es2 ? `forge integra la rama de ejecuci\xF3n en ${target} al acabar` : `forge merges the run branch into ${target} when it ends`;
+  const of = project ? es2 ? ` de ${project}` : ` of ${project}` : "";
   return {
     yes,
     ask: {
-      question: es2 ? `Cuando todo est\xE9 hecho y la revisi\xF3n final pase, \xBFintegro la rama de ejecuci\xF3n en ${target} sin preguntarte? [${authId}]` : `When everything is done and the final review passes, do I merge the run branch into ${target} without asking you? [${authId}]`,
+      question: es2 ? `Cuando todo est\xE9 hecho y la revisi\xF3n final${of} pase, \xBFintegro la rama de ejecuci\xF3n en ${target} sin preguntarte? [${authId}]` : `When everything is done and the final review${of} passes, do I merge the run branch into ${target} without asking you? [${authId}]`,
       header: es2 ? "Al acabar" : "On finish",
       options: [
         { label: es2 ? "No, la reviso yo (Recomendado)" : "No, I will review it (Recommended)", description: es2 ? "al acabar te pregunto antes de integrar" : "when it ends I ask you before merging" },
@@ -16851,7 +16878,9 @@ function pendingAuth(root, o) {
   const dir = authDir(root);
   const recs = readAuthsIn(dir);
   const nowMs = o.now.getTime();
-  const open = recs.find((r2) => !r2.unreadable && r2.kind === o.kind && r2.runId === o.runId && r2.target === o.target && r2.session === o.session && !r2.answer && !r2.usedAt && !aheadOf(r2, nowMs) && (o.kind !== "merge" || nowMs - Date.parse(r2.createdAt) < MERGE_AUTH_TTL_MS));
+  const carriers = /* @__PURE__ */ new Map();
+  for (const r2 of recs) if (!r2.unreadable) carriers.set(r2.question, (carriers.get(r2.question) ?? 0) + 1);
+  const open = recs.find((r2) => !r2.unreadable && r2.kind === o.kind && r2.runId === o.runId && r2.target === o.target && r2.session === o.session && r2.project === o.project && !r2.answer && !r2.usedAt && !aheadOf(r2, nowMs) && (o.kind !== "merge" || nowMs - Date.parse(r2.createdAt) < MERGE_AUTH_TTL_MS) && carriers.get(r2.question) === 1);
   if (open) {
     const b = o.build(open.authId);
     if (b.ask.question === open.question) return { authId: open.authId, ask: b.ask };
@@ -16861,7 +16890,18 @@ function pendingAuth(root, o) {
     if (!AUTH_ID.test(authId)) throw new Error("auth: the run id cannot name an authorization");
     if ((0, import_node_fs22.existsSync)(import_node_path22.default.join(dir, `${authId}.json`))) continue;
     const b = o.build(authId);
-    const rec = { authId, kind: o.kind, runId: o.runId, target: o.target, question: b.ask.question, yes: b.yes, createdAt: o.now.toISOString(), session: o.session };
+    if (carriers.has(b.ask.question)) continue;
+    const rec = {
+      authId,
+      kind: o.kind,
+      runId: o.runId,
+      target: o.target,
+      question: b.ask.question,
+      yes: b.yes,
+      createdAt: o.now.toISOString(),
+      session: o.session,
+      ...o.project ? { project: o.project } : {}
+    };
     if (writeAuthIn(dir, rec, null)) return { authId, ask: b.ask };
   }
   throw new Error("auth: no free authorization id");
@@ -16889,11 +16929,17 @@ function checkMergeAuth(recs, o) {
 }
 function checkMofAuth(recs, o) {
   if (unreadableFor(recs, "merge-on-finish", o.runId, o.session !== null)) return { ok: false, reason: "record unreadable" };
-  const mof = deciding(recs, "merge-on-finish", o.now ?? Date.now());
-  const r2 = mof.filter((x) => x.runId === o.runId || x.runId === null && o.session !== null && x.session === o.session).sort(newestFirst)[0];
-  if (!r2) return { ok: false, reason: mof.some((x) => x.answer === "yes" && !x.usedAt && x.runId !== null && x.runId !== o.runId) ? "other run" : "no answer recorded" };
+  const nowMs = o.now ?? Date.now();
+  const mof = deciding(recs, "merge-on-finish", nowMs);
+  const launch = (x) => x.runId === null && o.session !== null && x.session === o.session;
+  const r2 = mof.filter((x) => x.runId === o.runId || launch(x) && !!o.project && x.project === o.project).sort(newestFirst)[0];
+  if (!r2) {
+    const open = mof.filter((x) => x.answer === "yes" && !x.usedAt);
+    return { ok: false, reason: open.some((x) => x.runId !== null && x.runId !== o.runId) ? "other run" : open.some(launch) ? "other project" : "no answer recorded" };
+  }
   if (r2.usedAt) return { ok: false, reason: "already used" };
   if (r2.answer !== "yes") return { ok: false, reason: "answered no", ...noteOf(r2) };
+  if (r2.runId === null && nowMs - answeredMs(r2) > MOF_LAUNCH_TTL_MS) return { ok: false, reason: "expired" };
   if (r2.target !== o.target) return { ok: false, reason: "other branch" };
   return { ok: true, record: r2 };
 }
@@ -17085,15 +17131,23 @@ function withTrust(config, t) {
   const { setup: _setup, ...swarm } = config.swarm;
   return { ...rest, swarm };
 }
-function trustFile(dir) {
+function trustPlace(dir) {
   let common;
   try {
-    common = (0, import_node_child_process2.execFileSync)("git", ["rev-parse", "--git-common-dir"], { cwd: dir, encoding: "utf8", timeout: 5e3, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
-  } catch {
-    return null;
+    common = (0, import_node_child_process2.execFileSync)("git", ["rev-parse", "--git-common-dir"], {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 5e3,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      env: { ...process.env, LC_ALL: "C", LANGUAGE: "C" }
+    }).trim();
+  } catch (e) {
+    return { file: null, why: /not a git repository/i.test(String(e.stderr ?? "")) ? "no-repo" : "git-failed" };
   }
-  return common ? import_node_path23.default.join(import_node_path23.default.resolve(dir, common), "forge", "trust.json") : null;
+  return common ? { file: import_node_path23.default.join(import_node_path23.default.resolve(dir, common), "forge", "trust.json") } : { file: null, why: "git-failed" };
 }
+var trustFile = (dir) => trustPlace(dir).file;
 function commandsTrustOf(x) {
   if (!x || typeof x !== "object" || Array.isArray(x)) return void 0;
   const o = x;
@@ -17119,15 +17173,16 @@ function readAt(file) {
 }
 var readTrust = (dir) => readAt(trustFile(dir));
 function updateTrust(dir, fn) {
-  const file = trustFile(dir);
-  if (!file) return false;
+  const place = trustPlace(dir);
+  if (place.file === null) return { ok: false, why: place.why };
+  const file = place.file;
   const next = fn(readAt(file));
   (0, import_node_fs23.mkdirSync)(import_node_path23.default.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   (0, import_node_fs23.writeFileSync)(tmp, `${JSON.stringify(next, null, 2)}
 `);
   (0, import_node_fs23.renameSync)(tmp, file);
-  return true;
+  return { ok: true };
 }
 var trustIn = (dir, config) => trustOf(config, configCommands(config).length ? readTrust(dir) : {});
 function loadTrusted(dir) {
@@ -19618,7 +19673,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       let mergeNote = null;
       if (mofAsked && !isForgeBranch(mergeInto)) {
         const mofRun = resume && prev ? prev.runId : runId;
-        const v = checkMofAuth(readAuths(io.cwd), { runId: mofRun, target: mergeInto, session: hook, now: io.now().getTime() });
+        const v = checkMofAuth(readAuths(io.cwd), { runId: mofRun, target: mergeInto, session: hook, project: resume && prev ? prev.project : project, now: io.now().getTime() });
         if (!v.ok) {
           mergeRefused = v.reason;
           mergeNote = v.note ?? null;
@@ -24019,7 +24074,7 @@ function learnSurface(io, dir, name, notes, heading) {
   if (!(0, import_node_fs38.existsSync)(file)) return { reason: `${surfaceFile(name)} does not exist` };
   if ((0, import_node_fs38.lstatSync)(file).isSymbolicLink()) return { reason: `${surfaceFile(name)} is a symlink` };
   const before3 = (0, import_node_fs38.readFileSync)(file, "utf8");
-  const cur = readLocal(io.cwd).surfaces[name];
+  const cur = surfacePermissions(io.cwd)[name];
   const allowed = cur?.state === "allowed" && hashMatches(cur.hash, permissionHash(before3, readLearned(io.cwd).get(name)));
   const at2 = io.now().toISOString();
   const r2 = appendLearned(before3, at2.slice(0, 10), notes, heading);
@@ -25036,7 +25091,8 @@ function runCommand(argv, io) {
         const git2 = io.git ?? defaultGit(io.cwd);
         const diff2 = git2(["diff", "--name-only", `${base}..HEAD`]);
         const surfaces = readSurfaces(repoDir, readLearned(io.cwd));
-        const local = readLocal(io.cwd);
+        const read = readLocal(io.cwd);
+        const local = { ...read, surfaces: surfacePermissions(io.cwd, read) };
         let inventory = null;
         const plan = verifyPlan({
           path: p,
@@ -25075,7 +25131,10 @@ function runCommand(argv, io) {
         if (sub === "set" && key === "commands") {
           if (value !== "allowed" && value !== "denied" && value !== "none") throw new UsageError("local set commands: the value must be allowed|denied|none");
           const kept2 = (fn) => {
-            if (!updateTrust(repoDir, fn)) throw new UsageError(`local set commands: ${repoDir} is not in a git repository, so forge keeps no answer for it and asks each time`);
+            const r2 = updateTrust(repoDir, fn);
+            if (!r2.ok) {
+              throw new UsageError(r2.why === "no-repo" ? `local set commands: ${repoDir} is not in a git repository, so forge keeps no answer for it and asks each time` : `local set commands: git could not tell where the repository of ${repoDir} is, so forge keeps no answer for it and asks each time`);
+            }
             return ok("ok");
           };
           if (value === "none") return kept2(({ commands: _gone, ...r2 }) => r2);
@@ -25092,7 +25151,7 @@ function runCommand(argv, io) {
           if (key === void 0) return json4(s2);
           const m = /^surfaces\.(.+)$/.exec(key);
           if (!m) throw new UsageError("local get: the path must be surfaces.<name>");
-          return json4(s2.surfaces[m[1]] ?? null);
+          return json4(surfacePermissions(io.cwd, s2)[m[1]] ?? null);
         }
         if (sub === "set" && (key === "workflow" || key === "autonomy")) {
           if (value === "none") {
@@ -25115,6 +25174,9 @@ function runCommand(argv, io) {
           if (has("expect") && !expected) throw new UsageError("local set: --expect needs the hash verify-plan gave");
           const surface = readSurfaces(repoDir, readLearned(io.cwd)).find((x) => x.name === m[1]);
           if (value === "allowed" && !surface) throw new UsageError(`local set: .forge/verify/${m[1]}.md does not exist`);
+          if (value === "allowed" && localTracked(io.cwd, "local.yaml")) {
+            throw new UsageError("local set: git tracks .forge/local.yaml, so a permission in it grants nothing: untrack it with git rm --cached .forge/local.yaml (the file stays) and answer again");
+          }
           if (value === "allowed" && expected !== void 0 && expected !== surface.hash) {
             throw new UsageError(`local set: .forge/verify/${m[1]}.md changed since verify-plan showed it: run verify-plan again`);
           }
@@ -25145,7 +25207,7 @@ function runCommand(argv, io) {
       case "roadmap-run":
         return roadmapCommand(cmd, args, io);
       case "authorize": {
-        const usage = "usage: forge authorize merge-on-finish --branch <b> [--run <runId> | --hook-session <id>] [--locale es|en]";
+        const usage = "usage: forge authorize merge-on-finish --branch <b> [--run <runId> | --project <P> [--hook-session <id>]] [--locale es|en]";
         if (args[0] !== "merge-on-finish") throw new UsageError(usage);
         const branch = flag("branch");
         if (!branch || !isRunBranch(branch)) throw new UsageError(`authorize merge-on-finish: --branch must be the branch the run merges into; ${usage}`);
@@ -25153,6 +25215,8 @@ function runCommand(argv, io) {
         const loc = flag("locale");
         if (has("locale") && loc !== "es" && loc !== "en") throw new UsageError("authorize merge-on-finish: --locale must be es or en");
         const runId = flag("run") ?? null;
+        const project = runId ? void 0 : flag("project");
+        if (!runId && !project) throw new UsageError(`authorize merge-on-finish: --project <P> is required without --run (a yes asked before the run exists counts for that project only); ${usage}`);
         const session = runId ? null : claudeSessionId(flag("hook-session"), io.env ?? process.env);
         if (!runId && !session) throw new UsageError(noClaudeSession("authorize merge-on-finish", "--hook-session"));
         const isDefault = isDefaultBranch(io.git ?? defaultGit(io.cwd), branch);
@@ -25163,7 +25227,8 @@ function runCommand(argv, io) {
           session,
           now: io.now(),
           rand: io.rand ?? Math.random,
-          build: (id2) => mofAsk(id2, branch, loc === "es", isDefault)
+          project,
+          build: (id2) => mofAsk(id2, branch, loc === "es", isDefault, project)
         });
         return json4({ authId: p.authId, runId, ask: p.ask });
       }
