@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderApp, type UiState } from '../src/page/render.js';
-import { BIG_NOW, bigModel, bigRun } from './fixtures/big-plan.js';
+import { BIG_NOW, bigModel, bigRun, bigRuns } from './fixtures/big-plan.js';
 
 const CSS = readFileSync(join(process.cwd(), 'src', 'page', 'theme.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
@@ -41,7 +41,7 @@ const ui = (over: Partial<UiState> = {}): UiState => ({
 
 /** The big plan's views in one document: Summary with the detail of T121 open (a loose task running in «En curso», the
  *  recent activity, «Te necesita»), the schedule with every phase open, Runs with its loose tasks and with the plan's
- *  run, Plan and Sessions. */
+ *  run (and the first run of its history open), Plan and Sessions. */
 function mountViews(): HTMLElement {
   const m = bigModel();
   m.run = { ...bigRun(BIG_NOW), kind: 'ephemeral', loose: [{ id: 'fix-x', title: 'Arreglar x', status: 'running', stage: 'implement', agent: 'forge-mech' }, { id: 'doc-y', title: 'Doc y', status: 'queued', stage: null, agent: null }] };
@@ -52,7 +52,7 @@ function mountViews(): HTMLElement {
     renderApp(m, ui({ modal: 'T121', tab: 'definition' })),
     renderApp(m, ui({ view: 'schedule', expanded: all, layers: ['critical', 'forecast', 'forge'] })),
     renderApp(m, ui({ view: 'runs' })),
-    renderApp(bigModel(), ui({ view: 'runs' })),
+    renderApp(bigModel(), ui({ view: 'runs', runsOpen: new Set([bigRuns()[0]!.runId]) })),
     renderApp(m, ui({ view: 'plan' })),
     renderApp(m, ui({ view: 'sessions' })),
   ].map(h => `<section class="view-box">${h}</section>`).join('');
@@ -72,7 +72,7 @@ describe('theme.css on the page (review M4, carry 10a)', () => {
     { cls: 'lab', uses: ['.tl', 'section.loose'] }, // a row's label in the timeline; a loose task's title
     { cls: 'zt', uses: ['.dpanel', '.zones'] }, // a zone touched in the detail; the touched part of a zone's bar
     { cls: 'pn', uses: ['.tl', 'section.plan'] }, // a phase's name in a timeline row; in a phase's header of Plan
-    { cls: 'chev', uses: ['.tl', 'section.plan'] }, // the fold mark of a timeline group; of a phase of Plan
+    { cls: 'chev', uses: ['.tl', 'section.plan', '.rhist'] }, // the fold mark of a timeline group; of a phase of Plan; of a run of the history
     { cls: 'c', uses: ['.tl', 'section.plan', '.sessions-view'] }, // a timeline counter; Plan's counts; a session's bar
   ];
 
@@ -102,7 +102,7 @@ describe('theme.css on the page (review M4, carry 10a)', () => {
     const ringed = (el: Element) => rings.some(s => { try { return el.matches(s); } catch { return false; } });
     const buttons = Array.from(box.querySelectorAll('button[data-action="open-task"]'));
     const kinds = new Set(buttons.map(b => b.className.split(' ')[0]));
-    for (const k of ['tr', 'nr', 'nxb', 'act', 'cpl', 'pr', 'sc', 'chip']) expect(kinds.has(k), k).toBe(true);
+    for (const k of ['tr', 'nr', 'nxb', 'act', 'cpl', 'pr', 'rtb', 'chip']) expect(kinds.has(k), k).toBe(true);
     const bare = new Set(buttons.filter(b => !ringed(b)).map(b => b.className));
     box.remove();
     expect([...bare]).toEqual([]);

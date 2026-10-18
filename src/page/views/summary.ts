@@ -43,7 +43,8 @@ function renderNeeds(m: Model, d: Dict, ui: UiState, dv: Derived): string {
     // H-18: the link opens Plan with the Aplazados filter.
     if (n.kind === 'deferred') return `<b>${esc(d.needs.deferred(n.findings, n.tasks.length))}</b> <button type="button" class="lnk" data-action="view" data-view="plan" data-pf="deferred">${esc(d.needs.seePlan)}</button> <button type="button" class="btn" data-action="seen-deferred" data-ids="${esc(n.tasks.map(t => t.id).join(' '))}">${esc(d.needs.seen)}</button>`;
     // Carry 7: the stall reason goes inside the bold line with the run (the brief had it after); kept, the line reads whole.
-    if (n.kind === 'stalled') return `<b>${esc(d.needs.stalled(n.runId) + (n.reason ? `: ${n.reason}` : ''))}</b> ${go('runs', d.needs.seeRuns)}${hint(d.needs.stalledHint)}`;
+    // C33: the line says what stopped it (stalled, /forge:stop or the budget), as the banner of Ejecuciones does.
+    if (n.kind === 'stalled') return `<b>${esc(d.needs.stalled[n.stop](n.runId) + (n.reason ? `: ${n.reason}` : ''))}</b> ${go('runs', d.needs.seeRuns)}${hint(d.needs.stalledHint)}`;
     if (n.kind === 'infinite') return `<b>${esc(d.needs.infinite(hhmm(n.since)))}</b>${hint(d.needs.infiniteHint)}`;
     return `<b>${esc(d.needs.stalePage(n.page, n.plan))}</b>`;
   };
@@ -85,17 +86,21 @@ function renderNow(m: Model, d: Dict, dv: Derived): string {
   const inRun = (t: PlanTask) => !!r && m.states[t.id]?.exec?.runId === r.runId;
   const ofRun = tasks.filter(inRun);
   const others = tasks.filter(t => !inRun(t));
-  const head = `<div class="nrh" aria-hidden="true">${(['task', 'stage', 'round', 'validators', 'time', 'agent', 'who'] as const).map(k => `<span>${esc(d.inProgress.cols[k])}</span>`).join('')}</div>`;
+  const head = nowHead(d);
   const groups: string[] = [];
   if (r && (ofRun.length || loose.length)) groups.push(`<div class="rh">${esc(runHead(d, r))}</div>${ofRun.map(t => nowRow(m, d, t)).join('')}${loose.map(x => looseRow(m, d, r, x)).join('')}`);
   if (others.length) groups.push(`${groups.length ? `<div class="rh">${esc(d.inProgress.noRun)}</div>` : ''}${others.map(t => nowRow(m, d, t)).join('')}`);
   return `<section class="card now">${title}<div class="nowt">${head}${groups.join('')}</div></section>`;
 }
 
-const runHead = (d: Dict, r: RunDoc): string =>
+/** The header row of «En curso» (hidden from assistive technology: each row says it all); Ejecuciones reuses it. */
+export const nowHead = (d: Dict): string =>
+  `<div class="nrh" aria-hidden="true">${(['task', 'stage', 'round', 'validators', 'time', 'agent', 'who'] as const).map(k => `<span>${esc(d.inProgress.cols[k])}</span>`).join('')}</div>`;
+
+export const runHead = (d: Dict, r: RunDoc): string =>
   (r.kind === 'ephemeral' ? d.inProgress.looseHead : d.inProgress.runHead)(r.runId, labelOf(d.run.mode, r.mode), r.slots.length, r.parallel, r.coordinator, r.branch);
 
-function nowRow(m: Model, d: Dict, t: PlanTask): string {
+export function nowRow(m: Model, d: Dict, t: PlanTask): string {
   const st: TaskState = m.states[t.id] ?? { status: 'in_progress' };
   const ex = st.exec;
   const f = st.forge;
@@ -143,7 +148,7 @@ function timeOf(m: Model, d: Dict, st: TaskState): string {
 }
 
 /** A loose task of an ephemeral run: not a plan task, so no detail to open; its dot is the coordinator's liveness. */
-function looseRow(m: Model, d: Dict, r: RunDoc, x: RunDoc['loose'][number]): string {
+export function looseRow(m: Model, d: Dict, r: RunDoc, x: RunDoc['loose'][number]): string {
   const coord = m.sessions[r.coordinator];
   const l = coord ? sessionLiveness(coord, m.now) : 'stopped';
   return `<div class="nr lt"><span class="c-task"><span class="k">${esc(x.id)}</span> ${esc(x.title)}</span>`

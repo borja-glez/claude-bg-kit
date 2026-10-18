@@ -577,11 +577,6 @@ describe('theme.css', () => {
     expect(cssRule(phone, '.sess')).not.toContain('grid-template-columns');
     expect(cssRule(CSS, '.sess .sgrid2')).toContain('grid-template-columns:repeat(auto-fill,minmax(min(220px,100%),1fr))');
   });
-  it('a run slot reads like the session cards it replaced, and only the slot buttons make their lines blocks (carry 9)', () => {
-    expect(cssRule(CSS, '.slot .sh')).toContain('font:700 20px');
-    expect(cssRule(CSS, '.slot .mono')).toBe('');
-    expect(cssRule(CSS, 'button.slot .mono')).toContain('display:block');
-  });
   it('keeps no dead selectors of the summary of before (carry 6)', () => {
     expect(CSS).not.toContain('.s.idle');
   });
@@ -798,21 +793,26 @@ const looseRun = (over: object = {}) => runDoc({
   ...over,
 });
 const looseSection = (html: string) => { const i = html.indexOf('<section class="loose'); return i < 0 ? '' : html.slice(i, html.indexOf('</section>', i)); };
+const runSummary = (over: object = {}) => ({ v: 1 as const, runId: 'shop-20261010T090000000Z', kind: 'plan' as const, mode: 'subagents' as const, parallel: 3,
+  branch: 'forge/run-shop', target: 'main', coordinator: 'main', startedAt: '2026-10-10T09:00:00.000Z', endedAt: '2026-10-10T11:05:00.000Z',
+  stopReason: 'finished' as const, closedBy: 'merge' as const, merged: true,
+  tasks: [{ id: 'T001', status: 'integrated' as const, seconds: 1500, rounds: 2, deferred: 1 }, { id: 'T003', title: 'Cart mock', status: 'stopped' as const }],
+  loose: false, finalReview: { action: 'accept' as const, critical: 0, important: 1, minor: 2 }, decisions: 2, deferred: 3, ...over });
 
 describe('execution', () => {
-  it('an ephemeral run reads as loose tasks in the pill and the runs view, with the loose titles in its slots', () => {
+  it('an ephemeral run reads as loose tasks in the pill and the runs view: its header, its running loose task as a row and every loose task listed', () => {
     const m = base();
     m.run = looseRun();
     m.sessions.main = { ...m.sessions.main, role: 'coordinator', leaseUntil: new Date(NOW + 5 * 60000).toISOString() };
     expect(renderApp(m, ui())).toContain('▶ tareas sueltas · subagentes 1/2');
-    const sv = renderApp(m, ui({ view: 'runs' }));
-    expect(sv).toMatch(/<section class="exec-sec"><div class="lbl">▶ tareas sueltas · subagentes 1\/2 · coordinadora: main/);
-    expect(sv).not.toContain('▶ ejecución');
-    expect(sv).toContain('Fix the cart');
-    expect(sv).toContain('libre'); // parallel 2, one slot: one free place
+    const rv = renderApp(m, ui({ view: 'runs' }));
+    expect(rv).toContain('<div class="rh">Tareas sueltas loose-1 · subagentes · 1/2 plazas · coordinadora main · rama main</div>');
+    expect(rv).toContain('<div class="nr lt">');
+    expect(rv).toContain('Fix the cart');
+    expect(looseSection(rv)).toContain('Typo in the README');
     const en = { ...m, meta: { ...m.meta!, locale: 'en' } };
     expect(renderApp(en, ui())).toContain('▶ loose tasks · subagents 1/2');
-    expect(renderApp(en, ui({ view: 'runs' }))).toContain('▶ loose tasks · subagents 1/2 · coordinator: main');
+    expect(renderApp(en, ui({ view: 'runs' }))).toContain('Loose tasks loose-1 · subagents · 1/2 slots · coordinator main · branch main');
   });
   it('a loose id equal to a plan task id shows the loose title and the coordinator liveness, not the plan task', () => {
     const m = base();
@@ -823,11 +823,12 @@ describe('execution', () => {
       loose: [{ id: planTask.id, title: 'Loose namesake', status: 'running' as const, stage: 'implement' as const, agent: 'forge-mech' }],
     });
     m.sessions.main = { ...m.sessions.main, heartbeatAt: new Date(NOW - 40 * 60000).toISOString(), leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
-    const sv = renderApp(m, ui({ view: 'runs' }));
-    const slot = sv.slice(sv.indexOf('<div class="sc slot"'), sv.indexOf('</h3>', sv.indexOf('<div class="sc slot"')));
-    expect(slot).toContain('Loose namesake');
-    expect(slot).not.toContain(planTask.title);
-    expect(slot).toContain('live-stopped');
+    const rv = renderApp(m, ui({ view: 'runs' }));
+    const at = rv.indexOf('<div class="nr lt">');
+    const row = rv.slice(at, rv.indexOf('</div>', at));
+    expect(row).toContain('Loose namesake');
+    expect(row).not.toContain(planTask.title);
+    expect(row).toContain('live-stopped');
   });
   it('the runs view lists the loose tasks with status, stage, agent and the slot liveness dot', () => {
     const m = base();
@@ -844,24 +845,6 @@ describe('execution', () => {
     // Only while an ephemeral run is active.
     expect(looseSection(renderApp({ ...m, run: runDoc() }, ui({ view: 'runs' })))).toBe('');
     expect(looseSection(renderApp({ ...m, run: looseRun({ active: false }) }, ui({ view: 'runs' })))).toBe('');
-  });
-  it('a slot reads its time as a duration; an invalid or future since shows none', () => {
-    const m = base();
-    m.run = runDoc();
-    // The first busy slot's markup (free slots are `sc slot free`).
-    const slotOf = (html: string) => { const i = html.indexOf('class="sc slot"'); return html.slice(i, html.indexOf('</button>', i)); };
-    expect(slotOf(renderApp(m, ui({ view: 'runs' })))).toContain('lleva 7 min');
-    m.run = runDoc({ slots: [{ task: 'T002', stage: 'implement' as const, agent: null, by: 'main', since: new Date(NOW + 30 * 60000).toISOString() }] });
-    const future = slotOf(renderApp(m, ui({ view: 'runs' })));
-    expect(future).toContain('T002');
-    expect(future).not.toContain('lleva');
-    expect(future).not.toContain('hace');
-    m.run = runDoc({ slots: [{ task: 'T002', stage: 'implement' as const, agent: null, by: 'main', since: 'garbage' }] });
-    const junk = slotOf(renderApp(m, ui({ view: 'runs' })));
-    expect(junk).toContain('T002');
-    expect(junk).not.toContain('lleva');
-    expect(junk).not.toContain('NaN');
-    expect(junk).not.toContain('hace');
   });
   it('a finished loose task shows how long it took when meta/run carries it', () => {
     const m = base();
@@ -941,13 +924,13 @@ describe('execution', () => {
     m.sessions.main = { ...m.sessions.main, heartbeatAt: new Date(NOW - 40 * 60000).toISOString(), leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
     expect(renderApp(m, ui())).toMatch(/parada desde \d\d:\d\d/);
   });
-  it('the runs view has the run block with slots and free places; session cards show role and stopped state', () => {
+  it('the runs view heads the active run with its slots in use and lists its tasks; session cards show role and stopped state', () => {
     const m = base();
     m.run = runDoc();
     m.sessions.main = { ...m.sessions.main, role: 'coordinator', heartbeatAt: new Date(NOW - 40 * 60000).toISOString(), leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
     const runs = renderApp(m, ui({ view: 'runs' }));
-    expect(runs).toContain('1/3 plazas');
-    expect(runs).toContain('libre');
+    expect(runs).toContain('<div class="rh">Ejecución r1 · subagentes · 1/3 plazas · coordinadora main · rama forge/run-demo-shop</div>');
+    expect(runs).toContain('data-k="t:T002"');
     const sessions = renderApp(m, ui({ view: 'sessions' }));
     expect(sessions).toContain('coordinadora');
     expect(sessions).toMatch(/parada · última señal \d\d:\d\d/);
@@ -1121,20 +1104,22 @@ describe('validators without a result and ?debug=1 (H-04)', () => {
 });
 
 describe('the execution of the runs view (H-10)', () => {
-  it('is an exec-sec section; plan slots open their task, loose slots do not', () => {
+  it('a plan task of the run is a row button that opens it; a loose task is a row without an action', () => {
     const m = base();
     m.run = runDoc();
-    const sv = renderApp(m, ui({ view: 'runs' }));
-    expect(sv).toContain('<section class="exec-sec">');
-    expect(sv).not.toContain('<section class="run"');
-    expect(sv).toContain('<button type="button" class="sc slot" data-action="open-task" data-id="T002" data-k="slot:T002">');
+    const rv = renderApp(m, ui({ view: 'runs' }));
+    expect(rv).toContain('<section class="card runa">');
+    expect(rv).not.toContain('class="exec-sec"');
+    expect(rv).toMatch(/<button type="button" class="nr[^"]*" data-action="open-task" data-id="T002" data-k="t:T002">/);
     m.run = looseRun();
-    expect(renderApp(m, ui({ view: 'runs' }))).not.toMatch(/class="sc slot" data-action/);
+    expect(renderApp(m, ui({ view: 'runs' }))).toContain('<div class="nr lt">');
   });
-  it('theme.css has no .runs and no bare .run, and makes plan slots clickable (H-07, H-10)', () => {
+  it('theme.css has no .runs, no bare .run and no grid of slots of the old run block (H-07, H-10)', () => {
     expect(CSS).not.toMatch(/(^|[\s,}])\.run[{:\s]/);
     expect(CSS).not.toContain('.runs');
-    expect(cssRule(CSS, '.exec-sec .slot[data-action]')).toContain('cursor:pointer');
+    expect(CSS).not.toContain('.exec-sec');
+    expect(CSS).not.toContain('button.sc');
+    expect(CSS).not.toMatch(/\.slot(?![\w-])/);
     expect(cssRule(CSS, '.seg')).toContain('display:flex');
     expect(CSS).not.toContain('.pips');
   });
@@ -1922,5 +1907,91 @@ describe('the analysis: burndown and zones (H-26, G-27)', () => {
       expect(html).not.toContain('class="fct"');
       expect(html).not.toContain('class="bdw"');
     }
+  });
+});
+
+describe('the runs view (G-07, §4.3, H-24)', () => {
+  const history = (html: string) => { const i = html.indexOf('<section class="card rhist">'); return i < 0 ? '' : html.slice(i, html.indexOf('</section>', i)); };
+  it('the history lists runs/ newest first, folded, each with its kind, date, duration, integrated tasks and merge', () => {
+    const m = { ...base(), runs: [runSummary({ runId: 'old-1', startedAt: '2026-10-09T10:00:00.000Z', endedAt: '2026-10-09T11:00:00.000Z', merged: false }), runSummary()] };
+    const h = history(renderApp(m, ui({ view: 'runs' })));
+    expect(h).toContain('<h2 class="lbl">Historial (2)</h2>');
+    expect([...h.matchAll(/data-action="run-toggle" data-id="([^"]+)" aria-expanded="false"/g)].map(x => x[1])).toEqual(['shop-20261010T090000000Z', 'old-1']);
+    expect(h).toMatch(/<span class="rk rk-plan">Ejecución<\/span> <span class="k">shop-20261010T090000000Z<\/span> <span class="mono">[^<]+ · 2 h 05 min · 1\/2 integradas · fusionada en main<\/span>/);
+    expect(h).toContain('sin fusionar · rama forge/run-shop');
+    expect(h).not.toContain('class="rhd"');
+  });
+  it('an open run tells how it ended, its final review, deferred findings and decisions, and each task; a plan task opens its detail', () => {
+    const h = history(renderApp({ ...base(), runs: [runSummary()] }, ui({ view: 'runs', runsOpen: new Set(['shop-20261010T090000000Z']) })));
+    expect(h).toContain('aria-expanded="true"');
+    for (const s of ['subagentes · 3 en paralelo', 'forge/run-shop → main', '<dd>terminó</dd>', 'aceptada · 0 C · 1 I · 2 m', '<dt>Aplazados</dt><dd>3</dd>', '<dt>Decisiones</dt><dd>2</dd>']) expect(h, s).toContain(s);
+    expect(h).toContain('<button type="button" class="rtb" data-action="open-task" data-id="T001" data-k="rt:shop-20261010T090000000Z:T001"><span class="k">T001</span> Esquema de pedidos <span class="mono rs-integrated">integrada · 25 min · 2 rondas · 1 aplazado</span></button>');
+    expect(h).toContain('<span class="k">T003</span> Cart mock <span class="mono rs-stopped">parada con /forge:stop</span>');
+  });
+  it('a task in two open runs has one key per run: morphdom never keeps one row for both (C19)', () => {
+    const runs = [runSummary({ runId: 'run-a', tasks: [{ id: 'T001', status: 'stopped' }] }), runSummary({ runId: 'run-b', endedAt: '2026-10-10T12:00:00.000Z', tasks: [{ id: 'T001', status: 'integrated' }] })];
+    const h = history(renderApp({ ...base(), runs }, ui({ view: 'runs', runsOpen: new Set(['run-a', 'run-b']) })));
+    const keys = [...h.matchAll(/data-k="([^"]+)"/g)].map(x => x[1]);
+    expect(keys).toEqual(['run:run-b', 'rt:run-b:T001', 'run:run-a', 'rt:run-a:T001']);
+  });
+  it('a run of 60 tasks shows its 60 rows only when it is open (Review Focus 2)', () => {
+    const tasks = Array.from({ length: 60 }, (_, i) => ({ id: `T${String(i + 1).padStart(3, '0')}`, status: 'integrated' as const, seconds: 600 }));
+    const m = { ...base(), runs: [runSummary({ tasks })] };
+    expect(history(renderApp(m, ui({ view: 'runs' }))).match(/class="rtb"/g)).toBeNull();
+    const open = history(renderApp(m, ui({ view: 'runs', runsOpen: new Set(['shop-20261010T090000000Z']) })));
+    expect(open.match(/class="rtb"/g)).toHaveLength(60);
+    expect(open).toContain('<div class="lbl">Tareas (60)</div>');
+  });
+  it('a task closed outside a run shows in the same list with its own label', () => {
+    const single = runSummary({ runId: 'single-T002-20261011T100000000Z', kind: 'single', mode: 'single', parallel: 1, coordinator: 'be', branch: 'main', target: 'main',
+      closedBy: null, finalReview: null, tasks: [{ id: 'T002', status: 'integrated', seconds: 2700, rounds: 2 }], decisions: 0, deferred: 0 });
+    const h = history(renderApp({ ...base(), runs: [single] }, ui({ view: 'runs', runsOpen: new Set([single.runId]) })));
+    expect(h).toContain('<span class="rk rk-single">Tarea fuera de una ejecución</span>');
+    expect(h).toContain('Tarea fuera de una ejecución · 1 en paralelo');
+  });
+  it('a stalled run shows its banner with the reason and what to do; a closed one does not (§4.3)', () => {
+    const at = (min: number) => new Date(NOW + min * 60000).toISOString();
+    const m = { ...base(), run: { ...runDoc({ active: false, stopReason: 'stalled' }), startedAt: at(-90), lastStepAt: at(-30), stallReason: 'T2 sigue <b>bloqueada</b>' } };
+    const html = renderApp(m, ui({ view: 'runs' }));
+    expect(html).toContain('<div class="warnbox" role="note"><b>La ejecución r1 se atascó</b>: T2 sigue &lt;b&gt;bloqueada&lt;/b&gt;<div class="hint">Reanúdala con /forge:run o ciérrala con /forge:stop</div></div>');
+    expect(html).not.toContain('class="card runa"');
+    expect(renderApp({ ...m, run: { ...m.run, closedAt: at(-10) } }, ui({ view: 'runs' }))).not.toContain('class="warnbox"');
+  });
+  it('the banner, and «Te necesita», say how the run stopped: stalled, stopped with /forge:stop or out of budget (C33)', () => {
+    const at = (min: number) => new Date(NOW + min * 60000).toISOString();
+    const stopped = (stopReason: string, locale = 'es') => {
+      const m = base();
+      return { ...m, meta: { ...m.meta!, locale }, run: { ...runDoc({ active: false, stopReason }), startedAt: at(-90), lastStepAt: at(-30) } };
+    };
+    expect(renderApp(stopped('stopped'), ui({ view: 'runs' }))).toContain('<div class="warnbox" role="note"><b>La ejecución r1 se paró con /forge:stop</b><div class="hint">');
+    expect(renderApp(stopped('budget'), ui({ view: 'runs' }))).toContain('<b>La ejecución r1 agotó el presupuesto</b>');
+    expect(renderApp(stopped('budget'), ui())).toContain('<b>La ejecución r1 agotó el presupuesto</b>');
+    expect(renderApp(stopped('stopped'), ui())).not.toContain('se atascó');
+    expect(renderApp(stopped('stopped', 'en'), ui({ view: 'runs' }))).toContain('<b>The run r1 was stopped with /forge:stop</b>');
+    expect(renderApp(stopped('budget', 'en'), ui({ view: 'runs' }))).toContain('<b>The run r1 ran out of budget</b>');
+    expect(renderApp(stopped('finished'), ui({ view: 'runs' }))).not.toContain('class="warnbox"');
+  });
+  it('with no run at all it says how runs start (H-24)', () => {
+    expect(renderApp(base(), ui({ view: 'runs' }))).toContain('Aún no hay ejecuciones: /forge:run lanza una y aquí queda su historial.');
+  });
+  it('escapes what a run summary carries, and a run that ends before it starts has no duration (Review Focus 2, 5)', () => {
+    const evil = runSummary({ runId: 'r-x', branch: HOSTILE, target: HOSTILE, coordinator: HOSTILE, tasks: [{ id: 'T001', title: HOSTILE, status: 'integrated' }],
+      startedAt: '2026-10-10T12:00:00.000Z', endedAt: '2026-10-10T11:00:00.000Z' });
+    const html = renderApp({ ...base(), runs: [evil] }, ui({ view: 'runs', runsOpen: new Set(['r-x']) }));
+    clean(html);
+    expect(html).not.toContain('NaN');
+    expect(history(html)).not.toMatch(/ · -?\d+ min · \d+\/\d+ integradas/);
+  });
+  it('a run id, a kind, a mode, a stop reason or a task status from outside the lists never reaches a class or an attribute raw (Review Focus 5)', () => {
+    const odd = runSummary({ runId: `r"${HOSTILE}`, kind: 'x" onclick="y', mode: 'constructor', stopReason: 'toString',
+      finalReview: { action: '__proto__', critical: 0, important: 0, minor: 0 }, tasks: [{ id: 'T001', status: 'x" onclick="y' }, { id: `T"${HOSTILE}`, status: 'integrated' }] });
+    const html = renderApp({ ...base(), runs: [odd] }, ui({ view: 'runs', runsOpen: new Set([odd.runId]) }));
+    clean(html);
+    const h = history(html);
+    expect(h).toContain('class="rk rk-plan"');
+    expect(h).toContain('class="mono rs-queued"');
+    expect(h).not.toContain('onclick');
+    expect(h).not.toContain('function');
+    expect(h).toContain(`data-k="run:${esc(odd.runId)}"`);
   });
 });

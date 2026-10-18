@@ -5,6 +5,7 @@ import type { GroupBy, Zoom } from '../lib/timeline.js';
 import type { NoteFilter } from '../lib/notes.js';
 import { PROPOSAL_CATEGORIES, PROPOSAL_RISKS, type ApprovalDoc, type ProposalCategory, type ProposalDoc, type ProposalRisk, type ProposalStatus } from '../lib/proposals.js';
 import type { Drop } from './normalize.js';
+import type { RunSummaryDoc } from '../lib/run-summary.js';
 
 export interface Model {
   meta: MetaDoc | null;
@@ -26,6 +27,8 @@ export interface Model {
   infinite?: InfiniteDoc | null;
   /** forge's execution (meta/run): the pill, «En curso» and the runs view. */
   run?: RunDoc | null;
+  /** G-07: the runs that ended (runs/), newest first by endedAt, at most 50. */
+  runs?: RunSummaryDoc[];
   /** 'user:<id>' of the viewer, or null when unknown. */
   me: string | null;
   /** Display names by opaque user id (from user.profiles). */
@@ -98,6 +101,8 @@ export interface UiState {
   planFilter?: PlanFilter;
   /** The plan's open phases; undefined is the default, the phase in progress. */
   planOpen?: Set<string>;
+  /** G-07: the runs of the history the person opened (by runId). */
+  runsOpen?: Set<string>;
   noteFilter: NoteFilter;
   timelineGroup: GroupBy;
   draft: { type: NoteType; text: string };

@@ -4,6 +4,7 @@
 import { buildDocs } from '../../src/lib/sync.js';
 import type { EventDoc, NoteDoc, Plan, PlanTask, PlanTrack, RunDoc, SessionDoc, TaskState, TaskStatus } from '../../src/lib/types.js';
 import type { ProposalDoc } from '../../src/lib/proposals.js';
+import type { RunSummaryDoc } from '../../src/lib/run-summary.js';
 import type { Snapshot } from '../../src/page/app.js';
 import type { Model } from '../../src/page/render.js';
 
@@ -103,6 +104,19 @@ export function bigRun(now = BIG_NOW): RunDoc {
   };
 }
 
+/** Two runs of runs/ for the Runs view: a run of the plan that merged twelve tasks yesterday, and a task closed outside a run. */
+export function bigRuns(now = BIG_NOW): RunSummaryDoc[] {
+  return [
+    { v: 1, runId: 'big-20261015T090000000Z', kind: 'plan', mode: 'subagents', parallel: 3, branch: 'forge/run-big-1', target: 'main', coordinator: 'main',
+      startedAt: at(now, -27 * 60), endedAt: at(now, -24 * 60), stopReason: 'finished', closedBy: 'merge', merged: true,
+      tasks: Array.from({ length: 12 }, (_, i) => ({ id: taskId(97 + i), status: 'integrated' as const, seconds: 1800 + i * 60, rounds: 1 + (i % 2), ...(i === 3 ? { deferred: 2 } : {}) })),
+      loose: false, finalReview: { action: 'accept', critical: 0, important: 1, minor: 2 }, decisions: 2, deferred: 2 },
+    { v: 1, runId: `single-${taskId(115)}-20261016T080000000Z`, kind: 'single', mode: 'single', parallel: 1, branch: 'main', target: 'main', coordinator: 'ana',
+      startedAt: at(now, -240), endedAt: at(now, -195), stopReason: 'finished', closedBy: null, merged: true,
+      tasks: [{ id: taskId(115), status: 'integrated', seconds: 2700, rounds: 2 }], loose: false, finalReview: null, decisions: 0, deferred: 0 },
+  ];
+}
+
 export function bigEvents(now = BIG_NOW): (EventDoc & { id: string })[] {
   return Array.from({ length: 20 }, (_, i) => {
     const n = DONE - i;
@@ -135,6 +149,7 @@ export function bigDocs(now = BIG_NOW, snap: Snapshot = bigSnapshot(now)): { met
     coll: {
       plan: Object.fromEntries(snap.phases.map(p => [p.id, p])), state: bigStates(now), sessions: bigSessions(now), events: byId(bigEvents(now)),
       notes: byId(bigNotes(now)), proposals: byId(bigProposals(now)), messages: {}, approvals: {},
+      runs: Object.fromEntries(bigRuns(now).map(r => [r.runId, r])),
     },
   };
 }
@@ -144,7 +159,7 @@ export function bigModel(now = BIG_NOW): Model {
   const snap = bigSnapshot(now);
   return {
     meta: snap.meta, plan: bigPlan(), states: bigStates(now), sessions: bigSessions(now), events: bigEvents(now), messages: [], notes: bigNotes(now),
-    proposals: bigProposals(now), infinite: null, run: bigRun(now), me: 'user:owner', isOwner: true, approvals: {}, profiles: {}, readOnly: false, now, offline: false, connecting: false, rev: 1,
+    proposals: bigProposals(now), infinite: null, run: bigRun(now), runs: bigRuns(now), me: 'user:owner', isOwner: true, approvals: {}, profiles: {}, readOnly: false, now, offline: false, connecting: false, rev: 1,
   };
 }
 

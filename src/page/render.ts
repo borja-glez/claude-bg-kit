@@ -35,7 +35,7 @@ export function renderApp(m: Model, ui: UiState, dv: Derived = computeDerived(m)
   }).join('');
   const body = view === 'plan' ? renderPlanView(m, d, ui, dv)
     : view === 'schedule' ? renderScheduleView(m, d, ui, loc, dv)
-    : view === 'runs' ? renderRunsView(m, d)
+    : view === 'runs' ? renderRunsView(m, d, ui, loc, dv)
     : view === 'sessions' ? renderSessionsView(m, d, dv)
     : view === 'talk' ? renderTalkView(m, d, ui, loc)
     : renderSummary(m, d, ui, loc, dv);

@@ -43,7 +43,10 @@ describe('needsOf (G-24)', () => {
       kind: 'plan' as const, loose: [], slots: [], startedAt: iso(NOW - movedMsAgo - H), lastStepAt: iso(NOW - movedMsAgo), stallReason: 'T2 sigue bloqueada', ...over,
     });
     const kinds = (r: ReturnType<typeof run>) => needsOf(model({ run: r })).map(n => n.kind);
-    expect(needsOf(model({ run: run(23 * H) }))).toEqual([{ kind: 'stalled', runId: 'r1', reason: 'T2 sigue bloqueada' }]);
+    expect(needsOf(model({ run: run(23 * H) }))).toEqual([{ kind: 'stalled', runId: 'r1', reason: 'T2 sigue bloqueada', stop: 'stalled' }]);
+    // C33: the need says what stopped it, for the banner and «Te necesita» to name it.
+    expect(needsOf(model({ run: run(H, 'stopped') }))).toMatchObject([{ kind: 'stalled', stop: 'stopped' }]);
+    expect(needsOf(model({ run: run(H, 'budget') }))).toMatchObject([{ kind: 'stalled', stop: 'budget' }]);
     expect(kinds(run(24 * H - 1))).toEqual(['stalled']);
     // The TTL itself: deleting the check makes these show.
     expect(kinds(run(24 * H))).toEqual([]);

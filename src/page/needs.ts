@@ -12,6 +12,10 @@ import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
 import { unmarkedReason } from './html.js';
 import type { Model } from './model.js';
 
+/** §4.3: what stops a run without closing it; each one names itself in «Te necesita» and in the banner of Ejecuciones (C33). */
+export const HALTS = ['stalled', 'stopped', 'budget'] as const;
+export type Halt = (typeof HALTS)[number];
+
 /** How long the deferred findings of a done task stay in «Te necesita» (§2, decisión menor). */
 export const DEFERRED_DAYS = 7;
 const DAY_MS = 86_400_000;
@@ -24,7 +28,7 @@ export type Need =
   | { kind: 'escalation'; message: MessageDoc & { id: string } }
   | { kind: 'external'; task: string; title: string; reason: string | null }
   | { kind: 'deferred'; findings: number; tasks: { id: string; doneAt: string }[] }
-  | { kind: 'stalled'; runId: string; reason: string | null }
+  | { kind: 'stalled'; runId: string; reason: string | null; stop: Halt }
   | { kind: 'infinite'; since: string }
   | { kind: 'stale-page'; page: string; plan: string };
 
@@ -72,8 +76,9 @@ export function needsOf(m: Model, pageVersion: string = WAYPOINT_VERSION): Need[
   if (deferred.length) out.push({ kind: 'deferred', findings: deferred.reduce((n, x) => n + x.findings, 0), tasks: deferred.map(({ id, doneAt }) => ({ id, doneAt })) });
   // §4.3: a run that stopped without being closed, within its 24 h.
   const r = m.run;
-  if (r && !r.active && !r.closedAt && (r.stopReason === 'stalled' || r.stopReason === 'stopped' || r.stopReason === 'budget')) {
-    if (withinRunTtl(m.now, Date.parse(r.lastStepAt ?? r.startedAt ?? ''))) out.push({ kind: 'stalled', runId: r.runId, reason: r.stallReason ?? null });
+  const stop = r && !r.active && !r.closedAt ? HALTS.find(h => h === r.stopReason) : undefined;
+  if (r && stop) {
+    if (withinRunTtl(m.now, Date.parse(r.lastStepAt ?? r.startedAt ?? ''))) out.push({ kind: 'stalled', runId: r.runId, reason: r.stallReason ?? null, stop });
   }
   // G-08: an active infinite run whose coordinator's lease stopped, within its 24 h (the same rule, carry 7).
   const c = m.infinite?.active === true ? m.infinite.coordinator : null;

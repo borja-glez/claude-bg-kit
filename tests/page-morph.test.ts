@@ -4,7 +4,7 @@ import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { start } from '../src/page/app.js';
 import { morphInto, nodeKey } from '../src/page/morph.js';
 import { renderApp, VIEWS, type UiState } from '../src/page/render.js';
-import { BIG_NOW, bigDocs, bigModel, bigSnapshot } from './fixtures/big-plan.js';
+import { BIG_NOW, bigDocs, bigModel, bigRuns, bigSnapshot } from './fixtures/big-plan.js';
 
 const flush = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 5; i++) await flush(); };
@@ -208,7 +208,7 @@ describe('morph keys (review M2)', () => {
     m.notes = [...m.notes, { id: 'na', ts: '2026-10-16T10:00:00.000Z', type: 'idea', author: 'session:main', text: 'una', taskId: 'T121' }, { id: 'nb', ts: '2026-10-16T10:05:00.000Z', type: 'idea', author: 'session:main', text: 'otra', taskId: 'T121' }];
     m.proposals = [...m.proposals, { ...m.proposals[0]!, id: 'p2', evidence: 'más' }];
     const all = new Set(m.plan.phases.map(p => p.id));
-    const base = { zoom: '1d' as const, offset: 0, expanded: all, planOpen: all, modal: 'T121', search: '', shot: null, noteFilter: 'all' as const, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', layers: ['critical', 'forge'] };
+    const base = { zoom: '1d' as const, offset: 0, expanded: all, planOpen: all, runsOpen: new Set(bigRuns().map(r => r.runId)), modal: 'T121', search: '', shot: null, noteFilter: 'all' as const, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', layers: ['critical', 'forge'] };
     for (const [view, talk] of [...VIEWS.map(v => [v, 'notes'] as const), ['talk', 'proposals'] as const]) {
       const box = document.createElement('div');
       box.innerHTML = renderApp(m, { ...base, view, talk } as UiState);

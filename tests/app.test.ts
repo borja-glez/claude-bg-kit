@@ -113,7 +113,7 @@ describe('start', () => {
     const f = fakeDb();
     const root = document.createElement('div');
     const app = await start({ claude: { use: async () => f.db }, snapshot, root, now: () => NOW });
-    expect([...f.subs.keys()].sort()).toEqual(['approvals', 'events', 'messages', 'meta/infinite', 'meta/metrics', 'meta/project', 'meta/run', 'notes', 'plan', 'proposals', 'sessions', 'state']);
+    expect([...f.subs.keys()].sort()).toEqual(['approvals', 'events', 'messages', 'meta/infinite', 'meta/metrics', 'meta/project', 'meta/run', 'notes', 'plan', 'proposals', 'runs', 'sessions', 'state']);
     f.push('state', { T001: { status: 'done', startedAt: '2026-10-11T10:00:00Z', doneAt: '2026-10-11T10:30:00Z' } });
     await flush();
     expect(root.innerHTML).toContain('17 %');
@@ -2689,6 +2689,70 @@ describe('the plan in the URL (H-18, G-24)', () => {
     expect([app.ui.view, app.ui.planFilter?.forge]).toEqual(['plan', ['deferred']]);
     expect(location.hash).toBe('#v=plan&pf=deferred');
     expect(root.innerHTML).toContain('data-id="T001"');
+    app.stop();
+  });
+});
+
+describe('the history of runs/ (G-07)', () => {
+  const RUN = { v: 1, runId: 'shop-20261010T090000000Z', kind: 'plan', mode: 'subagents', parallel: 3, branch: 'forge/run-shop', target: 'main', coordinator: 'main',
+    startedAt: '2026-10-10T09:00:00.000Z', endedAt: '2026-10-10T11:05:00.000Z', stopReason: 'finished', closedBy: 'merge', merged: true,
+    tasks: [{ id: 'T001', status: 'integrated', seconds: 1500 }], loose: false, finalReview: null, decisions: 0, deferred: 0 };
+  it('listens to runs/; one that is not a run summary is dropped and listed once with ?debug=1, and a run opens and folds on click (Review Focus 2)', async () => {
+    const f = fakeDb();
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : null) }, snapshot, root, now: () => NOW, debug: true });
+    f.push('runs', { [RUN.runId]: RUN, older: { ...RUN, runId: 'shop-20261009T090000000Z', startedAt: '2026-10-09T09:00:00.000Z', endedAt: '2026-10-09T11:00:00.000Z' }, bad: { v: 2 },
+      spaced: { ...RUN, runId: 'shop 20261008' } });
+    click(root, '[data-view="runs"]');
+    await settle();
+    expect(app.model.runs!.map(r => r.runId)).toEqual(['shop-20261010T090000000Z', 'shop-20261009T090000000Z']);
+    const dbg = root.querySelector('.dbg')!.textContent ?? '';
+    // C20: the normalizer's own report, once; the subscription adds none.
+    expect(dbg).toContain('runs/bad · run · dropped · no v: 1');
+    expect(dbg.match(/runs\/bad/g)).toHaveLength(1);
+    // Review Focus 2: a runId with spaces is no run id.
+    expect(dbg).toContain('runs/spaced · run · dropped · runId');
+    expect(root.innerHTML).not.toContain('shop 20261008');
+    click(root, '[data-action="run-toggle"][data-id="shop-20261010T090000000Z"]');
+    await settle();
+    expect([...app.ui.runsOpen!]).toEqual(['shop-20261010T090000000Z']);
+    expect(root.querySelector('[data-action="run-toggle"][data-id="shop-20261010T090000000Z"]')!.getAttribute('aria-expanded')).toBe('true');
+    expect(root.innerHTML).toContain('data-k="rt:shop-20261010T090000000Z:T001"');
+    click(root, '[data-action="run-toggle"][data-id="shop-20261010T090000000Z"]');
+    await settle();
+    expect(app.ui.runsOpen!.size).toBe(0);
+    app.stop();
+  });
+  it('a runtime that serves more than the 50 asked for leaves the page with the 50 newest', async () => {
+    const f = fakeDb();
+    const root = document.createElement('div');
+    const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : null) }, snapshot, root, now: () => NOW });
+    const many = Object.fromEntries(Array.from({ length: 55 }, (_, i) => {
+      const runId = `r-${String(i).padStart(2, '0')}`;
+      return [runId, { ...RUN, runId, endedAt: new Date(Date.parse('2026-10-01T00:00:00.000Z') + i * 3600000).toISOString() }];
+    }));
+    f.push('runs', many);
+    await settle();
+    expect(app.model.runs).toHaveLength(50);
+    expect([app.model.runs![0]!.runId, app.model.runs![49]!.runId]).toEqual(['r-54', 'r-05']);
+    app.stop();
+  });
+  it('a toggle for a run the page did not receive changes nothing', async () => {
+    const f = fakeDb();
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : null) }, snapshot, root, now: () => NOW });
+    f.push('runs', { [RUN.runId]: RUN });
+    click(root, '[data-view="runs"]');
+    await settle();
+    const fake = document.createElement('button');
+    fake.dataset.action = 'run-toggle';
+    fake.dataset.id = 'not-a-run';
+    root.querySelector('main')!.appendChild(fake);
+    fake.click();
+    await settle();
+    expect(app.ui.runsOpen).toBeUndefined();
     app.stop();
   });
 });

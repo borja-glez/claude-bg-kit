@@ -9,7 +9,8 @@ import { unmarkedReason } from './html.js';
 import { derive } from './derive.js';
 import { morphInto } from './morph.js';
 import { parseSeen, pruneSeen, seenKey } from './needs.js';
-import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
+import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeRunSummary, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
+import type { RunSummaryDoc } from '../lib/run-summary.js';
 import { decodeView, encodeView, type ViewState } from './urlstate.js';
 import { currentPhaseId, DETAIL_TABS, esc, GROUPS, NOTE_FILTERS, parsePlanFilter, phasesInProgress, planFilterKeys, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, togglePlanFilter, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type View } from './render.js';
 
@@ -93,6 +94,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     proposals: [],
     infinite: null,
     run: null,
+    runs: [],
     me: null,
     // Carry 5: unknown (undefined) until user.isOwner() answers; then true or false.
     isOwner: undefined,
@@ -749,6 +751,14 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       ui.planOpen = open;
     }
     else if (action === 'plan-all') { ui.planOpen = el.dataset.open === '1' ? new Set(model.plan.phases.map(p => p.id)) : new Set(); }
+    // G-07: a run of the history opens or folds (only ids the page received).
+    else if (action === 'run-toggle') {
+      const id = el.dataset.id ?? '';
+      if (!model.runs?.some(r => r.runId === id)) return;
+      const open = new Set(ui.runsOpen ?? []);
+      open.has(id) ? open.delete(id) : open.add(id);
+      ui.runsOpen = open;
+    }
     else if (action === 'nfilter') { const k = el.dataset.filter as UiState['noteFilter']; if (!NOTE_FILTERS.includes(k)) return; ui.noteFilter = k; }
     else if (action === 'answer-open') { ui.answering = el.dataset.id ?? null; ui.answerDraft = ''; ui.notice = null; }
     // G-24: [Visto] marks the deferred findings of the listed tasks as seen, in this browser only.
@@ -1211,6 +1221,16 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   unsubs.push(db.doc('meta/metrics').onSnapshot(((s: Snap) => { metricsDoc = s.exists ? normalizeMetrics(s.data(), reporter('meta/metrics')('meta/metrics')) : null; withMetrics(); changed(); }) as never, onErr));
   unsubs.push(db.doc('meta/run').onSnapshot(((s: Snap) => { model.run = s.exists ? normalizeRun(s.data(), reporter('meta/run')('meta/run')) : null; changed(); }) as never, onErr));
   unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data(), reporter('meta/infinite')('meta/infinite')) : null; changed(); }) as never, onErr));
+  // G-07: the runs that ended, newest first, at most 50 (asked of the database and kept so on the page, whatever a runtime
+  // serves); one that is not a run summary is dropped and listed with ?debug=1 (§4.11) by the normalizer's own report,
+  // once (C20).
+  const MAX_RUNS = 50;
+  unsubs.push(db.collection('runs').orderBy('endedAt', 'desc').limit(MAX_RUNS).onSnapshot(((s: QSnap) => {
+    const rep = reporter('runs');
+    model.runs = rows(s).map(r => normalizeRunSummary(r.body, rep(`runs/${r.id}`))).filter((x): x is RunSummaryDoc => x !== null)
+      .sort((a, b) => Date.parse(b.endedAt) - Date.parse(a.endedAt) || (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0)).slice(0, MAX_RUNS);
+    changed();
+  }) as never, onErr));
   unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const rep = reporter('plan'); const p = rows(s).map(r => normalizePhase(r.body, rep(`plan/${r.id}`))).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } planSnap = true; settleLink(); changed(); }) as never, onPlanErr));
   unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => {
     const rep = reporter('state');

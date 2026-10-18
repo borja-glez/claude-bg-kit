@@ -341,14 +341,7 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .pill.run{background:var(--teal);color:var(--base)}
 .pill.run.warn{background:var(--yellow)}
 .pill.run.stopped{background:var(--red)}
-.exec-sec{margin-bottom:16px}
-.exec-sec .slot.free{opacity:.45;border-style:dashed}
-.exec-sec .slot[data-action]{cursor:pointer}
-.exec-sec .slot[data-action]:hover{border-color:var(--s1)}
-button.sc{display:block;width:100%;text-align:left}
-.slot .sh{display:flex;align-items:center;gap:8px;font:700 20px 'Barlow Condensed',sans-serif}
-button.slot .mono{display:block}
-button.tr:focus-visible,.cpl:focus-visible,button.sc:focus-visible{outline:2px solid var(--lavender);outline-offset:-2px}
+button.tr:focus-visible,.cpl:focus-visible{outline:2px solid var(--lavender);outline-offset:-2px}
 section.loose{margin:12px 0}
 section.loose .lts{list-style:none;margin:0;padding:0}
 section.loose .lt{display:flex;gap:8px;align-items:baseline;padding:3px 0}
@@ -470,3 +463,25 @@ button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-
 .pr .fm{font:11px 'JetBrains Mono',monospace;color:var(--sub0)}
 .pr .fm.del{color:var(--red)}
 @media (pointer:coarse){.pr,.plh{min-height:40px}}
+
+/* ---- Runs (§4.6.5; G-07) ---- */
+.card.runa,.card.rhist{margin-top:12px}
+.warnbox .hint{margin-top:2px;font:11.5px 'JetBrains Mono',monospace;color:var(--sub0)}
+.rhl,.rtl{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column}
+.rhi{border-bottom:1px solid var(--s0)}
+.rhi:last-child{border-bottom:0}
+.rhb{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;width:100%;padding:7px 4px;text-align:left;font-size:13px;color:var(--sub1)}
+.rhb:hover,button.rtb:hover{background:var(--base)}
+.rhb:focus-visible,.rtb:focus-visible{outline:2px solid var(--lavender);outline-offset:-2px}
+.rhb .chev{width:10px;color:var(--o1)}
+/* A run id of up to 120 characters with no break point wraps instead of widening a 390 px page. */
+.rhb .k,.rhb .mono{min-width:0;overflow-wrap:anywhere}
+.rk{font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--lavender)}
+.rk-single{color:var(--teal)} .rk-ephemeral{color:var(--mauve)}
+.rhd{padding:4px 8px 10px 22px}
+.rhd .kv{grid-template-columns:auto minmax(0,1fr)}
+.rhd .kv dd{text-align:left;overflow-wrap:anywhere}
+.rtl{gap:2px}
+.rtb{display:block;width:100%;padding:3px 4px;border-radius:4px;text-align:left;font-size:12.5px;color:var(--sub1);overflow-wrap:anywhere}
+.rs-integrated{color:var(--green)} .rs-blocked,.rs-conflict{color:var(--yellow)} .rs-stopped{color:var(--red)}
+@media (pointer:coarse){.rhb,button.rtb{min-height:40px}}
