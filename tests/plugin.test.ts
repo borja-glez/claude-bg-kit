@@ -1744,4 +1744,9 @@ describe('plugin layout', () => {
     const declared = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.optionalDependencies };
     for (const p of ['node-pty', '@xterm/headless', 'node-addon-api']) expect(declared, p).not.toHaveProperty(p);
   });
+  it('waypoint PostToolUse: Bash and PowerShell, each with an if that lets only a command naming git through, and the same command (hooks filter, J-22)', () => {
+    const post = JSON.parse(read('plugins/waypoint/hooks/hooks.json')).hooks.PostToolUse as { matcher: string; hooks: { type: string; if?: string; command: string }[] }[];
+    expect(post.map(g => [g.matcher, g.hooks.map(h => [h.type, h.if])])).toEqual([['Bash', [['command', 'Bash(*git*)']]], ['PowerShell', [['command', 'PowerShell(*git*)']]]]);
+    expect(new Set(post.flatMap(g => g.hooks.map(h => h.command)))).toEqual(new Set(['node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" hook post-commit']));
+  });
 });

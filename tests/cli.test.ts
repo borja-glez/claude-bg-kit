@@ -1373,6 +1373,10 @@ describe('design commands', () => {
   });
 });
 
+// The commands isCommitCommand takes for a commit (its test below). Every one names git, which the Bash(*git*) and
+// PowerShell(*git*) filter of the PostToolUse hook needs.
+const COMMITS = ['git add . && git commit -m x', 'x; git commit -m y', 'true | git commit -m z', 'git -c user.name=a commit -m x', 'git -C sub commit -m x', 'git --no-pager commit -m x', '(git commit -m x)', 'cd a && (git add . && git commit -m x)'];
+
 describe('classic hooks', () => {
   const NOW = Date.parse('2026-10-11T10:00:00.000Z');
   const ago = (min: number) => new Date(NOW - min * 60000).toISOString();
@@ -1403,10 +1407,13 @@ describe('classic hooks', () => {
   const NOT_OWNER = ['Current task', 'continue', 'Use /waypoint:work'];
 
   it('isCommitCommand matches real commits only', () => {
-    const yes = ['git add . && git commit -m x', 'x; git commit -m y', 'true | git commit -m z', 'git -c user.name=a commit -m x', 'git -C sub commit -m x', 'git --no-pager commit -m x', '(git commit -m x)', 'cd a && (git add . && git commit -m x)'];
+    const yes = COMMITS;
     const no = ['git commit-tree abc', 'git commit-graph write', 'echo commit', 'git log --grep commit', 'git commit --dry-run -m x'];
     for (const c of yes) expect(isCommitCommand(c), c).toBe(true);
     for (const c of no) expect(isCommitCommand(c), c).toBe(false);
+  });
+  it('every command isCommitCommand takes for a commit names git, so the filter of hooks.json lets it through (hooks filter)', () => {
+    for (const c of COMMITS) expect(/git/.test(c), c).toBe(true);
   });
 
   describe('session-start (A-02, A-03, B-01, B-10, B-11, J-04, K3-13)', () => {
@@ -1827,6 +1834,14 @@ describe('classic hooks', () => {
       expect(hook('stop', { session_id: 'A' }).stdout).toBe('');
       ownTask('T003', 'main-2', 'done');
       expect(JSON.parse(hook('stop', { session_id: 'C' }).stdout).reason).toContain('.waypoint/demo-shop/seats/main-2/pending-commits.jsonl');
+    });
+    it('records the commit of a PowerShell command, as of a Bash one: the input carries tool_input.command in both (J-22)', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      const sha = commitFile('a.txt');
+      const r = hook('post-commit', { session_id: 'A', cwd: dir, hook_event_name: 'PostToolUse', tool_name: 'PowerShell', tool_input: { command: 'git commit -m "T002: x"' } });
+      expect(r).toEqual({ code: 0, stdout: '', stderr: '' });
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([sha]);
     });
   });
 
