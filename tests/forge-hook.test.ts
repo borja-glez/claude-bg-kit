@@ -1,11 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { buildSync } from 'esbuild';
 import { startRun, recordCycle } from '../src/forge/run.js';
 import { decideStop, decideExecutionStop } from '../src/forge/hook.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import { run } from '../src/forge/cli/run.js';
-import { authDir, readAuths, writeAuth, type AuthRecord } from '../src/forge/auth.js';
+import { authDir, checkMergeAuth, checkMofAuth, mofAsk, readAuths, writeAuth, type AuthRecord } from '../src/forge/auth.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { hookAnswerInput } from './helpers/hook-answer.js';
 
@@ -278,39 +282,142 @@ describe('hook answer (I-03)', () => {
     expect(readFileSync(path.join(dir, 'merge-shop-r1-zz99.json'), 'utf8')).toBe('{ broken');
     expect(readdirSync(dir).sort()).toEqual(['merge-shop-r1-ab12.json', 'merge-shop-r1-yy88.json', 'merge-shop-r1-zz99.json']);
   });
-  it('reads the answer from the transcript when the hook input carries none', () => {
+  /** A transcript line: the tool result of call `id` (none: a line that names no call) and its toolUseResult. */
+  const tline = (id: string | null, result: Record<string, unknown>) => JSON.stringify({
+    type: 'user', ...(id ? { message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'x' }] } } : {}), toolUseResult: result,
+  });
+  const YES_RESULT = { questions: [{ question: Q }], answers: { [Q]: 'Yes, merge it' }, annotations: {} };
+  it('reads the answer from the transcript when the hook input carries none: the line of its own call', () => {
     const root = tmp('forge-answer-');
     writeAuth(root, rec());
     const transcript = path.join(root, 't.jsonl');
-    writeFileSync(transcript, `${JSON.stringify({ type: 'user', toolUseResult: { questions: [{ question: Q }], answers: { [Q]: 'Yes, merge it' }, annotations: {} } })}\n`);
-    hook(root, { ...input(root, null), transcript_path: transcript });
+    writeFileSync(transcript, `${tline('toolu_1', YES_RESULT)}\n`);
+    hook(root, { ...input(root, null), transcript_path: transcript, tool_use_id: 'toolu_1' });
     expect(readAuths(root)[0].answer).toBe('yes');
   });
-  it('in the transcript only the result of this AskUserQuestion counts, and only from a .jsonl file given by its full path', () => {
+  it("never takes another call's answer from the transcript: without the call's id, with a tool_response, or from another call's line", () => {
     const root = tmp('forge-answer-');
     writeAuth(root, rec());
-    const line = (id: string | null, result: Record<string, unknown>) => JSON.stringify({
-      type: 'user', ...(id ? { message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'x' }] } } : {}), toolUseResult: result,
-    });
-    const yes = { questions: [{ question: Q }], answers: { [Q]: 'Yes, merge it' }, annotations: {} };
     const transcript = path.join(root, 't.jsonl');
     const before = files(root);
-    // An earlier call answered yes; the result of this one is not in the transcript yet.
-    writeFileSync(transcript, `${line('toolu_old', yes)}\n`);
-    hook(root, { ...input(root, null), transcript_path: transcript, tool_use_id: 'toolu_new' });
+    // An earlier call answered yes, once with its id and once on a line that names no call; this call's result is not there.
+    writeFileSync(transcript, `${tline('toolu_old', YES_RESULT)}\n${tline(null, YES_RESULT)}\n`);
+    for (const extra of [{}, { tool_use_id: '' }, { tool_use_id: 7 }, { tool_use_id: 'toolu_new' },
+      // A tool_response without answers is this call's result: the transcript is not read.
+      { tool_use_id: 'toolu_old', tool_response: { questions: [{ question: Q }] } }, { tool_use_id: 'toolu_old', tool_response: 'Your questions have been answered' },
+      { tool_use_id: 'toolu_old', tool_response: null }]) {
+      expect(hook(root, { ...input(root, null), transcript_path: transcript, ...extra }), JSON.stringify(extra)).toEqual(SILENT);
+    }
     // A result of another tool that carries `answers`.
-    writeFileSync(transcript, `${line(null, { answers: { [Q]: 'Yes, merge it' } })}\n`);
-    hook(root, { ...input(root, null), transcript_path: transcript });
-    // The right lines, but not in a .jsonl file given by its full path.
-    writeFileSync(path.join(root, 't.txt'), `${line(null, yes)}\n`);
+    writeFileSync(transcript, `${tline('toolu_x', { answers: { [Q]: 'Yes, merge it' } })}\n`);
+    hook(root, { ...input(root, null), transcript_path: transcript, tool_use_id: 'toolu_x' });
+    // The call's own line, but not in a .jsonl file given by its full path.
+    writeFileSync(path.join(root, 't.txt'), `${tline('toolu_1', YES_RESULT)}\n`);
     mkdirSync(path.join(root, 'd.jsonl'));
-    for (const p of [path.join(root, 't.txt'), path.relative(process.cwd(), transcript), path.join(root, 'd.jsonl'), path.join(root, 'none.jsonl'), 7]) {
-      hook(root, { ...input(root, null), transcript_path: p });
+    for (const p of [path.join(root, 't.txt'), 't.jsonl', path.join(root, 'd.jsonl'), path.join(root, 'none.jsonl'), 7]) {
+      hook(root, { ...input(root, null), transcript_path: p, tool_use_id: 'toolu_1' });
     }
     expect(files(root)).toEqual(before);
     // This call's result decides, wherever it is: here before the earlier one.
-    writeFileSync(transcript, `${line('toolu_new', { ...yes, answers: { [Q]: 'No' } })}\n${line('toolu_old', yes)}\n`);
+    writeFileSync(transcript, `${tline('toolu_new', { ...YES_RESULT, answers: { [Q]: 'No' } })}\n${tline('toolu_old', YES_RESULT)}\n`);
     hook(root, { ...input(root, null), transcript_path: transcript, tool_use_id: 'toolu_new' });
     expect(readAuths(root)[0]).toMatchObject({ answer: 'no', answeredBy: 's1' });
   });
+  it('a result the person did not submit records nothing: sent while they were away, a follow-up or a reply', () => {
+    const root = tmp('forge-answer-');
+    writeAuth(root, rec());
+    const before = files(root);
+    for (const result of [{ afkTimeoutMs: 120000 }, { afkTimeoutMs: 0 }, { afkTimeoutMs: null }, { followUp: true }, { followUp: 'more options' }, { response: 'Tell me more first' }]) {
+      expect(hook(root, hookAnswerInput({ cwd: root, answers: { [Q]: 'Yes, merge it' }, result })), JSON.stringify(result)).toEqual(SILENT);
+    }
+    // The same in the transcript, for an input without tool_response.
+    const transcript = path.join(root, 't.jsonl');
+    writeFileSync(transcript, `${tline('toolu_1', { ...YES_RESULT, afkTimeoutMs: 120000 })}\n${tline('toolu_2', { ...YES_RESULT, followUp: true })}\n`);
+    for (const id of ['toolu_1', 'toolu_2']) hook(root, { ...input(root, null), transcript_path: transcript, tool_use_id: id });
+    expect(files(root)).toEqual(before);
+    // The record stays pending: the person's own submit afterwards counts (a follow-up of false or an empty response is none).
+    hook(root, hookAnswerInput({ cwd: root, answers: { [Q]: 'Yes, merge it' }, result: { followUp: false, response: '' } }));
+    expect(readAuths(root)[0]).toMatchObject({ answer: 'yes', answeredBy: 's1' });
+  });
+  it('a merge-on-finish yes picked on the start card but sent while the person was away stays pending', () => {
+    const root = tmp('forge-answer-');
+    const m = mofAsk('mof-shop-r1-cd34', 'main', false, true);
+    const pending: AuthRecord = { authId: 'mof-shop-r1-cd34', kind: 'merge-on-finish', runId: 'shop-r1', target: 'main', question: m.ask.question, yes: m.yes, createdAt: NOW.toISOString(), session: null };
+    writeAuth(root, pending);
+    hook(root, hookAnswerInput({ cwd: root, answers: { 'Mode?': 'Secuencial', [m.ask.question]: m.yes }, result: { afkTimeoutMs: 120000 } }));
+    expect(readAuths(root)).toEqual([pending]);
+    expect(checkMofAuth(readAuths(root), { runId: 'shop-r1', target: 'main', session: 's1' })).toEqual({ ok: false, reason: 'no answer recorded' });
+  });
+  it('one answer answers one record: a question that two records carry (a copy beside the real one) answers neither', () => {
+    for (const copy of [rec({ authId: 'merge-evil-zz99', runId: 'evil' }), rec({ authId: 'mof-shop-r1-zz99', kind: 'merge-on-finish', session: null }),
+      rec({ authId: 'merge-shop-r1-zz98', answer: 'no', answeredAt: NOW.toISOString(), answeredBy: 's1' })]) {
+      const root = tmp('forge-answer-');
+      writeAuth(root, rec());
+      writeAuth(root, copy);
+      const before = files(root);
+      hook(root, input(root, { [Q]: 'Yes, merge it' }));
+      expect(files(root), copy.authId).toEqual(before);
+      // Without the copy, the same answer answers the record.
+      rmSync(path.join(authDir(root), `${copy.authId}.json`));
+      hook(root, input(root, { [Q]: 'Yes, merge it' }));
+      expect(readAuths(root), copy.authId).toEqual([{ ...rec(), answer: 'yes', answeredAt: NOW.toISOString(), answeredBy: 's1' }]);
+    }
+  });
+  it('a yes the person added a note to is not a yes: recorded as other, with the note; a note on a no is kept', () => {
+    const root = tmp('forge-answer-');
+    writeAuth(root, rec());
+    hook(root, hookAnswerInput({ cwd: root, answers: { [Q]: 'Yes, merge it' }, result: { annotations: { [Q]: { notes: '  only after CI  ' } } } }));
+    expect(readAuths(root)).toEqual([{ ...rec(), answer: 'other', note: 'only after CI', answeredAt: NOW.toISOString(), answeredBy: 's1' }]);
+    expect(checkMergeAuth(readAuths(root), { runId: 'shop-r1', target: 'main', session: 's1', now: NOW.getTime() })).toEqual({ ok: false, reason: 'answered no' });
+    writeAuth(root, rec());
+    hook(root, hookAnswerInput({ cwd: root, answers: { [Q]: 'No' }, result: { annotations: { [Q]: { notes: 'wait for the release' } } } }));
+    expect(readAuths(root)[0]).toMatchObject({ answer: 'no', note: 'wait for the release' });
+    // A note on another question, or one of blanks, leaves the yes a yes.
+    writeAuth(root, rec());
+    hook(root, hookAnswerInput({ cwd: root, answers: { 'Mode?': 'Secuencial', [Q]: 'Yes, merge it' }, result: { annotations: { 'Mode?': { notes: 'fast' }, [Q]: { notes: '  ', preview: 'p' } } } }));
+    expect(readAuths(root)).toEqual([{ ...rec(), answer: 'yes', answeredAt: NOW.toISOString(), answeredBy: 's1' }]);
+  });
+  it('a pending record dated more than 5 minutes ahead of now is not answered', () => {
+    const root = tmp('forge-answer-');
+    writeAuth(root, rec({ createdAt: new Date(NOW.getTime() + 10 * 60_000).toISOString() }));
+    const before = files(root);
+    hook(root, input(root, { [Q]: 'Yes, merge it' }));
+    expect(files(root)).toEqual(before);
+    writeAuth(root, rec({ createdAt: new Date(NOW.getTime() + 4 * 60_000).toISOString() }));
+    hook(root, input(root, { [Q]: 'Yes, merge it' }));
+    expect(readAuths(root)[0].answer).toBe('yes');
+  });
+  it('two hooks answering at once: the one that writes second finds the record answered and leaves that answer whole', () => {
+    for (const [first, second] of [[['No', 's2'], ['Yes, merge it', 's1']], [['Yes, merge it', 's1'], ['No', 's2']]]) {
+      const root = tmp('forge-answer-');
+      writeAuth(root, rec());
+      // The second hook has read the pending record; the first answers it before the second writes (during its clock read).
+      run(['hook', 'answer'], {
+        cwd: root, env: {}, stdin: JSON.stringify(input(root, { [Q]: second[0] }, [Q], second[1])),
+        now: () => { hook(root, input(root, { [Q]: first[0] }, [Q], first[1])); return new Date(NOW.getTime() + 1000); },
+      });
+      expect(readAuths(root), first.join()).toEqual([{ ...rec(), answer: first[0] === 'No' ? 'no' : 'yes', answeredAt: NOW.toISOString(), answeredBy: first[1] }]);
+      expect(readdirSync(authDir(root))).toEqual(['merge-shop-r1-ab12.json']);
+    }
+  });
+  it('hooks answering at once in separate processes leave one whole answer of one of them and no temporary file', async () => {
+    const root = tmp('forge-answer-');
+    writeAuth(root, rec());
+    // hookAnswer run by separate node processes, as two sessions' hooks run: auth.ts bundled for node.
+    const bundle = path.join(tmp('forge-answer-bundle-'), 'auth.cjs');
+    buildSync({ entryPoints: [fileURLToPath(new URL('../src/forge/auth.ts', import.meta.url))], bundle: true, platform: 'node', format: 'cjs', outfile: bundle, logLevel: 'silent' });
+    const go = Date.now() + 1500;
+    const code = `const { hookAnswer } = require(${JSON.stringify(bundle)});
+while (Date.now() < ${go}) {}
+hookAnswer({ cwd: process.env.FORGE_ROOT, env: {}, stdin: process.env.FORGE_STDIN, now: () => new Date(process.env.FORGE_AT) });`;
+    const writers = Array.from({ length: 6 }, (_, i) => ({ session: `s${i}`, label: i % 2 ? 'No' : 'Yes, merge it', at: new Date(NOW.getTime() + i * 1000).toISOString() }));
+    await Promise.all(writers.map(w => promisify(execFile)(process.execPath, ['-e', code], {
+      env: { ...process.env, FORGE_ROOT: root, FORGE_AT: w.at, FORGE_STDIN: JSON.stringify(input(root, { [Q]: w.label }, [Q], w.session)) },
+    })));
+    const recs = readAuths(root);
+    expect(recs).toHaveLength(1);
+    const w = writers.find(x => x.session === recs[0].answeredBy)!;
+    expect(recs[0]).toEqual({ ...rec(), answer: w.label === 'No' ? 'no' : 'yes', answeredAt: w.at, answeredBy: w.session });
+    expect(readdirSync(authDir(root))).toEqual(['merge-shop-r1-ab12.json']);
+  }, 60_000);
 });

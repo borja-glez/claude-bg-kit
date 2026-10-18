@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
-  authDir, checkMergeAuth, checkMofAuth, isForgeBranch, mergeAsk, mofAsk, newAuthId, normalizeAuth, pendingAuth, readAuths, useAuth, writeAuth, type AuthRecord,
+  authDir, checkMergeAuth, checkMofAuth, isForgeBranch, mergeAsk, mofAsk, newAuthId, normalizeAuth, pendingAuth, readAuths, retryBusy, useAuth, writeAuth, type AuthRecord,
 } from '../src/forge/auth.js';
 import { useTempDirs } from './helpers/tmp.js';
 
@@ -42,6 +42,17 @@ describe('merge authorizations (I-03)', () => {
     expect(why([no, merge()])).toBe('answered no');
     expect(why([mof({ answeredBy: 's1' })])).toBe('no answer recorded');
   });
+  it('a yes with a note of the person is not a yes', () => {
+    expect(why([merge({ answer: 'other', note: 'only after CI' })])).toBe('answered no');
+  });
+  it('a yes dated more than 5 minutes ahead of now allows nothing; a no dated so still decides', () => {
+    expect(why([merge({ answeredAt: at(36) })])).toBe('no answer recorded');
+    expect(why([merge({ createdAt: at(40), answeredAt: at(30) })])).toBe('no answer recorded');
+    expect(why([merge({ answeredAt: at(34) })])).toBe('ok');
+    expect(why([merge({ answeredAt: at(2 * 24 * 60) })])).toBe('no answer recorded');
+    // Setting the future no aside would let the older yes through: it decides instead.
+    expect(why([merge({ answeredAt: at(10) }), merge({ authId: 'merge-shop-r1-zz99', answer: 'no', answeredAt: at(50) })])).toBe('answered no');
+  });
 });
 
 describe('merge-on-finish authorizations (I-03)', () => {
@@ -67,6 +78,16 @@ describe('merge-on-finish authorizations (I-03)', () => {
     expect(checkMofAuth([mof({ authId: 'mof-launch-ef56', runId: null, session: null })], { runId: 'shop-r9', target: 'main', session: null }))
       .toEqual({ ok: false, reason: 'no answer recorded' });
     expect(why([merge()])).toBe('no answer recorded');
+  });
+  it('a yes with a note, or dated more than 5 minutes ahead of now (the clock by default), is not a yes', () => {
+    expect(why([mof({ answer: 'other', note: 'only on Friday' })])).toBe('answered no');
+    const o = { runId: 'shop-r1', target: 'main', session: 'x' };
+    expect(checkMofAuth([mof({ answeredAt: at(10) })], { ...o, now: Date.parse(at(0)) })).toEqual({ ok: false, reason: 'no answer recorded' });
+    expect(checkMofAuth([mof()], { ...o, now: Date.parse(at(-10)) })).toEqual({ ok: false, reason: 'no answer recorded' });
+    expect(checkMofAuth([mof()], { ...o, now: Date.parse(at(-4)) })).toMatchObject({ ok: true });
+    expect(checkMofAuth([mof({ answeredAt: new Date(Date.now() + 3_600_000).toISOString() })], o)).toEqual({ ok: false, reason: 'no answer recorded' });
+    expect(checkMofAuth([mof({ answeredAt: at(-1) }), mof({ authId: 'mof-shop-r1-zz99', answer: 'no', answeredAt: at(10) })], { ...o, now: Date.parse(at(0)) }))
+      .toEqual({ ok: false, reason: 'answered no' });
   });
 });
 
@@ -96,6 +117,24 @@ describe('authorization records (I-03)', () => {
       expect(normalizeAuth(bad), JSON.stringify(bad).slice(0, 120)).toBeNull();
     }
     expect(normalizeAuth({ ...merge(), session: '../s', answeredAt: 'yesterday', usedAt: 7 })).toEqual({ ...merge(), session: null, answeredAt: undefined, usedAt: undefined });
+    expect(normalizeAuth(merge({ answer: 'other', note: 'only after CI' }))).toEqual(merge({ answer: 'other', note: 'only after CI' }));
+    expect(normalizeAuth({ ...merge(), note: 'n'.repeat(2001) })).toEqual(merge());
+    expect(normalizeAuth({ ...merge(), note: 7 })).toEqual(merge());
+  });
+  it('retryBusy tries again while the file is busy (Windows), never on another error, and gives up after a few tries', () => {
+    const busy = (code: string, times: number) => {
+      let n = 0;
+      return () => { if (n++ < times) throw Object.assign(new Error(code), { code }); return n; };
+    };
+    const waits: number[] = [];
+    const wait = (ms: number) => { waits.push(ms); };
+    expect(retryBusy(busy('EPERM', 2), wait)).toBe(3);
+    expect(retryBusy(busy('EBUSY', 1), wait)).toBe(2);
+    expect(retryBusy(busy('EACCES', 1), wait)).toBe(2);
+    expect(waits).toEqual([15, 30, 15, 15]);
+    expect(() => retryBusy(busy('ENOENT', 1), wait)).toThrow('ENOENT');
+    expect(() => retryBusy(busy('EPERM', 99), wait)).toThrow('EPERM');
+    expect(waits).toHaveLength(4 + 5);
   });
   it('writeAuth refuses a record that does not read back, and writes nothing', () => {
     const root = tmp('forge-auth-');
@@ -137,6 +176,15 @@ describe('authorization records (I-03)', () => {
     expect(b.authId).not.toBe(a.authId);
     expect(pendingAuth(root, { ...o, session: 's2', rand: () => 0.5 }).authId).not.toBe(b.authId);
     expect(pendingAuth(root, { ...o, now: new Date(at(80)), rand: () => 0.125 }).authId).not.toBe(b.authId);
+  });
+  it('pendingAuth does not reuse an open question dated more than 5 minutes ahead of now', () => {
+    const root = tmp('forge-auth-');
+    const build = (id: string) => mergeAsk(id, 'forge/run-shop', 'main', false);
+    const ahead = merge({ authId: 'merge-shop-r1-0000', question: build('merge-shop-r1-0000').ask.question, createdAt: at(600), answer: undefined, answeredAt: undefined, answeredBy: undefined });
+    writeAuth(root, ahead);
+    const p = pendingAuth(root, { kind: 'merge', runId: 'shop-r1', target: 'main', session: 's1', now: new Date(T), rand: () => 0.5, build });
+    expect(p.authId).not.toBe('merge-shop-r1-0000');
+    expect(readAuths(root)).toContainEqual(ahead);
   });
   it('pendingAuth never writes over a record whose id it drew again', () => {
     const root = tmp('forge-auth-');

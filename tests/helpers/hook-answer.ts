@@ -11,6 +11,8 @@ export interface HookAnswer {
   questions?: string[];
   /** The session that answered (`session_id`). */
   session?: string;
+  /** More fields of tool_response (`annotations`, `afkTimeoutMs`…), with `answers`. */
+  result?: Record<string, unknown>;
   /** More fields of the input (`transcript_path`, `tool_use_id`…), or other values of these. */
   extra?: Record<string, unknown>;
 }
@@ -21,7 +23,7 @@ export function hookAnswerInput(o: HookAnswer): Record<string, unknown> {
   return {
     session_id: o.session ?? 's1', cwd: o.cwd, hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion',
     tool_input: { questions: questions.map(question => ({ question, header: 'x', options: [], multiSelect: false })) },
-    ...(o.answers ? { tool_response: { questions: [], answers: o.answers } } : {}),
+    ...(o.answers ? { tool_response: { questions: [], answers: o.answers, ...o.result } } : {}),
     ...o.extra,
   };
 }
