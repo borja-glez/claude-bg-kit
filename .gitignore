@@ -1,6 +1,7 @@
 .superpowers/
 .waypoint/
 node_modules/
+.vitest/
 plugins/waypoint/.claude-plugin/types/
 plugins/lens/.claude-plugin/types/
 /types/

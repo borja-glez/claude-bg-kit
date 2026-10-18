@@ -9,6 +9,15 @@ import { ENTRY_KINDS } from '../src/lib/history.js';
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 // A reference of forge:run (plugins/forge/skills/run/references/<name>.md).
 const runRef = (name: string) => read(`plugins/forge/skills/run/references/${name}.md`);
+/** I-17: the floor of a dependency range (`^5.0.5`, `~5.0.5`, `5.0.5`) is `min` or later. */
+const floorAtLeast = (range: string | undefined, min: string): boolean => {
+  const m = /^[\^~]?(\d+)\.(\d+)\.(\d+)$/.exec(range ?? '');
+  if (!m) return false;
+  const have = m.slice(1).map(Number);
+  const want = min.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if (have[i] !== want[i]) return have[i] > want[i];
+  return true;
+};
 
 describe('plugin layout', () => {
   it('marketplace bg-kit lists waypoint, lens and forge', () => {
@@ -1726,5 +1735,13 @@ describe('plugin layout', () => {
       'plugins/waypoint/README.es.md': ['| **Plan** |', '`pf=`', '`runs/`', '`target`'],
     };
     for (const [f, words] of Object.entries(want)) for (const w of words) expect(read(f), `${f}: ${w}`).toContain(w);
+  });
+  it('dev dependencies: vitest 5.0.5 or later, the version that clears its npm audit warnings (I-17)', () => {
+    const dev = JSON.parse(read('package.json')).devDependencies as Record<string, string>;
+    expect(floorAtLeast(dev.vitest, '5.0.5'), dev.vitest).toBe(true);
+    expect(floorAtLeast('^5.0.5', '5.0.5')).toBe(true);
+    expect(floorAtLeast('5.1.0', '5.0.5')).toBe(true);
+    expect(floorAtLeast('^2.1.8', '5.0.5')).toBe(false);
+    expect(floorAtLeast('latest', '5.0.5')).toBe(false);
   });
 });
