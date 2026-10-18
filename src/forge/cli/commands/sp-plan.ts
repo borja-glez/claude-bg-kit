@@ -22,7 +22,10 @@ export const command: Command = (args, ctx) => {
     // D-17: a task without checkboxes is recorded as complete in forge's own ledger (.forge/sp-done/ of the main
     // checkout), which sp-plan tasks, the triage and spPlans read; a task with them is ticked as before.
     const boxes = parseSpPlan(text).tasks.find(t => t.n === n)?.steps ?? 0;
-    const recorded = boxes === 0 && recordSpDone(mainCheckout(io.cwd), abs, n);
+    let recorded = false;
+    if (boxes === 0) {
+      try { recorded = recordSpDone(mainCheckout(io.cwd), abs, n); } catch (e) { throw new UsageError(`sp-plan check: cannot record task ${n} in ${file}: ${(e as Error).message}`); }
+    }
     return json({ task: n, checked: r.checked, recorded });
   } catch (e) {
     if (e instanceof SpPlanError) throw new UsageError(`sp-plan: ${file}: ${e.message}`);

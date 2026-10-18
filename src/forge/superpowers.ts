@@ -2,7 +2,8 @@
 // missing or unreadable means not installed), the path of one of its skills, and the specs and plans it wrote here that
 // forge has not taken yet. Reads only; never touches superpowers' cache.
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseDesign } from '../lib/design.js';
@@ -129,32 +130,46 @@ export function spLedgerDone(roots: string[], planAbs: string): number[] {
   const list = (dir: string) => { try { return readdirSync(dir); } catch { return []; } };
   for (const root of [...new Set(roots.map(r => path.resolve(r)))]) {
     const rel = path.relative(root, planAbs).split(path.sep).join('/');
-    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    const inRoot = !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
     const base = path.join(root, '.superpowers', 'sdd');
-    for (const name of list(base).filter(mine)) {
+    for (const name of inRoot ? list(base).filter(mine) : []) {
       const dir = path.join(base, name);
       let marker: string | null = null;
       try { marker = readFileSync(path.join(dir, 'plan-path'), 'utf8').trim().replace(/\\/g, '/'); } catch { /* a workspace without a marker */ }
       if (marker !== null && marker !== rel) continue;
       try { for (const n of sddComplete(readFileSync(path.join(dir, 'progress.md'), 'utf8'), rel)) done.add(n); } catch { /* no ledger */ }
     }
+    // forge's record names the plan by its path in its repository, the same from every worktree (see recordSpDone).
+    const forgeRel = planRepoRel(planAbs) ?? (inRoot ? rel : null);
     const forge = path.join(root, '.forge', 'sp-done');
-    for (const name of list(forge).filter(n => n.endsWith('.md') && mine(n.slice(0, -3)))) {
-      try { for (const n of sddComplete(readFileSync(path.join(forge, name), 'utf8'), rel)) done.add(n); } catch { /* unreadable */ }
+    for (const name of forgeRel ? list(forge).filter(n => n.endsWith('.md') && mine(n.slice(0, -3))) : []) {
+      try { for (const n of sddComplete(readFileSync(path.join(forge, name), 'utf8'), forgeRel!)) done.add(n); } catch { /* unreadable */ }
     }
   }
   return [...done].sort((a, b) => a - b);
 }
 
+/** The path of a plan from the top level of the git worktree that holds it: the same in every worktree of a repository.
+ *  Null when the plan is in no repository (or git is unavailable). */
+function planRepoRel(planAbs: string): string | null {
+  try {
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: path.dirname(planAbs), encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
+    const rel = path.relative(realpathSync(top), realpathSync(planAbs)).split(path.sep).join('/');
+    return top && rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : null;
+  } catch { return null; }
+}
+
 /**
  * D-17: records `Task <n>: complete (forge)` for the plan at planAbs in <root>/.forge/sp-done/<slug>.md, an SDD ledger
- * whose first line is `# SDD ledger — plan: <path from root>`, which sddComplete and spLedgerDone read. When that file
- * is another plan's, it goes to <slug>-<8 hex of the sha1 of the path>.md. The file is replaced through a temporary
- * file and a rename, so a reader never sees half of it. True when the task is recorded (now or before); false when
- * the plan is outside root or the record cannot be written.
+ * whose first line is `# SDD ledger — plan: <path>`, which sddComplete and spLedgerDone read. <root> is the main
+ * checkout; <path> is the plan's path in its own git worktree (the same from every worktree), or from root when the
+ * plan is in no repository. When that file is another plan's, it goes to <slug>-<8 hex of the sha1 of the path>.md.
+ * Several processes may record at once: a new file is created exclusively and a record is appended, never rewritten,
+ * so none is lost (a torn last line is ignored by the reader and repaired by the next append). True when the task is
+ * recorded (now or before); false when the plan is outside root. A write that fails throws.
  */
 export function recordSpDone(root: string, planAbs: string, n: number): boolean {
-  const rel = path.relative(root, planAbs).split(path.sep).join('/');
+  const rel = planRepoRel(planAbs) ?? path.relative(root, planAbs).split(path.sep).join('/');
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
   const slug = path.basename(planAbs).replace(/\.md$/i, '');
   const header = `# SDD ledger — plan: ${rel}`;
@@ -165,9 +180,16 @@ export function recordSpDone(root: string, planAbs: string, n: number): boolean 
   if (!file) return false;
   const text = read(file);
   if (text !== null && sddComplete(text, rel).includes(n)) return true;
-  const next = `${text === null ? `${header}\n` : text.endsWith('\n') ? text : `${text}\n`}Task ${n}: complete (forge)\n`;
-  const tmp = `${file}.${process.pid}.tmp`;
-  try { mkdirSync(dir, { recursive: true }); writeFileSync(tmp, next); renameSync(tmp, file); } catch { return false; } finally { rmSync(tmp, { force: true }); }
+  const line = `Task ${n}: complete (forge)\n`;
+  mkdirSync(dir, { recursive: true });
+  if (text === null) {
+    try { writeFileSync(file, `${header}\n${line}`, { flag: 'wx' }); return true; } catch (e) {
+      // Another process created it first: take the file as it is now.
+      if ((e as NodeJS.ErrnoException).code === 'EEXIST') return recordSpDone(root, planAbs, n);
+      throw e;
+    }
+  }
+  appendFileSync(file, `${text.endsWith('\n') ? '' : '\n'}${line}`);
   return true;
 }
 

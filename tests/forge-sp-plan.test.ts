@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { checkSpTask, markDone, parseSpPlan, renderSpBrief, sddComplete, SpPlanError } from '../src/lib/sp-plan.js';
 import { run, type Io } from '../src/forge/cli/run.js';
@@ -188,6 +189,56 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
     expect(readFileSync(path.join(dir, 'no-boxes.md'), 'utf8')).toBe(other);
     expect(readdirSync(dir).filter(f => /^no-boxes-[0-9a-f]{8}\.md$/.test(f))).toHaveLength(1);
     expect(done()).toEqual([true]);
+  });
+  it('records several tasks of one plan one after the other, appending to the same ledger', () => {
+    const P = 'docs/superpowers/plans/no-boxes.md';
+    writeFileSync(path.join(root, P), '# No Boxes\n\n### Task 1: a\n\nDo a.\n\n### Task 2: b\n\nDo b.\n');
+    const e = { ...io, env: {} };
+    for (const n of ['1', '2']) expect(JSON.parse(run(['sp-plan', 'check', P, '--task', n], e).stdout).recorded).toBe(true);
+    expect(readFileSync(path.join(root, '.forge', 'sp-done', 'no-boxes.md'), 'utf8')).toBe(`# SDD ledger — plan: ${P}\nTask 1: complete (forge)\nTask 2: complete (forge)\n`);
+    // A torn last line (no newline) is repaired by the next record, not glued to it.
+    writeFileSync(path.join(root, '.forge', 'sp-done', 'no-boxes.md'), `# SDD ledger — plan: ${P}\nTask 1: complete (forge)\nTask`);
+    expect(JSON.parse(run(['sp-plan', 'check', P, '--task', '2'], e).stdout).recorded).toBe(true);
+    expect(JSON.parse(run(['sp-plan', 'tasks', P], e).stdout).tasks.map((t: { done: boolean }) => t.done)).toEqual([true, true]);
+  });
+  it("a ledger of the plan foo-bar.md is not the plan foo.md's", () => {
+    const dir = path.join(root, '.forge', 'sp-done');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'foo-bar.md'), '# SDD ledger — plan: docs/superpowers/plans/foo-bar.md\nTask 1: complete (forge)\n');
+    writeFileSync(path.join(root, 'docs/superpowers/plans/foo.md'), '# Foo\n\n### Task 1: a\n\nDo a.\n');
+    const e = { ...io, env: {} };
+    expect(JSON.parse(run(['sp-plan', 'tasks', 'docs/superpowers/plans/foo.md'], e).stdout).tasks.map((t: { done: boolean }) => t.done)).toEqual([false]);
+    expect(JSON.parse(run(['sp-plan', 'check', 'docs/superpowers/plans/foo.md', '--task', '1'], e).stdout).recorded).toBe(true);
+    expect(readdirSync(dir).sort()).toEqual(['foo-bar.md', 'foo.md']);
+    expect(readFileSync(path.join(dir, 'foo-bar.md'), 'utf8')).toContain('foo-bar.md');
+  });
+  it('a record that cannot be written fails the check instead of reporting a task with boxes', () => {
+    const P = 'docs/superpowers/plans/no-boxes.md';
+    writeFileSync(path.join(root, P), '# No Boxes\n\n### Task 1: a\n\nDo a.\n');
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'sp-done'), 'not a folder');
+    const r = run(['sp-plan', 'check', P, '--task', '1'], { ...io, env: {} });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain('sp-plan check: cannot record task 1 in docs/superpowers/plans/no-boxes.md:');
+  });
+  it('the same plan gives the same record from the main checkout and from a worktree', () => {
+    const git = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'core.autocrlf=false', ...a], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const P = 'docs/superpowers/plans/no-boxes.md';
+    writeFileSync(path.join(root, P), '# No Boxes\n\n### Task 1: a\n\nDo a.\n\n### Task 2: b\n\nDo b.\n');
+    git(root, 'init', '-q');
+    git(root, 'add', P);
+    git(root, 'commit', '-q', '-m', 'plan');
+    const wt = path.join(tmp('forge-sp-wt-'), 'w');
+    git(root, 'worktree', 'add', '-q', '--detach', wt);
+    const at = (cwd: string) => ({ ...io, cwd, env: {} });
+    expect(JSON.parse(run(['sp-plan', 'check', P, '--task', '1'], at(root)).stdout).recorded).toBe(true);
+    expect(JSON.parse(run(['sp-plan', 'check', P, '--task', '2'], at(wt)).stdout).recorded).toBe(true);
+    const dir = path.join(root, '.forge', 'sp-done');
+    expect(readdirSync(dir)).toEqual(['no-boxes.md']);
+    expect(readFileSync(path.join(dir, 'no-boxes.md'), 'utf8')).toBe(`# SDD ledger — plan: ${P}\nTask 1: complete (forge)\nTask 2: complete (forge)\n`);
+    for (const cwd of [root, wt]) {
+      expect(JSON.parse(run(['sp-plan', 'tasks', P], at(cwd)).stdout).tasks.map((t: { done: boolean }) => t.done)).toEqual([true, true]);
+    }
   });
   it('brief prints the brief of one task', () => {
     const r = run(['brief', '--superpowers-plan', F, '--task', '2'], io);
