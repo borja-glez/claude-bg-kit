@@ -1,8 +1,11 @@
-const BAD = /[^A-Za-z0-9_\-.~:@+]+/g;
+// A-18: one SID grammar, the one isSafeId checks: anything outside [A-Za-z0-9_.-] becomes '-'. The ends lose their dots
+// and dashes, before and after the cut at 40, so a SID is never '.', '..' nor a hidden name. Older SIDs with ~ : @ + are
+// still read where they were.
+const BAD = /[^A-Za-z0-9_.-]+/g;
+const edges = (s: string) => s.replace(/^[-.]+|[-.]+$/g, '');
 
 export function sessionIdFrom(name: string): string {
-  const s = name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-    .replace(BAD, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  const s = edges(edges(name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(BAD, '-')).slice(0, 40));
   return s || 'main';
 }
 

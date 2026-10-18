@@ -908,7 +908,7 @@ describe('plugin layout', () => {
     expect(stop).toContain('If `FORGE stop` printed `members`');
     expect(stop).toContain('do not report it');
     expect(stop).toContain('whose `name` is null');
-    expect(read('plugins/waypoint/skills/work/SKILL.md')).toContain('no `~ : @ +`');
+    expect(read('plugins/waypoint/skills/work/SKILL.md')).not.toContain('~ : @ +');
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
       for (const s of ['`swarm relaunch <task> --plan p`', '`swarm nudge <task> [--plan p]`', '`swarm join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]`',
