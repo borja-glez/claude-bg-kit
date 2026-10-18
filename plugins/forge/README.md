@@ -199,7 +199,7 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 
 **Several requests at once.** Several independent requests in one message, and the independent briefs of a Medium task, run in parallel as an **ephemeral execution**: the same planner, always with subagents, with N = min(`swarm.parallel`, parallel tasks). Each task works in `.claude/worktrees/task-<id>` from your current branch and is integrated **into your current branch**, one at a time, as soon as it is accepted; there is no run branch and no merge question. Integration refuses if your checkout is no longer on the branch the run started from. A task with no zones runs alone, and dependencies and cycles are checked. You see it in lens and the band and, when the project has a roadmap, there as **Loose tasks** (outside `plan.yaml` and the plan's progress). A Large request leaves the batch, and with a single task there is no ephemeral execution. When it finishes, forge offers `swarm cleanup` here too (asking you, or recording the decision in auto), since a later batch that repeats one of its ids is refused while that task's worktree is still there. `swarm start` refuses while another run is active that it is not resuming. A conflict when integrating the task of an executor or manual session gets one fix round with the coordinator's subagents (`swarm retry <T> --adopt`, which refuses if the holder's worktree has uncommitted changes); on the second, it escalates.
 
-**The launcher.** `swarm.launcher: bg | herdr` chooses how a session is opened. A time-boxed spike found that herdr cannot open panes from the command line, so `--launcher herdr` exits with code 2 and the coordinator uses `bg`. herdr is not supported yet.
+**The launcher.** forge starts a sessions-mode member with `claude --bg` in its task worktree. herdr was removed: a `swarm.launcher: herdr` left in an old config still loads and reads as `bg`.
 
 ### Live signal
 
@@ -325,7 +325,7 @@ swarm:
   mode: subagents              # optional: subagents | sessions
   setup: npm ci                # optional: installs a new worktree's dependencies; default deduced from the lockfile
   validateJobs: 2              # background jobs (prep, review-prep, integrate, step) validating at once; 1 to 8, default 2
-  launcher: bg                 # bg | herdr; default bg
+  launcher: bg                 # only bg (herdr was removed and reads as bg)
   member:                      # how a sessions-mode member is launched
     effort: medium             # low | medium | high | xhigh | max; default medium
     model: sonnet              # optional: opus | sonnet | haiku; default your own model

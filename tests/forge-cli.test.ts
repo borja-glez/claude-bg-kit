@@ -1502,16 +1502,31 @@ describe('forge waypoint-cli', () => {
     const base = tmp('forge-wp-');
     touch(path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs'));
     for (const v of ['0.7.0', '0.10.0', '0.9.1']) touch(path.join(base, 'waypoint', v, 'dist', 'waypoint.cjs'));
-    const r = run(['waypoint-cli'], { cwd: base, now: () => new Date(), scriptPath: path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs') });
+    const r = run(['waypoint-cli'], { cwd: base, now: () => new Date(), env: { CLAUDE_CONFIG_DIR: path.join(base, 'no-config') }, scriptPath: path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs') });
     expect(r.code).toBe(0);
     expect(r.stdout.trim()).toBe(path.join(base, 'waypoint', '0.10.0', 'dist', 'waypoint.cjs'));
   });
   it('exits 2 when waypoint is not found', () => {
     const base = tmp('forge-wp-');
     touch(path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs'));
-    const r = run(['waypoint-cli'], { cwd: base, now: () => new Date(), scriptPath: path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs') });
+    const r = run(['waypoint-cli'], { cwd: base, now: () => new Date(), env: { CLAUDE_CONFIG_DIR: path.join(base, 'no-config') }, scriptPath: path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs') });
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/waypoint\.cjs not found/);
+  });
+  it('prefers the installPath installed_plugins.json gives waypoint to a higher version left in the cache (I-18)', () => {
+    const base = tmp('forge-wp-');
+    const script = path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs');
+    touch(script);
+    for (const v of ['0.30.0', '0.99.0']) touch(path.join(base, 'waypoint', v, 'dist', 'waypoint.cjs'));
+    const cfg = path.join(base, 'cfg');
+    mkdirSync(path.join(cfg, 'plugins'), { recursive: true });
+    writeFileSync(path.join(cfg, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+      'waypoint@bg-kit': [{ scope: 'user', installPath: path.join(base, 'waypoint', '0.30.0'), version: '0.30.0' }],
+    } }));
+    const at = (env: Record<string, string>) => run(['waypoint-cli'], { cwd: base, now: () => new Date(), env, scriptPath: script }).stdout.trim();
+    expect(at({ CLAUDE_CONFIG_DIR: cfg })).toBe(path.join(base, 'waypoint', '0.30.0', 'dist', 'waypoint.cjs'));
+    // Without the file the cache scan still finds the highest version, as before.
+    expect(at({ CLAUDE_CONFIG_DIR: path.join(base, 'no-config') })).toBe(path.join(base, 'waypoint', '0.99.0', 'dist', 'waypoint.cjs'));
   });
   describe('proposals', () => {
     const prop = { category: 'quality', risk: 'low', title: 'Cut dead code', rationale: 'r', evidence: 'e', pillar: 'quality', source: 'scout', path: 'src/util/dead.ts' };

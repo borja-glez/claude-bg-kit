@@ -110,12 +110,11 @@ export function addTaskWorktree(deps: SwarmDeps, main: string, task: string, run
   return { worktree: dir, branch, base, setup, resumed: prior.length > 0, prior, ...(total > prior.length ? { priorTotal: total } : {}) };
 }
 
-/** The `waypoint launch` arguments of a sessions-mode member of task <T>, with its effort, model and launcher from the config. */
+/** The `waypoint launch` arguments of a sessions-mode member of task <T>, with its effort and model from the config. */
 export function memberLaunch(root: string, planPath: string, task: string, e: ExecutionState): string[] {
   const { swarm } = loadConfig(root);
   return ['launch', planPath, task, '--task', '--run', e.runId, '--coordinator', e.coordinator, '--base', e.branch,
-    '--effort', swarm.member.effort, ...(swarm.member.model ? ['--model', swarm.member.model] : []),
-    ...(swarm.launcher === 'herdr' ? ['--launcher', 'herdr'] : [])];
+    '--effort', swarm.member.effort, ...(swarm.member.model ? ['--model', swarm.member.model] : [])];
 }
 
 /**

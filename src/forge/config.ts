@@ -104,6 +104,7 @@ const Schema = z.object({
   swarm: z.object({
     parallel: z.number().int().min(1).max(10).default(3),
     mode: z.enum(['subagents', 'sessions']).optional(),
+    // I-18: only bg; herdr was removed, and an old config that names it still loads and reads as bg.
     launcher: z.enum(['bg', 'herdr']).default('bg'),
     member: z.object({
       effort: z.enum(EFFORTS).default('medium'),

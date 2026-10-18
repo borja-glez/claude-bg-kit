@@ -199,7 +199,7 @@ La ejecución secuencial no es un tercer modo: es subagents con N = 1.
 
 **Varias peticiones a la vez.** Varias peticiones independientes de un mensaje, y los briefs independientes de una Medium, corren en paralelo como **ejecución efímera**: el mismo planificador, siempre con subagentes, con N = min(`swarm.parallel`, tareas en paralelo). Cada tarea trabaja en `.claude/worktrees/task-<id>` desde tu rama actual y se integra **en tu rama actual**, de una en una, en cuanto se acepta; no hay rama de ejecución ni pregunta de fusión. La integración se niega si tu checkout ya no está en la rama desde la que empezó la ejecución. Una tarea sin zonas corre sola, y se comprueban las dependencias y los ciclos. Se ve en lens y en la banda y, si el proyecto tiene roadmap, allí como **Tareas sueltas** (fuera de `plan.yaml` y del progreso del plan). Una petición Large sale del lote, y con una sola tarea no hay ejecución efímera. Al terminar, forge también ofrece aquí `swarm cleanup` (te pregunta, o en auto anota la decisión), porque un lote posterior que repita uno de sus ids se rechaza mientras siga el worktree de esa tarea. `swarm start` se niega mientras haya otra ejecución activa que no esté retomando. Un conflicto al integrar la tarea de una sesión ejecutora o manual tiene una ronda de arreglo con los subagentes de la coordinadora (`swarm retry <T> --adopt`, que se niega si el worktree de quien la tiene tiene cambios sin confirmar); a la segunda, se escala.
 
-**El lanzador.** `swarm.launcher: bg | herdr` elige cómo se abre una sesión. Un sondeo acotado en el tiempo encontró que herdr no puede abrir paneles desde la línea de comandos, así que `--launcher herdr` devuelve un error (código 2) y la coordinadora usa `bg`. herdr aún no está soportado.
+**El lanzador.** forge arranca un miembro del modo sessions con `claude --bg` en el worktree de su tarea. herdr se quitó: un `swarm.launcher: herdr` que quede en una config antigua sigue cargando y se lee como `bg`.
 
 ### Señal en vivo
 
@@ -325,7 +325,7 @@ swarm:
   mode: subagents              # opcional: subagents | sessions
   setup: npm ci                # opcional: instala las dependencias de un worktree nuevo; por defecto se deduce del lockfile
   validateJobs: 2              # trabajos en segundo plano (prep, review-prep, integrate, step) validando a la vez; de 1 a 8, por defecto 2
-  launcher: bg                 # bg | herdr; por defecto bg
+  launcher: bg                 # solo bg (herdr se quitó y se lee como bg)
   member:                      # cómo se lanza un miembro del modo sessions
     effort: medium             # low | medium | high | xhigh | max; por defecto medium
     model: sonnet              # opcional: opus | sonnet | haiku; por defecto tu propio modelo

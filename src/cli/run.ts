@@ -22,7 +22,7 @@ import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
 import { isCommitCommand, runHook } from './hooks.js';
-import { launchRun, EFFORTS, MODELS, type Launcher, type Effort, type Model } from '../lib/launcher.js';
+import { launchRun, EFFORTS, MODELS, type Effort, type Model } from '../lib/launcher.js';
 import { PAGE_RULES, declaresAssets, roadmapCapabilities, rulesOf, sharingChangeAsk, sharingChanged, sharingNotice, syncSummary } from '../lib/publish.js';
 import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
 import { TASK_STATUSES } from '../lib/types.js';
@@ -372,7 +372,9 @@ export function run(argv: string[], io: Io): Result {
         }
         const launcherAt = args.indexOf('--launcher');
         const launcher = launcherAt >= 0 ? args[launcherAt + 1] : 'bg';
-        if (launcher !== 'bg' && launcher !== 'herdr') return fail('launch: --launcher must be bg or herdr', 2);
+        // I-18: one launcher. herdr could never open a pane from the command line and was removed.
+        if (launcher === 'herdr') return fail('launch: herdr was removed; use bg', 2);
+        if (launcher !== 'bg') return fail('launch: --launcher must be bg', 2);
         const swarmAt = args.indexOf('--swarm');
         const swarm = swarmAt >= 0 ? args[swarmAt + 1] : undefined;
         if (swarmAt >= 0 && (!swarm || !SAFE_ID.test(swarm))) return fail('launch: --swarm needs the coordinator session id', 2);
@@ -396,9 +398,7 @@ export function run(argv: string[], io: Io): Result {
           const taskPrompt = `/forge:member --plan ${args[0]} --task ${track} — run member of ${val('--coordinator')}: work only ${track}, then stop`;
           const taskFlags = `${effort ? ` --effort ${effort}` : ''}${model ? ` --model ${model}` : ''}`;
           const taskCommand = `claude --bg --name ${taskName}${taskFlags} "${taskPrompt}"`;
-          // The launcher is resolved before any branch or worktree exists: a refused one leaves nothing behind.
-          const taskRun = launchRun(launcher as Launcher, { name: taskName, prompt: taskPrompt, worktree: taskWt, effort, model });
-          if (taskRun === null) return fail('launch: herdr cannot open panes from the command line; use launcher bg', 2);
+          const taskRun = launchRun({ name: taskName, prompt: taskPrompt, worktree: taskWt, effort, model });
           if (!existsSync(taskWt)) {
             excludeHere();
             const exists = git('branch', '--list', taskBranch) !== '';
@@ -417,9 +417,7 @@ export function run(argv: string[], io: Io): Result {
         const command = `claude --bg --name ${name} "${prompt}"`;
         // `run` starts it from any directory without moving the caller's shell: a cd outside a subshell would
         // leave a coordinator working in the worktree. Single quotes, with any quote in the path escaped.
-        const inWorktree = launchRun(launcher as Launcher, { name, prompt, worktree });
-        if (inWorktree === null) return fail('launch: herdr cannot open panes from the command line; use launcher bg', 2);
-        // Only once the launcher resolved: a refused one leaves no branch nor worktree behind.
+        const inWorktree = launchRun({ name, prompt, worktree });
         if (!existsSync(worktree)) {
           excludeHere();
           const exists = git('branch', '--list', branch) !== '';

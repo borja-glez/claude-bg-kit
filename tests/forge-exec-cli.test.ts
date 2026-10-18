@@ -727,11 +727,11 @@ describe('forge swarm (execution)', () => {
     for (const a of starts) expect(a.launch).toEqual([...head(a.task), '--effort', 'medium']);
     expect(out(run(['swarm', 'relaunch', starts[0].task, '--plan', 'plan.yaml'], io)).launch).toEqual([...head(starts[0].task), '--effort', 'medium']);
   });
-  it('tick start and relaunch in sessions take the configured effort, model and the herdr launcher', () => {
+  it('tick start and relaunch in sessions take the configured effort and model; a swarm.launcher herdr adds no launcher (I-18)', () => {
     writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\nswarm:\n  launcher: herdr\n  member:\n    effort: high\n    model: sonnet\n');
     const starts = sessionsStarts();
     expect(starts.length).toBeGreaterThan(0);
-    const tail = ['--effort', 'high', '--model', 'sonnet', '--launcher', 'herdr'];
+    const tail = ['--effort', 'high', '--model', 'sonnet'];
     for (const a of starts) expect(a.launch).toEqual([...head(a.task), ...tail]);
     expect(out(run(['swarm', 'relaunch', starts[0].task, '--plan', 'plan.yaml'], io)).launch).toEqual([...head(starts[0].task), ...tail]);
   });

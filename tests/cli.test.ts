@@ -6,7 +6,7 @@ import { run, isCommitCommand, type Io } from '../src/cli/run.js';
 import { makesCommits, readForge } from '../src/cli/hooks.js';
 import { describeViewer } from '../src/lib/viewer-role.js';
 import { parsePlan } from '../src/lib/plan.js';
-import { launchRun, HERDR_TEMPLATE } from '../src/lib/launcher.js';
+import { launchRun } from '../src/lib/launcher.js';
 import { buildDocs, planHash } from '../src/lib/sync.js';
 import { parseDesign } from '../src/lib/design.js';
 import { PAGE_RULES } from '../src/lib/publish.js';
@@ -393,27 +393,17 @@ describe('multi-session commands', () => {
       expect(run(['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--coordinator', 'S1'], io).code).toBe(2);
       expect(run([...args, '--merge'], io).code).toBe(2);
     });
-    it('--launcher bg is the default; herdr follows the spike; anything else is refused', () => {
+    it('--launcher bg is the default and the only launcher; herdr was removed and anything else is refused (I-18)', () => {
       init();
       const def = JSON.parse(run(args, io).stdout);
       const bg = JSON.parse(run([...args, '--launcher', 'bg'], io).stdout);
       expect(bg.run).toBe(def.run);
-      expect(bg.run).toBe(launchRun('bg', { name: bg.name, prompt: bg.prompt, worktree: bg.worktree }));
-      const h = run([...args, '--launcher', 'herdr'], io);
-      if (HERDR_TEMPLATE === null) {
-        expect(h.code).toBe(2);
-        expect(h.stderr).toContain('launch: herdr cannot open panes from the command line; use launcher bg');
-      } else {
-        expect(JSON.parse(h.stdout).run).toBe(launchRun('herdr', { name: bg.name, prompt: bg.prompt, worktree: bg.worktree }));
-      }
-      expect(run([...args, '--launcher', 'nope'], io).code).toBe(2);
+      expect(bg.run).toBe(launchRun({ name: bg.name, prompt: bg.prompt, worktree: bg.worktree }));
+      expect(run([...args, '--launcher', 'herdr'], io)).toMatchObject({ code: 2, stderr: 'launch: herdr was removed; use bg\n' });
+      expect(run([...args, '--launcher', 'nope'], io)).toMatchObject({ code: 2, stderr: 'launch: --launcher must be bg\n' });
     });
-    it('a launcher that cannot run is refused before any worktree or branch exists', () => {
+    it('a refused launcher leaves no worktree nor branch behind', () => {
       init();
-      if (HERDR_TEMPLATE !== null) return; // only a refused launcher shows it
-      expect(run([...args, '--launcher', 'herdr'], io).code).toBe(2);
-      expect(existsSync(path.join(dir, '.claude', 'worktrees', 'task-T001'))).toBe(false);
-      expect(git('branch', '--list', 'task/T001')).toBe('');
       expect(run(['launch', 'plan.yaml', 'ui', '--launcher', 'herdr'], io).code).toBe(2);
       expect(existsSync(path.join(dir, '.claude', 'worktrees', 'ui'))).toBe(false);
       expect(git('branch', '--list', 'track/ui')).toBe('');
