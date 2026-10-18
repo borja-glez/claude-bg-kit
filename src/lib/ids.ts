@@ -2,10 +2,13 @@
 // and dashes, before and after the cut at 40, so a SID is never '.', '..' nor a hidden name. Older SIDs with ~ : @ + are
 // still read where they were.
 const BAD = /[^A-Za-z0-9_.-]+/g;
-const edges = (s: string) => s.replace(/^[-.]+|[-.]+$/g, '');
+// The start is trimmed before the cut and the end after it, so the end pattern only ever sees at most 40 characters.
+const START = /^[-.]+/;
+const END = /[-.]+$/;
 
 export function sessionIdFrom(name: string): string {
-  const s = edges(edges(name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(BAD, '-')).slice(0, 40));
+  const mapped = name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(BAD, '-');
+  const s = mapped.replace(START, '').slice(0, 40).replace(END, '');
   return s || 'main';
 }
 

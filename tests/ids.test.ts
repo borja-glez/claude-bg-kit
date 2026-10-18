@@ -19,6 +19,13 @@ describe('sessionIdFrom (A-18)', () => {
     expect(sessionIdFrom('C++ dev')).toBe('c-dev');
     expect(sessionIdFrom('front.end_2')).toBe('front.end_2');
   });
+  it('a cut that lands on a separator loses it, and a long run of separators is linear', () => {
+    expect(sessionIdFrom('a'.repeat(39) + '-b')).toBe('a'.repeat(39));
+    expect(sessionIdFrom('a'.repeat(39) + '.b')).toBe('a'.repeat(39));
+    const t = performance.now();
+    expect(sessionIdFrom('a' + '-'.repeat(100000) + 'b')).toBe('a');
+    expect(performance.now() - t).toBeLessThan(500);
+  });
   it('a name that reduces to nothing or to dots is main, and every result is a safe id of at most 40 (Review Focus 5)', () => {
     for (const s of ['.', '..', '...', '日本語', '@@@', '', '   ']) expect(sessionIdFrom(s), JSON.stringify(s)).toBe('main');
     const names = ['Ana@trabajo:1~x', 'José María', 'Ünïcödé', 'a/b\c', '  spaces  ', '.hidden', 'trailing.', '-dash-', 'x'.repeat(100),
