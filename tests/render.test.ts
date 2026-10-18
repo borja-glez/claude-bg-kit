@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs } from '../src/lib/sync.js';
 import { dictFor } from '../src/page/i18n.js';
-import { esc, openGroups, parsePlanFilter, phasesInProgress, planFilterKeys, relText, renderApp, timelineSvg, timelineWindow, togglePlanFilter, VIEWS, type Model, type UiState } from '../src/page/render.js';
+import { esc, openGroups, parsePlanFilter, phasesInProgress, planFilterKeys, relText, renderApp, timelineSvg, timelineWindow, togglePlanFilter, VIEWS, type Model, type UiState, type View } from '../src/page/render.js';
 import { fitWindow } from '../src/lib/timeline.js';
 import type { MessageDoc, EventType, NoteDoc, PlanStatus, PlanTrack, TaskStatus } from '../src/lib/types.js';
 import { proposalDigest, type ApprovalDoc, type ProposalDoc } from '../src/lib/proposals.js';
@@ -2362,5 +2362,54 @@ describe('«Te necesita»: a decision that changed says whose it was (carry 4b-3
     expect(en).toContain('1 proposal changed after forge’s policy decided it: review the text and decide');
     expect(en).toContain('1 proposal changed after your decision: review the text and decide');
     expect(of(['forge:policy', 'forge:policy'], 'en')).toContain('2 proposals changed after forge’s policy decided them: review the text and decide');
+  });
+});
+
+describe('theme.css: the light theme writes its text with its text tokens (H-19)', () => {
+  it('no text is coloured with a palette colour, a state alias or --o0 / --o1: it goes through --mute and the --t-* tokens', () => {
+    expect(CSS).not.toMatch(/[{;]color:var\(--(o0|o1|peach|yellow|green|blue|lavender|teal|red|mauve|pink|sapphire|sky|flamingo|done|cur|blk|now)\)/);
+  });
+  it('in the dark theme each text token is the colour of before (--mute is the design page’s, 4.5:1 on --base)', () => {
+    const root = cssRule(CSS, ':root');
+    expect(root).toContain('--mute:#868ba3');
+    for (const [t, c] of [['t-peach', 'peach'], ['t-yellow', 'yellow'], ['t-green', 'green'], ['t-blue', 'blue'], ['t-lav', 'lavender'], ['t-teal', 'teal'],
+      ['t-red', 'red'], ['t-mauve', 'mauve'], ['t-pink', 'pink'], ['t-sapphire', 'sapphire'], ['t-sky', 'sky'], ['t-flamingo', 'flamingo']]) expect(root, t).toContain(`--${t}:var(--${c})`);
+  });
+  it('the light --sub0 is the design page’s, 4.5:1 on --mantle too', () => {
+    expect(CSS).toContain('--sub0:#62657b');
+    expect(CSS).not.toContain('--sub0:#6c6f85');
+  });
+  it('states, notes, tracks, labels and links keep their meaning in their token, and the fills keep the palette', () => {
+    for (const [sel, tok] of [['.st-done', 't-sapphire'], ['.st-blocked', 't-yellow'], ['.nt-idea', 't-sapphire'], ['.nt-debt', 't-red'], ['.c-sky', 't-sky'],
+      ['.c-flamingo', 't-flamingo'], ['.lbl', 'mute'], ['.ok', 't-green'], ['.del', 't-red'], ['.lnk', 't-blue']]) expect(cssRule(CSS, sel), sel).toContain(`color:var(--${tok})`);
+    expect(cssRule(CSS, '.gb.done')).toContain('background:var(--done)');
+    expect(cssRule(CSS, '.lg.done')).toContain('background:var(--done)');
+  });
+  it('the text drawn on a fill takes its --on-* token', () => {
+    for (const [sel, tok] of [['.btn.pri', 'on-lav'], ['.nav .badge', 'on-peach'], ['.zoom button.on', 'on-lav'], ['.chipb.on', 'on-lav'], ['.tl .now span', 'on-red'],
+      ['.pill.run', 'on-teal'], ['.pill.run.warn', 'on-yellow'], ['.pill.run.stopped', 'on-red']]) expect(cssRule(CSS, sel), sel).toContain(`color:var(--${tok})`);
+  });
+});
+
+describe('toggles say whether they are pressed, folds whether they are open, text boxes what they are for (G-15, H-19)', () => {
+  const TOGGLES = ['tgroup', 'tl-status', 'tl-layer', 'zoom', 'fit', 'plan-filter', 'talk-c', 'pfilter'];
+  const FOLDS = ['toggle-phase', 'plan-phase', 'run-toggle'];
+  it('in every view', () => {
+    const m = { ...base(), isOwner: true, run: runDoc(), runs: [runSummary()], proposals: [P()], notes: [note({ id: 'q1', type: 'question', text: '¿A o B?' })] };
+    const cases: [View, Partial<UiState>][] = [
+      ...VIEWS.map(v => [v, {}] as [View, Partial<UiState>]),
+      ['talk', { talk: 'proposals', commenting: 'p1', rejecting: 'p1' }],
+      ['schedule', { expanded: new Set(['F1']) }],
+      ['runs', { runsOpen: new Set(['shop-20261010T090000000Z']) }],
+    ];
+    for (const [view, over] of cases) {
+      const html = renderApp(m, ui({ view, answering: 'q1', ...over }));
+      for (const tag of html.match(/<button[^>]*>/g) ?? []) {
+        const action = /data-action="([^"]+)"/.exec(tag)?.[1] ?? '';
+        if (TOGGLES.includes(action)) expect(tag, `${view}: ${tag}`).toMatch(/aria-pressed="(true|false)"/);
+        if (FOLDS.includes(action)) expect(tag, `${view}: ${tag}`).toMatch(/aria-expanded="(true|false)"/);
+      }
+      for (const tag of html.match(/<(textarea|input)\b[^>]*>/g) ?? []) expect(tag, `${view}: ${tag}`).toMatch(/aria-label="[^"]+"/);
+    }
   });
 });

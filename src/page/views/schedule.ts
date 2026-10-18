@@ -194,15 +194,15 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
     }
   }
   const chip = (kind: 'status' | 'layer', key: string, label: string, on: boolean) =>
-    `<button class="chipb${on ? ' on' : ''}" data-action="tl-${kind}" data-key="${esc(key)}" aria-pressed="${on}">${esc(label)}</button>`;
+    `<button type="button" class="chipb${on ? ' on' : ''}" data-action="tl-${kind}" data-key="${esc(key)}" aria-pressed="${on}">${esc(label)}</button>`;
   const statusLabel = (k: string) => (k === 'in_progress' ? d.legend.current : k === 'blocked' ? d.legend.blocked : k === 'done' ? d.legend.done : d.tl.pending);
   const layerLabel = (k: string) => (k === 'critical' ? d.tl.critical : k === 'forecast' ? d.tl.forecast : d.tl.forge);
   const groupName = (g: GroupBy) => (g === 'phase' ? d.byPhase : g === 'track' ? d.byTrack : g === 'session' ? d.tl.bySession : d.tl.byCategory);
   return `<section class="timeline">
     <div class="tabs">
-      ${GROUPS.map(g => `<button class="tab ${groupBy === g ? 'on' : ''}" data-action="tgroup" data-group="${g}"${g === 'track' ? ` title="${esc(d.trackHelp)}"` : ''}>${esc(groupName(g))}</button>`).join('')}
-      <button class="tab" data-action="tl-all" data-open="${allOpen ? '0' : '1'}">${esc(allOpen ? d.tl.collapse : d.tl.expand)}</button>
-      <input class="search" name="search" data-role="search" placeholder="${esc(d.search)}" value="${esc(ui.search)}">
+      ${GROUPS.map(g => `<button type="button" class="tab ${groupBy === g ? 'on' : ''}" data-action="tgroup" data-group="${g}" aria-pressed="${groupBy === g}"${g === 'track' ? ` title="${esc(d.trackHelp)}"` : ''}>${esc(groupName(g))}</button>`).join('')}
+      <button type="button" class="tab" data-action="tl-all" data-open="${allOpen ? '0' : '1'}">${esc(allOpen ? d.tl.collapse : d.tl.expand)}</button>
+      <input class="search" name="search" data-role="search" aria-label="${esc(d.search)}" placeholder="${esc(d.search)}" value="${esc(ui.search)}">
     </div>
     <div class="tools">
       <div class="chips" data-scroll-key="chips:status"><span class="lbl">${esc(d.tl.show)}</span>${TL_STATUSES.map(k => chip('status', k, statusLabel(k), filter.has(k))).join('')}</div>

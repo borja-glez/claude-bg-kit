@@ -28,8 +28,17 @@ const resolve = (tokens: Record<string, string>, name: string): string => {
   return v;
 };
 const TEXT = ['mute', 't-peach', 't-yellow', 't-green', 't-blue', 't-lav', 't-teal', 't-red', 't-mauve', 't-pink', 'sub0', 'sub1', 'text'];
-// 4c adds src/page/theme.css, the roadmap's, to this list.
-const FILES = ['src/design-page/theme.css'];
+// Per file: its text tokens, the text-on-fill tokens it must define as plain colours in light, and a rule that must be among the pairs checked.
+// The roadmap (4c) also writes sapphire (done tasks, ideas), sky and flamingo (tracks) as text: three tokens more, and its fills (buttons, chips,
+// the badge, the now label, the run pill) take their own `--on-*` text colour.
+const FILES: Record<string, { tokens: readonly string[]; onFill: readonly string[]; rule: string }> = {
+  'src/design-page/theme.css': { tokens: TEXT, onFill: ['on-peach'], rule: '.cp' },
+  'src/page/theme.css': {
+    tokens: [...TEXT, 't-sapphire', 't-sky', 't-flamingo'],
+    onFill: ['on-lav', 'on-peach', 'on-red', 'on-teal', 'on-yellow'],
+    rule: '.btn.pri',
+  },
+};
 
 const themesOf = (css: string) => {
   const dark = tokensOf(/^:root\{([^}]*)\}/m.exec(css)?.[1] ?? '');
@@ -37,21 +46,22 @@ const themesOf = (css: string) => {
   const preferred = tokensOf(/@media \(prefers-color-scheme: light\)\{:root:not\(\[data-theme="dark"\]\)\{([^}]*)\}\}/.exec(css)?.[1] ?? '');
   return { dark, forced, preferred };
 };
-const R = (tokens: Record<string, string>, name: string) => resolve(tokens, name);
+// A light block lists only what differs from :root, so an alias there (--done, --cur, --blk, --now) resolves through the light palette.
+const R = (tokens: Record<string, string>, name: string, base: Record<string, string> = {}) => resolve({ ...base, ...tokens }, name);
 
 describe('text tokens reach 4.5:1 on --base and --mantle in both themes (K3-11, H-19)', () => {
-  for (const file of FILES) {
+  for (const [file, { tokens, onFill, rule }] of Object.entries(FILES)) {
     const css = readFileSync(path.join(process.cwd(), file), 'utf8');
     const { dark, forced, preferred } = themesOf(css);
     it(`${file} light`, () => {
-      for (const t of [...TEXT, 'on-peach']) {
+      for (const t of [...tokens, ...onFill]) {
         expect(forced[t], `${file} [data-theme=light] --${t}`).toMatch(/^#[0-9a-f]{6}$/i);
         expect(preferred[t], `${file} prefers-color-scheme: light --${t}`).toBe(forced[t]);
       }
-      for (const t of TEXT) for (const bg of ['base', 'mantle']) expect(contrast(forced[t], forced[bg]), `--${t} on --${bg}`).toBeGreaterThanOrEqual(4.5);
+      for (const t of tokens) for (const bg of ['base', 'mantle']) expect(contrast(forced[t], forced[bg]), `--${t} on --${bg}`).toBeGreaterThanOrEqual(4.5);
     });
     it(`${file} dark`, () => {
-      for (const t of TEXT) for (const bg of ['base', 'mantle']) expect(contrast(R(dark, t), R(dark, bg)), `dark --${t} on --${bg}`).toBeGreaterThanOrEqual(4.5);
+      for (const t of tokens) for (const bg of ['base', 'mantle']) expect(contrast(R(dark, t), R(dark, bg)), `dark --${t} on --${bg}`).toBeGreaterThanOrEqual(4.5);
     });
     it(`${file}: every rule that sets a text color and a fill reaches 4.5:1 in both themes (buttons, chips)`, () => {
       const pairs: [string, string, string][] = [];
@@ -60,10 +70,10 @@ describe('text tokens reach 4.5:1 on --base and --mantle in both themes (K3-11, 
         const bg = /(?:^|[;\s])background:var\(--([\w-]+)\)/.exec(m[2])?.[1];
         if (fg && bg) pairs.push([m[1].trim(), fg, bg]);
       }
-      expect(pairs.map(p => p[0])).toContain('.cp');
+      expect(pairs.map(p => p[0])).toContain(rule);
       for (const [sel, fg, bg] of pairs) {
         expect(contrast(R(dark, fg), R(dark, bg)), `dark ${sel}: --${fg} on --${bg}`).toBeGreaterThanOrEqual(4.5);
-        expect(contrast(R(forced, fg), R(forced, bg)), `light ${sel}: --${fg} on --${bg}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(R(forced, fg, dark), R(forced, bg, dark)), `light ${sel}: --${fg} on --${bg}`).toBeGreaterThanOrEqual(4.5);
       }
     });
   }
