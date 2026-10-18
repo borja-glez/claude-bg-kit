@@ -11,6 +11,7 @@
     "mod-types:check": "node scripts/mod-types.mjs check",
     "mod-types:update": "node scripts/mod-types.mjs update",
     "build": "node build.mjs",
+    "clean-temp": "node scripts/clean-temp.mjs",
     "art": "node docs/assets/art.mjs"
   },
   "dependencies": {
