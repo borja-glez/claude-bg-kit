@@ -10,6 +10,8 @@ import { readEvents } from '../src/forge/ledger.js';
 import { loadConfig } from '../src/forge/config.js';
 import { SLOT_MAX_WAIT_MS } from '../src/forge/jobs.js';
 import { mergingFile, readMerging, readMergingFile, removeMergingIf, takeMerging, MERGING_UNREADABLE_MS } from '../src/forge/merging.js';
+import { authDir, readAuths, useAuth, writeAuth } from '../src/forge/auth.js';
+import { hookAnswerStdin } from './helpers/hook-answer.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
 
@@ -21,6 +23,17 @@ const commitIn = (cwd: string, file: string, text: string, msg: string) => { wri
 const out = (r: { stdout: string }) => JSON.parse(r.stdout);
 const runWt = () => path.join(root, '.claude', 'worktrees', 'run');
 const NOBAD = 'validators:\n  - name: nobad\n    cmd: node -e "process.exit(require(\'fs\').existsSync(\'bad.txt\')?1:0)"\n';
+/** I-03: the person's answer to an AskUserQuestion, as the hook `answer` records it (PostToolUse, stdin), at the time `at` says. */
+const answer = (question: string, label: string, session = 'hook-main', at: Io = io) =>
+  run(['hook', 'answer'], { ...at, stdin: hookAnswerStdin({ cwd: root, session, answers: { [question]: label } }) });
+/** I-03: swarm merge as the skill runs it: the question, the person's yes recorded by the hook, then --yes from the same session. */
+const mergeYes = (extra: string[] = [], at: Io = io) => {
+  const first = run(['swarm', 'merge', '--hook-session', 'hook-main', ...extra], at);
+  const p = first.code === 0 ? JSON.parse(first.stdout) : null;
+  if (p?.result !== 'needs-authorization') return first;
+  answer(p.ask.question, p.ask.options[0].label, 'hook-main', at);
+  return run(['swarm', 'merge', '--yes', '--hook-session', 'hook-main', ...extra], at);
+};
 
 beforeEach(() => {
   root = tmp('forge-integ-');
@@ -66,9 +79,9 @@ describe('forge swarm integrate (into the run branch)', () => {
     accept('T1', 'a.txt', 'a\n');
     out(run(['swarm', 'integrate', 'T1'], io));
     saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
-    expect(out(run(['swarm', 'merge'], io))).toEqual({ result: 'needs-authorization' });
+    expect(out(run(['swarm', 'merge'], io))).toMatchObject({ result: 'needs-authorization' });
     expect(readExecution(root)!.closedAt).toBeNull();
-    expect(out(run(['swarm', 'merge', '--yes'], io))).toMatchObject({ result: 'merged', closed: true });
+    expect(out(mergeYes())).toMatchObject({ result: 'merged', closed: true });
     expect(readExecution(root)).toMatchObject({ closedAt: '2026-10-12T12:00:00.000Z', closedBy: 'merge' });
   });
   it('merges an accepted task into the run branch in its worktree, never in the main checkout', () => {
@@ -208,7 +221,7 @@ describe('forge swarm integrate (into the run branch)', () => {
   it('neither integrate nor merge write a per-sha baseline any more (C6 replaces it)', () => {
     accept('T1', 'a.txt', 'a\n');
     out(run(['swarm', 'integrate', 'T1'], io));
-    expect(out(run(['swarm', 'merge', '--yes'], io))).toMatchObject({ result: 'merged', preexisting: [] });
+    expect(out(mergeYes())).toMatchObject({ result: 'merged', preexisting: [] });
     expect(existsSync(path.join(root, '.forge', 'execution', 'baseline'))).toBe(false);
   });
   it('still reads a per-sha baseline forge 0.16 left for the run tip, and writes none', () => {
@@ -323,7 +336,7 @@ describe('forge swarm integrate (into the run branch)', () => {
       expect(out(run(['swarm', 'integrate', 'T1'], io)).result).toBe('integrated');
       // The final validators come from the main checkout's config; there gen.txt is not there before the merge.
       writeFileSync(path.join(root, '.forge', 'config.yaml'), GEN("if(f.existsSync('gen.txt'))"));
-      const r = out(run(['swarm', 'merge', '--yes'], io));
+      const r = out(mergeYes());
       expect(r).toMatchObject({ result: 'merged', restored: ['gen.txt'] });
       expect(g(runWt(), 'status', '--porcelain')).toBe('');
       expect(git('status', '--porcelain')).toBe('');
@@ -650,7 +663,7 @@ describe('forge swarm integrate (into the run branch)', () => {
       accept('T1', 'package.json', '{}\n');
       expect(out(run(['swarm', 'integrate', 'T1'], io)).result).toBe('integrated');
       expect(installs()).toBe(1);
-      const r = out(run(['swarm', 'merge', '--yes'], io));
+      const r = out(mergeYes());
       expect(r).toMatchObject({ result: 'merged' });
       expect(r.setup).toBeUndefined();
       expect(installs()).toBe(1);
@@ -665,7 +678,7 @@ describe('forge swarm integrate (into the run branch)', () => {
       accept('T1', 'package.json', '{}\n');
       expect(out(run(['swarm', 'integrate', 'T1'], io)).result).toBe('integrated');
       commitIn(root, 'other.txt', 'o\n', 'main moved');
-      const r = out(run(['swarm', 'merge', '--yes'], io));
+      const r = out(mergeYes());
       expect(r).toMatchObject({ result: 'merged', setup: { ok: true } });
       expect(installs()).toBe(1);
       expect(installs(root)).toBe(1);
@@ -679,7 +692,7 @@ describe('forge swarm integrate (into the run branch)', () => {
       setupConfig(INSTALL(), `${finalValidators()}  - name: red\n    cmd: node -e "process.exit(1)"\n`);
       accept('T1', 'a.txt', 'a\n');
       expect(out(run(['swarm', 'integrate', 'T1'], io)).result).toBe('integrated');
-      const r = out(run(['swarm', 'merge', '--yes'], io));
+      const r = out(mergeYes());
       // Red in a checkout without dependencies says nothing: it counts against the merge instead of being excused.
       expect(r).toMatchObject({ result: 'conflict', detail: 'validators failed after merging forge/run-shop: red' });
       expect(readFileSync(where(), 'utf8').split('\n').filter(Boolean).map(l => path.resolve(l).toLowerCase())).toEqual([path.resolve(runWt()).toLowerCase()]);
@@ -702,7 +715,7 @@ describe('forge swarm integrate (into the run branch)', () => {
       };
       it('removes the node_modules the attempt created when the restored tree has no manifest', () => {
         rejected(NOFILE, false);
-        const r = out(run(['swarm', 'merge', '--yes'], io));
+        const r = out(mergeYes());
         expect(r).toMatchObject({ result: 'conflict', setup: { ok: true } });
         expect(r.depsFromRejectedMerge).toBeUndefined();
         expect(installs(root)).toBe(1);
@@ -711,7 +724,7 @@ describe('forge swarm integrate (into the run branch)', () => {
       });
       it('installs again for the restored tree when it has a manifest', () => {
         rejected(NOPKG, true);
-        const r = out(run(['swarm', 'merge', '--yes'], io));
+        const r = out(mergeYes());
         expect(r).toMatchObject({ result: 'conflict', restoreSetup: { ok: true } });
         expect(r.depsFromRejectedMerge).toBeUndefined();
         // Before the baseline (main had no node_modules), after the merge, and for the restored tree.
@@ -727,7 +740,7 @@ describe('forge swarm integrate (into the run branch)', () => {
         writeFileSync(path.join(root, '.git', 'info', 'exclude'), 'node_modules\n');
         // The install brings the cache back: the link now resolves.
         setupConfig(`node -e "require('fs').mkdirSync('${cache.replace(/\\/g, '/')}',{recursive:true})"`, `validators:\n${NOFILE}`);
-        const r = out(run(['swarm', 'merge', '--yes'], io));
+        const r = out(mergeYes());
         expect(r).toMatchObject({ result: 'conflict', depsFromRejectedMerge: true });
         expect(lstatSync(path.join(root, 'node_modules')).isSymbolicLink()).toBe(true);
         try { rmSync(path.join(root, 'node_modules'), { force: true }); } catch { /* afterEach removes the repository */ }
@@ -743,7 +756,7 @@ describe('forge swarm integrate (into the run branch)', () => {
         rejected(NOPKG, true);
         // An install that rewrites the lockfile, but only for the main manifest (the restored tree).
         setupConfig(`node -e "const f=require('fs');if(f.readFileSync('package.json','utf8').includes('main'))f.appendFileSync('package-lock.json','\\n')"`, `validators:\n${NOPKG}`);
-        const r = out(run(['swarm', 'merge', '--yes'], io));
+        const r = out(mergeYes());
         expect(r).toMatchObject({ result: 'conflict', restoreSetup: { ok: true }, restoreChanged: ['package-lock.json'], depsFromRejectedMerge: true });
         expect(git('status', '--porcelain')).toBe('M package-lock.json');
       });
@@ -751,7 +764,7 @@ describe('forge swarm integrate (into the run branch)', () => {
         rejected(NOFILE, false);
         mkdirSync(path.join(root, 'node_modules'));
         writeFileSync(path.join(root, '.git', 'info', 'exclude'), 'node_modules/\n');
-        const r = out(run(['swarm', 'merge', '--yes'], io));
+        const r = out(mergeYes());
         expect(r).toMatchObject({ result: 'conflict', depsFromRejectedMerge: true });
         expect(r.say).toEqual(['The dependencies in your checkout were installed for the rejected merge of forge/run-shop and may not match your files: reinstall them before you use it.']);
         expect(existsSync(path.join(root, 'node_modules'))).toBe(true);
@@ -761,11 +774,11 @@ describe('forge swarm integrate (into the run branch)', () => {
   it('merge: asks without authorization, merges into the base with it, refuses a dirty main checkout', () => {
     accept('T1', 'a.txt', 'a\n');
     out(run(['swarm', 'integrate', 'T1'], io));
-    expect(out(run(['swarm', 'merge'], io))).toEqual({ result: 'needs-authorization' });
+    expect(out(run(['swarm', 'merge'], io))).toMatchObject({ result: 'needs-authorization' });
     writeFileSync(path.join(root, 'dirty.txt'), 'x\n');
-    expect(out(run(['swarm', 'merge', '--yes'], io))).toMatchObject({ result: 'main-dirty' });
+    expect(out(mergeYes())).toMatchObject({ result: 'main-dirty' });
     rmSync(path.join(root, 'dirty.txt'));
-    expect(out(run(['swarm', 'merge', '--yes'], io))).toMatchObject({ result: 'merged' });
+    expect(out(mergeYes())).toMatchObject({ result: 'merged' });
     expect(git('log', '-1', '--format=%s')).toBe('forge: merge forge/run-shop');
   });
   it('integrate keeps the sha and prints the task done with its commit, not merged yet, and meta/metrics apart; merge prints it again, merged (G-06, J-15, A-10)', () => {
@@ -778,7 +791,7 @@ describe('forge swarm integrate (into the run branch)', () => {
     });
     expect(r.metrics).toEqual({ op: 'update', collection: 'meta', doc_id: 'metrics', data: { lastCommit: { sha: r.sha, ts: r.commit.ts }, updatedAt: '2026-10-12T12:00:00.000Z' } });
     saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
-    const m = out(run(['swarm', 'merge', '--yes'], io));
+    const m = out(mergeYes());
     expect(m.publish).toHaveLength(1);
     const merged = JSON.parse(readFileSync(m.publish[0].file_path, 'utf8'));
     expect(Object.keys(merged)).toEqual(['forge']);
@@ -793,7 +806,7 @@ describe('forge swarm integrate (into the run branch)', () => {
     const work = path.join(root, '.forge', 'work', 'shop', 'T2');
     rmSync(work, { recursive: true, force: true });
     writeFileSync(work, 'not a folder');
-    const m = out(run(['swarm', 'merge', '--yes'], io));
+    const m = out(mergeYes());
     expect(m.result).toBe('merged');
     expect(m.publish.map((w: { doc_id: string }) => w.doc_id)).toEqual(['T1']);
     expect(m.publishErrors).toHaveLength(1);
@@ -982,12 +995,12 @@ describe('an integration left half-done (D-07)', () => {
     marker({ ...live, pid: process.ppid });
     const before = readFileSync(mergingFile(root), 'utf8');
     // A JSON result, as main-dirty is, not a usage error.
-    expect(out(run(['swarm', 'merge', '--yes'], io))).toMatchObject({ result: 'busy', detail: expect.stringContaining(`an integration (T2, pid ${process.ppid}) is merging in`) });
+    expect(out(mergeYes())).toMatchObject({ result: 'busy', detail: expect.stringContaining(`an integration (T2, pid ${process.ppid}) is merging in`) });
     expect(readFileSync(mergingFile(root), 'utf8')).toBe(before);
     expect(git('log', '-1', '--format=%s')).toBe('init');
     // Once its process is gone, the merge goes on.
     marker({ ...live, pid: deadPid() });
-    expect(out(run(['swarm', 'merge', '--yes'], io))).toMatchObject({ result: 'merged' });
+    expect(out(mergeYes())).toMatchObject({ result: 'merged' });
     expect(existsSync(mergingFile(root))).toBe(false);
   });
   it('a leftover marker is removed only while it is still what was read: one written since stays', () => {
@@ -1035,5 +1048,133 @@ describe('an integration left half-done (D-07)', () => {
     const r = out(swarmCommand(['integrate', 'T1'], io, hooked(() => { seen ??= readMerging(root); }, blind)));
     expect(r.result).toBe('integrated');
     expect(seen).toMatchObject({ phase: 'baseline', dir: path.resolve(runWt()) });
+  });
+});
+
+describe('the final merge needs the recorded yes of the person (I-03)', () => {
+  const finished = () => { accept('T1', 'a.txt', 'a\n'); out(run(['swarm', 'integrate', 'T1'], io)); };
+  const merge = (args: string[], at: Io = io) => out(run(['swarm', 'merge', ...args, '--hook-session', 'hook-main'], at));
+  const when = (hhmm: string): Io => ({ ...io, now: () => new Date(`2026-10-12T${hhmm}:00.000Z`) });
+  const record = (authId: string) => readAuths(root).find(r => r.authId === authId);
+  it('without a record --yes asks again; with the yes the hook recorded it merges, and uses the record', () => {
+    finished();
+    const p = merge(['--yes']);
+    expect(p).toMatchObject({ result: 'needs-authorization', reason: 'no answer recorded', authId: expect.stringMatching(/^merge-shop-.+-[0-9a-z]{4}$/) });
+    expect(p.ask).toMatchObject({ header: 'Merge', multiSelect: false });
+    expect(p.ask.question).toBe(`Do I merge forge/run-shop into main? [${p.authId}]`);
+    expect(p.ask.options.map((o: { label: string }) => o.label)).toEqual(['Yes, merge it', 'No']);
+    expect(merge([]).authId).toBe(p.authId);
+    answer(p.ask.question, 'Yes, merge it');
+    expect(merge(['--yes'])).toMatchObject({ result: 'merged' });
+    expect(record(p.authId)).toMatchObject({ answer: 'yes', answeredBy: 'hook-main', usedAt: '2026-10-12T12:00:00.000Z' });
+  });
+  it('a no, a yes from another session or one older than 60 minutes is not a yes', () => {
+    finished();
+    const p1 = merge([]);
+    answer(p1.ask.question, 'No', 'hook-main', when('12:01'));
+    const p2 = merge(['--yes'], when('12:02'));
+    expect(p2).toMatchObject({ result: 'needs-authorization', reason: 'answered no' });
+    answer(p2.ask.question, 'Yes, merge it', 'hook-other', when('12:03'));
+    const p3 = merge(['--yes'], when('12:04'));
+    expect(p3).toMatchObject({ result: 'needs-authorization', reason: 'other session' });
+    answer(p3.ask.question, 'Yes, merge it', 'hook-main', when('12:05'));
+    expect(merge(['--yes'], when('13:06'))).toMatchObject({ result: 'needs-authorization', reason: 'expired' });
+    expect(git('log', '-1', '--format=%s')).not.toBe('forge: merge forge/run-shop');
+  });
+  it('a yes of another run, or one already used, is not a yes either', () => {
+    finished();
+    const e = readExecution(root)!;
+    const yes = { kind: 'merge' as const, target: 'main', question: 'q', yes: 'Yes, merge it', createdAt: '2026-10-12T12:00:00.000Z', session: 'hook-main',
+      answeredAt: '2026-10-12T12:00:00.000Z', answer: 'yes' as const, answeredBy: 'hook-main' };
+    writeAuth(root, { ...yes, authId: 'merge-shop-other-aaaa', runId: 'shop-other' });
+    expect(merge(['--yes'])).toMatchObject({ result: 'needs-authorization', reason: 'other run' });
+    writeAuth(root, { ...yes, authId: `merge-${e.runId}-bbbb`, runId: e.runId, usedAt: '2026-10-12T12:00:00.000Z' });
+    expect(merge(['--yes'])).toMatchObject({ result: 'needs-authorization', reason: 'already used' });
+  });
+  it('into a branch of forge (forge/infinite-…) it merges without a question', () => {
+    finished();
+    git('checkout', '-q', '-b', 'forge/infinite-20261012');
+    saveExecution(root, { ...readExecution(root)!, base: 'forge/infinite-20261012' });
+    expect(merge([])).toMatchObject({ result: 'merged' });
+    expect(git('log', '-1', '--format=%s')).toBe('forge: merge forge/run-shop');
+  });
+  it('a yes the person added a note to is no yes, and the refusal carries the note', () => {
+    finished();
+    const p = merge([]);
+    run(['hook', 'answer'], { ...io, stdin: hookAnswerStdin({ cwd: root, session: 'hook-main', answers: { [p.ask.question]: 'Yes, merge it' },
+      result: { annotations: { [p.ask.question]: { notes: 'only after CI' } } } }) });
+    expect(merge(['--yes'])).toMatchObject({ result: 'needs-authorization', reason: 'answered no', note: 'only after CI' });
+    expect(git('log', '-1', '--format=%s')).toBe('init');
+  });
+  it('a main-dirty or a conflict does not spend the yes: the same answer merges once the cause is gone, and only once', () => {
+    accept('T1', 'bad.txt', 'x\n');
+    out(run(['swarm', 'integrate', 'T1'], io));
+    const p = merge([]);
+    answer(p.ask.question, 'Yes, merge it');
+    writeFileSync(path.join(root, 'dirty.txt'), 'x\n');
+    expect(merge(['--yes'])).toMatchObject({ result: 'main-dirty' });
+    expect(record(p.authId)).not.toHaveProperty('usedAt');
+    rmSync(path.join(root, 'dirty.txt'));
+    // The final validators fail on the merged tree: rolled back, a conflict.
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), NOBAD);
+    expect(merge(['--yes'])).toMatchObject({ result: 'conflict', detail: expect.stringContaining('nobad') });
+    expect(record(p.authId)).not.toHaveProperty('usedAt');
+    expect(git('log', '-1', '--format=%s')).toBe('init');
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\n');
+    expect(merge(['--yes'])).toMatchObject({ result: 'merged' });
+    expect(record(p.authId)).toMatchObject({ usedAt: '2026-10-12T12:00:00.000Z' });
+    // More work integrated after it: the yes it used does not merge again; the merge asks a new question.
+    const head = git('rev-parse', 'HEAD');
+    accept('T2', 'b.txt', 'b\n');
+    out(run(['swarm', 'integrate', 'T2'], io));
+    const again = merge(['--yes']);
+    expect(again).toMatchObject({ result: 'needs-authorization', reason: 'already used' });
+    expect(again.authId).not.toBe(p.authId);
+    expect(git('rev-parse', 'HEAD')).toBe(head);
+  });
+  it('a yes that cannot be marked used merges nothing and stays the person\'s, to be used once', () => {
+    finished();
+    const p = merge([]);
+    answer(p.ask.question, 'Yes, merge it');
+    // A directory where the record's temporary file goes: the write that marks it used fails.
+    const blocker = path.join(authDir(root), `${p.authId}.json.${process.pid}.tmp`);
+    mkdirSync(blocker);
+    const r = run(['swarm', 'merge', '--yes', '--hook-session', 'hook-main'], io);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`nothing was merged: the yes ${p.authId} could not be marked used`);
+    expect(git('log', '-1', '--format=%s')).toBe('init');
+    expect(record(p.authId)).not.toHaveProperty('usedAt');
+    rmSync(blocker, { recursive: true });
+    expect(merge(['--yes'])).toMatchObject({ result: 'merged' });
+    expect(merge(['--yes'])).toMatchObject({ result: 'needs-authorization', reason: 'already used' });
+  });
+  it('the yes is checked again when it is spent: one another merge spent after the first check merges nothing', () => {
+    finished();
+    const p = merge([]);
+    answer(p.ask.question, 'Yes, merge it');
+    const mainGit = defaultGit(root);
+    let spent = false;
+    // Another merge of the run spends the yes while this one reads which branch the main checkout is on.
+    const deps: SwarmDeps = {
+      git: a => {
+        if (!spent && a[0] === 'rev-parse' && a[1] === '--abbrev-ref') { spent = true; useAuth(root, record(p.authId)!, '2026-10-12T12:00:00.000Z'); }
+        return mainGit(a);
+      },
+      exec: defaultExec(root), repo: repoReader(root), at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
+    };
+    expect(out(swarmCommand(['merge', '--yes', '--hook-session', 'hook-main'], io, deps))).toMatchObject({ result: 'needs-authorization', reason: 'already used' });
+    expect(spent).toBe(true);
+    expect(git('log', '-1', '--format=%s')).toBe('init');
+  });
+  it('without a Claude session id the yes cannot be checked: needs-authorization, no session id', () => {
+    finished();
+    const p = out(run(['swarm', 'merge'], io));
+    expect(p).toMatchObject({ result: 'needs-authorization', ask: { header: 'Merge' } });
+    answer(p.ask.question, 'Yes, merge it');
+    expect(out(run(['swarm', 'merge', '--yes'], io))).toMatchObject({ result: 'needs-authorization', reason: 'no session id' });
+    // C1: the flag wins over the environment.
+    expect(out(run(['swarm', 'merge', '--yes', '--hook-session', 'hook-x'], { ...io, env: { CLAUDE_CODE_SESSION_ID: 'hook-main' } })))
+      .toMatchObject({ result: 'needs-authorization', reason: 'other session' });
+    expect(git('log', '-1', '--format=%s')).toBe('init');
   });
 });

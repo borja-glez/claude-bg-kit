@@ -1,6 +1,6 @@
 // The files git keeps per repository that forge and waypoint write without a commit: info/exclude and info/attributes
 // of the common git directory, shared by every worktree. They came from forge's swarm.ts so that waypoint's launch
-// can use them too (A-08).
+// can use them too (A-08). Also the one rule for the repository's default branch.
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -19,6 +19,17 @@ export function appendOnce(file: string, line: string): void {
 
 /** The top level of the worktree git runs in; null when git cannot say. */
 export const gitToplevel = (git: GitRun): string | null => git(['rev-parse', '--show-toplevel'])?.trim() || null;
+
+/**
+ * The repository's default branch, by the one rule forge uses for it: origin's HEAD; without one, main when it exists,
+ * else master when it exists; null when none.
+ */
+export function defaultBranchOf(git: GitRun): string | null {
+  const origin = git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])?.trim().replace(/^origin\//, '');
+  if (origin) return origin;
+  for (const b of ['main', 'master']) if (git(['rev-parse', '--verify', '-q', `refs/heads/${b}`]) !== null) return b;
+  return null;
+}
 
 /**
  * The repository's common git directory (shared by every worktree), absolute. git prints it relative to the directory

@@ -368,7 +368,7 @@ describe('hook answer (I-03)', () => {
     writeAuth(root, rec());
     hook(root, hookAnswerInput({ cwd: root, answers: { [Q]: 'Yes, merge it' }, result: { annotations: { [Q]: { notes: '  only after CI  ' } } } }));
     expect(readAuths(root)).toEqual([{ ...rec(), answer: 'other', note: 'only after CI', answeredAt: NOW.toISOString(), answeredBy: 's1' }]);
-    expect(checkMergeAuth(readAuths(root), { runId: 'shop-r1', target: 'main', session: 's1', now: NOW.getTime() })).toEqual({ ok: false, reason: 'answered no' });
+    expect(checkMergeAuth(readAuths(root), { runId: 'shop-r1', target: 'main', session: 's1', now: NOW.getTime() })).toEqual({ ok: false, reason: 'answered no', note: 'only after CI' });
     writeAuth(root, rec());
     hook(root, hookAnswerInput({ cwd: root, answers: { [Q]: 'No' }, result: { annotations: { [Q]: { notes: 'wait for the release' } } } }));
     expect(readAuths(root)[0]).toMatchObject({ answer: 'no', note: 'wait for the release' });

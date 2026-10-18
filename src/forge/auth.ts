@@ -320,9 +320,12 @@ const deciding = (recs: AuthRecord[], kind: AuthKind, nowMs: number) =>
 const unreadableFor = (recs: AuthRecord[], kind: AuthKind, runId: string, launch: boolean) =>
   recs.some(r => r.unreadable && r.kind === kind && (r.runId === runId || (launch && r.runId === null)));
 
+/** The note of a yes the person added a note to (`other`): its refusal carries it, so they hear why it is no yes. */
+const noteOf = (r: AuthRecord): { note?: string } => (r.answer === 'other' && r.note ? { note: r.note } : {});
+
 /** Whether `swarm merge --yes` may merge run `runId` into `target` for the session `session`, and why not. */
 export function checkMergeAuth(recs: AuthRecord[], o: { runId: string; target: string; session: string | null; now: number }):
-  { ok: true; record: AuthRecord } | { ok: false; reason: MergeAuthReason } {
+  { ok: true; record: AuthRecord } | { ok: false; reason: MergeAuthReason; note?: string } {
   if (!o.session) return { ok: false, reason: 'no session id' };
   if (unreadableFor(recs, 'merge', o.runId, false)) return { ok: false, reason: 'record unreadable' };
   const answered = deciding(recs, 'merge', o.now);
@@ -332,7 +335,7 @@ export function checkMergeAuth(recs: AuthRecord[], o: { runId: string; target: s
     return { ok: false, reason: open.some(x => x.runId !== o.runId) ? 'other run' : open.some(x => x.target !== o.target) ? 'other branch' : 'no answer recorded' };
   }
   if (r.usedAt) return { ok: false, reason: 'already used' };
-  if (r.answer !== 'yes') return { ok: false, reason: 'answered no' };
+  if (r.answer !== 'yes') return { ok: false, reason: 'answered no', ...noteOf(r) };
   if (!r.answeredAt || o.now - Date.parse(r.answeredAt) > MERGE_AUTH_TTL_MS) return { ok: false, reason: 'expired' };
   if (r.answeredBy !== o.session) return { ok: false, reason: 'other session' };
   return { ok: true, record: r };
@@ -343,13 +346,13 @@ export function checkMergeAuth(recs: AuthRecord[], o: { runId: string; target: s
  * (milliseconds, the clock by default) only sets aside a yes dated ahead of it.
  */
 export function checkMofAuth(recs: AuthRecord[], o: { runId: string; target: string; session: string | null; now?: number }):
-  { ok: true; record: AuthRecord } | { ok: false; reason: MofReason } {
+  { ok: true; record: AuthRecord } | { ok: false; reason: MofReason; note?: string } {
   if (unreadableFor(recs, 'merge-on-finish', o.runId, o.session !== null)) return { ok: false, reason: 'record unreadable' };
   const mof = deciding(recs, 'merge-on-finish', o.now ?? Date.now());
   const r = mof.filter(x => x.runId === o.runId || (x.runId === null && o.session !== null && x.session === o.session)).sort(newestFirst)[0];
   if (!r) return { ok: false, reason: mof.some(x => x.answer === 'yes' && !x.usedAt && x.runId !== null && x.runId !== o.runId) ? 'other run' : 'no answer recorded' };
   if (r.usedAt) return { ok: false, reason: 'already used' };
-  if (r.answer !== 'yes') return { ok: false, reason: 'answered no' };
+  if (r.answer !== 'yes') return { ok: false, reason: 'answered no', ...noteOf(r) };
   if (r.target !== o.target) return { ok: false, reason: 'other branch' };
   return { ok: true, record: r };
 }

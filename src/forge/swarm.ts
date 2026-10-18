@@ -3,6 +3,7 @@ import path from 'node:path';
 import { forgeDir } from './ledger.js';
 import { parseSwarm, type SwarmState } from '../lib/swarm-state.js';
 import type { WidthProfile } from './schedule.js';
+import type { MofReason } from './auth.js';
 
 export const swarmFile = (root: string) => path.join(root, '.forge', 'swarm.json');
 
@@ -45,7 +46,22 @@ export interface StartFacts {
   es: boolean; kind: 'plan' | 'ephemeral'; resume: boolean; runId: string; mode: 'subagents' | 'sessions'; parallel: number;
   branch: string; base: string; mergeOnFinish: boolean; loose: number;
   setup: { cmd: string | null; ok: boolean; tail: string[] } | null;
+  /** I-03: why --merge-on-finish was not taken (no recorded yes to the start question). */ mergeRefused?: MofReason | null;
+  /** I-03: the note the person added to their yes, which made it no yes (`answered no`). */ mergeNote?: string | null;
 }
+
+/** I-03: why a run will not merge by itself at the end, in the person's language. */
+const REFUSED: Record<MofReason, { es: string; en: string }> = {
+  'record unreadable': { es: 'no pude leer un registro de autorización', en: 'an authorization record could not be read' },
+  'no answer recorded': { es: 'no hay ninguna respuesta tuya registrada', en: 'no answer of yours is recorded' },
+  'answered no': { es: 'respondiste que no', en: 'you answered no' },
+  'other run': { es: 'la respuesta era para otra ejecución', en: 'the answer was for another run' },
+  'other branch': { es: 'la respuesta era para otra rama', en: 'the answer was for another branch' },
+  'already used': { es: 'esa respuesta ya se usó', en: 'that answer was already used' },
+};
+/** A note of the person's as one line of at most NOTE_SHOWN characters. */
+const NOTE_SHOWN = 200;
+const oneLine = (s: string) => { const t = s.replace(/\s+/g, ' ').trim(); return t.length > NOTE_SHOWN ? `${t.slice(0, NOTE_SHOWN - 1)}…` : t; };
 
 /** How the execution was set up: the mode, the width, the branch, where to see the work and what happens at the end. */
 export function startAnnounce(f: StartFacts): string[] {
@@ -72,6 +88,11 @@ export function startAnnounce(f: StartFacts): string[] {
       f.mergeOnFinish ? `When it ends, if the final review passes, I merge ${f.branch} into ${f.base}.` : 'When it ends I merge nothing without asking you.',
       '/forge:stop stops it.',
     );
+  }
+  if (f.mergeRefused) {
+    const note = f.mergeRefused === 'answered no' && f.mergeNote ? oneLine(f.mergeNote) : '';
+    const why = note ? (f.es ? `respondiste con una nota: «${note}»` : `you answered with a note: "${note}"`) : REFUSED[f.mergeRefused][f.es ? 'es' : 'en'];
+    lines.push(f.es ? `No integro solo al acabar (pregunta del arranque: ${why}).` : `I will not merge by myself at the end (start question: ${why}).`);
   }
   if (f.setup && !f.setup.ok) {
     const tail = f.setup.tail[f.setup.tail.length - 1];

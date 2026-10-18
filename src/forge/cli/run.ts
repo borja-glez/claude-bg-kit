@@ -8,7 +8,8 @@ import { decideStop, decideExecutionStop, UNBOUND_WARNING } from '../hook.js';
 import { readExecution, updateExecution, runWorktree, executionTaskFile, writePublicTask, executionHolding, eventsSince } from '../execution.js';
 import { planLocale, replyIn, sessionReply } from '../../lib/locale.js';
 import { isLocale } from '../../lib/forge-run.js';
-import { isSafeId, normalizePublicTask, type PublicTask } from '../../lib/execution-state.js';
+import { isRunBranch, isSafeId, normalizePublicTask, type PublicTask } from '../../lib/execution-state.js';
+import { defaultBranchOf, type GitRun } from '../../lib/git-info.js';
 import { samePath } from '../../lib/worktree.js';
 import { parseStatus, parseSnapshot, treeCheck, type TreeSnapshot } from '../tree.js';
 import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult } from '../triage.js';
@@ -46,7 +47,7 @@ import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJEC
 import { memberForHook, allMembersOf, memberFile } from '../members.js';
 import { hookLive } from '../live.js';
 import { hookRoute } from '../route-hooks.js';
-import { hookAnswer } from '../auth.js';
+import { hookAnswer, mofAsk, pendingAuth } from '../auth.js';
 import { liveJobs, noSlot, slotFor, withJob, writeJsonAtomic, type Slot } from '../jobs.js';
 import { sleepSync } from '../pid.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, permissionHash, hashMatches, LEARNED_HEADINGS, type Surface } from '../surfaces.js';
@@ -61,7 +62,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined>; slot?: Slot; roadmapFit?: typeof fitForgeDoc }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|verify-close|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|setup|stop|hook|roadmap-doc|roadmap-run> ...';
+const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|verify-close|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|authorize|swarm|setup|stop|hook|roadmap-doc|roadmap-run> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 const MAX_WHY = 200;
@@ -888,6 +889,9 @@ function eventContextOf(argv: string[], io: Io): EventContext {
   return { env: io.env ?? {}, ...(project !== undefined ? { project } : {}) };
 }
 
+/** I-03: whether `b` is the repository's default branch, by the rule swarm start refuses it as a run branch with. */
+const isDefaultBranch = (git: GitRun, b: string): boolean => defaultBranchOf(git) === b;
+
 /** The forge CLI (see runOrJob): every event a command appends carries its session, run and project (C4). A command a
  *  swarm step runs (its deps.cli) that names no project keeps the step's (withEventContext). */
 export function run(argv: string[], io: Io): Result {
@@ -1675,6 +1679,27 @@ function runCommand(argv: string[], io: Io): Result {
       case 'roadmap-run':
         // C7 (wave 4): the roadmap documents the CLI builds; their own exit codes (2, and 3 for a block that does not fit).
         return roadmapCommand(cmd, args, io);
+      case 'authorize': {
+        // I-03: the start question of a run that may merge by itself at the end. The skill asks `ask` as printed and the
+        // hook `answer` records the person's answer, which `swarm start --merge-on-finish` checks. With --run (the id
+        // swarm propose printed) it is tied to that run; without it (auto mode at launch, before any plan) to this session.
+        const usage = 'usage: forge authorize merge-on-finish --branch <b> [--run <runId> | --hook-session <id>] [--locale es|en]';
+        if (args[0] !== 'merge-on-finish') throw new UsageError(usage);
+        const branch = flag('branch');
+        if (!branch || !isRunBranch(branch)) throw new UsageError(`authorize merge-on-finish: --branch must be the branch the run merges into; ${usage}`);
+        if (has('run') && (flag('run') === undefined || !isSafeId(flag('run')))) throw new UsageError('authorize merge-on-finish: --run must be the run id swarm propose printed');
+        const loc = flag('locale');
+        if (has('locale') && loc !== 'es' && loc !== 'en') throw new UsageError('authorize merge-on-finish: --locale must be es or en');
+        const runId = flag('run') ?? null;
+        const session = runId ? null : claudeSessionId(flag('hook-session'), io.env ?? process.env);
+        if (!runId && !session) throw new UsageError(noClaudeSession('authorize merge-on-finish', '--hook-session'));
+        const isDefault = isDefaultBranch(io.git ?? defaultGit(io.cwd), branch);
+        const p = pendingAuth(io.cwd, {
+          kind: 'merge-on-finish', runId, target: branch, session, now: io.now(), rand: io.rand ?? Math.random,
+          build: id => mofAsk(id, branch, loc === 'es', isDefault),
+        });
+        return json({ authId: p.authId, runId, ask: p.ask });
+      }
       case 'swarm':
         return swarmCommand(args, io, {
           git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), execMany: io.execMany, repo: repoReader(repoDir),

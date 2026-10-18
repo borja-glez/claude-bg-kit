@@ -15,6 +15,7 @@ import { FORGE_DOC_MAX, fitForgeDoc, parseForgeDocV2, type IntegrationV2 } from 
 import { isSafeId, normalizePublicTask, type ExecTask, type ExecutionState } from '../lib/execution-state.js';
 import { statusKey } from '../lib/forge-status.js';
 import { samePath } from '../lib/worktree.js';
+import { defaultBranchOf } from '../lib/git-info.js';
 import { eventId } from '../lib/ids.js';
 
 export class RoadmapDocError extends Error {
@@ -58,19 +59,11 @@ const relOf = (root: string, p: string): string => {
   return at >= 0 ? r.slice(at) : path.basename(p);
 };
 
-/** The repository's default branch: origin's HEAD, else main or master; null when none. */
-function defaultBranch(dir: string): string | null {
-  const origin = git(dir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])?.replace(/^origin\//, '');
-  if (origin) return origin;
-  for (const b of ['main', 'master']) if (git(dir, ['rev-parse', '--verify', '-q', `refs/heads/${b}`]) !== null) return b;
-  return null;
-}
-
 /** G-06 outside an execution: the branch and HEAD of `dir`, and whether HEAD is in the default branch; null without commits. */
 export function integrationAt(dir: string): IntegrationV2 | null {
   const sha = git(dir, ['rev-parse', 'HEAD']);
   const branch = git(dir, ['rev-parse', '--abbrev-ref', 'HEAD']);
-  const target = defaultBranch(dir);
+  const target = defaultBranchOf(args => git(dir, args));
   if (!sha || !branch || !target) return null;
   return { branch, sha, merged: git(dir, ['merge-base', '--is-ancestor', sha, target]) !== null, target };
 }

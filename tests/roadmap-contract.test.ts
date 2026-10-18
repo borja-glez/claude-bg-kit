@@ -10,6 +10,7 @@ import { saveExecution, writePublicTask } from '../src/forge/execution.js';
 import { normalizeForgeV1, normalizeInfinite, normalizeRun, normalizeRunSummary, normalizeState } from '../src/page/normalize.js';
 import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
 import { MEDIUM_T1, ROADMAP_AT, largeWithDeferred, writeVerify } from './fixtures/roadmap-ledger.js';
+import { hookAnswerStdin } from './helpers/hook-answer.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
 
@@ -187,8 +188,12 @@ describe('the roadmap contract (C7, wave 4)', () => {
       const again = (out(run(['swarm', 'step', '--plan', '.forge/plan.yaml', '--db', '.forge/db'], io2)).actions as Record<string, unknown>[]).find(a => a.again === true)!;
       expect(again).toMatchObject({ type: 'integrated', task: 'T1', publish: { op: 'update', collection: 'state', doc_id: 'T1' }, metrics: integrated.metrics });
       walk(again);
-      // Re-review m4: swarm merge prints each integrated task's block (merged: true) for the skill to send.
-      const merged = out(run(['swarm', 'merge', '--yes'], io2));
+      // Re-review m4: swarm merge prints each integrated task's block (merged: true) for the skill to send. I-03: once the
+      // person's yes to its question is recorded by the hook, from the session that merges.
+      const asked = out(run(['swarm', 'merge', '--hook-session', 'hook-main'], io2));
+      expect(asked).toMatchObject({ result: 'needs-authorization' });
+      run(['hook', 'answer'], { ...io2, stdin: hookAnswerStdin({ cwd: root2, session: 'hook-main', answers: { [asked.ask.question]: asked.ask.options[0].label } }) });
+      const merged = out(run(['swarm', 'merge', '--yes', '--hook-session', 'hook-main'], io2));
       expect(merged).toMatchObject({ result: 'merged', publish: [{ op: 'update', collection: 'state', doc_id: 'T1' }] });
       walk(merged);
     } finally { try { g2(root2, 'worktree', 'prune'); } catch { /* ignore */ } rmSync(root2, { recursive: true, force: true }); }

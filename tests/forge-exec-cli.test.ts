@@ -12,7 +12,10 @@ import { setupFor, swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.j
 import { writeMember } from '../src/forge/members.js';
 import { readLoose } from '../src/forge/loose.js';
 import { samePath } from '../src/lib/worktree.js';
-import { codeSpan, integratedSay, keptFilesSay } from '../src/forge/swarm.js';
+import { codeSpan, integratedSay, keptFilesSay, startAnnounce, type StartFacts } from '../src/forge/swarm.js';
+import { authDir, readAuths } from '../src/forge/auth.js';
+import { defaultBranchOf } from '../src/lib/git-info.js';
+import { hookAnswerStdin } from './helpers/hook-answer.js';
 import { normalizeRun } from '../src/page/normalize.js';
 import { mergingFile } from '../src/forge/merging.js';
 import { STEP_WAIT_SECONDS } from '../src/forge/schedule.js';
@@ -60,6 +63,17 @@ afterEach(() => { try { git('worktree', 'prune'); } catch { /* ignore */ } });
 const writeDocs = (dir: string, docs: Record<string, unknown>) => {
   mkdirSync(dir, { recursive: true });
   for (const [id, d] of Object.entries(docs)) writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(d));
+};
+/** I-03: the person's answer to an AskUserQuestion, as the hook `answer` records it, at the time `at` says. */
+const answerHook = (question: string, label: string, session = 'hook-design', at: Io = io, result: Record<string, unknown> = {}) =>
+  cli(['hook', 'answer'], { ...at, stdin: hookAnswerStdin({ cwd: root, session, answers: { [question]: label }, result }) });
+type Ask = { question: string; options: { label: string }[] };
+const yesOf = (ask: Ask) => ask.options.find(o => /^(Sí|Yes)/.test(o.label))!.label;
+/** I-03: the person's yes to the merge-on-finish question of run `runId` into `branch`, asked in the design session. */
+const authorizeMof = (runId: string, branch = 'main', at: Io = io) => {
+  const a = out(cli(['authorize', 'merge-on-finish', '--run', runId, '--branch', branch, '--locale', 'en'], at));
+  answerHook(a.ask.question, yesOf(a.ask), 'hook-design', at);
+  return a;
 };
 
 describe('forge swarm (execution)', () => {
@@ -109,7 +123,8 @@ describe('forge swarm (execution)', () => {
     expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], at(2)))).not.toHaveProperty('replaced');
   });
   it('start creates the run branch in its own worktree and leaves the main checkout alone', () => {
-    const e = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], io));
+    authorizeMof('shop-r1');
+    const e = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1', '--merge-on-finish'], io));
     expect(e).toMatchObject({ active: true, mode: 'subagents', parallel: 3, base: 'main', branch: 'forge/run-shop', mergeOnFinish: true });
     expect(git('rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
     expect(existsSync(path.join(root, '.claude', 'worktrees', 'run', 'plan.yaml'))).toBe(true);
@@ -266,7 +281,8 @@ describe('forge swarm (execution)', () => {
     expect(setupFor(files(['package.json']), 'make deps')).toEqual({ cmd: 'make deps' });
   });
   it('start announces the run in English without a plan locale: new, resumed, with and without merge on finish', () => {
-    const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], io));
+    authorizeMof('shop-r1');
+    const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1', '--merge-on-finish'], io));
     expect(s.announce).toEqual([
       'Execution running: subagents mode, 3 tasks at a time, branch forge/run-shop.',
       'To see the app with the work, open it from .claude/worktrees/run.',
@@ -296,7 +312,8 @@ describe('forge swarm (execution)', () => {
     expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).announce)
       .toEqual([`Retomo la ejecución ${s.runId}: modo subagentes, 3 a la vez, rama forge/run-shop.`]);
     expect(run(['swarm', 'stop'], io).code).toBe(0);
-    const merging = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], io));
+    authorizeMof('shop-r1');
+    const merging = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1', '--merge-on-finish'], io));
     expect(merging.announce[2]).toBe('Al acabar, si la revisión final pasa, integro forge/run-shop en main.');
     expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'en'], io)).announce[0]).toMatch(/^Resuming the execution /);
   });
@@ -1975,5 +1992,175 @@ describe('the swarm commands print the state/T write the CLI builds (J-15)', () 
     const r = out(run(['swarm', 'task', 'T1', '--stage', 'implement'], io));
     expect(r).toMatchObject({ stage: 'implement', publish: null, publishError: expect.any(String) });
     expect(readExecution(root)!.tasks.T1.stage).toBe('implement');
+  });
+});
+
+describe('the run id and the merge on finish (I-03)', () => {
+  const runWtDir = () => path.join(root, '.claude', 'worktrees', 'run');
+  const noBranch = () => expect(() => git('rev-parse', '--verify', '-q', 'refs/heads/forge/run-shop')).toThrow();
+  it('propose prints the run id start adopts; a bad run id exits 2 before anything moves', () => {
+    expect(out(run(['swarm', 'propose', '--plan', 'plan.yaml'], io)).runId).toBe('shop-2026-10-12T120000000Z');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1'], io)).runId).toBe('shop-r1');
+    run(['swarm', 'stop'], io);
+    const exec = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    const branches = git('branch', '--list');
+    for (const bad of ['other-r1', 'shop-../x', `shop-${'x'.repeat(130)}`, 'shop-r1', '--merge-on-finish']) {
+      expect(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', bad], io).code, bad).toBe(2);
+    }
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(exec);
+    expect(git('branch', '--list')).toBe(branches);
+  });
+  it('a bad run id creates no branch, worktree or execution.json: on a first start, and with the run of execution.json gone from git', () => {
+    for (const bad of ['other-r1', 'shop-../x', `shop-${'x'.repeat(116)}`, '--merge-on-finish']) {
+      const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', bad], io);
+      expect(r.code, bad).toBe(2);
+      expect(r.stderr, bad).toContain('--run-id');
+    }
+    expect(readExecution(root)).toBeNull();
+    noBranch();
+    expect(existsSync(runWtDir())).toBe(false);
+    // The run id of execution.json, its branch and worktree removed since: refused before either comes back.
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1'], io));
+    run(['swarm', 'stop'], io);
+    git('worktree', 'remove', '--force', runWtDir());
+    git('branch', '-D', 'forge/run-shop');
+    const exec = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    expect(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1'], io).stderr).toContain('not be the run of execution.json');
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(exec);
+    noBranch();
+    expect(existsSync(runWtDir())).toBe(false);
+  });
+  it('a resume keeps its run id: --run-id is ignored there; propose --tasks prints null (an ephemeral run never merges at the end)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1'], io));
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r9'], io))).toMatchObject({ runId: 'shop-r1', mergeOnFinish: false });
+    expect(readExecution(root)!.runId).toBe('shop-r1');
+    writeFileSync(path.join(root, '.forge', 'tasks.json'), JSON.stringify(['x1', 'x2'].map(id => ({ id, title: id, path: 'small', zones: [`${id}.txt`], depends_on: [] }))));
+    expect(out(run(['swarm', 'propose', '--tasks', '.forge/tasks.json'], io)).runId).toBeNull();
+  });
+  it('--merge-on-finish without a recorded yes starts with mergeOnFinish false and says why', () => {
+    const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1', '--merge-on-finish', '--locale', 'es'], io));
+    expect(s).toMatchObject({ mergeOnFinish: false, mergeRefused: 'no answer recorded' });
+    expect(s.announce.join('\n')).toContain('No integro solo al acabar (pregunta del arranque: no hay ninguna respuesta tuya registrada).');
+  });
+  it('a yes to the start question of the same run and branch, answered in another session hours before, sets mergeOnFinish and is used', () => {
+    const a = authorizeMof('shop-r1');
+    expect(a).toMatchObject({ authId: expect.stringMatching(/^mof-shop-r1-[0-9a-z]{4}$/), runId: 'shop-r1' });
+    expect(a.ask.options.map((o: { label: string }) => o.label)).toEqual(['No, I will review it (Recommended)', 'Yes, merge it into main']);
+    const later = new Date(NOW.getTime() + 5 * 3600_000);
+    const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1', '--merge-on-finish'], { ...io, now: () => later }));
+    expect(s.mergeOnFinish).toBe(true);
+    expect(s).not.toHaveProperty('mergeRefused');
+    expect(readAuths(root).find(r => r.authId === a.authId)).toMatchObject({ answer: 'yes', answeredBy: 'hook-design', usedAt: later.toISOString() });
+  });
+  it('a yes of another run, of another branch, or a no leaves mergeOnFinish false', () => {
+    const cases: [string, () => void, string][] = [
+      ['shop-a', () => { authorizeMof('shop-x'); }, 'other run'],
+      ['shop-b', () => { authorizeMof('shop-b', 'develop'); }, 'other branch'],
+      ['shop-c', () => { const a = out(cli(['authorize', 'merge-on-finish', '--run', 'shop-c', '--branch', 'main', '--locale', 'en'], io)); answerHook(a.ask.question, a.ask.options[0].label); }, 'answered no'],
+    ];
+    for (const [runId, setup, reason] of cases) {
+      setup();
+      const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', runId, '--merge-on-finish'], io));
+      expect(s.mergeOnFinish, reason).toBe(false);
+      expect(s.mergeRefused, reason).toBe(reason);
+      run(['swarm', 'stop'], io);
+      out(run(['swarm', 'close'], io));
+    }
+  });
+  it('a yes asked before the run existed (auto mode at launch) counts only from the session that asked, and is tied to its run then', () => {
+    const a = out(cli(['authorize', 'merge-on-finish', '--branch', 'main', '--locale', 'en', '--hook-session', 'hook-main'], io));
+    expect(a.runId).toBeNull();
+    expect(a.authId).toMatch(/^mof-launch-[0-9a-z]{4}$/);
+    answerHook(a.ask.question, yesOf(a.ask), 'hook-main');
+    const other = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish', '--hook-session', 'hook-other'], io));
+    expect(other).toMatchObject({ mergeOnFinish: false, mergeRefused: 'no answer recorded' });
+    run(['swarm', 'stop'], io);
+    out(run(['swarm', 'close'], io));
+    const mine = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], { ...io, now: () => new Date(NOW.getTime() + 60_000) }));
+    expect(mine.mergeOnFinish).toBe(true);
+    expect(readAuths(root).find(r => r.authId === a.authId)).toMatchObject({ runId: mine.runId, usedAt: expect.any(String) });
+    expect(cli(['authorize', 'merge-on-finish', '--branch', 'main'], io).code).toBe(2);
+  });
+  it('a used yes starts no second run that merges by itself: the launch yes of the session, or a run id used before', () => {
+    const a = out(cli(['authorize', 'merge-on-finish', '--branch', 'main', '--locale', 'en', '--hook-session', 'hook-main'], io));
+    answerHook(a.ask.question, yesOf(a.ask), 'hook-main');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], io)).mergeOnFinish).toBe(true);
+    run(['swarm', 'stop'], io);
+    out(run(['swarm', 'close'], io));
+    const later = { ...io, now: () => new Date(NOW.getTime() + 60_000) };
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], later))).toMatchObject({ mergeOnFinish: false, mergeRefused: 'no answer recorded' });
+    run(['swarm', 'stop'], later);
+    out(run(['swarm', 'close'], later));
+    authorizeMof('shop-r1');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1', '--merge-on-finish'], later)).mergeOnFinish).toBe(true);
+    run(['swarm', 'stop'], later);
+    out(run(['swarm', 'close'], later));
+    // Another run in between, so shop-r1 is no longer the run of execution.json and may be named again.
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], { ...io, now: () => new Date(NOW.getTime() + 120_000) }));
+    run(['swarm', 'stop'], later);
+    out(run(['swarm', 'close'], later));
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1', '--merge-on-finish'], later)))
+      .toMatchObject({ runId: 'shop-r1', mergeOnFinish: false, mergeRefused: 'already used' });
+  });
+  it('a yes to the start question that cannot be marked used starts no run with it, and stays the person\'s', () => {
+    const a = authorizeMof('shop-r1');
+    // A directory where the record's temporary file goes: the write that marks it used fails.
+    const blocker = path.join(authDir(root), `${a.authId}.json.${process.pid}.tmp`);
+    mkdirSync(blocker);
+    const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1', '--merge-on-finish'], io);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`the yes ${a.authId} to the start question could not be marked used`);
+    expect(readExecution(root)).toBeNull();
+    expect(readAuths(root).find(x => x.authId === a.authId)).not.toHaveProperty('usedAt');
+    rmSync(blocker, { recursive: true });
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1', '--merge-on-finish'], io))).toMatchObject({ runId: 'shop-r1', mergeOnFinish: true });
+    expect(readAuths(root).find(x => x.authId === a.authId)).toMatchObject({ usedAt: NOW.toISOString() });
+  });
+  it('a resume checks --merge-on-finish against the run\'s own base, not the branch the checkout is on now', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1'], io));
+    git('switch', '-qc', 'develop');
+    authorizeMof('shop-r1', 'develop');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], io)))
+      .toMatchObject({ runId: 'shop-r1', base: 'main', mergeOnFinish: false, mergeRefused: 'other branch' });
+    const later = { ...io, now: () => new Date(NOW.getTime() + 60_000) };
+    authorizeMof('shop-r1', 'main', later);
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], later))).toMatchObject({ runId: 'shop-r1', base: 'main', mergeOnFinish: true });
+  });
+  it('a yes the person added a note to is no yes: announce says so with the note', () => {
+    const a = out(cli(['authorize', 'merge-on-finish', '--run', 'shop-r1', '--branch', 'main', '--locale', 'en'], io));
+    answerHook(a.ask.question, yesOf(a.ask), 'hook-design', io, { annotations: { [a.ask.question]: { notes: 'only if\n the demo passes' } } });
+    const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--run-id', 'shop-r1', '--merge-on-finish', '--locale', 'en'], io));
+    expect(s).toMatchObject({ mergeOnFinish: false, mergeRefused: 'answered no' });
+    expect(s.announce).toContain('I will not merge by myself at the end (start question: you answered with a note: "only if the demo passes").');
+  });
+  it('announce says each reason in the person\'s language, also a record that could not be read', () => {
+    const facts: StartFacts = { es: false, kind: 'plan', resume: false, runId: 'shop-r1', mode: 'subagents', parallel: 1, branch: 'forge/run-shop', base: 'main', mergeOnFinish: false, loose: 0, setup: null };
+    const line = (f: Partial<StartFacts>) => startAnnounce({ ...facts, ...f }).find(l => /^(I will not|No integro)/.test(l));
+    expect(line({})).toBeUndefined();
+    expect(line({ mergeRefused: 'record unreadable' })).toBe('I will not merge by myself at the end (start question: an authorization record could not be read).');
+    expect(line({ mergeRefused: 'record unreadable', es: true })).toBe('No integro solo al acabar (pregunta del arranque: no pude leer un registro de autorización).');
+    expect(line({ mergeRefused: 'already used', es: true })).toBe('No integro solo al acabar (pregunta del arranque: esa respuesta ya se usó).');
+    expect(line({ mergeRefused: 'answered no', mergeNote: 'el viernes', es: true })).toBe('No integro solo al acabar (pregunta del arranque: respondiste con una nota: «el viernes»).');
+    expect(line({ mergeRefused: 'answered no' })).toBe('I will not merge by myself at the end (start question: you answered no).');
+  });
+  it('one rule for the default branch, which swarm start and authorize share: origin\'s HEAD, else main, else master', () => {
+    const fake = (origin: string | null, heads: string[]) => (a: string[]) =>
+      a[0] === 'symbolic-ref' ? (origin === null ? null : `origin/${origin}\n`) : heads.some(h => a[3] === `refs/heads/${h}`) ? 'sha\n' : null;
+    expect(defaultBranchOf(fake('develop', ['main']))).toBe('develop');
+    expect(defaultBranchOf(fake(null, ['main', 'master']))).toBe('main');
+    expect(defaultBranchOf(fake(null, ['master']))).toBe('master');
+    expect(defaultBranchOf(fake(null, []))).toBeNull();
+  });
+  it('authorize merge-on-finish: the same open question is printed again; a bad branch, run, locale or subcommand exits 2', () => {
+    const a = out(cli(['authorize', 'merge-on-finish', '--run', 'shop-r1', '--branch', 'main', '--locale', 'es'], io));
+    expect(a.ask.question).toBe(`Cuando todo esté hecho y la revisión final pase, ¿integro la rama de ejecución en main sin preguntarte? [${a.authId}]`);
+    expect(a.ask.options[1]).toEqual({ label: 'Sí, intégrala en main', description: 'main es la rama por defecto del repositorio' });
+    expect(out(cli(['authorize', 'merge-on-finish', '--run', 'shop-r1', '--branch', 'main', '--locale', 'es'], io)).authId).toBe(a.authId);
+    expect(out(cli(['authorize', 'merge-on-finish', '--run', 'shop-r1', '--branch', 'develop'], io)).ask.options[1].description)
+      .toBe('forge merges the run branch into develop when it ends');
+    for (const bad of [['merge'], ['merge-on-finish', '--run', 'shop-r1'], ['merge-on-finish', '--run', 'shop-r1', '--branch', '-x'], ['merge-on-finish', '--run', 'a/b', '--branch', 'main'],
+      ['merge-on-finish', '--run', '--branch', 'main'], ['merge-on-finish', '--run', 'shop-r1', '--branch', 'main', '--locale', 'fr']]) {
+      expect(cli(['authorize', ...bad], io).code, bad.join(' ')).toBe(2);
+    }
   });
 });

@@ -42,8 +42,10 @@ describe('merge authorizations (I-03)', () => {
     expect(why([no, merge()])).toBe('answered no');
     expect(why([mof({ answeredBy: 's1' })])).toBe('no answer recorded');
   });
-  it('a yes with a note of the person is not a yes', () => {
+  it('a yes with a note of the person is not a yes, and the refusal carries the note (a plain no carries none)', () => {
     expect(why([merge({ answer: 'other', note: 'only after CI' })])).toBe('answered no');
+    expect(checkMergeAuth([merge({ answer: 'other', note: 'only after CI' })], ok)).toEqual({ ok: false, reason: 'answered no', note: 'only after CI' });
+    expect(checkMergeAuth([merge({ answer: 'no', note: 'wait for the release' })], ok)).toEqual({ ok: false, reason: 'answered no' });
   });
   it('a yes dated more than 5 minutes ahead of now allows nothing; a no dated so still decides', () => {
     expect(why([merge({ answeredAt: at(36) })])).toBe('no answer recorded');
@@ -82,6 +84,7 @@ describe('merge-on-finish authorizations (I-03)', () => {
   it('a yes with a note, or dated more than 5 minutes ahead of now (the clock by default), is not a yes', () => {
     expect(why([mof({ answer: 'other', note: 'only on Friday' })])).toBe('answered no');
     const o = { runId: 'shop-r1', target: 'main', session: 'x' };
+    expect(checkMofAuth([mof({ answer: 'other', note: 'only on Friday' })], o)).toEqual({ ok: false, reason: 'answered no', note: 'only on Friday' });
     expect(checkMofAuth([mof({ answeredAt: at(10) })], { ...o, now: Date.parse(at(0)) })).toEqual({ ok: false, reason: 'no answer recorded' });
     expect(checkMofAuth([mof()], { ...o, now: Date.parse(at(-10)) })).toEqual({ ok: false, reason: 'no answer recorded' });
     expect(checkMofAuth([mof()], { ...o, now: Date.parse(at(-4)) })).toMatchObject({ ok: true });
