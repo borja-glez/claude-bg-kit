@@ -11545,7 +11545,7 @@ function findCycle(plan) {
 var import_node_crypto = require("node:crypto");
 
 // src/lib/waypoint-version.ts
-var WAYPOINT_VERSION = true ? "0.28.0" : "0.0.0";
+var WAYPOINT_VERSION = true ? "0.29.0" : "0.0.0";
 var VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})/;
 var partsOf = (v) => {
   const m = typeof v === "string" ? VERSION.exec(v) : null;
@@ -12118,8 +12118,11 @@ function normalizePhase(x2, report) {
     id: x2.id,
     name: str2(x2.name),
     order: typeof x2.order === "number" && Number.isFinite(x2.order) ? x2.order : 0,
+    // The plan's own default (plan.ts: committed); any other value would reach a class name in the views.
+    plan_status: x2.plan_status === "provisional" ? "provisional" : "committed",
     tasks: keepAll(arr(x2.tasks), (t) => isObj(t) && typeof t.id === "string" && typeof t.title === "string", "tasks", report).map(normalizeTask)
   };
+  if (x2.plan_status !== void 0 && x2.plan_status !== "committed" && x2.plan_status !== "provisional") report?.("plan_status", "coerced", kindOf(x2.plan_status));
   const goal = typeof x2.goal === "string" ? cleanText(x2.goal, 300) : "";
   if (goal) out.goal = goal;
   else {
@@ -13062,17 +13065,17 @@ ${Z.join(`
           let M = this.rules.other.nextBulletRegex(f), v = this.rules.other.hrRegex(f), Z = this.rules.other.fencesBeginRegex(f), le = this.rules.other.headingBeginRegex(f), Pe = this.rules.other.htmlBeginRegex(f), ye = this.rules.other.blockquoteBeginRegex(f);
           for (; e; ) {
             let K = e.split(`
-`, 1)[0], H;
-            if (g = K, this.options.pedantic ? (g = g.replace(this.rules.other.listReplaceNesting, "  "), H = g) : H = g.replace(this.rules.other.leadingSpaceTab, (Se) => Se.replace(this.rules.other.tabCharGlobal, "    ")), Z.test(g) || le.test(g) || Pe.test(g) || ye.test(g) || M.test(g) || v.test(g)) break;
-            if (H.search(this.rules.other.nonSpaceChar) >= f || !g.trim()) c += `
-` + H.slice(f);
+`, 1)[0], H2;
+            if (g = K, this.options.pedantic ? (g = g.replace(this.rules.other.listReplaceNesting, "  "), H2 = g) : H2 = g.replace(this.rules.other.leadingSpaceTab, (Se) => Se.replace(this.rules.other.tabCharGlobal, "    ")), Z.test(g) || le.test(g) || Pe.test(g) || ye.test(g) || M.test(g) || v.test(g)) break;
+            if (H2.search(this.rules.other.nonSpaceChar) >= f || !g.trim()) c += `
+` + H2.slice(f);
             else {
               if (w || b.replace(this.rules.other.tabCharGlobal, "    ").search(this.rules.other.nonSpaceChar) >= 4 || Z.test(b) || le.test(b) || v.test(b)) break;
               c += `
 ` + g;
             }
             w = !g.trim(), p += K + `
-`, e = e.substring(K.length + 1), b = H.slice(f);
+`, e = e.substring(K.length + 1), b = H2.slice(f);
           }
         }
         r2.loose || (i ? r2.loose = true : this.rules.other.doubleBlankLine.test(p) && (i = true)), r2.items.push({ type: "list_item", raw: p, task: !!this.options.gfm && this.rules.other.listIsTask.test(c), loose: false, text: c, tokens: [] }), r2.raw += p;
@@ -14803,7 +14806,7 @@ function nextRound(i) {
 }
 
 // src/lib/metrics.ts
-function computeMetrics(plan, states, now, activeSessions = 1) {
+function computeMetrics(plan, states, now) {
   const st2 = (id2) => statusOf(states, id2);
   const total = plan.tasks.length;
   const done = plan.tasks.filter((t) => st2(t.id) === "done").length;
@@ -14841,8 +14844,6 @@ function computeMetrics(plan, states, now, activeSessions = 1) {
     }
   }
   const paceMin = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;
-  const remaining = total - done;
-  const etaIso = paceMin != null && remaining > 0 ? new Date(now + remaining * paceMin * 6e4 / Math.max(1, activeSessions)).toISOString() : null;
   return {
     total,
     done,
@@ -14852,13 +14853,105 @@ function computeMetrics(plan, states, now, activeSessions = 1) {
     phasesDone: Object.values(byPhase).filter((p) => p.status === "done").length,
     phaseCount: plan.phases.length,
     paceMin,
-    etaIso,
     startedAt: starts.length ? new Date(Math.min(...starts)).toISOString() : null,
     byPhase,
     byTrack,
     byVersion,
     currentVersion
   };
+}
+
+// src/lib/timeline.ts
+var H = 36e5;
+var SPAN = { "6h": 6 * H, "1d": 24 * H, "3d": 72 * H, "1w": 168 * H, "1m": 720 * H };
+var TICK = { "6h": H, "1d": 2 * H, "3d": 6 * H, "1w": 24 * H, "1m": 72 * H };
+var DEFAULT_ESTIMATE_MIN = 30;
+var MIN_SPAN = 30 * 6e4;
+var MAX_SPAN = 180 * 24 * H;
+var MAX_PAN = 10 * 365 * 24 * H;
+var STEPS = [15 * 6e4, 30 * 6e4, H, 2 * H, 3 * H, 6 * H, 12 * H, 24 * H, 48 * H, 168 * H, 336 * H, 720 * H];
+
+// src/lib/insights.ts
+var MIN2 = 6e4;
+var isDone = (states, id2) => states[id2]?.status === "done";
+function remainingMin(plan, states, id2, now) {
+  const t = plan.tasks.find((x2) => x2.id === id2);
+  const raw = Number(t?.estimate_min);
+  const est = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_ESTIMATE_MIN;
+  const s = states[id2];
+  if (s?.status === "done") return 0;
+  const start = s?.startedAt ?? s?.claimedAt;
+  if ((s?.status === "in_progress" || s?.status === "claimed") && start) {
+    const spent = (now - Date.parse(start)) / MIN2;
+    return Number.isFinite(spent) ? Math.max(5, Math.round(est - spent)) : est;
+  }
+  return est;
+}
+var MAX_DATE = 864e13;
+var PACE_MIN = 0.25;
+var PACE_MAX = 4;
+var clampPace = (r2) => Number.isFinite(r2) && r2 > 0 ? Math.min(PACE_MAX, Math.max(PACE_MIN, r2)) : 1;
+function paceRatioOf(plan, states) {
+  const ratios = [];
+  for (const t of plan.tasks) {
+    const s = states[t.id];
+    const est = Number(t.estimate_min);
+    if (s?.status !== "done" || !s.startedAt || !s.doneAt || !(est > 0)) continue;
+    const real = (Date.parse(s.doneAt) - Date.parse(s.startedAt)) / MIN2;
+    if (Number.isFinite(real) && real > 0) ratios.push(real / est);
+  }
+  if (!ratios.length) return 1;
+  ratios.sort((a, b) => a - b);
+  const mid = ratios.length >> 1;
+  return clampPace(ratios.length % 2 ? ratios[mid] : (ratios[mid - 1] + ratios[mid]) / 2);
+}
+function forecastEnd(plan, states, now, opts) {
+  const pending = plan.tasks.filter((t) => !isDone(states, t.id));
+  if (!pending.length) return null;
+  const parallel = Math.max(1, Math.floor(Number.isFinite(opts.parallel) ? opts.parallel : 1));
+  const pace = clampPace(opts.paceRatio);
+  const ids = new Set(pending.map((t) => t.id));
+  const dur = new Map(pending.map((t) => [t.id, remainingMin(plan, states, t.id, now) * pace]));
+  const deps = new Map(pending.map((t) => [t.id, [...new Set(t.depends_on)].filter((x2) => ids.has(x2) && x2 !== t.id)]));
+  const waiting = /* @__PURE__ */ new Map();
+  for (const [id2, ds] of deps) for (const x2 of ds) waiting.set(x2, [...waiting.get(x2) ?? [], id2]);
+  const tail = /* @__PURE__ */ new Map();
+  const visiting = /* @__PURE__ */ new Set();
+  const tailOf = (id2) => {
+    const known = tail.get(id2);
+    if (known !== void 0) return known;
+    if (visiting.has(id2)) return 0;
+    visiting.add(id2);
+    let best = 0;
+    for (const next of waiting.get(id2) ?? []) best = Math.max(best, tailOf(next));
+    visiting.delete(id2);
+    const v = best + dur.get(id2);
+    tail.set(id2, v);
+    return v;
+  };
+  const running = (id2) => {
+    const s = states[id2]?.status;
+    return s === "in_progress" || s === "claimed";
+  };
+  const rank = (a, b) => Number(running(b)) - Number(running(a)) || tailOf(b) - tailOf(a) || (a < b ? -1 : a > b ? 1 : 0);
+  const free = Array.from({ length: Math.min(parallel, pending.length) }, () => 0);
+  const finish = /* @__PURE__ */ new Map();
+  const left = new Set(ids);
+  while (left.size) {
+    let ready = [...left].filter((id3) => deps.get(id3).every((x2) => finish.has(x2)));
+    if (!ready.length) ready = [...left];
+    ready.sort(rank);
+    const id2 = ready[0];
+    const after = Math.max(0, ...deps.get(id2).map((x2) => finish.get(x2) ?? 0));
+    let w = 0;
+    for (let i = 1; i < free.length; i++) if (Math.max(free[i], after) < Math.max(free[w], after)) w = i;
+    const end = Math.max(free[w], after) + dur.get(id2);
+    free[w] = end;
+    finish.set(id2, end);
+    left.delete(id2);
+  }
+  const at2 = now + Math.max(...finish.values()) * MIN2;
+  return Number.isFinite(at2) && Math.abs(at2) <= MAX_DATE ? { at: Math.round(at2), parallel } : null;
 }
 
 // src/lib/worktree.ts
@@ -15935,7 +16028,8 @@ warning: artifacts.design is not the design's artifact: set it to ${line(design.
         ];
         const next = availableTasks(p, states)[0];
         if (next) lines2.push(`next: ${title(next.id)}`);
-        if (m.paceMin != null) lines2.push(`pace: ${m.paceMin} min/task \xB7 eta: ${m.etaIso ?? "-"}`);
+        const f = forecastEnd(p, states, io.now().getTime(), { parallel: 1, paceRatio: paceRatioOf(p, states) });
+        if (m.paceMin != null) lines2.push(`pace: ${m.paceMin} min/task \xB7 eta: ${f ? new Date(f.at).toISOString() : "-"}`);
         return ok(lines2.join("\n"));
       }
       case "session-id":

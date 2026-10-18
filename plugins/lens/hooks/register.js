@@ -11,7 +11,7 @@ import { atom, read, update } from "claude-code";
 var statusOf = (states, id2) => states[id2]?.status ?? "free";
 
 // src/lib/metrics.ts
-function computeMetrics(plan, states, now, activeSessions = 1) {
+function computeMetrics(plan, states, now) {
   const st = (id2) => statusOf(states, id2);
   const total = plan.tasks.length;
   const done = plan.tasks.filter((t) => st(t.id) === "done").length;
@@ -49,8 +49,6 @@ function computeMetrics(plan, states, now, activeSessions = 1) {
     }
   }
   const paceMin = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;
-  const remaining = total - done;
-  const etaIso = paceMin != null && remaining > 0 ? new Date(now + remaining * paceMin * 6e4 / Math.max(1, activeSessions)).toISOString() : null;
   return {
     total,
     done,
@@ -60,7 +58,6 @@ function computeMetrics(plan, states, now, activeSessions = 1) {
     phasesDone: Object.values(byPhase).filter((p) => p.status === "done").length,
     phaseCount: plan.phases.length,
     paceMin,
-    etaIso,
     startedAt: starts.length ? new Date(Math.min(...starts)).toISOString() : null,
     byPhase,
     byTrack,
