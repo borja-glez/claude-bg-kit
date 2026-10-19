@@ -32,7 +32,7 @@ elsewhere and are reconstructed from their READMEs.
 - `/waypoint:work` may edit files without asking, and every waypoint skill allows the tools it names (A-22).
 - `/waypoint:launch` may commit the plan it asks for (A-22).
 - `--swarm` is still obsolete and its warning now says forge composes the launch (A-19).
-- The band's bundle carries no zod and is minified: `hooks/register.js` drops from about 433 KB to about 213 KB (I-13). The band shows a plan or a draft design that `waypoint validate` rejects (the CLI is the one that validates), without the tracks, phases and tasks whose id breaks the plan's id rule; titles, phase names, the project and an address that is not a web link reach it as one clean line. The band marks a member forge launched for one task by its member file; `launchedBy` is no longer read.
+- The band's bundle carries no zod and is minified: `hooks/register.js` drops from about 433 KB to about 214 KB (I-13). The band shows a plan or a draft design that `waypoint validate` rejects (the CLI is the one that validates), without the tracks, phases and tasks whose id breaks the plan's id rule; titles, phase names, the project and an address that is not a web link reach it as one clean line. The band marks a member forge launched for one task by its member file; `launchedBy` is no longer read.
 
 #### Removed
 - `waypoint launch --task` exits 2: forge composes the launch of its run members (A-19).
