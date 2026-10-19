@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { parseConfig, loadConfig, configValue, agentFor, ROLES, ConfigError, NAME } from '../src/forge/config.js';
+import { parseConfig, loadConfig, configValue, agentFor, ROLES, ConfigError, NAME, verifyFlow, verifyPorts } from '../src/forge/config.js';
 import { selectValidators } from '../src/forge/validators.js';
 import { cacheable } from '../src/forge/validate-cache.js';
 import { run, type Io } from '../src/forge/cli/run.js';
@@ -237,5 +237,22 @@ describe('this repo validates its mods (I-02)', () => {
     const tm = manual().find(v => v.name === 'typecheck-mod')!;
     expect(tm.cache).toBe(false);
     expect(cacheable(tm)).toBe(false);
+  });
+});
+
+describe('verify.ports and verify.flow (K2-07, K2-13)', () => {
+  it('default to 41000-41999 and final, read what the config says, and leave the default verify block as it was', () => {
+    expect(verifyPorts(parseConfig(null))).toEqual({ from: 41000, to: 41999 });
+    expect(verifyFlow(parseConfig(null))).toBe('final');
+    const c = parseConfig('verify:\n  ports: "47100-47109"\n  flow: phase\n');
+    expect(verifyPorts(c)).toEqual({ from: 47100, to: 47109 });
+    expect(verifyFlow(c)).toBe('phase');
+    expect(parseConfig(null).verify).toEqual({ limits: { checks: 8, shots: 10, minutes: 10 } });
+  });
+  it('a range that is not two ports in order, or an unknown flow, is a config error that names it', () => {
+    for (const bad of ['verify:\n  ports: "80-90"\n', 'verify:\n  ports: "42000-41000"\n', 'verify:\n  ports: 41000\n', 'verify:\n  ports: "41000-70000"\n']) {
+      expect(() => parseConfig(bad), bad).toThrow(/verify\.ports/);
+    }
+    expect(() => parseConfig('verify:\n  flow: always\n')).toThrow(/verify\.flow/);
   });
 });

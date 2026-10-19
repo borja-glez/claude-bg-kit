@@ -7,8 +7,10 @@ import { parse } from 'yaml';
 import { NAME } from './config.js';
 import type { RepoReader } from './validators.js';
 
-export interface Surface { name: string; file: string; title: string; affects: string[] | null; tools: string[]; hash: string; error?: string }
-export interface Draft { name: string; affects: string[]; tools: string[]; body: string }
+/** `affects` (K2-15): the globs whose changes make a surface worth a `flow` check (a plain list in the header counts as
+ *  flow, as before); `smoke`: those that only ask for a `smoke` check (`affects: {flow: [...], smoke: [...]}`). */
+export interface Surface { name: string; file: string; title: string; affects: string[] | null; smoke?: string[]; tools: string[]; hash: string; error?: string }
+export interface Draft { name: string; affects: string[]; smoke?: string[]; tools: string[]; body: string }
 
 /** The sha256 (64 hex) of the whole file, line endings normalised. A permission is tied to permissionHash, which is
  *  this one unless `surfaces learn` recorded lines it appended. */
@@ -57,6 +59,15 @@ export function parseSurface(name: string, text: string, learned?: ReadonlySet<s
       if (h && typeof h === 'object' && !Array.isArray(h)) {
         const o = h as Record<string, unknown>;
         if (Array.isArray(o.affects)) out.affects = strs(o.affects);
+        else if (o.affects && typeof o.affects === 'object') {
+          // K2-15: the two levels. A mapping with neither list is no affects.
+          const a = o.affects as Record<string, unknown>;
+          const flow = strs(a.flow), smoke = strs(a.smoke);
+          if (flow.length || smoke.length) {
+            out.affects = flow;
+            if (smoke.length) out.smoke = smoke;
+          }
+        }
         out.tools = strs(o.tools);
       } else if (h !== null) out.error = 'header is not a mapping';
     } catch (e) { out.error = `header: ${(e as Error).message.split('\n')[0]}`; }
@@ -78,7 +89,9 @@ export function readSurfaces(root: string, learned?: ReadonlyMap<string, Readonl
 }
 
 const WEB_DEPS = ['vite', 'next', 'react-scripts', '@angular/core', 'svelte', 'vue', 'astro'];
-const WEB_AFFECTS = ['**/*.tsx', '**/*.jsx', '**/*.vue', '**/*.svelte', '**/*.html', '**/*.css', '**/*.scss', '**/pages/**', '**/routes/**', '**/components/**', '**/views/**', '**/app/**'];
+// K2-15: a web app's interface asks for its flows; its styles, its server and its build config only for a smoke check.
+const WEB_FLOW = ['**/*.tsx', '**/*.jsx', '**/*.vue', '**/*.svelte', '**/*.html', '**/pages/**', '**/routes/**', '**/components/**', '**/views/**', '**/app/**'];
+const WEB_SMOKE = ['**/*.css', '**/*.scss', '**/api/**', '**/server/**', 'package.json', 'vite.config.*', 'next.config.*'];
 
 export function detectDrafts(repo: RepoReader): Draft[] {
   const out: Draft[] = [];
@@ -88,14 +101,14 @@ export function detectDrafts(repo: RepoReader): Draft[] {
   const scripts = (pkg.scripts ?? {}) as Record<string, unknown>;
   const script = ['dev', 'start'].find(s => typeof scripts[s] === 'string');
   if (script && WEB_DEPS.some(d => d in deps)) {
-    out.push({ name: 'web', affects: WEB_AFFECTS, tools: ['chrome-mcp'], body:
+    out.push({ name: 'web', affects: WEB_FLOW, smoke: WEB_SMOKE, tools: ['chrome-mcp'], body:
       `# Web\n\nStart the app with \`npm run ${script}\` and open the URL it prints. Check it with the browser MCP (Chrome or Playwright), or the Playwright CLI.\n` });
   }
   const android = ['capacitor.config.ts', 'capacitor.config.js', 'capacitor.config.json'].some(f => repo.exists(f))
     || ['android/app/build.gradle', 'android/app/build.gradle.kts', 'app/build.gradle', 'app/build.gradle.kts'].some(f => /com\.android\.application/.test(repo.read(f) ?? ''));
   if (android) {
     const capacitor = ['capacitor.config.ts', 'capacitor.config.js', 'capacitor.config.json'].some(f => repo.exists(f));
-    out.push({ name: 'android', affects: capacitor ? ['android/**', ...WEB_AFFECTS] : ['android/**', '**/res/**', '**/*.kt', '**/*.java'], tools: ['adb'], body:
+    out.push({ name: 'android', affects: capacitor ? ['android/**', ...WEB_FLOW] : ['android/**', '**/res/**', '**/*.kt', '**/*.java'], ...(capacitor ? { smoke: WEB_SMOKE } : {}), tools: ['adb'], body:
       `# Android\n\nBuild the debug app${capacitor ? ' (`npx cap sync android` first)' : ''}, install it on a running emulator or device with \`adb install -r\`, launch it and check the screens the change touches with screenshots (\`adb exec-out screencap -p\`).\n` });
   }
   if (repo.list('ios').some(f => /\.(xcodeproj|xcworkspace)$/.test(f))) {
@@ -110,7 +123,15 @@ export function detectDrafts(repo: RepoReader): Draft[] {
   return out;
 }
 
-const HEADING = new RegExp(`^##\\s+(${LEARNED_HEADINGS.join('|')})\\s*$`);
+/** K2-15: the YAML header a draft's file starts with, written as it is: `affects` with its two levels when it has smoke
+ *  globs, and `tools`. JSON strings are YAML scalars, so any glob reads back unchanged. */
+export function draftHeader(d: Draft): string {
+  const list = (xs: string[]) => `[${xs.map(x => JSON.stringify(x)).join(', ')}]`;
+  const affects = d.smoke?.length ? `affects:\n  flow: ${list(d.affects)}\n  smoke: ${list(d.smoke)}\n` : `affects: ${list(d.affects)}\n`;
+  return `---\n${affects}tools: ${list(d.tools)}\n---\n`;
+}
+
+const HEADING =new RegExp(`^##\\s+(${LEARNED_HEADINGS.join('|')})\\s*$`);
 
 /** Lines of the body (`i`: index in t.split('\n'), `at`: offset): after a leading YAML header, outside ``` fences. */
 function bodyLines(t: string): { text: string; at: number; i: number }[] {

@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { parseSurface, readSurfaces, detectDrafts, appendLearned, surfaceHash, permissionHash, lineDigest } from '../src/forge/surfaces.js';
+import { parseSurface, readSurfaces, detectDrafts, appendLearned, surfaceHash, permissionHash, lineDigest, draftHeader } from '../src/forge/surfaces.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readLocal, writeLocal, readLearned, learnedFile } from '../src/forge/local.js';
 import type { RepoReader } from '../src/forge/validators.js';
@@ -274,5 +274,30 @@ describe('forge surfaces CLI', () => {
     // A line nobody recorded, in the merged file, asks again.
     writeFileSync(path.join(main, '.forge', 'verify', 'web.md'), `${surface}\n## Learned\n- 2026-10-12: note a\n- 2026-10-12: note b\n- 2026-10-12: note c\n`);
     expect(vp(main)).toBe('changed');
+  });
+  it('lists each draft with the header to write (K2-15)', () => {
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { dev: 'vite' }, devDependencies: { vite: '5' } }));
+    const [d] = JSON.parse(run(['surfaces'], { ...io, env: {} }).stdout).drafts;
+    expect(d.header).toMatch(/^---\naffects:\n {2}flow: \[/);
+  });
+});
+
+describe('affects in two levels (K2-15)', () => {
+  it('a plain list counts as flow; a mapping gives flow and smoke; an empty one is no affects', () => {
+    const plain = parseSurface('a', '---\naffects: ["src/**"]\n---\n');
+    expect(plain.affects).toEqual(['src/**']);
+    expect(plain.smoke).toBeUndefined();
+    expect(parseSurface('b', '---\naffects:\n  flow: ["src/ui/**"]\n  smoke: ["src/api/**", 7]\n---\n')).toMatchObject({ affects: ['src/ui/**'], smoke: ['src/api/**'] });
+    expect(parseSurface('c', '---\naffects:\n  smoke: ["**/*.css"]\n---\n')).toMatchObject({ affects: [], smoke: ['**/*.css'] });
+    expect(parseSurface('d', '---\naffects: {}\n---\n').affects).toBeNull();
+  });
+  it('the web draft has both levels, and its header reads back as it was proposed', () => {
+    const [web] = detectDrafts(repo({ 'package.json': JSON.stringify({ scripts: { dev: 'vite' }, devDependencies: { vite: '5' } }) }));
+    expect(web.affects).toContain('**/*.tsx');
+    expect(web.affects).not.toContain('**/*.css');
+    expect(web.smoke).toContain('**/*.css');
+    expect(parseSurface('web', `${draftHeader(web)}${web.body}`)).toMatchObject({ affects: web.affects, smoke: web.smoke, tools: web.tools, title: 'Web' });
+    const [ios] = detectDrafts(repo({ 'ios/App.xcodeproj/project.pbxproj': '' }));
+    expect(draftHeader(ios)).toBe('---\naffects: ["ios/**"]\ntools: ["xcrun"]\n---\n');
   });
 });

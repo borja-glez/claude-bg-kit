@@ -34,8 +34,8 @@ describe('verifyPlan', () => {
   it('medium and large: by affects; no affects is always a candidate', () => {
     const r = verifyPlan({ ...base, path: 'medium', surfaces: [surf('web', ['src/ui/**']), surf('api', ['src/api/**']), surf('free', null)], ...local({ web: 'allowed', api: 'allowed', free: 'allowed' }) });
     expect(r.surfaces).toEqual([
-      { name: 'web', permission: 'allowed', match: 'src/ui/Cart.tsx', missing: [], unknown: [], hash: 'h-web' },
-      { name: 'free', permission: 'allowed', match: null, missing: [], unknown: [], hash: 'h-free' },
+      { name: 'web', permission: 'allowed', match: 'src/ui/Cart.tsx', depth: 'flow', missing: [], unknown: [], hash: 'h-web' },
+      { name: 'free', permission: 'allowed', match: null, depth: 'smoke', missing: [], unknown: [], hash: 'h-free' },
     ]);
     expect(r.eligible).toBe(true);
   });
@@ -53,12 +53,12 @@ describe('verifyPlan', () => {
   });
   it('denied drops the surface, unknown asks, ask alone is not eligible', () => {
     const r = verifyPlan({ ...base, path: 'large', surfaces: [surf('web', null), surf('app', null)], ...local({ web: 'denied' }) });
-    expect(r.surfaces).toEqual([{ name: 'app', permission: 'ask', match: null, missing: [], unknown: [], hash: 'h-app' }]);
+    expect(r.surfaces).toEqual([{ name: 'app', permission: 'ask', match: null, depth: 'smoke', missing: [], unknown: [], hash: 'h-app' }]);
     expect(r.eligible).toBe(false);
   });
   it('an allowed surface whose content changed asks again (changed), and is not eligible on its own', () => {
     const r = verifyPlan({ ...base, path: 'medium', surfaces: [{ ...surf('web', null), hash: 'h-new' }], ...local({ web: 'allowed' }) });
-    expect(r.surfaces).toEqual([{ name: 'web', permission: 'changed', match: null, missing: [], unknown: [], hash: 'h-new' }]);
+    expect(r.surfaces).toEqual([{ name: 'web', permission: 'changed', match: null, depth: 'smoke', missing: [], unknown: [], hash: 'h-new' }]);
     expect(r.eligible).toBe(false);
   });
   it('missing and unknown tools are passed through, not dropped', () => {
@@ -75,6 +75,18 @@ describe('verifyPlan', () => {
     const r = verifyPlan({ ...base, path: 'medium', changed: null, surfaces: [surf('web', ['src/**']), surf('free', null)], ...local({ web: 'allowed', free: 'allowed' }) });
     expect(r.surfaces.map(s => s.name)).toEqual(['free']);
     expect(r.reason).toMatch(/diff/);
+  });
+  it('depth: flow when the diff touches a flow glob, smoke when it only touches a smoke one or the surface has no affects (K2-15)', () => {
+    const two = (name: string, flow: string[], smoke: string[]): Surface => ({ ...surf(name, flow), smoke });
+    const r = verifyPlan({ ...base, path: 'medium', changed: ['src/api/cart.ts'],
+      surfaces: [two('web', ['src/ui/**'], ['src/api/**']), two('cli', ['bin/**'], []), surf('free', null)], ...local({ web: 'allowed', cli: 'allowed', free: 'allowed' }) });
+    expect(r.surfaces.map(s => [s.name, s.depth, s.match])).toEqual([['web', 'smoke', 'src/api/cart.ts'], ['free', 'smoke', null]]);
+    const ui = verifyPlan({ ...base, path: 'medium', surfaces: [two('web', ['src/ui/**'], ['src/api/**'])], ...local({ web: 'allowed' }) });
+    expect(ui.surfaces[0]).toMatchObject({ depth: 'flow', match: 'src/ui/Cart.tsx' });
+  });
+  it('a draft matches by either level (K2-15)', () => {
+    const drafts: Draft[] = [{ name: 'web', affects: ['src/ui/**'], smoke: ['**/*.css'], tools: [], body: '' }];
+    expect(verifyPlan({ ...base, path: 'medium', changed: ['src/app.css'], drafts, surfaces: [], ...local() }).drafts).toEqual([{ name: 'web', match: 'src/app.css' }]);
   });
 });
 

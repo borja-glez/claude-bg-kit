@@ -2,6 +2,8 @@
 // surface is a candidate when the diff touches its `affects`, or always when it has none. Permission comes from
 // local.yaml (denied drops the surface; unknown asks; an allowance covers its hash, see hashMatches). Missing and
 // unknown tools are reported, never a reason to drop.
+// K2-15: a surface whose flow globs the diff touches is checked at depth flow; one that only matches its smoke globs, or
+// has no affects, at depth smoke.
 import { globMatch } from './validators.js';
 import { hashMatches, type Draft, type Surface } from './surfaces.js';
 import type { LocalState } from './local.js';
@@ -10,6 +12,8 @@ export interface Ask { question: string; options: string[] }
 export interface PlanSurface {
   // hash: the surface's permission hash now, for `local set surfaces.<name> allowed --expect <hash>`.
   name: string; permission: 'allowed' | 'ask' | 'changed'; match: string | null; missing: string[]; unknown: string[]; hash: string;
+  /** K2-15: how deep its agent checks it: `flow` when the diff touches its flow globs, else `smoke`. */
+  depth: 'flow' | 'smoke';
   // What the question to the user shows (the CLI adds them): the change since the allowance (changed) and the question.
   // A diff cut at its cap says so (diffTruncated) and names the file holding all of it (null: it could not be written).
   diff?: string | null; diffTruncated?: true; diffFile?: string | null; commits?: string[]; ask?: Ask;
@@ -29,19 +33,23 @@ export function verifyPlan(i: {
     const perm = i.local.surfaces[s.name];
     if (perm?.state === 'denied') continue;
     let match: string | null = null;
-    if (s.affects !== null) {
-      const m = firstMatch(s.affects, i.changed);
-      if (m === undefined) continue;
-      match = m;
+    let depth: PlanSurface['depth'] = 'smoke';
+    const smoke = s.smoke ?? [];
+    if (s.affects !== null || smoke.length) {
+      const flow = firstMatch(s.affects ?? [], i.changed);
+      const light = flow === undefined ? firstMatch(smoke, i.changed) : undefined;
+      if (flow === undefined && light === undefined) continue;
+      match = (flow ?? light)!;
+      depth = flow !== undefined ? 'flow' : 'smoke';
     }
     // An allowance covers the content it was given for: an edited surface (another commit, a PR) asks again.
     const permission = perm?.state !== 'allowed' ? 'ask' : hashMatches(perm.hash, s.hash) ? 'allowed' : 'changed';
     const { missing, unknown } = i.tools(s);
-    surfaces.push({ name: s.name, permission, match, missing, unknown, hash: s.hash });
+    surfaces.push({ name: s.name, permission, match, depth, missing, unknown, hash: s.hash });
   }
   const drafts = i.drafts
     .filter(d => !i.surfaces.some(s => s.name === d.name) && !i.local.proposed.includes(d.name))
-    .flatMap(d => { const m = firstMatch(d.affects, i.changed); return m === undefined ? [] : [{ name: d.name, match: m }]; });
+    .flatMap(d => { const m = firstMatch([...d.affects, ...(d.smoke ?? [])], i.changed); return m === undefined ? [] : [{ name: d.name, match: m }]; });
   const eligible = surfaces.some(s => s.permission === 'allowed');
   const reason = i.changed === null ? 'the diff is unknown: only surfaces without affects are candidates'
     : surfaces.length ? surfaces.map(s => `${s.name}${s.match ? ` (${s.match})` : ''}`).join(', ') : 'no surface matches the diff';

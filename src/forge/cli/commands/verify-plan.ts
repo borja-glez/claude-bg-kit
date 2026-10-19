@@ -101,7 +101,7 @@ export const command: Command = (args, ctx) => {
     if (plan.eligible && chosen.length) {
       mkdirSync(roundDir, { recursive: true });
       writeFileSync(pending, JSON.stringify({
-        task, at: ts(), surfaces: chosen.map(s => ({ name: s.name, file: surfaceFile(s.name), missing: s.missing, unknown: s.unknown })),
+        task, at: ts(), surfaces: chosen.map(s => ({ name: s.name, file: surfaceFile(s.name), depth: s.depth, missing: s.missing, unknown: s.unknown })),
         brief: rel(path.join(work, `brief-${n}.md`)), diff: rel(path.join(work, `diff-${n}.patch`)), dir: rel(roundDir), evidence: rel(path.join(work, 'evidence', `${n}-${round}`)),
       }, null, 2) + '\n');
     } else rmSync(pending, { force: true });

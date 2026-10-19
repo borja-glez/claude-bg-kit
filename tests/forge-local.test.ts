@@ -50,7 +50,7 @@ describe('local.yaml', () => {
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), text);
     // The hash of the whole file, no blob, no commit.
     writeFileSync(localFile(root), `surfaces:\n  web: { state: allowed, hash: ${surfaceHash(text)} }\n`);
-    expect(vp(root).surfaces).toEqual([{ name: 'web', permission: 'allowed', match: null, missing: [], unknown: [], hash: surfaceHash(text) }]);
+    expect(vp(root).surfaces).toEqual([{ name: 'web', permission: 'allowed', match: null, depth: 'smoke', missing: [], unknown: [], hash: surfaceHash(text) }]);
   });
   it('a 16-hex allowance of forge ≤ 0.12 stays allowed, untouched; another content or another 16 hex asks again', () => {
     const text = '# Web\n\nRun it.\n';
@@ -59,7 +59,7 @@ describe('local.yaml', () => {
     writeFileSync(web, text);
     const legacy = `surfaces:\n  web: { state: allowed, hash: ${surfaceHash(text).slice(0, 16)} }\n`;
     writeFileSync(localFile(root), legacy);
-    expect(vp(root).surfaces[0]).toEqual({ name: 'web', permission: 'allowed', match: null, missing: [], unknown: [], hash: surfaceHash(text) });
+    expect(vp(root).surfaces[0]).toEqual({ name: 'web', permission: 'allowed', match: null, depth: 'smoke', missing: [], unknown: [], hash: surfaceHash(text) });
     expect(vp(root).eligible).toBe(true);
     // Nothing rewrites the stored allowance.
     expect(readFileSync(localFile(root), 'utf8')).toBe(legacy);

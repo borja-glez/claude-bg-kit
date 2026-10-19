@@ -4,7 +4,7 @@ import path from 'node:path';
 import { NAME } from '../../config.js';
 import { UsageError } from '../errors.js';
 import { readLocal, updateLocal, readLearned } from '../../local.js';
-import { readSurfaces, detectDrafts, surfaceFile, LEARNED_HEADINGS } from '../../surfaces.js';
+import { readSurfaces, detectDrafts, draftHeader, surfaceFile, LEARNED_HEADINGS } from '../../surfaces.js';
 import { repoReader } from '../exec.js';
 import { learnSurface } from '../shared.js';
 
@@ -14,7 +14,8 @@ export const command: Command = (args, ctx) => {
   if (sub === undefined || sub.startsWith('--')) {
     const surfaces = readSurfaces(io.cwd, readLearned(io.cwd));
     const local = readLocal(io.cwd);
-    const drafts = detectDrafts(repoReader(repoDir)).filter(d => !surfaces.some(s => s.name === d.name) && !local.proposed.includes(d.name));
+    const drafts = detectDrafts(repoReader(repoDir)).filter(d => !surfaces.some(s => s.name === d.name) && !local.proposed.includes(d.name))
+      .map(d => ({ ...d, header: draftHeader(d) }));
     return json({ surfaces, drafts });
   }
   const name = flag('name');
