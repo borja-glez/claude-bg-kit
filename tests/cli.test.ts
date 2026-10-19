@@ -2564,6 +2564,37 @@ describe('page --publish-info and the sync line', () => {
     expect(pub({ assets: false })).toMatchObject({ capabilities: caps, internal: false });
     expect(pub()).toMatchObject({ capabilities: caps, internal: false });
   });
+  it('--no-assets drops assets even when the published roadmap has them, and that republish is a change to ask (R6b)', () => {
+    const pub = (page: unknown, caps2: unknown, ...extra: string[]) => {
+      writeFileSync(path.join(dir, 'page.json'), JSON.stringify(page));
+      const r = run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(caps2), '--page', 'page.json', ...extra], io);
+      expect(r.code, r.stderr).toBe(0);
+      return JSON.parse(r.stdout);
+    };
+    setArtifact('https://claude.ai/artifact/r1');
+    const withAssets = { ...caps, assets: {} };
+    // A file that still declares assets: the printed capabilities drop them; the skill writes them and runs again.
+    expect(pub({ version: WP, rules: PAGE_RULES, assets: true }, withAssets, '--no-assets')).toMatchObject({ capabilities: caps, internal: false, say: null });
+    // That last run: no assets, not internal, and a change of who can see the roadmap, asked once in the plan language.
+    const last = pub({ version: WP, rules: PAGE_RULES, assets: true }, caps, '--no-assets');
+    expect(last).toMatchObject({ capabilities: caps, internal: false, say: null, capabilitiesChanged: true, write: { data: { assets: false } } });
+    expect(last.ask).toContain('compartirse públicamente');
+    // The question names no forge config: waypoint reads none (A-19).
+    expect(last.ask).not.toContain('.forge/config.yaml');
+    // A roadmap already without assets: nothing changes.
+    expect(pub({ version: WP, rules: PAGE_RULES, assets: false }, caps, '--no-assets')).toMatchObject({ capabilities: caps, internal: false, capabilitiesChanged: false, ask: null });
+    const p = path.join(dir, 'plan.yaml');
+    writeFileSync(p, readFileSync(p, 'utf8').replace('locale: es', 'locale: en'));
+    const en = pub({ assets: true }, caps, '--no-assets').ask;
+    expect(en).toContain('shared publicly');
+    expect(en).not.toContain('.forge/config.yaml');
+  });
+  it('--assets with --no-assets is exit 2 and builds nothing (R6b)', () => {
+    const r = run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(), '--assets', '--no-assets'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('--no-assets');
+    expect(existsSync(path.join(dir, 'r.html'))).toBe(false);
+  });
   it('without the flag page prints the bare path as before', () => {
     expect(run(['page', 'plan.yaml', '--out', 'r.html'], io).stdout).toBe(`${path.join(dir, 'r.html')}\n`);
   });

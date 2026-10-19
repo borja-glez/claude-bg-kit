@@ -668,10 +668,13 @@ describe('plugin layout', () => {
     for (const s of [md, inf]) expect(s).not.toContain('task.json');
     expect(inf).not.toContain('lastTickAt');
   });
-  it('the plan skill declares assets only with --assets (A-19)', () => {
+  it('the plan skill declares assets only with --assets (A-19), and drops them with --no-assets (R6b)', () => {
     const md = read('plugins/waypoint/skills/plan/SKILL.md');
     expect(md).toContain('"assets": {}');
-    expect(md).toContain('--assets');
+    const step1 = md.slice(md.indexOf('## 3. Publish the roadmap page'), md.indexOf('\n2. If `artifacts.roadmap` is empty'));
+    for (const w of ['--assets', '--no-assets', '`no-assets`']) expect(step1, w).toContain(w);
+    // The way back to a shareable roadmap is the one a decline names.
+    expect(md.slice(md.indexOf('\n3. If it already exists'))).toContain('/waypoint:plan no-assets');
   });
   it('run and infinite record decisions with decision add, and every report lists them', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
@@ -1660,7 +1663,7 @@ describe('plugin layout', () => {
     }
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
       const md = read(f);
-      for (const s of ['approvals/', '`owner`', 'meta/metrics', 'meta/page', 'sync [--db DIR]', 'page [--publish-info --capabilities F [--page P] [--assets]] [--states DIR]', 'validate [--design D]']) expect(md, `${f}: ${s}`).toContain(s);
+      for (const s of ['approvals/', '`owner`', 'meta/metrics', 'meta/page', 'sync [--db DIR]', 'page [--publish-info --capabilities F [--page P] [--assets] [--no-assets]] [--states DIR]', 'validate [--design D]']) expect(md, `${f}: ${s}`).toContain(s);
     }
   });
   it('waypoint:design runs the converging loop: critique-next, round --verify, the budget, reasons, resolved, amend and reopen, critiques in docs/ (wave 4d)', () => {

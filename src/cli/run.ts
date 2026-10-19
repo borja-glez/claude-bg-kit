@@ -176,6 +176,9 @@ export function run(argv: string[], io: Io): Result {
       case 'hash':
         return ok(planHash(loadPlan()));
       case 'page': {
+        // Ruling R6b: --assets asks for forge's screenshot store and --no-assets drops it; one call cannot ask for both.
+        const noAssets = args.includes('--no-assets');
+        if (noAssets && args.includes('--assets')) return fail('page: --assets and --no-assets cannot be combined', 2);
         const p = loadPlan();
         // Final review I5: meta/page's rules are those of the capabilities actually published, the file the skill passed to
         // the Artifact publish; read (and refused) before the page is built.
@@ -209,7 +212,8 @@ export function run(argv: string[], io: Io): Result {
         // A-19: the roadmap carries forge's screenshots (the assets capability) only when its caller says so: forge asks
         // for it from its own config; waypoint reads none. A roadmap already published with assets keeps them: forge's
         // sync-only /waypoint:plan calls pass no `assets`, and a republish without them would ask to change who can see the page.
-        const internal = args.includes('--assets') || before === true;
+        // R6b: --no-assets (/waypoint:plan no-assets) drops them all the same, so the republish asks to make it shareable again.
+        const internal = !noAssets && (args.includes('--assets') || before === true);
         // G-13, §4.1: meta/page, the version and the rules of what is published (sync --db compares it; infinite reads rules).
         // `capabilities` is what this checkout should publish; `rules`, what the published file grants (rulesOf).
         // `roadmap` is the plan's project, the id known before the first publish: the approvals warning keys on it.

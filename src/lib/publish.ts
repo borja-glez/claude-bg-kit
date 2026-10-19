@@ -1,11 +1,11 @@
 // What the plan skill says when it publishes the roadmap (its steps 3 and 5): the capabilities, whether they make the
-// artifact internal, and the lines for the person. Pure; the waypoint CLI reads the plan and .forge/config.yaml.
+// artifact internal, and the lines for the person. Pure; the waypoint CLI reads the plan and the listed meta/page.
 import type { Plan } from './types.js';
 
 /** G-13, §4.1: the rules of the page this version publishes; 2 is the first with the owner's approvals rule. */
 export const PAGE_RULES = 2;
 
-/** The capabilities of plan skill step 3.2; `assets` (forge's verification screenshots) only when evidence is uploaded. */
+/** The capabilities of plan skill step 3.2; `assets` (forge's verification screenshots) only when the caller asks for it. */
 export function roadmapCapabilities(assets: boolean): Record<string, unknown> {
   return {
     db: { rules: [
@@ -56,9 +56,10 @@ export function sharingChangeAsk(plan: Plan, assets: boolean): string {
       ? 'Al republicar, el roadmap pasa a guardar las capturas de verificación de forge: quedará interno de tu organización y su enlace público dejará de funcionar.'
       : "Republishing makes the roadmap keep forge's verification screenshots: it becomes internal to your organization and its public link stops working.";
   }
+  // R6b: only /waypoint:plan no-assets drops the store, so the question is about making the roadmap shareable again.
   return isEs(plan.locale)
-    ? 'Al republicar, el roadmap deja de guardar las capturas de verificación de forge (evidence: local en .forge/config.yaml): podrá volver a compartirse públicamente y las capturas ya subidas dejarán de verse.'
-    : "Republishing stops the roadmap keeping forge's verification screenshots (evidence: local in .forge/config.yaml): it can be shared publicly again, and the screenshots already uploaded stop showing.";
+    ? 'Al republicar, el roadmap vuelve a poder compartirse: deja de guardar las capturas de verificación de forge, así que podrá compartirse públicamente; las capturas ya subidas dejarán de verse y las nuevas de forge se quedan en tu equipo.'
+    : "Republishing makes the roadmap shareable again: it stops keeping forge's verification screenshots, so it can be shared publicly; the screenshots already uploaded stop showing, and forge's new ones stay on your machine.";
 }
 
 const isEs = (locale: string | undefined) => (locale ?? '').toLowerCase().split(/[-_]/)[0] === 'es';

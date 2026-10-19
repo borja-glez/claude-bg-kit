@@ -18,12 +18,14 @@ elsewhere and are reconstructed from their READMEs.
 #### Added
 - `waypoint launch <plan> <track> --exec` starts the session's `claude --bg` itself, detached and in the worktree, with its output in `.waypoint/<project>/launch/<name>.log`; `/waypoint:launch` uses it and needs no `claude --bg` permission any more (A-22).
 - `waypoint doctor <plan> [--fix]` lists what older versions left under `.waypoint/<project>/` (`last-head`, files of `sync/` the plan no longer writes, caches of collections the roadmap does not have), and `--fix` deletes them; it reports what it could not delete (`failed`) and exits 1 (A-24).
-- `page --publish-info --assets`: the roadmap declares `assets` only when its caller asks for it; `/waypoint:plan assets` passes it, and forge asks for it when its screenshots are uploaded (A-19).
+- `page --publish-info --assets`: the roadmap declares `assets` only when its caller asks for it; `/waypoint:plan assets` passes it, and forge's Large path asks for it when its screenshots are uploaded (A-19).
+- `page --publish-info --no-assets` drops `assets` even when the published roadmap has them; `/waypoint:plan no-assets` passes it and asks once before the roadmap becomes shareable again. `--assets` and `--no-assets` together exit 2 (ruling R6b).
 - `page --publish-info` keeps `assets` when the listed `--page` says the published roadmap has them, so forge's routine syncs never change who can see it (A-19).
 - One plan-path rule (`PLAN_PATH`) shared by `launch` and forge (A-19).
 
 #### Changed
 - waypoint no longer reads `.forge/config.yaml` nor bundles forge's config schema (A-19, I-18).
+- Who decides the roadmap's sharing: `/waypoint:plan` alone no longer adds forge's screenshot store in a repository with forge (run `/waypoint:plan assets`, as forge's Large path does), and a roadmap published with the store keeps it, since `evidence: local` in forge's config no longer removes it and only stops new uploads; `/waypoint:plan no-assets` makes it shareable again (A-19, ruling R6b).
 - `sync` deletes its earlier batches of `--out` (inside `.waypoint/<project>/`) before writing, and replaces a batch file that is a link instead of writing through it (A-24).
 - A listing with a document that does not read is used without it, and the CLI says `warning: skipped <dir>/<file> (unreadable)` on stderr; `next`, `conflicts` and `status` exit 1 when the `--states` they are given does not exist (A-06, I-14).
 - `session-id` gives only letters, digits, `_`, `.` and `-`, the ids forge accepts (A-18).
