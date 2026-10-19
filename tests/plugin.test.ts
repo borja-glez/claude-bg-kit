@@ -2065,7 +2065,9 @@ describe('plugin layout', () => {
     // M4, T5: the plan hands its route off with the plan, and closes it on every stop: all done, a breaker or a stall, the end.
     const sp = runRef('superpowers-plan').split('\n');
     expect(sp.find(l => l.startsWith('1. '))).toContain('FORGE route stage --stage handed-off --plan <f> --session <CSID>');
-    for (const n of ['1. ', '6. ', '7. ']) expect(sp.find(l => l.startsWith(n)), n).toContain('FORGE route stage --stage done --session <CSID>');
+    for (const n of ['1. ', '3. ', '6. ', '7. ']) expect(sp.find(l => l.startsWith(n)), n).toContain('FORGE route stage --stage done --session <CSID>');
+    // Step 1 stops twice: not a superpowers plan (exit 2), and every task already done.
+    expect(sp.find(l => l.startsWith('1. '))!.split('FORGE route stage --stage done --session <CSID>')).toHaveLength(3);
     // M5: the ephemeral start names the id its begin takes.
     expect(runRef('ephemeral').split('\n').find(l => l.startsWith('2. **Start.**'))).toContain('FORGE begin --task');
   });
