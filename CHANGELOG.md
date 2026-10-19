@@ -16,7 +16,7 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.32.1 — 2026-10-20
 
 #### Changed
-- The roadmap page reads the proposals forge 0.26 makes from what verification saw outside a brief (`source: verify`), the last flow pass of a run's summary (`runs/<runId>` `flow`) and the exact commits of a decision's undo (`shas`). A page published before this version drops the proposals of source verify until it is published again: republish it after updating, as `waypoint:plan` says (K2-12, K2-13, K2-19).
+- The roadmap page reads the proposals forge 0.26 makes from what verification saw outside a brief (`source: verify`), the last flow pass of a run's summary (`runs/<runId>` `flow`), and the shared library keeps the exact commits of a decision's undo (`shas`). A page published before this version drops the proposals of source verify until it is published again: republish it after updating, as `waypoint:plan` says (K2-12, K2-13, K2-19).
 
 ### 0.32.0 — 2026-10-19
 
@@ -382,7 +382,7 @@ elsewhere and are reconstructed from their READMEs.
 - `verify-env --task <id>-<n> --dir <review dir>`: a free port of `verify.ports` (`41000-41999` by default) and a browser profile of its own for each verification, so two of them never share either; the same round gets the same ones again (K2-07).
 - `verify-spawn --dir <evidence dir> [--cwd <code checkout>] -- <cmd…>`: the verify agent starts what it needs detached, in the code checkout it is given, its output in `logs/`, each spawn recorded in `logs/<n>.pid.json` with its start time and image; it prints `{started, pid, log, running}`. A command that ends within 1 s with another code did not start (`code`, `logTail`); one that ends with 0 is started and done, and is not recorded. On Windows the command runs through cmd.exe (`%NAME%` expands; a line break in an argument is refused) (K2-03, K2-20).
 - `verify-preflight --plan <plan>`: the surfaces an execution's plan may use that need the person, asked once before any task starts; `--skip <name>` keeps «No, esta vez» for the whole run, and only the coordinator records it, from the main checkout (K2-08).
-- The flow pass: `verify-plan --run` plans the surfaces of a run's integrated result since the last pass, at depth flow, and `verify-close --flow` closes it (a `verify-flow` event, `flow` in `execution.json` and in `runs/<runId>`). Its folder is `.forge/work/flow-<runId>-<n>/` and never reuses a number; `since` comes from the last pass, else from the run's own recorded integration merges; `verify-close --flow` closes only a real pass folder, from the main checkout. `verify.flow: final` (the default) runs it before Large's final review, which takes its `verify.json` with `verdict --verify`; `phase` also when a phase's last task is integrated (`swarm step` says so); `off` never. An ephemeral run does it at the end of its batch (K2-13).
+- The flow pass: `verify-plan --run` plans the surfaces of a run's integrated result since the last pass, at depth flow, and `verify-close --flow` closes it (a `verify-flow` event, `flow` in `execution.json` and in `runs/<runId>`). Its folder is `.forge/work/flow-<runId>-<n>/` and never reuses a number; `since` comes from the last pass, else from the run's own recorded integration merges; `verify-close --flow` closes only a real pass folder, from the main checkout. `verify.flow: final` (the default) runs it before Large's final review, which takes its `verify.json` with `verdict --verify`; `phase` also when a phase's last task is integrated (`swarm step` says so); `off` never. An ephemeral run does it at the end of its batch. `verify-plan --run --whole-run` plans the whole run instead of what is new since the last pass (the final review's pass and its re-review) (K2-13).
 - `surfaces digest --run <runId>`: what a run's verifications learned, by surface, bounded, shown once at its end (K2-11).
 - `review-prep --sensitive` (security reviews whatever the diff touches) and `--report` (red validators never hold a review that fixes nothing) (K4-06, K2-17).
 
@@ -390,18 +390,31 @@ elsewhere and are reconstructed from their READMEs.
 - `verify-cleanup` stops a process only while it is still the one recorded (a reused pid goes to `reused`; one whose identity cannot be read goes to `unknown` and is never stopped; a record it did not write goes to `skipped`), on macOS and Linux with SIGTERM to its group and children and SIGKILL after 5 s, and frees the port and the profile verify-env reserved (`released`). The older `pids.json` of integers, as forge 0.25 and earlier agents wrote it, is still read (K2-03, K2-20).
 - A surface's `affects` can be `{flow: [...], smoke: [...]}`; a plain list counts as flow. `verify-plan` prints each surface's `depth`, and `FORGE surfaces` the `header` of each draft (K2-15).
 - A blocked verification is an abstention with its reason, never invalid output to respawn; a check that failed because of the environment (`env: true`) is minor, and the same failed check observed differently stalls the loop (K2-09, K2-10).
-- `review-close` and `verdict` wait for `verify.json` once `verify-env` reserved a verification; `review-close` also prints its minor findings (K2-09, K2-17).
-- `surfaces learn` writes the surface of `--cwd` and, like `verify-close`, keeps only general notes: one line of at most 240 characters, naming neither the task nor `.forge/work/`, not repeated, and not reading as an instruction (backticks, URLs, shell text, imperatives aimed at an agent) or holding a secret; `notesSkipped` says why. Each Learned section carries a fixed line telling the next verify agent that the notes are data (K2-06, K2-11).
+- `review-close` and `verdict` wait for `verify.json` once `verify-env` reserved a verification, and only while a surface is still pending (a `verify-skip` of every surface listed in `verify-pending.json` ends the wait); a `--verify` file that is named and missing always exits 3 with `missing`. `review-close` also prints its minor findings (K2-09, K2-17).
+- `surfaces learn` writes the surface of `--cwd` and, like `verify-close`, keeps only general notes: one line of at most 240 characters, naming neither the task nor `.forge/work/`, not repeated, and not reading as an instruction (backticks, URLs, shell text, imperatives aimed at an agent) or holding a secret; `verify-close` says why in `notesSkipped` and `surfaces learn` in `skipped` (never echoing the dropped text). Each Learned section carries a fixed line telling the next verify agent that the notes are data (K2-06, K2-11).
 - The defects a verify agent sees outside the brief (`defects` in `verify.json`) become pending proposals of source verify; a defect whose text reads as an instruction or holds a secret is not proposed (`defects.skipped`, with its `why`), its surface name is checked, and it names its screen or route, never a full URL. Only the roadmap's owner approves the proposals (K2-12).
-- With nobody to ask, `verify-plan --unattended` logs the skip of a surface that needs the person and `note: true` asks for one question note per surface and run, through a marker file per run and surface under `.forge/execution/asked/<runId>/`: a run member never writes `execution.json`. `verify-plan --run --unattended` skips what needs the person the same way a task does, and a pass opens only once nobody is waiting for an answer, with at least one allowed surface (K2-08, K2-13).
+- With nobody to ask, `verify-plan --unattended` logs the skip of a surface that needs the person and `note: true` asks for one question note per surface and run, through a marker file per run and surface under `.forge/execution/asked/<runId>/`: a run member never writes `execution.json`. `verify-plan --run --unattended` skips what needs the person the same way a task does, with a note once per surface and run, and does not wait: its pass opens with at least one allowed surface. Attended, the pass opens once nobody is waiting for an answer (K2-08, K2-13).
 - The verify agent gets «the code checkout» and starts the app there (`verify-spawn --cwd`) (K2-03).
 - Security reviews by the zones the real diff touches (its paths, with a rename by both names, and the zone words of its added and removed lines), not by the words of the task. Once security reviewed a task its later rounds keep it, until a redo; a light review gets security too when the diff touches a zone; `--sensitive` is kept for the task's later rounds (K4-06).
 - `/forge:review` prepares and closes with `review-prep` and `review-close`, offers verify and logs the phase done; its report names the surface notes and the proposals verify left (K2-17).
 - The verify agents may create build outputs git ignores, use their own port and profile, and report `env` checks and `defects` (K2-18, K2-11).
 - A `git-revert` undo names its exact commits (`undo.shas`, checked against `base..head` by `decision add`), and `/forge:decisions revert` reverts those and nothing else (K2-19).
+- `swarm integrate <T> [--plan <file>] [--db <dir>]` prints `flow` itself when a phase closes (`verify.flow: phase`), so a single-command coordinator sees it too.
+- `verify-preflight --skip` works after `finish`, on an execution of this checkout that is no longer active.
+- `surfaces digest` compares with the surface as the run started, so the notes the run merged are still listed.
+- A blocked flow pass keeps its base: the next pass starts where it did (`flow.since`).
+- The note and defect filters keep honest lines (routes, slugs, UI names such as a button called Run, Spanish verbs mid-sentence) and still drop orders and real tokens.
+- Reservation and profile names: a long flow-pass folder gets a valid name, and a browser profile names its checkout.
+- `execution/asked/<runId>` is pruned with its run's state.
 - Depends on waypoint ^0.32.1.
 
 #### Fixed
+- A reservation file's content can no longer name a file to delete.
+- `verify-close` stops the processes and frees the port and the profile even when `verify.json` is unusable.
+- A fix round's security carry follows the fix's content, not just its paths.
+- An environment failure no longer closes a product finding of the same check.
+- A check name over 200 characters re-matches its finding.
+- Dropped notes and defects are not echoed back.
 - On Windows, a forge process that created `.forge/execution.lock` while another one removed it got `EPERM` and crashed: it exited 1 and its update was lost. It now waits as for a busy lock. The same holds for the port locks of `verify-env`.
 
 ### 0.25.0 — 2026-10-19
