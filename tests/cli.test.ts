@@ -432,6 +432,41 @@ describe('multi-session commands', () => {
       expect(lstatSync(log).isFile()).toBe(true);
     });
   });
+
+  it('next prints multi: false alone; true with another live session or an open message for it (J-12)', () => {
+    const states = writeDocs('c/state', {});
+    const me = { name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', leaseUntil: '2026-10-11T10:09:00.000Z', status: 'active' };
+    const alone = writeDocs('c/alone', { be: me });
+    const next = (...extra: string[]) => {
+      const r = run(['next', 'plan.yaml', '--states', states, '--session', 'be', ...extra], io);
+      expect(r.code, r.stderr).toBe(0);
+      return JSON.parse(r.stdout) as { multi: boolean };
+    };
+    expect(next('--sessions', alone).multi).toBe(false);
+    expect(next().multi).toBe(false);
+    expect(next('--sessions', writeDocs('c/two', { be: me, ui: { ...me, name: 'ui' } })).multi).toBe(true);
+    const messages = writeDocs('c/messages', { m1: { ts: '2026-10-11T09:30:00Z', from: 'ui', to: 'be', type: 'overlap_warning', taskId: 'T001', text: 'x', status: 'open' } });
+    expect(next('--sessions', alone, '--messages', messages).multi).toBe(true);
+    // N1: a given-but-missing --messages folder is no messages, as inbox and escalations read it.
+    expect(next('--sessions', alone, '--messages', 'c/nope').multi).toBe(false);
+  });
+  it('next counts a task an idle session left for this session, never one of its own (Review Focus 1)', () => {
+    const me = { name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', leaseUntil: '2026-10-11T10:09:00.000Z', status: 'active' };
+    const old = { name: 'old', heartbeatAt: '2026-10-11T08:00:00.000Z', status: 'active' };
+    const left = writeDocs('c/left', { T001: { status: 'in_progress', owner: 'old' } });
+    const multi = (states: string, sessions: string, ...extra: string[]) =>
+      JSON.parse(run(['next', 'plan.yaml', '--states', states, '--sessions', sessions, '--session', 'be', ...extra], io).stdout).multi as boolean;
+    expect(multi(left, writeDocs('c/sessions', { be: me, old }))).toBe(true);
+    // T001 is a task of track backend: a session of track ui has nothing to recover there.
+    expect(multi(left, writeDocs('c/sessions2', { be: me, old }), '--track', 'ui')).toBe(false);
+    // Its own task, left while its own session went idle, is resumed by next, not recovered.
+    expect(multi(writeDocs('c/mine', { T001: { status: 'in_progress', owner: 'be' } }), writeDocs('c/sessions3', { be: { ...me, status: 'idle' } }))).toBe(false);
+  });
+  it('next in a linked worktree (its .git is a file into <repo>/.git/worktrees/) is multi (J-12)', () => {
+    writeFileSync(path.join(dir, '.git'), `gitdir: ${path.join(dir, 'main', '.git', 'worktrees', 'ui')}\n`);
+    const states = writeDocs('c/state', {});
+    expect(JSON.parse(run(['next', 'plan.yaml', '--states', states, '--session', 'be'], io).stdout).multi).toBe(true);
+  });
 });
 
 describe('final fix: db plan cache, idle owners, recover caches', () => {

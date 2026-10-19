@@ -8,7 +8,8 @@ import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known, typ
 import { normalizeMessage, normalizeMeta, normalizePhase, sessionDoc, stateDoc } from '../page/normalize.js';
 import { readDocs } from '../lib/read-docs.js';
 import { availableTasks, commitShas } from '../lib/deps.js';
-import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, isIdle, IDLE_MINUTES } from '../lib/coordination.js';
+import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, isIdle, multiSession, IDLE_MINUTES } from '../lib/coordination.js';
+import { mainCheckoutFrom } from '../lib/main-checkout.js';
 import { parseDesign, changedSections, designBody, designStatus, DesignError, setDesignStatus } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, line, mergeDismissed } from '../lib/design-gate.js';
@@ -81,6 +82,8 @@ export function run(argv: string[], io: Io): Result {
     if (!existsSync(abs(flag('sessions')!))) throw new CacheError(`${cmd}: --sessions cache missing — list it first`);
     return docs('sessions', sessionDoc);
   };
+  // J-12: an optional --messages listing; a missing folder is no messages, as inbox and escalations read it.
+  const optMessages = () => (flag('messages') ? docs('messages', normalizeMessage) : undefined);
   // The runtime plan: the db plan cache (--db <dbcache dir>) when given, else the plan file.
   const loadView = (): { view: PlanView; project: string; version: string } => {
     const p = loadPlan();
@@ -312,9 +315,16 @@ export function run(argv: string[], io: Io): Result {
         const states = optStates();
         const integrated = base ? integratedShas(view, states, base, io.cwd) : undefined;
         const r = pickTask(view, states, { sessionId: session, track: flag('track'), sessions, now: io.now().getTime(), integrated });
+        // J-12: whether this session works next to others, so /waypoint:work reads references/multisession.md: what
+        // multiSession says, or a task an idle session left that recover would give this session (of its track, if it has one).
+        const now = io.now().getTime();
+        const track = flag('track');
+        const leftover = !!sessions && recoverableTasks(view, states, sessions, now)
+          .some(t => t.owner !== session && (!track || view.tasks.find(x => x.id === t.taskId)?.track === track));
+        const multi = leftover || multiSession({ sessions, messages: optMessages(), sid: session, inTrackWorktree: inLinkedWorktree(io.cwd), now });
         // unblock is only reported when true, as before
         const { unblock, ...rest } = r;
-        return ok(JSON.stringify(unblock ? r : rest));
+        return ok(JSON.stringify({ ...(unblock ? r : rest), multi }));
       }
       case 'conflicts': {
         const session = flag('session');
@@ -1038,6 +1048,17 @@ export function run(argv: string[], io: Io): Result {
     if (e instanceof DesignError || e instanceof CritiqueError) return fail(e.message);
     if (e instanceof PlanError || e instanceof CacheError) return fail(e.message);
     return fail(`error: ${(e as Error).message}`);
+  }
+}
+
+/** J-12: whether `cwd` is in a linked worktree (a track's), read from the nearest `.git` above it, without calling git. */
+function inLinkedWorktree(cwd: string): boolean {
+  for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
+    const git = path.join(dir, '.git');
+    if (existsSync(git)) {
+      try { return statSync(git).isFile() && mainCheckoutFrom(dir, readFileSync(git, 'utf8')) !== dir; } catch { return false; }
+    }
+    if (path.dirname(dir) === dir) return false;
   }
 }
 

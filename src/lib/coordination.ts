@@ -128,6 +128,24 @@ export function inboxFor(messages: Record<string, MessageDoc | undefined>, sessi
     });
 }
 
+/**
+ * J-12: whether a session works next to others, so /waypoint:work reads its multi-session protocol: another session of
+ * the listing is live (not idle by its one lease, A-05), a message addressed to this session is open, or it works in a
+ * track worktree. Without a sessions listing no other session counts as live. A broadcast (`to: '*'`) does not count:
+ * it stays open for everyone, and the skill keeps the ones it saw in seen.json.
+ */
+export function multiSession(i: {
+  sessions?: Record<string, SessionDoc | undefined>;
+  messages?: Record<string, MessageDoc | undefined>;
+  sid: string;
+  inTrackWorktree: boolean;
+  now: number;
+}): boolean {
+  if (i.inTrackWorktree) return true;
+  if (i.messages && inboxFor(i.messages, i.sid).some(m => m.to === i.sid)) return true;
+  return !!i.sessions && Object.entries(i.sessions).some(([id, s]) => id !== i.sid && !isIdle(s, i.now));
+}
+
 export function threadKey(m: MessageDoc): string {
   return `${m.taskId ?? '-'}|${[String(m.from), String(m.to)].sort().join('|')}`;
 }

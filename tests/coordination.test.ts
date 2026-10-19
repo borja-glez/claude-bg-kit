@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
-import { conflictsFor, escalationCandidates, inboxFor, isIdle, leaseOf, liveness, pickTask, recoverableTasks, sessionLiveness, threadKey, LEASE_MINUTES, SILENT_MINUTES } from '../src/lib/coordination.js';
+import { conflictsFor, escalationCandidates, inboxFor, isIdle, leaseOf, liveness, multiSession, pickTask, recoverableTasks, sessionLiveness, threadKey, LEASE_MINUTES, SILENT_MINUTES } from '../src/lib/coordination.js';
 import type { MessageDoc, SessionDoc, States } from '../src/lib/types.js';
 
 const base = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
@@ -266,5 +266,27 @@ describe('conflictsFor with a task without zones (D-09)', () => {
   it('a task without zones overlaps every task in progress', () => {
     const s: States = { T001: { status: 'in_progress', owner: 'be' } };
     expect(conflictsFor(plan, s, 'T006', 'ui')).toEqual([{ taskId: 'T001', owner: 'be', zones: [['**', 'src/db/**']] }]);
+  });
+});
+
+describe('multiSession (J-12)', () => {
+  const T0 = Date.parse('2026-10-11T12:00:00Z');
+  const at = (min: number) => new Date(T0 + min * MIN).toISOString();
+  const live: SessionDoc = { name: 'ui', heartbeatAt: at(-1), leaseUntil: at(9), status: 'active' };
+  const gone: SessionDoc = { name: 'ui', heartbeatAt: at(-40), leaseUntil: at(-30), status: 'active' };
+  const msg = (over: Partial<MessageDoc> = {}) =>
+    ({ ts: at(-2), from: 'ui', to: 'be', type: 'overlap_warning', taskId: 'T001', text: 'x', status: 'open', ...over }) as MessageDoc;
+  const base = { sid: 'be', inTrackWorktree: false, now: T0 };
+  it('alone it is false; another live session, an open message for this session or a track worktree make it true', () => {
+    expect(multiSession({ ...base, sessions: { be: live } })).toBe(false);
+    expect(multiSession({ ...base, sessions: { be: live, ui: live } })).toBe(true);
+    expect(multiSession({ ...base, sessions: {}, messages: { m1: msg() } })).toBe(true);
+    expect(multiSession({ ...base, sessions: {}, inTrackWorktree: true })).toBe(true);
+  });
+  it('a lease that ran out, an idle session, a broadcast, a resolved or own message, or no sessions listing do not count (Review Focus 2)', () => {
+    expect(multiSession({ ...base, sessions: { be: live, ui: gone } })).toBe(false);
+    expect(multiSession({ ...base, sessions: { ui: { ...live, status: 'idle' } } })).toBe(false);
+    expect(multiSession({ ...base, sessions: {}, messages: { m1: msg({ to: '*' }), m2: msg({ status: 'resolved' }), m3: msg({ from: 'be', to: 'ui' }) } })).toBe(false);
+    expect(multiSession({ ...base })).toBe(false);
   });
 });
