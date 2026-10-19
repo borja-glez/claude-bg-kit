@@ -12,9 +12,9 @@ import { UsageError } from '../errors.js';
 import { readLocal, updateLocal, mainCheckout } from '../../local.js';
 import { addDecision } from '../../decisions.js';
 import { TASK_ID } from '../../../lib/decisions.js';
-import { SP_MAX, spPlanPool, spSpecPool, type SpPlanEntry, type SpPool, type SpSpec } from '../../superpowers.js';
+import { SP_MAX, spPlanPool, spPlans, spSpecPool, spSpecs, type SpPlanEntry, type SpPool, type SpSpec } from '../../superpowers.js';
 import {
-  ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute,
+  ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, needsPools, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute,
   type RouteDoc, type RouteOption, type RouteStage,
 } from '../../route.js';
 import { superpowersOf, committedAt, declinedSpecs, spContext, triageCore } from '../shared.js';
@@ -145,14 +145,19 @@ export const command: Command = (args, ctx) => {
   const prefs = resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir));
   const sp = superpowersOf(io, repoDir);
   const now = io.now().getTime();
-  // K1-07: plans done elsewhere and specs already planned or handed off are no longer offered. I2: the request is matched
-  // against all of the pending ones, and the rest of their folders keep a request that names one from getting another.
-  const spc = sp.installed ? spContext(io, repoDir, now) : null;
-  const empty = <T>(): SpPool<T> => ({ pending: [], others: [] });
-  const specPool = spc ? spSpecPool(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)), routed: spc.routed }) : empty<SpSpec>();
-  const planPool = spc ? spPlanPool(repoDir, now, { committedAt: committedAt(io, repoDir), main: spc.main, subjects: spc.subjects }) : empty<SpPlanEntry>();
   // K1-07: the request names the plan or spec to recommend; the probe already read the file, so it reads.
   const text = textFile !== undefined ? (() => { try { return readFileSync(path.resolve(io.cwd, textFile), 'utf8'); } catch { return ''; } })() : '';
+  // K1-07: plans done elsewhere and specs already planned or handed off are no longer offered. I2: when the recommendation
+  // can use them (needsPools), the request is matched against all of the pending ones, and the rest of their folders keep
+  // a request that names one from getting another; else only the offered ones are read.
+  const spc = sp.installed ? spContext(io, repoDir, now) : null;
+  const wide = needsPools({ runPlan: has('run-plan'), buildSpec: has('build-spec'), text });
+  const specOpts = spc ? { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)), routed: spc.routed } : null;
+  const planOpts = spc ? { committedAt: committedAt(io, repoDir), main: spc.main, subjects: spc.subjects } : null;
+  const specPool: SpPool<SpSpec> = !specOpts ? { pending: [], others: [] }
+    : wide ? spSpecPool(repoDir, now, specOpts) : { pending: spSpecs(repoDir, now, specOpts), others: [] };
+  const planPool: SpPool<SpPlanEntry> = !planOpts ? { pending: [], others: [] }
+    : wide ? spPlanPool(repoDir, now, planOpts) : { pending: spPlans(repoDir, now, planOpts), others: [] };
   const options = routeOptions({
     path: p as PathName, prefs, superpowers: { installed: sp.installed, version: sp.version },
     specs: specPool.pending.slice(0, SP_MAX), plans: planPool.pending.slice(0, SP_MAX), pools: { specs: specPool, plans: planPool },

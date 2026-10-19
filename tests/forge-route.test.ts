@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { firstStage, listRoutes, namedOrFirst, normalizeRoute, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute } from '../src/forge/route.js';
+import { firstStage, listRoutes, namedOrFirst, needsPools, normalizeRoute, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute } from '../src/forge/route.js';
 import { resolvePrefs } from '../src/forge/prefs.js';
 import { readLocal } from '../src/forge/local.js';
 import { allDecisions } from '../src/forge/decisions.js';
@@ -78,6 +78,31 @@ describe('routeOptions', () => {
     const pools = { plans: none, specs: { pending: [SPEC_NEW], others: [{ path: 'docs/superpowers/specs/2026-10-01-checkout-design.md', title: 'Checkout' }] } };
     expect(routeOptions(input({ specs: [SPEC_NEW], buildSpec: true, text: 'build the checkout-design spec', pools })).recommended.option).toBe('forge');
     expect(routeOptions(input({ path: 'large', specs: [SPEC_NEW], buildSpec: true, text: 'build the checkout-design spec', pools })).recommended).toEqual({ option: 'forge', why: expect.stringContaining('large') });
+  });
+  it('a plan or spec not offered stops the fallback by its path, file or stem, or by a title of several words named whole: «Refactor» does not (residual 1)', () => {
+    const PENDING = { path: 'docs/superpowers/plans/2026-10-12-cart-refactor.md', title: 'Cart refactor', tasks: 2, done: 0 };
+    const DONE = { path: 'docs/superpowers/plans/2026-10-01-refactor.md', title: 'Refactor' };
+    expect(namedOrFirst([PENDING], 'run the plan to refactor the cart', [DONE])).toBe(PENDING);
+    expect(namedOrFirst([PENDING], 'carry out 2026-10-01-refactor.md', [DONE])).toBeUndefined();
+    expect(namedOrFirst([PENDING], 'carry out 2026-10-01-refactor', [DONE])).toBeUndefined();
+    expect(namedOrFirst([PENDING], 'carry out docs/superpowers/plans/2026-10-01-refactor.md', [DONE])).toBeUndefined();
+    const TOTALS = { path: 'docs/superpowers/plans/2026-10-01-totals.md', title: 'Cart totals' };
+    expect(namedOrFirst([PENDING], 'run the «Cart totals» plan', [TOTALS])).toBeUndefined();
+    expect(namedOrFirst([PENDING], 'run the plan for the cart totalsheet', [TOTALS])).toBe(PENDING);
+    // A pending plan still matches by any name it holds.
+    expect(namedOrFirst([{ ...PENDING, title: 'Refactor' }, { ...PENDING, path: 'docs/superpowers/plans/2026-10-13-x.md', title: 'Other' }].reverse(), 'run the refactor plan')!.title)
+      .toBe('Refactor');
+  });
+  it('the recommendation names the plan or the spec it carries in its why, for the question (residual 4)', () => {
+    expect(routeOptions(input({ plans: [PLAN], runPlan: true })).recommended.why).toContain(PLAN.path);
+    expect(routeOptions(input({ specs: [SPEC], buildSpec: true })).recommended.why).toContain(SPEC.path);
+  });
+  it('the pools are read only when a recommendation can use them: --run-plan, --build-spec or a docs/superpowers/ path (residual 2)', () => {
+    const base = { runPlan: false, buildSpec: false, text: 'add coupons to the cart' };
+    expect(needsPools(base)).toBe(false);
+    expect(needsPools({ ...base, runPlan: true })).toBe(true);
+    expect(needsPools({ ...base, buildSpec: true })).toBe(true);
+    expect(needsPools({ ...base, text: 'see Docs\\Superpowers\\plans\\x.md' })).toBe(true);
   });
   it('a request is matched against every pending plan, not only the three offered (I2)', () => {
     const plans = [12, 11, 10, 9].map(d => ({ path: `docs/superpowers/plans/2026-10-${String(d).padStart(2, '0')}-plan-${d}.md`, title: `Plan number ${d}`, tasks: 2, done: 0 }));

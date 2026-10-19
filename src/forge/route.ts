@@ -28,15 +28,32 @@ export interface RouteOutput {
 const fold = (s: string) => s.normalize('NFD').replace(/\p{M}+/gu, '').normalize('NFC').toLowerCase();
 // What follows a folder's path in a request: the file it names, up to a space, a quote or a bracket.
 const NAMED_FILE = /[^\s"'`<>()[\]{},;|*]*/y;
+const DATE_PREFIX = /^\d{4}-\d{2}-\d{2}-/;
+// A letter or a digit: what never touches a whole phrase at either end.
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+/** Whether `t` holds `n` as a whole phrase: no letter or digit right before or after it. */
+function holdsWhole(t: string, n: string): boolean {
+  for (let at = t.indexOf(n); at >= 0; at = t.indexOf(n, at + 1)) {
+    if (!WORD_CHAR.test(t[at - 1] ?? '') && !WORD_CHAR.test(t[at + n.length] ?? '')) return true;
+  }
+  return false;
+}
+
+/** I2: whether a request's recommendation can use the pools (every pending plan and spec, and the rest of their folders):
+ *  with --run-plan or --build-spec, or a docs/superpowers/ path in its text. Else forge route reads only the offered ones. */
+export const needsPools = (o: { runPlan: boolean; buildSpec: boolean; text: string }): boolean =>
+  o.runPlan || o.buildSpec || o.text.replace(/\\/g, '/').toLowerCase().includes('docs/superpowers/');
 
 /**
  * K1-07, I2: the plan or the spec a request names, else the first (the most recent with work left). `entries` are every
  * pending one, newest first (not only the SP_MAX offered); `others`, the rest of their folder (done, cited, handed off,
  * declined or older than the window), are named only so that naming one never recommends another.
  * - A path into their folder (`docs/superpowers/plans/<file>`) decides alone: the entry with that file, else none.
- * - Else the longest name the text holds (T8: `cart-totals-v2` over `cart-totals`), among the entries and the others:
- *   its path, its file name with or without `.md` and the date, or its title (6 characters or more: a short word names
- *   nothing). An entry's: that entry; one of the others': none.
+ * - Else the longest name the text holds (T8: `cart-totals-v2` over `cart-totals`), among the entries and the others,
+ *   6 characters or more (a short word names nothing). An entry: its path, its file name with or without `.md` and the
+ *   date, or its title. One of the others: its path, its file name, or its stem with the date; its stem without the date
+ *   and its title only when they have several words and the text holds them whole, so a common word («Refactor») never
+ *   takes a pending plan's place. An entry's: that entry; one of the others': none.
  * - Nothing named: the first.
  */
 export function namedOrFirst<T extends { path: string; title: string }>(entries: readonly T[], text: string, others: readonly SpNamed[] = []): T | undefined {
@@ -57,15 +74,18 @@ export function namedOrFirst<T extends { path: string; title: string }>(entries:
     }
   }
   if (named.size) return entries.find(e => named.has(fileOf(e.path)) || named.has(stemOf(e.path)));
-  const longest = (e: SpNamed) => {
+  const longest = (e: SpNamed, offered: boolean) => {
     const stem = stemOf(e.path);
-    return [fold(e.path), fileOf(e.path), stem, stem.replace(/^\d{4}-\d{2}-\d{2}-/, ''), fold(e.title ?? '')]
-      .filter(n => n.length >= 6 && t.includes(n)).reduce((m, n) => Math.max(m, n.length), 0);
+    const exact = [fold(e.path), fileOf(e.path), ...(DATE_PREFIX.test(stem) ? [stem] : [])];
+    const loose = [stem.replace(DATE_PREFIX, ''), fold(e.title ?? '')];
+    const held = [...exact, ...loose].filter(n => n.length >= 6 && t.includes(n)
+      && (offered || exact.includes(n) || (/[\s_-]/.test(n.trim()) && holdsWhole(t, n))));
+    return held.reduce((m, n) => Math.max(m, n.length), 0);
   };
   // Ties go to the entries, the most recent first.
   let best: { entry: T | undefined; length: number } = { entry: undefined, length: 0 };
-  for (const e of entries) { const n = longest(e); if (n > best.length) best = { entry: e, length: n }; }
-  for (const o of others) { const n = longest(o); if (n > best.length) best = { entry: undefined, length: n }; }
+  for (const e of entries) { const n = longest(e, true); if (n > best.length) best = { entry: e, length: n }; }
+  for (const o of others) { const n = longest(o, false); if (n > best.length) best = { entry: undefined, length: n }; }
   return best.length ? best.entry : entries[0];
 }
 
@@ -88,9 +108,12 @@ export function routeOptions(i: {
   const plan = namedOrFirst(i.pools?.plans.pending ?? i.plans, i.text ?? '', i.pools?.plans.others);
   const spec = namedOrFirst(i.pools?.specs.pending ?? i.specs, i.text ?? '', i.pools?.specs.others);
   let recommended: Recommendation;
-  if (i.runPlan && plan) recommended = { option: 'superpowers-plan', why: 'an unfinished superpowers plan to carry out: forge executes and reviews each task', plan: plan.path };
-  else if (i.buildSpec && spec) recommended = { option: 'superpowers-design', why: 'a recent superpowers spec not imported yet: forge builds from it', spec: spec.path };
-  else if (i.path === 'large' && i.prefs.autonomy === 'auto') recommended = { option: 'forge', why: 'large, in auto mode: forge designs, critiques and approves it without asking' };
+  // The why names the plan or the spec, so the person can tell at the question whether it is the one they meant.
+  if (i.runPlan && plan) {
+    recommended = { option: 'superpowers-plan', why: `the unfinished superpowers plan ${plan.path} to carry out: forge executes and reviews each task`, plan: plan.path };
+  } else if (i.buildSpec && spec) {
+    recommended = { option: 'superpowers-design', why: `the recent superpowers spec ${spec.path}, not imported yet: forge builds from it`, spec: spec.path };
+  } else if (i.path === 'large' && i.prefs.autonomy === 'auto') recommended = { option: 'forge', why: 'large, in auto mode: forge designs, critiques and approves it without asking' };
   else if (i.path === 'large') recommended = { option: 'forge', why: 'large: forge designs it with waypoint, critiques, plans and builds' };
   else recommended = { option: 'forge', why: 'forge triages, implements and reviews it' };
   return { ...base, options: ['forge', 'superpowers', 'superpowers-design', 'superpowers-plan'], recommended };
