@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseIndex, assignIds, recordRound, answeredBy, idsOf, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, carriedResiduals, carriedOutOfModel, type FindingsIndex,
 } from '../src/forge/findings-index.js';
-import type { Finding, Review, ReviewerName } from '../src/forge/verdict.js';
+import { parseVerifyFile, synthesize, verifyReview, weightsFor, type Finding, type Review, type ReviewerName } from '../src/forge/verdict.js';
 
 const fail = (findings: Finding[]): Review => ({ verdict: 'fail', confidence: 0.8, findings });
 const pass: Review = { verdict: 'pass', confidence: 0.9, findings: [] };
@@ -251,6 +251,20 @@ describe('findings index (J-06)', () => {
     expect(one.rounds[0].findings[0]).toMatchObject({ id: 'F1', check: 'cart' });
     const { withIds } = review(one, 2, { verify: fail([v('cart total', 'cart total: expected 10, observed 0 items in the cart'), v('cart', 'cart: expected 2 items, observed a blank page')]) });
     expect(ids(withIds.verify)).toEqual(['F2', 'F1']);
+  });
+  it('a check whose name is over 200 characters, failing the same way twice, keeps its id and blocks (M8)', () => {
+    const name = 'the checkout flow '.repeat(14).trim();
+    expect(name.length).toBe(251);
+    const failed = () => verifyReview(parseVerifyFile(JSON.stringify({ surfaces: ['web'], result: 'fail', checks: [{ id: 1, surface: 'web', name, ok: false, expected: 'paid', observed: '500' }] })));
+    const w = weightsFor({ sensitive: false, perf: false });
+    const one = assignIds(empty(), 1, { verify: failed() });
+    // The index as review-close writes it and the next review reads it back.
+    const index = parseIndex(JSON.stringify(recordRound(empty(), 1, synthesize(one, w, true, [], { round: 1 }), answeredBy(one))), 'T1-1');
+    const two = assignIds(index, 2, { verify: failed() });
+    const v = synthesize(two, w, true, [], { round: 2, open: openIds(index, 2), closed: closedFor(index, 2, idsOf(two), answeredBy(two)) });
+    expect(ids(two.verify)).toEqual(['F1']);
+    expect(v).toMatchObject({ action: 'fix', deferred: [] });
+    expect(v.important.map(f => f.id)).toEqual(['F1']);
   });
 });
 

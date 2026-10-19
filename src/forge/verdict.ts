@@ -266,6 +266,7 @@ export function parseVerifyFile(text: string | null): VerifyFile | null {
 
 // As a review: pass is a confident pass; each failed check is a finding with `verify/<surface>` as its evidence and its
 // check's name (K2-10): critical on the main flow, important otherwise, minor when it failed because of the environment.
+// The name is cut to 200 characters as the findings index keeps it (M8), so the same check always matches its entry.
 // Blocked is the agent saying it could not verify: an abstention with its reason (K2-09); an unusable file abstains, invalid.
 export function verifyReview(v: VerifyFile | null): Review {
   if (!v) return invalidReview();
@@ -273,7 +274,7 @@ export function verifyReview(v: VerifyFile | null): Review {
   if (v.result === 'pass') return { verdict: 'pass', confidence: 1, findings: [] };
   const findings: Finding[] = v.checks.filter(c => !c.ok).map(c => ({
     severity: c.env ? 'minor' : c.main ? 'critical' : 'important', file: `verify/${c.surface || 'app'}`,
-    problem: `${c.name}: expected ${c.expected}, observed ${c.observed}`, check: c.name || `check ${c.id}`,
+    problem: `${c.name}: expected ${c.expected}, observed ${c.observed}`, check: (c.name || `check ${c.id}`).slice(0, 200),
   }));
   return { verdict: 'fail', confidence: 1, findings };
 }
