@@ -245,6 +245,13 @@ describe('findings index (J-06)', () => {
     }
     expect(expressCandidate(of([open()]), 1)).toBe(false);
   });
+  it('a verify finding keeps the id of the same check whatever it observed, and never pairs by its words with another check (K2-10)', () => {
+    const v = (check: string, problem: string): Finding => ({ severity: 'important', file: 'verify/web', problem, check });
+    const one = review(empty(), 1, { verify: fail([v('cart', 'cart: expected 2 items, observed 0 items in the cart')]) }).index;
+    expect(one.rounds[0].findings[0]).toMatchObject({ id: 'F1', check: 'cart' });
+    const { withIds } = review(one, 2, { verify: fail([v('cart total', 'cart total: expected 10, observed 0 items in the cart'), v('cart', 'cart: expected 2 items, observed a blank page')]) });
+    expect(ids(withIds.verify)).toEqual(['F2', 'F1']);
+  });
 });
 
 describe('the handover (C-15)', () => {

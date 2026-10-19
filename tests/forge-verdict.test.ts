@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, parseHunks, correctOrigin, breaksRubric, type Review, type Finding, type ClosedFinding, type RoundOptions } from '../src/forge/verdict.js';
+import { decideRound } from '../src/forge/loop.js';
 
 const pass = (confidence = 1, findings: Review['findings'] = []): Review => ({ verdict: 'pass', confidence, findings });
 const fail = (confidence = 1, findings: Review['findings'] = []): Review => ({ verdict: 'fail', confidence, findings });
@@ -202,7 +203,7 @@ describe('verify.json', () => {
     expect(fail.verdict).toBe('fail');
     expect(fail.findings.map(f => [f.severity, f.file])).toEqual([['critical', 'verify/web'], ['important', 'verify/web']]);
     expect(fail.findings[0].problem).toBe('c1: expected e, observed o');
-    expect(verifyReview(parseVerifyFile(file({ result: 'blocked', reason: 'x', checks: [] })))).toEqual({ verdict: 'abstain', confidence: 0, findings: [], invalid: true });
+    expect(verifyReview(parseVerifyFile(file({ result: 'blocked', reason: 'x', checks: [] })))).toEqual({ verdict: 'abstain', confidence: 0, findings: [], abstained: true, reason: 'x' });
     expect(verifyReview(null)).toEqual({ verdict: 'abstain', confidence: 0, findings: [], invalid: true });
   });
   it('the result follows the checks unless blocked', () => {
@@ -213,7 +214,7 @@ describe('verify.json', () => {
     expect(oneFailed!.result).toBe('fail');
     const r = verifyReview(oneFailed);
     expect(r.verdict).toBe('fail');
-    expect(r.findings).toEqual([{ severity: 'important', file: 'verify/web', problem: 'c2: expected e, observed o' }]);
+    expect(r.findings).toEqual([{ severity: 'important', file: 'verify/web', problem: 'c2: expected e, observed o', check: 'c2' }]);
   });
   it('a failing main check fails the verdict like a critical correctness finding', () => {
     const W2 = weightsFor({ sensitive: false, perf: false });
@@ -225,6 +226,34 @@ describe('verify.json', () => {
   it('a blocked verify never fails the task by itself', () => {
     const r = synthesize({ correctness: pass(), verify: verifyReview(parseVerifyFile(file({ result: 'blocked', reason: 'x', checks: [] }))) }, weightsFor({ sensitive: false, perf: false }), true);
     expect(r.action).toBe('accept');
+  });
+  it('blocked is a declared abstention with its reason, never invalid output (K2-09)', () => {
+    const blocked = verifyReview(parseVerifyFile(file({ result: 'blocked', reason: 'the emulator did not boot', checks: [] })));
+    expect(blocked).toEqual({ verdict: 'abstain', confidence: 0, findings: [], abstained: true, reason: 'the emulator did not boot' });
+    const r = synthesize({ correctness: pass(), verify: blocked }, weightsFor({ sensitive: false, perf: false }), true);
+    expect(r.reviewers.find(x => x.name === 'verify')).toMatchObject({ verdict: 'abstain', invalid: false });
+  });
+  it('a failed check of the environment is minor and opens no round; when every failed check is, the result is blocked (K2-10)', () => {
+    const env = (id: number) => ({ ...check(id, false), env: true });
+    const mixed = parseVerifyFile(file({ result: 'fail', checks: [check(1, false), env(2), check(3, true)] }))!;
+    expect(mixed.result).toBe('fail');
+    expect(verifyReview(mixed).findings.map(f => [f.check, f.severity])).toEqual([['c1', 'important'], ['c2', 'minor']]);
+    const onlyEnv = parseVerifyFile(file({ result: 'fail', checks: [env(1), check(2, true)] }))!;
+    expect(onlyEnv).toMatchObject({ result: 'blocked', reason: 'environment: c1' });
+    expect(verifyReview(onlyEnv)).toMatchObject({ verdict: 'abstain', abstained: true });
+    expect(parseVerifyFile(file({ result: 'fail', reason: 'port 41000 taken', checks: [env(1)] }))).toMatchObject({ result: 'blocked', reason: 'port 41000 taken' });
+    const r = synthesize({ correctness: pass(), verify: verifyReview(parseVerifyFile(file({ result: 'fail', checks: [check(1, false), env(2)] }))) },
+      weightsFor({ sensitive: false, perf: false }), true);
+    expect(r.minor.map(f => f.check)).toEqual(['c2']);
+  });
+  it('the same failed check observed differently is the same blocking set: same signature, and the loop stalls (K2-10)', () => {
+    const W = weightsFor({ sensitive: false, perf: false });
+    const review = (observed: string) => synthesize({ correctness: pass(), verify: verifyReview(parseVerifyFile(file({ result: 'fail', checks: [{ ...check(1, false, true), observed }] }))) }, W, true);
+    const a = review('the cart shows 0 items'), b = review('a blank page after 3 s');
+    expect(a.signature).toMatch(/^v2:/);
+    expect(b.signature).toBe(a.signature);
+    const h = (x: typeof a) => ({ action: x.action, score: x.score, signature: x.signature });
+    expect(decideRound([h(a), h(b)], 'medium').next).toBe('stalled');
   });
 });
 

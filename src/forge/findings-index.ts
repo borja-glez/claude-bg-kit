@@ -8,7 +8,7 @@ import { breaksRubric, type ClosedFinding, type Finding, type Origin, type Resid
 export type IndexStatus = 'open' | 'closed' | 'residual' | 'minor';
 export interface IndexedFinding {
   id: string; reviewer: ReviewerName; severity: Finding['severity']; file?: string; line?: number; problem: string;
-  fix?: string; origin?: Origin; regression?: boolean; outOfModel?: boolean; residual?: Residual; status: IndexStatus;
+  fix?: string; origin?: Origin; regression?: boolean; outOfModel?: boolean; residual?: Residual; check?: string; status: IndexStatus;
 }
 /** `fresh`: the first review after a redo (I4); what reviews before it closed was about the reverted attempt. */
 export interface IndexRound { round: number; findings: IndexedFinding[]; fresh?: true }
@@ -54,7 +54,8 @@ function entryOf(x: unknown): IndexedFinding | null {
     id: o.id, reviewer, severity, ...(typeof o.file === 'string' && o.file ? { file: o.file } : {}),
     ...(Number.isInteger(o.line) && (o.line as number) >= 0 ? { line: o.line as number } : {}), problem: o.problem,
     ...(typeof o.fix === 'string' ? { fix: o.fix } : {}), ...(origin ? { origin } : {}), ...(o.regression === true ? { regression: true } : {}),
-    ...(o.outOfModel === true ? { outOfModel: true } : {}), ...(residual ? { residual } : {}), status,
+    ...(o.outOfModel === true ? { outOfModel: true } : {}), ...(residual ? { residual } : {}),
+    ...(typeof o.check === 'string' && o.check ? { check: o.check.slice(0, 200) } : {}), status,
   };
 }
 
@@ -115,8 +116,17 @@ export function assignIds(index: FindingsIndex, round: number, reviews: Partial<
       const named = hinted.has(f) ? open.find(o => o.id === hinted.get(f) && o.reviewer === n && !taken.has(o.id)) : undefined;
       if (named && pairFindings([f], [named])[0] === 0) { list[i] = { ...f, id: named.id }; taken.add(named.id); }
     });
+    // K2-10: a verify finding keeps the id of the open one of the same check and evidence, whatever it observed this time;
+    // it never pairs by its words with another check's.
+    if (n === 'verify') {
+      list.forEach((f, i) => {
+        if (f.id || f.check === undefined || f.severity === 'minor') return;
+        const same = open.find(o => o.reviewer === 'verify' && !taken.has(o.id) && o.check === f.check && o.file === f.file);
+        if (same) { list[i] = { ...f, id: same.id }; taken.add(same.id); }
+      });
+    }
     const loose = list.map((f, i) => ({ f, i }))
-      .filter(x => x.f.severity !== 'minor' && !x.f.id && (x.f.origin === undefined || x.f.origin === 'previous'));
+      .filter(x => x.f.severity !== 'minor' && !x.f.id && x.f.check === undefined && (x.f.origin === undefined || x.f.origin === 'previous'));
     const free = open.filter(o => o.reviewer === n && !taken.has(o.id));
     const pairs = pairFindings(loose.map(x => x.f), free);
     loose.forEach((x, k) => {
@@ -151,7 +161,8 @@ function entry(f: Finding, status: IndexStatus): IndexedFinding | null {
     id: f.id, reviewer: f.reviewer, severity: f.declared ?? f.severity, ...(f.file ? { file: f.file } : {}),
     ...(f.line !== undefined ? { line: f.line } : {}), problem: f.problem, ...(f.fix ? { fix: f.fix } : {}),
     ...(f.origin ? { origin: f.origin } : {}), ...(f.regression ? { regression: true } : {}),
-    ...(f.outOfModel ? { outOfModel: true } : {}), ...(f.residual ? { residual: f.residual } : {}), status,
+    ...(f.outOfModel ? { outOfModel: true } : {}), ...(f.residual ? { residual: f.residual } : {}),
+    ...(f.check ? { check: f.check } : {}), status,
   };
 }
 

@@ -23,10 +23,14 @@ export interface Finding {
   residual?: Residual;
   /** Set by the CLI: the severity the reviewer gave a finding the CLI lowered to minor (outOfModel). */
   declared?: 'critical' | 'important' | 'minor';
+  /** Set by the CLI on a verify finding: the name of its check (K2-10). Its stable id and the signature follow the check,
+   *  not what the agent observed this time. */
+  check?: string;
 }
 /** A finding an earlier review of the brief closed; `round` is the last review that had it open (J-06, hardening). */
 export interface ClosedFinding extends Finding { id: string; round: number }
-export interface Review { verdict: 'pass' | 'fail' | 'abstain'; confidence: number; findings: Finding[]; approach?: 'ok' | 'wrong'; invalid?: boolean; dropped?: number; incomplete?: boolean }
+// abstained (K2-09): the reviewer said it could not judge (a verify agent's blocked), with its reason: an abstention, never invalid output to respawn.
+export interface Review { verdict: 'pass' | 'fail' | 'abstain'; confidence: number; findings: Finding[]; approach?: 'ok' | 'wrong'; invalid?: boolean; dropped?: number; incomplete?: boolean; abstained?: true; reason?: string }
 export interface FailingValidator { validator: string; failures: string[]; failing?: string[] }
 export interface Weights { correctness: number; security: number; perf: number; verify: number }
 export type Action = 'accept' | 'fix' | 'redo';
@@ -209,7 +213,7 @@ export function weightsFor(opts: { sensitive: boolean; perf: boolean }): Weights
   return { correctness: 0.5, security: 0.3, perf: 0.2, verify: 0.5 };
 }
 
-export interface VerifyCheck { id: number; surface: string; name: string; main: boolean; ok: boolean; expected: string; observed: string; shot: string | null }
+export interface VerifyCheck { id: number; surface: string; name: string; main: boolean; ok: boolean; expected: string; observed: string; shot: string | null; env: boolean }
 export interface VerifyFile {
   surfaces: string[]; result: 'pass' | 'fail' | 'blocked'; reason: string | null; checks: VerifyCheck[]; unchecked: string[];
   learned: { surface: string; note: string }[]; proposals: { surface: string; change: string }[];
@@ -237,11 +241,17 @@ export function parseVerifyFile(text: string | null): VerifyFile | null {
   const checks = objs(r.checks).map((c, i) => ({
     id: typeof c.id === 'number' ? c.id : i + 1, surface: s(c.surface), name: s(c.name), main: truthy(c.main), ok: truthy(c.ok),
     expected: s(c.expected), observed: s(c.observed), shot: typeof c.shot === 'string' && c.shot.trim() ? c.shot : null,
+    env: truthy(c.env),
   }));
+  // K2-10: when every failed check is of the environment (it did not start, the port was taken, a tool is missing), the
+  // verification could not judge the brief: blocked, with those checks as its reason when the agent gave none.
+  const failed = checks.filter(c => !c.ok);
+  const envOnly = result !== 'blocked' && failed.length > 0 && failed.every(c => c.env);
   return {
     surfaces: Array.isArray(r.surfaces) ? r.surfaces.filter((x): x is string => typeof x === 'string') : [],
     // Unless blocked, the checks decide: a stated result that disagrees with them is overridden.
-    result: result === 'blocked' ? result : checks.some(c => !c.ok) ? 'fail' : 'pass', reason,
+    result: result === 'blocked' || envOnly ? 'blocked' : failed.length ? 'fail' : 'pass',
+    reason: envOnly && !reason ? `environment: ${failed.map(c => c.name || `check ${c.id}`).join(', ')}` : reason,
     checks,
     unchecked: Array.isArray(r.unchecked) ? r.unchecked.map(s) : [],
     learned: objs(r.learned).filter(l => typeof l.note === 'string' && l.note.trim()).map(l => ({ surface: s(l.surface), note: s(l.note) })),
@@ -249,14 +259,16 @@ export function parseVerifyFile(text: string | null): VerifyFile | null {
   };
 }
 
-// As a review: pass is a confident pass; each failed check is a finding (critical on the main flow, important
-// otherwise) with `verify/<surface>` as its evidence; blocked or unusable abstains, flagged invalid.
+// As a review: pass is a confident pass; each failed check is a finding with `verify/<surface>` as its evidence and its
+// check's name (K2-10): critical on the main flow, important otherwise, minor when it failed because of the environment.
+// Blocked is the agent saying it could not verify: an abstention with its reason (K2-09); an unusable file abstains, invalid.
 export function verifyReview(v: VerifyFile | null): Review {
-  if (!v || v.result === 'blocked') return invalidReview();
+  if (!v) return invalidReview();
+  if (v.result === 'blocked') return { verdict: 'abstain', confidence: 0, findings: [], abstained: true, reason: v.reason ?? 'blocked' };
   if (v.result === 'pass') return { verdict: 'pass', confidence: 1, findings: [] };
   const findings: Finding[] = v.checks.filter(c => !c.ok).map(c => ({
-    severity: c.main ? 'critical' : 'important', file: `verify/${c.surface || 'app'}`,
-    problem: `${c.name}: expected ${c.expected}, observed ${c.observed}`,
+    severity: c.env ? 'minor' : c.main ? 'critical' : 'important', file: `verify/${c.surface || 'app'}`,
+    problem: `${c.name}: expected ${c.expected}, observed ${c.observed}`, check: c.name || `check ${c.id}`,
   }));
   return { verdict: 'fail', confidence: 1, findings };
 }
@@ -422,7 +434,8 @@ export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weigh
   // J-06: what blocks, by severity and stable id (file and problem for a finding without one), and the failing validators
   // by their failing tests, in any order (their failure lines when those are unknown). Prefixed v2: so a signature from
   // forge 0.17 or older, made of the problem's text, never matches; empty when nothing blocks.
-  const key = (f: Finding) => `${f.severity}|${f.id ?? `${f.file ?? ''}|${f.problem.trim().toLowerCase()}`}`;
+  // K2-10: a verify finding without an id is its surface and its check, never what was observed.
+  const key = (f: Finding) => `${f.severity}|${f.id ?? (f.check !== undefined ? `${f.file ?? ''}|check:${f.check}` : `${f.file ?? ''}|${f.problem.trim().toLowerCase()}`)}`;
   const blocking = [
     ...[...critical, ...blockingImportant].map(key),
     ...failingValidators.map(v => `validator|${v.validator}|${(v.failing?.length ? [...v.failing].sort() : v.failures).join('\n')}`),
