@@ -349,13 +349,11 @@ export function run(argv: string[], io: Io): Result {
         // No notes directory yet means nobody has written a note: not an error.
         if (!existsSync(abs(dir))) return ok(JSON.stringify({ notes: [], latest: null, say: [], mentions: [] }));
         if (!statSync(abs(dir)).isDirectory()) return fail('notes cache missing — list notes first');
-        const all: (NoteDoc & { id: string })[] = [];
-        for (const f of readdirSync(abs(dir)).filter(x => x.endsWith('.json')).sort()) {
-          try {
-            const n = normalizeNote(JSON.parse(readFileSync(path.join(abs(dir), f), 'utf8')));
-            if (n) all.push({ ...n, id: f.slice(0, -5) });
-          } catch { /* corrupt note file: ignore */ }
-        }
+        // I-14: through docsIn like every listing, so a note that does not read is said on stderr; in file-name order
+        // (an object lists integer-like ids first, so the order is that of the file names again).
+        const byFile = (a: string, b: string) => (`${a}.json` < `${b}.json` ? -1 : `${a}.json` > `${b}.json` ? 1 : 0);
+        const all: (NoteDoc & { id: string })[] = Object.entries(docsIn<NoteDoc>(dir, normalizeNote))
+          .sort(([a], [b]) => byFile(a, b)).map(([id, n]) => ({ ...n, id }));
         const stamps = all.flatMap(n => [Date.parse(n.ts), Date.parse(n.answeredAt ?? '')]).filter(t => !Number.isNaN(t));
         const latest = stamps.length ? new Date(Math.max(...stamps)).toISOString() : null;
         const since = flag('since') ?? null;

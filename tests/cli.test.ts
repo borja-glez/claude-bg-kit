@@ -2130,6 +2130,17 @@ describe('notes command', () => {
     const none = JSON.parse(run(['notes', '--notes', d, '--since', '2030-01-01T00:00:00Z'], io).stdout);
     expect(none.notes).toEqual([]);
   });
+  it('a note file that does not read, or is no note, is skipped and said on stderr, with the same result and exit 0 (I-14)', () => {
+    const d = writeNotes({ bad: '{not json', nul: 'null', odd: { type: 'nope' }, ok: note });
+    const r = run(['notes', '--notes', d, '--since', 'garbage'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout).notes.map((n: { id: string }) => n.id)).toEqual(['ok']);
+    expect(r.stderr.split('\n').filter(Boolean)).toEqual(['bad.json', 'nul.json', 'odd.json'].map(f => `warning: skipped ${d}/${f} (unreadable)`));
+  });
+  it('notes of the same time keep the order of their file names', () => {
+    const d = writeNotes({ 10: note, 9: note, a: note });
+    expect(JSON.parse(run(['notes', '--notes', d, '--since', 'garbage'], io).stdout).notes.map((n: { id: string }) => n.id)).toEqual(['10', '9', 'a']);
+  });
   it('latest is null for an empty directory', () => {
     const d = writeNotes({});
     expect(JSON.parse(run(['notes', '--notes', d], io).stdout)).toEqual({ notes: [], latest: null, say: [], mentions: [] });
