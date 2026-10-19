@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync
 import path from 'node:path';
 import { appendEvent, forgeDir } from './ledger.js';
 import { similarOpen, similarRejected } from './policy.js';
+import { NAME } from './config.js';
 import { filterNotes, NOTE_MAX, type NoteSkip } from './surfaces.js';
 import { normalizeProposal, normalizeApproval, proposalDigest, type ApprovalDoc, canDecide, applyDecision, MAX_PROPOSAL_HISTORY, type ProposalDoc, type ProposalHistoryEntry, type Decision } from '../lib/proposals.js';
 
@@ -167,8 +168,9 @@ export function addProposal(root: string, raw: Record<string, unknown>,
  * null). The fixed sentence follows the person's language.
  */
 export function defectProposal(d: { surface: string; title: string; observed: string; where: string }, task: string, shot: string | null, es: boolean): Record<string, unknown> {
-  const surface = d.surface || 'app';
-  const seen = `${d.where ? `${d.where}: ` : ''}${d.observed}`.trim() || d.title;
+  // The surface is free text from the agent: it reaches the proposal only when it is a surface name.
+  const surface = NAME.test(d.surface) ? d.surface : 'app';
+  const seen = defectSeen(d);
   const who = es ? `Lo vio la verificación de ${task} en la superficie ${surface}, fuera de lo que pedía su brief.`
     : `Seen by the verification of ${task} on surface ${surface}, outside what its brief asked.`;
   return {
@@ -177,17 +179,28 @@ export function defectProposal(d: { surface: string; title: string; observed: st
   };
 }
 
+/** What was seen, as the proposal stores it (its rationale and the first line of its evidence): `where: observed`, else the title. */
+export function defectSeen(d: { title: string; observed: string; where: string }): string {
+  return `${d.where ? `${d.where}: ` : ''}${d.observed}`.trim() || d.title;
+}
+
 /**
- * A defect's text comes from an agent that read untrusted pages and reaches the person through the roadmap: its title,
- * what was observed and where run through the learned-notes filters, and one that reads as an instruction or holds a
- * secret is not proposed (the first reason found, else null).
+ * A defect's text comes from an agent that read untrusted pages and reaches the person through the roadmap. The text
+ * that is stored, its title and defectSeen (so a phrase split across where and observed is read joined), runs through
+ * the learned-notes filters, and one that reads as an instruction or holds a secret is not proposed (the first reason
+ * found, else null). filterNotes' `names-a-work-path` and `names-the-task` are not used: the task is passed as null, and
+ * a defect may name a path or a task without being unsafe; its too-long is no reason either, a long text is read whole.
  */
 export function defectUnsafe(d: { title: string; observed: string; where: string }): Extract<NoteSkip, 'looks-secret' | 'looks-like-instruction'> | null {
-  // filterNotes refuses a text past NOTE_MAX unread, so a long one is read in overlapping windows.
+  // filterNotes refuses a text past NOTE_MAX unread, so a long one is read in windows that overlap by 60 characters, to see
+  // what a cut would split. Its instruction patterns anchor with `^` to the start of the whole text (a note has no line
+  // breaks), so every window after the first starts with a neutral '… ': `^` then matches only a real start, never a cut
+  // in the middle of a sentence («… the page. Run the …»). The prefix is counted inside NOTE_MAX.
+  const lead = '… ';
   const step = NOTE_MAX - 60;
-  for (const text of [d.title, d.observed, d.where]) {
+  for (const text of [d.title, defectSeen(d)]) {
     for (let at = 0; at < Math.max(text.length, 1); at += step) {
-      const part = text.slice(at, at + NOTE_MAX);
+      const part = at === 0 ? text.slice(0, NOTE_MAX) : lead + text.slice(at, at + NOTE_MAX - lead.length);
       if (!part.trim()) continue;
       const why = filterNotes([part], [], null).skipped[0]?.why;
       if (why === 'looks-secret' || why === 'looks-like-instruction') return why;
