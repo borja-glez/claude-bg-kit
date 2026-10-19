@@ -85,6 +85,16 @@ export function parsePlanTasks(md: string): PlanTask[] {
   return tasks;
 }
 
+// Carry from 4d: a line scan and a trim, never a regex whose whitespace runs compete (that one was quadratic).
+function planTitle(md: string): string {
+  for (const line of md.split(/\r?\n/)) {
+    if (!line.startsWith('#') || !/\s/.test(line.charAt(1))) continue;
+    const text = line.slice(1).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
 export interface TodoSummary { total: number; done: number; inProgress: string | null; next: string[]; active: string[]; cells: string }
 
 const TODO_ACTIVE_MAX = 3;
@@ -249,7 +259,7 @@ function superpowers(input: {
       // Without a checked step the checkboxes say nothing: a plan run by subagents keeps them empty and, once its
       // ledger is deleted, would show as not started.
       if (!plan.some(p => p.checked > 0)) return null;
-      const title = /^#\s+(.+?)\s*$/m.exec(input.planFallback)?.[1] ?? '';
+      const title = planTitle(input.planFallback);
       return {
         plan: clip(title), tasks: plan.length,
         done: plan.filter(p => p.steps > 0 && p.checked === p.steps).length, current: null, lastLines: [],

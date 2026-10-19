@@ -161,6 +161,23 @@ describe('buildPanelModel', () => {
     const m = buildPanelModel({ ...base, planFallback: PLAN });
     expect(m.superpowers).toMatchObject({ tasks: 3, done: 1, current: null, lastLines: [] });
   });
+  it('reads the title of a fallback plan from its first single-hash line', () => {
+    const title = (plan: string) => (buildPanelModel({ ...base, planFallback: plan }).superpowers as { plan: string }).plan;
+    const step = '### Task 1: A\n- [x] step\n';
+    expect(title(`# Plan title  \n${step}`)).toBe('Plan title');
+    expect(title(`## Sub\n# Real\n${step}`)).toBe('Real');
+    expect(title(`# T\r\n${step}`)).toBe('T');
+    expect(title(`#\n# Next\n${step}`)).toBe('Next');
+    expect(title(`#   \n${step}`)).toBe('');
+    expect(title(step)).toBe('');
+  });
+  it('reads a hostile fallback plan title in linear time', () => {
+    const plan = `#${' '.repeat(40_000)}a${' '.repeat(40_000)}b\n### Task 1: A\n- [x] step\n`;
+    const t0 = performance.now();
+    const m = buildPanelModel({ ...base, planFallback: plan });
+    expect(performance.now() - t0).toBeLessThan(500);
+    expect((m.superpowers as { plan: string }).plan).toBe(`a${' '.repeat(79)}`);
+  });
   it('hides a fallback plan with no checked step (one run by subagents, whose ledger is gone)', () => {
     expect(buildPanelModel({ ...base, planFallback: PLAN.replace(/\[x\]/g, '[ ]') }).superpowers).toBeNull();
   });
