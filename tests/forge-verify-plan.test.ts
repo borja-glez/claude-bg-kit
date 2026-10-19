@@ -7,6 +7,9 @@ import { surfaceHash, type Surface, type Draft } from '../src/forge/surfaces.js'
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readEvents } from '../src/forge/ledger.js';
 import { readLocal, writeLocal, type SurfacePermission } from '../src/forge/local.js';
+import { readExecution } from '../src/forge/execution.js';
+import type { ExecutionState } from '../src/lib/execution-state.js';
+import { seedExecution } from './helpers/execution.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
 
@@ -345,5 +348,74 @@ describe('verdict with verify.json and verify-cleanup', () => {
     expect(readEvents(root).some(e => e.kind === 'verify')).toBe(false);
     const none = run(['verdict', '--task', 'shop-final', '--dir', '.forge/work/shop/final-1', '--verify', '.forge/work/flow-r1-1/none.json'], at);
     expect(none.code).toBe(3);
+  });
+});
+
+describe('permission questions once per run (K2-08)', () => {
+  let root: string;
+  let io: Io;
+  const g = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const exec = (): ExecutionState => ({
+    runId: 'shop-1', kind: 'plan', mode: 'subagents', parallel: 2, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+    coordinator: 'main', hookSession: null, active: true, stopReason: null, stallReason: null, startedAt: '2026-10-16T09:00:00.000Z', lastStepAt: null,
+    lastBlockStep: null, sleepUntil: null, closedAt: null, closedBy: null, tasks: {},
+  });
+  const vp = (task: string, ...extra: string[]) =>
+    JSON.parse(run(['verify-plan', '--task', task, '--path', 'medium', '--base', 'x', ...extra], { ...io, git: () => 'src/ui/Cart.tsx\n' }).stdout);
+  beforeEach(() => {
+    root = tmp('forge-vpre-');
+    io = { cwd: root, now: () => new Date('2026-10-16T10:00:00Z'), env: {} };
+    g('init', '-q', '-b', 'main'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't'); g('config', 'core.autocrlf', 'false');
+    const files: [string, string][] = [
+      ['src/ui/Cart.tsx', 'x\n'], ['bin/cli.js', 'x\n'],
+      ['.forge/verify/web.md', '---\naffects: ["src/ui/**"]\n---\n# Web\n'], ['.forge/verify/cli.md', '---\naffects: ["bin/**"]\n---\n# CLI\n'],
+      ['plan.yaml', 'project: shop\nlocale: en\nversion: "1"\ntracks:\n  - { id: a, name: A, color: blue }\nphases:\n  - { id: p1, name: P1 }\n'
+        + 'tasks:\n  - { id: T1, title: Cart badge, track: a, phase: p1, done_when: the badge shows the count, zones: [src/ui/**] }\n'],
+    ];
+    for (const [f, text] of files) {
+      mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
+      writeFileSync(path.join(root, f), text);
+    }
+    g('add', '-A'); g('commit', '-qm', 'init');
+  });
+  it("verify-preflight lists the surfaces the plan's zones may use that need the person, with their question", () => {
+    writeFileSync(path.join(root, '.forge', 'verify', 'docs.md'), '# Docs\n');
+    const out = JSON.parse(run(['verify-preflight', '--plan', 'plan.yaml', '--locale', 'en'], io).stdout);
+    expect(out.surfaces.map((s: { name: string; permission: string; tasks: string[] }) => [s.name, s.permission, s.tasks])).toEqual([['web', 'ask', ['T1']]]);
+    expect(out.surfaces[0].ask.options).toEqual(['Yes, always', 'Not this time', 'Never in this project']);
+    expect(run(['local', 'set', 'surfaces.web', 'allowed'], io).code).toBe(0);
+    expect(JSON.parse(run(['verify-preflight', '--plan', 'plan.yaml'], io).stdout).surfaces).toEqual([]);
+  });
+  it('a local.yaml that git tracks grants no surface to verify-preflight (R6)', () => {
+    writeFileSync(path.join(root, '.forge', 'local.yaml'),
+      `surfaces:\n  web:\n    state: allowed\n    hash: ${surfaceHash('---\naffects: ["src/ui/**"]\n---\n# Web\n')}\n`);
+    g('add', '-f', '.forge/local.yaml'); g('commit', '-qm', 'ship local');
+    const out = JSON.parse(run(['verify-preflight', '--plan', 'plan.yaml', '--locale', 'en'], io).stdout);
+    expect(out.surfaces.map((s: { name: string; permission: string }) => [s.name, s.permission])).toEqual([['web', 'ask']]);
+  });
+  it('«No, esta vez» lasts the run: verify-plan marks the surface skipped and logs only its verify-skip', () => {
+    seedExecution(root, exec());
+    expect(run(['verify-preflight', '--skip', 'web'], io).code).toBe(0);
+    const out = vp('T1-1');
+    expect(out.surfaces).toEqual([expect.objectContaining({ name: 'web', permission: 'skipped' })]);
+    expect(out.surfaces[0]).not.toHaveProperty('ask');
+    expect(readEvents(root).filter(e => e.kind === 'verify-skip').map(e => [e.task, e.surface])).toEqual([['T1-1', 'web']]);
+    expect(run(['verify-preflight', '--skip', 'web'], { ...io, cwd: tmp('forge-vpre-none-') }).code).toBe(2);
+  });
+  it("--skip is the coordinator's: from a forge task worktree it exits 2 and records nothing (R1)", () => {
+    seedExecution(root, exec());
+    // The smallest worktree ledgerRoot recognises: <main>/.claude/worktrees/task-*, its .git file pointing into the main .git.
+    const wt = path.join(root, '.claude', 'worktrees', 'task-T1-1');
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(path.join(wt, '.git'), `gitdir: ${path.join(root, '.git', 'worktrees', 'task-T1-1')}\n`);
+    expect(run(['verify-preflight', '--skip', 'web'], { ...io, cwd: wt }).code).toBe(2);
+    expect(readExecution(root)!.verifySkip).toBeUndefined();
+  });
+  it('unattended, each task logs its verify-skip and the question note is asked for once per surface and run', () => {
+    seedExecution(root, exec());
+    expect(vp('T1-1', '--unattended').surfaces[0]).toMatchObject({ name: 'web', permission: 'ask', note: true });
+    expect(vp('T2-1', '--unattended').surfaces[0]).toMatchObject({ name: 'web', permission: 'ask', note: false });
+    expect(readEvents(root).filter(e => e.kind === 'verify-skip').map(e => e.task)).toEqual(['T1-1', 'T2-1']);
+    expect(readdirSync(path.join(root, '.forge', 'execution', 'asked', 'shop-1'))).toEqual(['web.json']);
   });
 });

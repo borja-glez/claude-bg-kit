@@ -139,6 +139,17 @@ describe('the stopped task status (D3, K2-02)', () => {
   });
 });
 
+describe('verifySkip and flow (K2-08, K2-13)', () => {
+  it('keeps surface names once and a well-formed flow; drops what is not', () => {
+    const e = normalizeExecution({ ...base, verifySkip: ['web', 'web', '../x', 3], flow: { sha: 'abc1234', at: '2026-10-16T10:00:00.000Z', result: 'fail' } })!;
+    expect(e).toMatchObject({ verifySkip: ['web'], flow: { sha: 'abc1234', at: '2026-10-16T10:00:00.000Z', result: 'fail' } });
+    expect(e).not.toHaveProperty('verifyAsked');
+    expect(normalizeExecution({ ...base, flow: { sha: 'zz', at: 'x', result: 'maybe' } })!.flow).toBeNull();
+    expect(normalizeExecution(base)).not.toHaveProperty('verifySkip');
+    expect(normalizeExecution(base)).not.toHaveProperty('flow');
+  });
+});
+
 describe('ExecTask.sha (G-06)', () => {
   it('keeps the sha swarm integrate wrote, and drops one that is not a sha', () => {
     const at = '2026-10-16T10:00:00.000Z';

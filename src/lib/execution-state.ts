@@ -44,6 +44,10 @@ export interface ExecutionState {
   closedAt?: string | null;
   /** C2: what closed it; null without a closedAt. */
   closedBy?: 'merge' | 'close' | null;
+  /** K2-08: the surfaces the person answered «No, esta vez» for in this run: verify-plan skips them until it ends. */
+  verifySkip?: string[];
+  /** K2-13: the run's last flow pass: the commit it verified, when, and its result; null when what was stored is not one. */
+  flow?: { sha: string; at: string; result: 'pass' | 'fail' | 'blocked' } | null;
 }
 
 // STAGES lives in types.ts (pure, so the roadmap page can bundle it without this file's yaml/zod imports); re-exported here.
@@ -94,6 +98,17 @@ function normalizeTask(x: unknown, now?: number): ExecTask | null {
   };
 }
 
+// K2-08: surface names (forge's NAME rule), each once, at most 100.
+const SURFACE = /^[A-Za-z0-9_.:-]{1,64}$/;
+const surfaceList = (x: unknown): string[] | null =>
+  (Array.isArray(x) ? [...new Set(x.filter((s): s is string => typeof s === 'string' && SURFACE.test(s) && s !== '.' && s !== '..'))].slice(0, 100) : null);
+// K2-13: the last flow pass, or null when what is there is not one.
+const flowOf = (x: unknown): ExecutionState['flow'] => {
+  if (!isObj(x) || typeof x.sha !== 'string' || !/^[0-9a-f]{7,64}$/i.test(x.sha) || !iso(x.at)) return null;
+  const result = oneOf(['pass', 'fail', 'blocked'] as const, x.result);
+  return result ? { sha: x.sha, at: x.at as string, result } : null;
+};
+
 export function normalizeExecution(x: unknown, now?: number): ExecutionState | null {
   if (!isObj(x)) return null;
   const mode = oneOf(['subagents', 'sessions'] as const, x.mode);
@@ -125,6 +140,8 @@ export function normalizeExecution(x: unknown, now?: number): ExecutionState | n
     ...(typeof x.planned === 'number' && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}),
     ...(x.autonomy === 'auto' ? { autonomy: 'auto' as const } : {}),
     ...(isLocale(x.locale) ? { locale: x.locale } : {}),
+    ...(surfaceList(x.verifySkip) ? { verifySkip: surfaceList(x.verifySkip)! } : {}),
+    ...(x.flow !== undefined ? { flow: flowOf(x.flow) } : {}),
   };
 }
 

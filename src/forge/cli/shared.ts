@@ -1,6 +1,6 @@
 // I-12: the helpers of src/forge/cli that more than one command uses. Each command lives in commands/<name>.ts.
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { appendEvent, readEvents } from '../ledger.js';
 import { readRunText, stopFile, type RunState, type StopContext } from '../run.js';
@@ -25,8 +25,9 @@ import { detectValidators, globMatch } from '../validators.js';
 import { mcpInventory } from '../tools.js';
 import { defaultProcDeps, stopEvidence, type EvidenceCleanup, type ProcDeps } from '../verify-proc.js';
 import { releaseEnv } from '../verify-env.js';
-import { readLocal, mainCheckout, readLearned, recordLearned, surfacePermissions, OBJECT_ID } from '../local.js';
-import { appendLearned, LEARNED_GUARD, filterNotes, learnedNotes, type NoteSkip, surfaceFile, permissionHash, hashMatches } from '../surfaces.js';
+import { readLocal, mainCheckout, readLearned, recordLearned, surfacePermissions, OBJECT_ID, type SurfacePermission } from '../local.js';
+import { appendLearned, LEARNED_GUARD, filterNotes, learnedNotes, type NoteSkip, surfaceFile, permissionHash, hashMatches, type Surface } from '../surfaces.js';
+import { askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
 import { claudeConfigDir, claudeJsonDir, locateSuperpowersFor, spLedgerDone, spSkillPath, SP_WINDOW_MS } from '../superpowers.js';
 import { listRoutes } from '../route.js';
 import { markDone, parseSpPlan, SpPlanError } from '../../lib/sp-plan.js';
@@ -82,6 +83,55 @@ export function surfaceBlob(dir: string, file: string): string | null {
       { cwd: dir, input: text, encoding: 'utf8', timeout: 10000, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true }).trim();
     return OBJECT_ID.test(id) ? id : null;
   } catch { return null; }
+}
+
+// The whole diff of a surface whose question shows it capped, in <root>/.forge/work/surfaces/<name>-<hash 16>.diff
+// (written to a new file, then renamed into place): its absolute path, or null when it cannot be written or a
+// directory on the way is a link (a commit can ship .forge/work as one, to make forge write elsewhere).
+export function writeFullDiff(root: string, name: string, hash: string, diff: string): string | null {
+  let dir = root;
+  for (const part of ['.forge', 'work', 'surfaces']) {
+    dir = path.join(dir, part);
+    try { if (lstatSync(dir).isSymbolicLink()) return null; } catch { /* missing: made below */ }
+  }
+  const file = path.join(dir, `${name}-${hash.slice(0, 16)}.diff`);
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(tmp, diff, { flag: 'wx' });
+    renameSync(tmp, file);
+    return file;
+  } catch {
+    try { rmSync(tmp, { force: true }); } catch { /* leave it */ }
+    return null;
+  }
+}
+
+// What the question about a surface that is not allowed shows: for a changed one, the diff from the blob allowed to the
+// file now (its header naming the file, capped; null without a stored blob, when git cannot, or when nothing differs)
+// and the commits since the allowance (the last 3 of the file when its commit is unknown), then the question with its
+// three answers. A capped diff says so (diffTruncated) and leaves the whole one in diffFile (null when it could not be
+// written), so a line pushed past the cap is still shown. Every git call ignores replace refs, which anyone who can
+// write the repository's refs could use to show another content than the one allowed. `dir`: where the surface was
+// read; `work`: the caller's directory, which holds forge's own files.
+export function surfaceQuestion(p: PlanSurface, s: Surface, perm: SurfacePermission | undefined, git: (args: string[]) => string | null, dir: string, work: string, es: boolean): PlanSurface {
+  if (p.permission === 'allowed' || p.permission === 'skipped') return p;
+  if (p.permission === 'ask') return { ...p, ask: askFor(s, 'ask', es) };
+  const lines = (out: string | null) => (out ?? '').split('\n').map(l => l.trim()).filter(Boolean);
+  let diff: string | null = null;
+  let cut: Pick<PlanSurface, 'diffTruncated' | 'diffFile'> = {};
+  if (perm?.blob) {
+    const now = surfaceBlob(dir, s.file);
+    const d = now ? git(['--no-replace-objects', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', perm.blob, now]) : null;
+    if (d && now) {
+      const full = relabelDiff(d, perm.blob, now, s.file);
+      diff = capLines(full, 120, es);
+      if (diff !== full) cut = { diffTruncated: true, diffFile: writeFullDiff(work, s.name, p.hash, full) };
+    }
+  }
+  const since = perm?.commit ? git(['--no-replace-objects', 'log', '--oneline', '-n', '10', `${perm.commit}..HEAD`, '--', s.file]) : null;
+  const commits = lines(since ?? git(['--no-replace-objects', 'log', '--oneline', '-n', '3', '--', s.file]));
+  return { ...p, diff, ...cut, commits, ask: askFor(s, 'changed', es) };
 }
 
 // The time git last committed a file of the repository (sp-specs and sp-plans), in ms; null when it does not track it.

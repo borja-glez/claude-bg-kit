@@ -11,7 +11,7 @@ import type { LocalState } from './local.js';
 export interface Ask { question: string; options: string[] }
 export interface PlanSurface {
   // hash: the surface's permission hash now, for `local set surfaces.<name> allowed --expect <hash>`.
-  name: string; permission: 'allowed' | 'ask' | 'changed'; match: string | null; missing: string[]; unknown: string[]; hash: string;
+  name: string; permission: 'allowed' | 'ask' | 'changed' | 'skipped'; match: string | null; missing: string[]; unknown: string[]; hash: string;
   /** K2-15: how deep its agent checks it: `flow` when the diff touches its flow globs, else `smoke`. */
   depth: 'flow' | 'smoke';
   // What the question to the user shows (the CLI adds them): the change since the allowance (changed) and the question.
@@ -26,6 +26,8 @@ const firstMatch = (globs: string[], changed: string[] | null): string | undefin
 export function verifyPlan(i: {
   path: string; asked: boolean; changed: string[] | null; surfaces: Surface[]; drafts: Draft[];
   local: Pick<LocalState, 'surfaces' | 'proposed'>; tools: (s: Surface) => { missing: string[]; unknown: string[] };
+  /** K2-08: the surfaces the person answered «No, esta vez» for in this run: one that would ask is `skipped`. */
+  skip?: readonly string[];
 }): VerifyPlan {
   if ((i.path === 'trivial' || i.path === 'small') && !i.asked) return { eligible: false, surfaces: [], drafts: [], reason: `${i.path}: no tool verification unless the task asks for it` };
   const surfaces: PlanSurface[] = [];
@@ -43,7 +45,8 @@ export function verifyPlan(i: {
       depth = flow !== undefined ? 'flow' : 'smoke';
     }
     // An allowance covers the content it was given for: an edited surface (another commit, a PR) asks again.
-    const permission = perm?.state !== 'allowed' ? 'ask' : hashMatches(perm.hash, s.hash) ? 'allowed' : 'changed';
+    const asked = perm?.state !== 'allowed' ? 'ask' : hashMatches(perm.hash, s.hash) ? 'allowed' : 'changed';
+    const permission: PlanSurface['permission'] = asked !== 'allowed' && i.skip?.includes(s.name) ? 'skipped' : asked;
     const { missing, unknown } = i.tools(s);
     surfaces.push({ name: s.name, permission, match, depth, missing, unknown, hash: s.hash });
   }
@@ -82,4 +85,24 @@ export function capLines(text: string, max: number, es: boolean): string {
   if (more <= 0) return text;
   const note = es ? `… (${more} ${more === 1 ? 'línea más' : 'líneas más'})` : `… (${more} more ${more === 1 ? 'line' : 'lines'})`;
   return `${[...lines.slice(0, max), note].join('\n')}\n`;
+}
+
+/**
+ * K2-08: the surfaces an execution asks about before any task starts: not allowed as they are now (ask, or changed since
+ * the allowance; a denied one never runs) and with affects, flow or smoke, that match a tracked file of some task's zones
+ * (a task without zones is the whole repository). A surface without affects is asked in its task, as before.
+ */
+export function preflight(i: { tasks: { id: string; zones: string[] }[]; tracked: string[]; surfaces: Surface[]; local: Pick<LocalState, 'surfaces'> }):
+  { name: string; permission: 'ask' | 'changed'; tasks: string[] }[] {
+  const out: { name: string; permission: 'ask' | 'changed'; tasks: string[] }[] = [];
+  for (const s of i.surfaces) {
+    const perm = i.local.surfaces[s.name];
+    if (perm?.state === 'denied' || (perm?.state === 'allowed' && hashMatches(perm.hash, s.hash))) continue;
+    const globs = [...(s.affects ?? []), ...(s.smoke ?? [])];
+    if (!globs.length) continue;
+    const hits = i.tracked.filter(f => globs.some(g => globMatch(g, f)));
+    const tasks = i.tasks.filter(t => hits.some(f => !t.zones.length || t.zones.some(z => globMatch(z, f)))).map(t => t.id);
+    if (tasks.length) out.push({ name: s.name, permission: perm?.state === 'allowed' ? 'changed' : 'ask', tasks });
+  }
+  return out;
 }
