@@ -178,7 +178,7 @@ describe('plugin layout', () => {
     const large = runRef('large');
     for (const w of ['final-validators-2.json', 'final-2.patch', '--dir .forge/work/<project>/final-2 --validators .forge/work/<project>/final-validators-2.json',
       '`redo` is treated as `fix`', '--no-merged', 'design-page']) expect(large).toContain(w);
-    expect(md).toContain('FORGE log --kind ruling --task <id>-<n>');
+    expect(runRef('review-close')).toContain('FORGE log --kind ruling --task <id>-<n>');
     expect(read('plugins/forge/README.md')).toContain('keeps its verdict and still scores');
   });
   it('waypoint work skill hands §3 to forge when forge drives the session', () => {
@@ -604,7 +604,7 @@ describe('plugin layout', () => {
     for (const s of ['FORGE verify-plan', 'forge-verify', 'FORGE local set surfaces.', '--path', '`new`']) expect(md).toContain(s);
     expect(md).toMatch(/explains how to check something[\s\S]*\.forge\/verify\/<name>\.md/);
     expect(md).toMatch(/[Rr]ead `references\/verify\.md` now and follow `## Before the review`/);
-    expect(md).toMatch(/[Rr]ead `references\/verify\.md` now and follow `## After the verdict`/);
+    expect(runRef('review-close')).toMatch(/[Rr]ead `references\/verify\.md` now and follow `## After the verdict`/);
     const ref = runRef('verify');
     for (const s of ['## Before the review', '## After the verdict', 'FORGE surfaces learn', 'FORGE local set surfaces.', 'verify-skip', 'FORGE verify-cleanup', 'asset: true', 'permission: changed'])
       expect(ref, s).toContain(s);
@@ -620,8 +620,11 @@ describe('plugin layout', () => {
     expect(md).toContain('`FORGE` below means `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs"`');
     for (const w of ['FORGE triage', 'FORGE validate', 'FORGE review-prep', 'FORGE review-close', 'FORGE agents', 'FORGE log',
       '## Trivial', '## Small', '## Medium', '## Large', '## Resuming', 'fresh-stronger', 'forge-fable', '--text-file', '--data-file', '<id>-<n>', 'FORGE prep --task <id>-1 --path small --no-baseline',
-      '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`','`revert`', '`invalid: true`',
-      '`failures` of every validator with `ok: false` and no `preexisting` in `validators-<n>.json`', '--baseline .forge/work/<id>/baseline-<n>.json']) expect(md).toContain(w);
+      '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`',
+      '--baseline .forge/work/<id>/baseline-<n>.json']) expect(md).toContain(w);
+    for (const w of ['`revert`', '`invalid: true`', '`failures` of every validator with `ok: false` and no `preexisting` in `validators-<n>.json`', 'breaker', 'stalled', 'fresh-stronger']) {
+      expect(runRef('review-close'), w).toContain(w);
+    }
     for (const w of ['FORGE verdict', '/waypoint:design']) expect(runRef('large')).toContain(w);
     expect(runRef('execution')).toContain('--base-run');
     // FORGE last lives in the resuming reference; the core's Resuming line names what sends you there.
@@ -752,7 +755,7 @@ describe('plugin layout', () => {
   });
   it('forge:run is split into references: each exists, the core cites it and no longer repeats its text', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
-    for (const f of ['large', 'execution', 'ephemeral', 'superpowers-plan', 'manual-member', 'resuming', 'autonomy', 'decisions', 'verify']) {
+    for (const f of ['large', 'execution', 'ephemeral', 'superpowers-plan', 'manual-member', 'resuming', 'autonomy', 'decisions', 'verify', 'review-close']) {
       expect(existsSync(new URL(`../plugins/forge/skills/run/references/${f}.md`, import.meta.url)), f).toBe(true);
       expect(run, f).toMatch(new RegExp(`[Rr]ead \`references/${f}\\.md\` now`));
     }
@@ -811,7 +814,7 @@ describe('plugin layout', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
     const medium = run.slice(run.indexOf('## Medium'), run.indexOf('### Superpowers plan'));
     const steps = read('plugins/forge/skills/run/references/task-steps.md');
-    for (const [label, s] of [['Medium', medium], ['task-steps', steps]] as const) {
+    for (const [label, s] of [['Medium', medium + runRef('review-close')], ['task-steps', steps]] as const) {
       for (const w of ['FORGE review-prep --task', 'FORGE review-close --task', '`spawn`', "the Agent tool's `model`", '`effort`', 'shadow/',
         '`missing`', '`deferred`', '`next`', '`implementer`', '`carried`']) expect(s, `${label}: ${w}`).toContain(w);
       expect(s, `${label} still calls verdict`).not.toMatch(/FORGE verdict/);
@@ -1141,7 +1144,7 @@ describe('plugin layout', () => {
     const steps = runRef('task-steps');
     const conv = runRef('convergence');
     for (const s of [medium, steps]) expect(s).toContain('references/convergence.md');
-    for (const w of ['`revert`', '`handover`', '`threatModel`', '`express: true`', 'Threat model: <that path>']) expect(medium, w).toContain(w);
+    for (const w of ['`revert`', '`handover`', '`threatModel`', '`express: true`', 'Threat model: <that path>']) expect(medium + runRef('review-close'), w).toContain(w);
     expect(medium).not.toContain('git revert --no-edit');
     for (const w of ['FORGE shadow collect --task', '`shadowPending`', '`ask`', '--out-of-model', '--defer', 'NEEDS_CONTEXT', '`validators.cmd`', 'run_in_background',
       '`residual`', '`reviews`', 'threatModel.outOfScope', '"point": "ruling"', 'AskUserQuestion', '`revert.args`', '`revert.steps`', 'git revert -m 1']) expect(conv, w).toContain(w);
@@ -1996,5 +1999,23 @@ describe('plugin layout', () => {
     for (const w of ['## 6. Messages between sessions', '## 7. Release', 'node "<WP>" inbox <plan>', 'node "<WP>" recover <plan>', 'node "<WP>" escalations <plan>',
       '--recovered-from', '**Lost task.**', '**Zone expansion.**', '**Delegation.**', '**Phase close.**', '`WP`', '`DB`', '`SID`', '`<plan>`']) expect(multi, w).toContain(w);
     for (const w of ['## 6. Messages between sessions', '## 7. Release', 'node "<WP>" inbox', 'node "<WP>" recover']) expect(work, w).not.toContain(w);
+  });
+  it('a run member never reads forge:run SKILL.md: the close of a review round is references/review-close.md, cited by Medium and the task steps (J-12)', () => {
+    const steps = runRef('task-steps');
+    const member = read('plugins/forge/skills/member/SKILL.md');
+    for (const [name, s] of [['task-steps', steps], ['member', member]] as const) {
+      expect(s, name).not.toContain('../SKILL.md');
+      expect(s, name).not.toContain('skills/run/SKILL.md');
+    }
+    expect(member).toContain('review-close.md');
+    const close = runRef('review-close');
+    for (const w of ['FORGE review-close --task <id>-<n> --dir <WORK> --path <path>', '`missing`', '`invalid: true`', '`incomplete`', 'FORGE log --kind ruling --task <id>-<n>',
+      '**Findings to send**', '`deferred`', '`resume`', '`fresh-stronger`', '`redo`', '`breaker`', '`stalled`', '`tierUp: true`', '`last: true`', 'references/convergence.md',
+      '## After the verdict']) expect(close, w).toContain(w);
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    const medium = run.slice(run.indexOf('\n## Medium'), run.indexOf('### Superpowers plan'));
+    expect(medium.split('\n').find(l => l.startsWith('6. '))).toContain('references/review-close.md');
+    expect(steps.split('\n').find(l => l.startsWith('5. **verdict**'))).toContain('references/review-close.md');
+    expect(steps.split('\n').find(l => l.startsWith('4. **verify**'))).toContain('FORGE verify-plan --task T-<n>');
   });
 });

@@ -1,6 +1,6 @@
 # Convergence of the review loop
 
-Read from forge:run (Medium steps 3, 5 and 6 in `SKILL.md`) and from `references/task-steps.md` (steps 2, 4 and 5). `FORGE` and `<id>-<n>` mean what the skill that sent you here says; in an execution every FORGE call also takes `--cwd <worktree>`, as the task steps do.
+Read from forge:run (Medium steps 3 and 5 in `SKILL.md`, and `references/review-close.md`) and from `references/task-steps.md` (steps 2, 4 and 5). `FORGE` and `<id>-<n>` mean what the skill that sent you here says; in an execution every FORGE call also takes `--cwd <worktree>`, as the task steps do.
 
 **Reviews and residuals.** review-prep and review-close print `reviews`: review `n` of at most `max` (4 reviews on Medium, 5 on Large). Every critical and important finding has an `id` (`F1`, `F2`…) for the whole brief, kept in `findings-index-<n>.json`. review-close's `deferred` lists the findings that do not block, each with its `id` and its `residual` (`untouched`, `docs`, `late-round`, `hardening`, `cap`, `out-of-model`, `architecture`): the task goes on, and the report that closes the work lists each one with its id, its `residual`, file and line, for the person to decide. When a round opens anyway, the `untouched`, `docs` and `late-round` ones also go to the implementer.
 

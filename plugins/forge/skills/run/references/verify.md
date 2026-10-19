@@ -1,6 +1,6 @@
 # Tool verification
 
-Read from forge:run (`## Medium` step 3b and step 6 in `SKILL.md`). `FORGE`, `<id>` and the Medium steps cited here mean what that skill says. `<WORK>` is the task's work folder: `.forge/work/<id>` on the Medium path; in an execution, the `work` that `FORGE swarm worktree` printed.
+Read from forge:run (`## Medium` step 3b in `SKILL.md`), from `references/review-close.md` and from `references/task-steps.md` (step 4). `FORGE`, `<id>` and the Medium steps cited here mean what that skill says. `<WORK>` is the task's work folder: `.forge/work/<id>` on the Medium path; in an execution, the `work` that `FORGE swarm worktree` printed.
 
 ## Before the review
 
