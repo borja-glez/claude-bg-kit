@@ -47,7 +47,7 @@ export interface ExecutionState {
   /** K2-08: the surfaces the person answered «No, esta vez» for in this run: verify-plan skips them until it ends. */
   verifySkip?: string[];
   /** K2-13: the run's last flow pass: the commit it verified, when, and its result; null when what was stored is not one. */
-  flow?: { sha: string; at: string; result: 'pass' | 'fail' | 'blocked' } | null;
+  flow?: { sha: string; at: string; result: 'pass' | 'fail' | 'blocked'; since?: string } | null;
 }
 
 // STAGES lives in types.ts (pure, so the roadmap page can bundle it without this file's yaml/zod imports); re-exported here.
@@ -106,7 +106,8 @@ const surfaceList = (x: unknown): string[] | null =>
 const flowOf = (x: unknown): ExecutionState['flow'] => {
   if (!isObj(x) || typeof x.sha !== 'string' || !/^[0-9a-f]{7,64}$/i.test(x.sha) || !iso(x.at)) return null;
   const result = oneOf(['pass', 'fail', 'blocked'] as const, x.result);
-  return result ? { sha: x.sha, at: x.at as string, result } : null;
+  const since = typeof x.since === 'string' && /^[0-9a-f]{7,64}$/i.test(x.since) ? x.since : null;
+  return result ? { sha: x.sha, at: x.at as string, result, ...(since ? { since } : {}) } : null;
 };
 
 export function normalizeExecution(x: unknown, now?: number): ExecutionState | null {

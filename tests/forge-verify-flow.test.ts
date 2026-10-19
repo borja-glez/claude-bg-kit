@@ -113,6 +113,26 @@ describe('the flow pass (K2-13)', () => {
     expect(both.code).toBe(2);
     expect(both.stderr).toContain('--since and --whole-run');
   });
+  it("a blocked pass keeps its base: the next pass still diffs from the pass's own since, and moves it only after a pass or a fail (M6)", () => {
+    const first = vp().flow;
+    writeFileSync(path.join(root, first.dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'blocked', reason: 'the emulator did not boot', checks: [] }));
+    expect(run(['verify-close', '--flow', first.dir, '--locale', 'en'], io).code).toBe(0);
+    expect(readExecution(root)!.flow).toMatchObject({ sha: first.head, result: 'blocked', since: base });
+    integrate('T3', 'src/ui/More.tsx');
+    const second = vp().flow;
+    expect(second).toMatchObject({ n: 2, since: base });
+    expect(readFileSync(path.join(root, second.brief), 'utf8')).toContain('- T1: Cart badge');
+    writeFileSync(path.join(root, second.dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'blocked', reason: 'again', checks: [] }));
+    expect(run(['verify-close', '--flow', second.dir, '--locale', 'en'], io).code).toBe(0);
+    integrate('T4', 'src/ui/Other.tsx');
+    const third = vp().flow;
+    expect(third).toMatchObject({ n: 3, since: base });
+    writeFileSync(path.join(root, third.dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'pass', checks: [] }));
+    expect(run(['verify-close', '--flow', third.dir, '--locale', 'en'], io).code).toBe(0);
+    expect(readExecution(root)!.flow).toMatchObject({ sha: third.head, result: 'pass', since: base });
+    integrate('T5', 'src/ui/Last.tsx');
+    expect(vp().flow).toMatchObject({ n: 4, since: third.head });
+  });
   it("flowSince: the last pass, else the commit before the first integration of one of the run's tasks, else none", () => {
     expect(flowSince({ tasks: execution().tasks }, gitFn)).toBe(base);
     expect(flowSince({ tasks: execution().tasks, flow: { sha: 'abc1234', at: AT, result: 'pass' } }, gitFn)).toBe('abc1234');

@@ -22,7 +22,7 @@ export function flowDirs(root: string, runId: string): string[] {
 }
 
 /**
- * The commit a flow pass diffs from: the last pass's (execution.flow); else the first parent of the run's first
+ * The commit a flow pass diffs from: the last pass's (execution.flow), or that pass's own base when it was blocked; else the first parent of the run's first
  * integration on HEAD. That integration is the oldest merge among the shas the run recorded for its tasks; with none
  * recorded, the oldest merge titled `forge: integrate <T>` of one of its tasks since the run started (the run branch
  * is reused across runs, and plan ids repeat). Null before any.
@@ -30,6 +30,8 @@ export function flowDirs(root: string, runId: string): string[] {
 export function flowSince(
   e: Pick<ExecutionState, 'flow' | 'tasks'> & { startedAt?: string }, git: (args: string[]) => string | null,
 ): string | null {
+  // A blocked pass verified nothing: its base stays, so the next pass covers what it should have.
+  if (e.flow?.result === 'blocked' && e.flow.since) return e.flow.since;
   if (e.flow?.sha) return e.flow.sha;
   return runStart(e, git);
 }

@@ -96,7 +96,7 @@ export const command: Command = (args, ctx) => {
       if (!logged || logged.result !== v.result) {
         appendEvent(io.cwd, { ts: ts(), kind: 'verify-flow', runId: pass.runId, result: v.result, passed, total, dir: relDir });
       }
-      updateExecution(mainCheckout(io.cwd), cur => (cur && cur.runId === pass.runId ? { ...cur, flow: { sha: pass.head, at: ts(), result: v.result } } : null));
+      updateExecution(mainCheckout(io.cwd), cur => (cur && cur.runId === pass.runId ? { ...cur, flow: { sha: pass.head, at: ts(), result: v.result, since: pass.since } } : null));
     } else {
       const last = eventsOf(ledger, { project: resolveProject({ flag: flag('project'), dir: dirArg, task, events: ledger }), task })
         .filter(e => e.kind === 'verify' && isTask(e, task) && typeof e.result === 'string').at(-1);
