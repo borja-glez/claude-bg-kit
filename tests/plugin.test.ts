@@ -2113,7 +2113,12 @@ describe('plugin layout', () => {
     expect(v).toContain('the code checkout');
     for (const a of ['forge-verify', 'forge-verify-heavy']) expect(read(`plugins/forge/agents/${a}.md`), a).toContain('--cwd <code checkout>');
     const manual = read('plugins/forge/skills/verify/SKILL.md');
-    for (const w of ['FORGE verify-env --task manual-<date>', 'smoke']) expect(manual, w).toContain(w);
+    for (const w of ['FORGE verify-env --task manual-<date>', 'smoke', 'FORGE verify-close --task manual-<date>-<hhmm>']) expect(manual, w).toContain(w);
+  });
+  it('the final fix wave keeps the checkout of an allowance and the whole-run final pass in the text agents follow (B-I1, B-I2)', () => {
+    expect(runRef('verify')).toContain('takes `--cwd <the checkout verify-plan read>`');
+    expect(runRef('large')).toContain('verify-plan --run --whole-run');
+    expect(runRef('verify')).toContain('add `--whole-run`');
   });
 
   it('/forge:review prepares and closes with the CLI, offers verify and logs done (K2-17)', () => {
