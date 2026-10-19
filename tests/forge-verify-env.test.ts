@@ -7,6 +7,7 @@ import { run, type Io } from '../src/forge/cli/run.js';
 import { readEvents, type LedgerEvent } from '../src/forge/ledger.js';
 import { deriveStatus } from '../src/lib/forge-status.js';
 import { envDir, portFree, readReservations, releaseEnv, reserveEnv } from '../src/forge/verify-env.js';
+import { runIdOf } from '../src/forge/execution.js';
 
 const tmp = useTempDirs();
 // A block of 12 consecutive free ports, found once; without one the suite skips (it never fails on a busy machine).
@@ -102,6 +103,15 @@ describe.skipIf(P === null)('forge verify-env (K2-07)', () => {
     const other = reserve('K-1-1', { evidence: path.join(root, 'elsewhere') });
     expect(other?.evidence).toBe(path.join(root, 'elsewhere'));
     expect(first?.evidence).not.toBe(other?.evidence);
+  });
+  it('a flow pass of a project whose id has 48 characters gets a reservation, named after its folder alone (M7)', () => {
+    const project = 'customer-portal-redesign-2026-q4-mobile-checkout';
+    expect(project).toHaveLength(48);
+    const id = `flow-${runIdOf(project, now)}-1`;
+    const a = out(env(id, `.forge/work/${id}`));
+    expect(a.port).toBe(P);
+    const names = readdirSync(envDir(root)).filter(f => f.endsWith('.json'));
+    expect(names).toEqual([expect.stringMatching(new RegExp(`^${id}-[0-9a-f]{8}\\.json$`))]);
   });
   it('a lapsed reservation is swept: its file, its lock and its profile folder', () => {
     const a = reserve('S-1-1')!;

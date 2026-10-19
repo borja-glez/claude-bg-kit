@@ -24,13 +24,14 @@ export const envDir = (main: string) => path.join(main, '.forge', 'verify-env');
 const KEY = /^[A-Za-z0-9_.-]{1,160}$/;
 
 /** The reservation's name: the task's status key (C5) and its review round, `<key>-<n>-<round>` for a
- *  `reviews-<n>-<round>` folder; for any other folder (a flow pass) the status key, the folder's name and a short hash of
- *  its path, so two tasks' `flow` folders never share one. Null when unsafe. */
+ *  `reviews-<n>-<round>` folder; for any other folder (a flow pass, whose folder already names its run) the folder's name
+ *  and a short hash of its path, so two tasks' `flow` folders never share one (M7: without the status key, which repeats
+ *  the run id and passed the limit for a long project id). Null when unsafe. */
 export function envKey(statusKey: string, dir: string): string | null {
   const abs = path.resolve(dir);
   const round = /^reviews-(\d+-\d+)$/.exec(path.basename(abs));
   const hash = createHash('sha1').update(abs).digest('hex').slice(0, 8);
-  const key = round ? `${statusKey}-${round[1]}` : `${statusKey}-${path.basename(abs)}-${hash}`;
+  const key = round ? `${statusKey}-${round[1]}` : `${path.basename(abs)}-${hash}`;
   return KEY.test(key) ? key : null;
 }
 
