@@ -149,7 +149,11 @@ export const command: Command = (args, ctx) => {
   const spc = sp.installed ? spContext(io, repoDir, now) : null;
   const specs = spc ? spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)), routed: spc.routed }) : [];
   const plans = spc ? spPlans(repoDir, now, { committedAt: committedAt(io, repoDir), main: spc.main, subjects: spc.subjects }) : [];
-  const options = routeOptions({ path: p as PathName, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has('run-plan'), buildSpec: has('build-spec') });
+  // K1-07: the request names the plan or spec to recommend; the probe already read the file, so it reads.
+  const text = textFile !== undefined ? (() => { try { return readFileSync(path.resolve(io.cwd, textFile), 'utf8'); } catch { return ''; } })() : '';
+  const options = routeOptions({
+    path: p as PathName, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has('run-plan'), buildSpec: has('build-spec'), text,
+  });
   if (!probed) return json(options);
   // A raised --path only chooses here; forge:run triages again and records the path it follows.
   const effective = PATH_ORDER.indexOf(p as PathName) > PATH_ORDER.indexOf(probed.result.path) ? p as PathName : probed.result.path;

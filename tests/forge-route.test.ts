@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { firstStage, listRoutes, normalizeRoute, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute } from '../src/forge/route.js';
+import { firstStage, listRoutes, namedOrFirst, normalizeRoute, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute } from '../src/forge/route.js';
 import { resolvePrefs } from '../src/forge/prefs.js';
 import { readLocal } from '../src/forge/local.js';
 import { allDecisions } from '../src/forge/decisions.js';
@@ -27,7 +27,7 @@ describe('routeOptions', () => {
     expect(routeOptions(input()).options).toEqual(['forge', 'superpowers', 'superpowers-design', 'superpowers-plan']);
     expect(routeOptions(input({ plans: [PLAN], runPlan: true, specs: [SPEC] })).recommended).toMatchObject({ option: 'superpowers-plan', plan: PLAN.path });
     expect(routeOptions(input({ plans: [PLAN], specs: [SPEC], buildSpec: true })).recommended).toMatchObject({ option: 'superpowers-design', spec: SPEC.path });
-    expect(routeOptions(input({ path: 'large' })).recommended).toEqual({ option: 'superpowers-design', why: expect.stringContaining('brainstorming') });
+    expect(routeOptions(input({ path: 'large' })).recommended).toMatchObject({ option: 'forge' });
     expect(routeOptions(input()).recommended.option).toBe('forge');
     // A plan nobody asked to carry out is not recommended.
     expect(routeOptions(input({ plans: [PLAN] })).recommended.option).toBe('forge');
@@ -36,7 +36,28 @@ describe('routeOptions', () => {
     const r = routeOptions(input({ specs: [SPEC] }));
     expect(r.recommended).toEqual({ option: 'forge', why: expect.any(String) });
     expect(r.specs).toEqual([SPEC.path]);
-    expect(routeOptions(input({ path: 'large', specs: [SPEC] })).recommended).toEqual({ option: 'superpowers-design', why: expect.stringContaining('brainstorming') });
+    expect(routeOptions(input({ path: 'large', specs: [SPEC] })).recommended).toEqual({ option: 'forge', why: expect.any(String) });
+  });
+  it('Large recommends forge; superpowers designs only to build a spec that exists (K1-06)', () => {
+    expect(routeOptions(input({ path: 'large' })).recommended).toEqual({ option: 'forge', why: expect.stringContaining('large') });
+    expect(routeOptions(input({ path: 'large', specs: [SPEC], buildSpec: true })).recommended).toMatchObject({ option: 'superpowers-design', spec: SPEC.path });
+  });
+  it('the plan or the spec the request names is the recommended one, else the most recent (K1-07)', () => {
+    const NEW = { path: 'docs/superpowers/plans/2026-10-12-coupons.md', title: 'Coupons', tasks: 2, done: 0 };
+    const OLD = { path: 'docs/superpowers/plans/2026-10-02-cart-totals.md', title: 'Cart totals', tasks: 3, done: 1 };
+    const rec = (text: string) => routeOptions(input({ plans: [NEW, OLD], runPlan: true, text })).recommended.plan;
+    expect(rec('Carry out the cart-totals plan, please')).toBe(OLD.path);
+    expect(rec('carry out docs\\superpowers\\plans\\2026-10-02-cart-totals.md')).toBe(OLD.path);
+    expect(rec('Run the "Cart totals" plan')).toBe(OLD.path);
+    expect(rec('Carry out the plan')).toBe(NEW.path);
+    const CHECKOUT = { path: 'docs/superpowers/specs/2026-10-01-checkout-design.md', title: 'Checkout', modified: '2026-10-01T00:00:00.000Z' };
+    expect(routeOptions(input({ specs: [SPEC, CHECKOUT], buildSpec: true, text: 'build the checkout-design spec' })).recommended.spec).toBe(CHECKOUT.path);
+  });
+  it('a short name never decides: "fix the cart" does not pick a plan titled Cart (Review Focus 5)', () => {
+    const CART = { path: 'docs/superpowers/plans/2026-10-02-cart.md', title: 'Cart', tasks: 2, done: 0 };
+    const NEW = { path: 'docs/superpowers/plans/2026-10-12-coupons.md', title: 'Coupons', tasks: 2, done: 0 };
+    expect(routeOptions(input({ plans: [NEW, CART], runPlan: true, text: 'fix the cart and carry out the plan' })).recommended.plan).toBe(NEW.path);
+    expect(namedOrFirst([], 'anything')).toBeUndefined();
   });
   it('in auto mode a Large request without a spec goes to forge, whose design loop never asks', () => {
     const auto = resolvePrefs({ autonomy: 'auto' }, {}, {});
@@ -49,7 +70,7 @@ describe('routeOptions', () => {
     expect(r).toMatchObject({ workflow: 'forge', autonomy: 'auto', sources: { workflow: 'local', autonomy: 'request' }, specs: [SPEC.path], plans: [{ path: PLAN.path, tasks: 3, done: 1 }] });
   });
   it('routeAsk: the method with the recommended option first, and whether to remember it (K1-08)', () => {
-    const es = routeAsk(routeOptions(input({ path: 'large' })), 'es');
+    const es = routeAsk(routeOptions(input({ path: 'large', specs: [SPEC], buildSpec: true })), 'es');
     expect(es.options.map(o => [o.option, o.recommended])).toEqual([['superpowers-design', true], ['forge', false], ['superpowers', false], ['superpowers-plan', false]]);
     expect(es.options[0].label).toBe('superpowers diseña, forge construye (Recomendado)');
     expect(es.remember.options.map(o => o.remember)).toEqual([true, false]);
@@ -97,7 +118,7 @@ describe('forge route CLI', () => {
     expect(JSON.parse(run(['route', '--task', 't1', '--path', 'large'], io).stdout)).toMatchObject({ options: ['forge', 'none'], superpowers: { installed: false } });
     installSuperpowers();
     expect(JSON.parse(run(['route', '--task', 't1', '--path', 'large'], io).stdout)).toMatchObject({
-      options: ['forge', 'superpowers', 'superpowers-design', 'superpowers-plan'], superpowers: { installed: true, version: '6.4.1' }, recommended: { option: 'superpowers-design' },
+      options: ['forge', 'superpowers', 'superpowers-design', 'superpowers-plan'], superpowers: { installed: true, version: '6.4.1' }, recommended: { option: 'forge' },
     });
     expect(run(['route', '--task', 't1'], io).code).toBe(2);
     expect(run(['route', '--task', 't1', '--path', 'huge'], io).code).toBe(2);
@@ -238,6 +259,22 @@ describe('forge route CLI', () => {
     expect(readLocal(root).workflow).toBe('forge');
     expect(JSON.parse(run(['route', 'set', '--task', 't2', '--chosen', 'none', '--by', 'user', '--remember'], io).stdout)).toEqual({ written: false, remembered: 'off' });
     expect(readLocal(root).workflow).toBe('off');
+  });
+  it('route --text-file passes the request to the recommendation: the plan it names (K1-07)', () => {
+    installSuperpowers();
+    const plan = (name: string, title: string, daysAgo: number) => {
+      const f = path.join(root, 'docs', 'superpowers', 'plans', name);
+      mkdirSync(path.dirname(f), { recursive: true });
+      writeFileSync(f, `# ${title} Implementation Plan\n\n### Task 1: one\n\n- [ ] a\n`);
+      const t = new Date(io.now().getTime() - daysAgo * 86_400_000);
+      utimesSync(f, t, t);
+    };
+    plan('2026-10-12-coupons.md', 'Coupons', 1);
+    plan('2026-10-02-cart-totals.md', 'Cart totals', 10);
+    mkdirSync(path.join(root, '.forge', 'work', 't1'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'work', 't1', 'task.txt'), 'Carry out the cart-totals plan and review each task\n');
+    const r = JSON.parse(run(['route', '--task', 't1', '--text-file', '.forge/work/t1/task.txt', '--run-plan'], io).stdout);
+    expect(r.recommended).toMatchObject({ option: 'superpowers-plan', plan: 'docs/superpowers/plans/2026-10-02-cart-totals.md' });
   });
 });
 

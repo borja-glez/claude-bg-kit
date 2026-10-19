@@ -24,10 +24,28 @@ export interface RouteOutput {
   options: RouteOption[]; recommended: Recommendation;
 }
 
-/** The options and the recommendation: a plan the request asks to carry out, then a spec it asks to build, then Large
- *  with superpowers (forge in auto mode: brainstorming would ask), else forge. Without superpowers: forge or no forge.
- *  A recent spec or plan the request does not ask for is only listed: it may be about another task. */
-export function routeOptions(i: { path: PathName; prefs: Prefs; superpowers: { installed: boolean; version: string | null }; specs: SpSpec[]; plans: SpPlanEntry[]; runPlan: boolean; buildSpec: boolean }): RouteOutput {
+/**
+ * K1-07: the plan or the spec a request names, by its path, its file name with or without `.md` and the date, or its
+ * title (names of 6 characters or more: a short word names nothing), else the first, the most recent with work left.
+ */
+export function namedOrFirst<T extends { path: string; title: string }>(entries: readonly T[], text: string): T | undefined {
+  const t = text.toLowerCase().replace(/\\/g, '/');
+  const names = (e: T) => {
+    const file = e.path.split('/').pop() ?? e.path;
+    const stem = file.replace(/\.md$/i, '');
+    return [e.path, file, stem, stem.replace(/^\d{4}-\d{2}-\d{2}-/, ''), e.title].map(s => s.toLowerCase()).filter(s => s.length >= 6);
+  };
+  return entries.find(e => names(e).some(n => t.includes(n))) ?? entries[0];
+}
+
+/** The options and the recommendation: a plan the request asks to carry out, then a spec it asks to build (K1-07: the one
+ *  it names, else the most recent), else forge, Large included (K1-06: forge designs it with waypoint). Without
+ *  superpowers: forge or no forge. A recent spec or plan the request does not ask for is only listed: it may be about
+ *  another task. */
+export function routeOptions(i: {
+  path: PathName; prefs: Prefs; superpowers: { installed: boolean; version: string | null }; specs: SpSpec[]; plans: SpPlanEntry[];
+  runPlan: boolean; buildSpec: boolean; text?: string;
+}): RouteOutput {
   const base = {
     workflow: i.prefs.workflow, autonomy: i.prefs.autonomy, sources: i.prefs.sources, superpowers: i.superpowers,
     specs: i.specs.map(s => s.path), plans: i.plans.map(p => ({ path: p.path, tasks: p.tasks, done: p.done })),
@@ -35,11 +53,13 @@ export function routeOptions(i: { path: PathName; prefs: Prefs; superpowers: { i
   if (!i.superpowers.installed) {
     return { ...base, options: ['forge', 'none'], recommended: { option: 'forge', why: 'superpowers is not installed: forge triages, implements and reviews it' } };
   }
+  const plan = namedOrFirst(i.plans, i.text ?? '');
+  const spec = namedOrFirst(i.specs, i.text ?? '');
   let recommended: Recommendation;
-  if (i.runPlan && i.plans.length) recommended = { option: 'superpowers-plan', why: 'an unfinished superpowers plan to carry out: forge executes and reviews each task', plan: i.plans[0].path };
-  else if (i.buildSpec && i.specs.length) recommended = { option: 'superpowers-design', why: 'a recent superpowers spec not imported yet: forge builds from it', spec: i.specs[0].path };
+  if (i.runPlan && plan) recommended = { option: 'superpowers-plan', why: 'an unfinished superpowers plan to carry out: forge executes and reviews each task', plan: plan.path };
+  else if (i.buildSpec && spec) recommended = { option: 'superpowers-design', why: 'a recent superpowers spec not imported yet: forge builds from it', spec: spec.path };
   else if (i.path === 'large' && i.prefs.autonomy === 'auto') recommended = { option: 'forge', why: 'large, in auto mode: forge designs, critiques and approves it without asking' };
-  else if (i.path === 'large') recommended = { option: 'superpowers-design', why: 'large and ambiguous: brainstorming clarifies intent, forge builds and reviews' };
+  else if (i.path === 'large') recommended = { option: 'forge', why: 'large: forge designs it with waypoint, critiques, plans and builds' };
   else recommended = { option: 'forge', why: 'forge triages, implements and reviews it' };
   return { ...base, options: ['forge', 'superpowers', 'superpowers-design', 'superpowers-plan'], recommended };
 }
