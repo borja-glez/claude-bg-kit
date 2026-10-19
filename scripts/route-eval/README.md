@@ -1,6 +1,6 @@
 # Prueba empírica del enrutado
 
-Comprueba que una sesión nueva carga `forge:route` antes que cualquier otra skill cuando la petición es trabajo de código Medium o Large, y que no la carga para lo demás: una edición trivial o pequeña, una pregunta o un mensaje de otro agente. El objetivo es, en cada configuración, `forge:route` primero en al menos el 90 % de los prompts que lo esperan y en ninguno de los demás.
+Comprueba que una sesión nueva carga `forge:route` antes que cualquier otra skill cuando la petición es trabajo de código Medium o Large, y que no la carga para lo demás: una edición trivial, una pregunta o un mensaje de otro agente. Una petición Small cuenta aparte (abajo, en «Prompts»). El objetivo es, en cada configuración, `forge:route` primero en al menos el 90 % de los prompts que lo esperan y en ninguno de los que esperan `none`.
 
 `run.mjs` monta un repositorio Node pequeño en un directorio temporal (`demo-shop`: un carrito, su índice, un test, un README y los ajustes de npm y git, seis ficheros: con menos de cinco el triaje de forge lo da por vacío y manda todo a Large) y lanza cada prompt de `prompts.json` con `claude -p --output-format stream-json --max-turns 2`. Carga el forge y el waypoint de este checkout con `--plugin-dir` y desactiva, con `--settings`, las copias instaladas de forge, waypoint y lens. De cada sesión lee la primera skill que carga una llamada a `Skill`, los plugins del mensaje `init`, por qué paró (el `subtype` del mensaje `result`) y lo que costó (su `total_cost_usd`).
 
@@ -18,7 +18,12 @@ superpowers se desactiva en los ajustes del propio repositorio de prueba, y no e
 
 `prompts.json` lleva 16, la mitad en español y la otra mitad en inglés, y cada uno dice lo que se espera (`expected`):
 - 4 Medium y 4 Large: `route`, `forge:route` primero;
-- 2 Trivial, 2 Small, 2 preguntas sobre el código y 2 mensajes de otro agente (`<teammate-message …>`): `none`.
+- 2 Small: `either`, cualquiera de las dos cosas está bien;
+- 2 Trivial, 2 preguntas sobre el código y 2 mensajes de otro agente (`<teammate-message …>`): `none`.
+
+Los Small van aparte porque las reglas de forge piden cargar `forge:route` para todo lo que pase de una edición trivial (la regla de `SessionStart`, la pista de `UserPromptSubmit` y la descripción de la skill), y `forge:route` se aparta entonces con `stepAside: true`. Una sesión que cumple esas reglas carga `forge:route` en un Small, y una que no la carga tampoco se equivoca. La tabla los cuenta en su propia columna, «Small (either)», que no suma falsos positivos ni cuenta para `PASS`.
+
+Los Medium nombran a propósito los ficheros que tocan: el triaje de la CLI de forge mide una petición por los ficheros que nombra, y el último test de `tests/route-eval.test.ts` comprueba que da Medium o Large justo a los que esperan `route`. Ese triaje solo corre cuando `forge:route` ya se cargó, así que nombrarlos no ayuda a la medida de la primera skill, pero sí cambia el estímulo respecto a la pasada de octubre.
 
 ## Uso
 
@@ -42,11 +47,13 @@ Cada pasada llama al modelo y cuesta dinero: lánzala solo cuando quien paga est
 ## Qué hacer con el resultado
 
 - Apunta la tabla y el resumen en `## Resultados`, con la fecha.
-- Si `no-hint` sale igual o mejor que `with-superpowers` (los mismos aciertos o más y los mismos falsos positivos o menos), propón a la persona poner `route.hint: off` por defecto o retirar la pista. Mientras no se decida, `route.hint` sigue en `on`.
+- Si `no-hint` sale igual o mejor que `with-superpowers` (los mismos aciertos o más y los mismos falsos positivos o menos), propón a la persona poner `route.hint: off` por defecto o retirar la pista. Mientras no se decida, `route.hint` sigue en `on`. La columna de los Small no entra en esa comparación: la pista salta en `s-es` («cambia») y no en `s-en`, y en los dos casos la sesión hace bien.
 
 ## Resultados
 
 ### 13 de octubre de 2026: 10 prompts, dos configuraciones
+
+Esta tabla no se compara con la de una pasada de hoy: tenía 10 prompts, un `demo-shop` de 4 ficheros (el triaje de forge lo daba por vacío) y unos Medium redactados sin nombrar ficheros.
 
 13 de octubre de 2026, dos pasadas y ninguna calibración: el texto de los hooks es el inicial. Las dos pasadas dieron lo mismo. Entre la primera y la segunda, la descripción de `forge:route` ganó la frase «Never in a subagent.». La tabla es la de la segunda pasada, con el texto final.
 

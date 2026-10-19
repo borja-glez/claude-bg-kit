@@ -54,7 +54,7 @@ describe('route-eval', () => {
     const r = (id: string, expected: EvalResult['expected'], firstSkill: string | null, cost: number | null = 0.01): EvalResult =>
       ({ id, size: expected === 'route' ? 'medium' : 'question', lang: 'en', expected, config: 'with', firstSkill, plugins: null, cost, error: null });
     const ok = [...Array.from({ length: 10 }, (_, i) => r(`m${i}`, 'route', 'forge:route')), r('q', 'none', null), r('a', 'none', null, null)];
-    expect(summarize(ok)).toEqual([{ config: 'with', routed: 10, routable: 10, rate: 1, falseNegatives: 0, falsePositives: 0, others: 2, cost: 0.11 }]);
+    expect(summarize(ok)).toEqual([{ config: 'with', routed: 10, routable: 10, rate: 1, falseNegatives: 0, falsePositives: 0, others: 2, either: 0, eitherRouted: 0, cost: 0.11 }]);
     expect(passes(summarize(ok))).toBe(true);
     expect(passes(summarize([...ok.slice(0, 9), r('m9', 'route', 'superpowers:brainstorming'), ...ok.slice(10)]))).toBe(true);
     const missed = [...ok.slice(0, 8), r('m8', 'route', null), r('m9', 'route', null), ...ok.slice(10)];
@@ -67,13 +67,30 @@ describe('route-eval', () => {
     expect(summarize([r('q', 'none', null, null)])[0].cost).toBeNull();
     expect(table(ok, summarize(ok))).toContain('| m0 | medium | en | route | with | forge:route | $0.0100 |');
   });
-  it('has 16 prompts: Medium and Large expect forge:route; Trivial, Small, questions and agent messages do not (K1-02)', () => {
+  it("a Small prompt expects either: forge's rules load forge:route, which steps aside, so it is neither a false positive nor a miss (I1)", () => {
+    const r = (id: string, expected: EvalResult['expected'], firstSkill: string | null): EvalResult =>
+      ({ id, size: expected === 'either' ? 'small' : expected === 'route' ? 'medium' : 'trivial', lang: 'en', expected, config: 'with', firstSkill, plugins: null, cost: null, error: null });
+    const routed = Array.from({ length: 8 }, (_, i) => r(`m${i}`, 'route', 'forge:route'));
+    const results = [...routed, r('t', 'none', null), r('s1', 'either', 'forge:route'), r('s2', 'either', null)];
+    const [s] = summarize(results);
+    expect(s).toMatchObject({ routed: 8, routable: 8, falseNegatives: 0, falsePositives: 0, others: 1, either: 2, eitherRouted: 1 });
+    expect(passes([s])).toBe(true);
+    expect(passes(summarize([...routed, r('t', 'none', null), r('s1', 'either', 'forge:route'), r('s2', 'either', 'forge:route')]))).toBe(true);
+    const out = table(results, [s]);
+    expect(out).toContain('| s1 | small | en | either | with | forge:route |');
+    const head = out.split('\n').find(l => l.startsWith('| config |'))!;
+    const row = out.split('\n').find(l => l.startsWith('| with |'))!;
+    const cell = (name: string) => row.split('|').map(c => c.trim())[head.split('|').map(c => c.trim()).indexOf(name)];
+    expect(cell('Small (either)')).toBe('1/2');
+    expect(cell('false positives')).toBe('0/1');
+  });
+  it('has 16 prompts: Medium and Large expect forge:route; Small either; Trivial, questions and agent messages do not (K1-02, I1)', () => {
     const prompts = JSON.parse(readFileSync(new URL('../scripts/route-eval/prompts.json', import.meta.url), 'utf8')) as EvalPrompt[];
     const count = (size: string, lang?: string) => prompts.filter(p => p.size === size && (!lang || p.lang === lang)).length;
     expect(prompts).toHaveLength(16);
     expect([count('medium', 'es'), count('medium', 'en'), count('large', 'es'), count('large', 'en')]).toEqual([2, 2, 2, 2]);
     expect([count('trivial'), count('small'), count('question'), count('agent')]).toEqual([2, 2, 2, 2]);
-    for (const p of prompts) expect(p.expected, p.id).toBe(p.size === 'medium' || p.size === 'large' ? 'route' : 'none');
+    for (const p of prompts) expect(p.expected, p.id).toBe(p.size === 'medium' || p.size === 'large' ? 'route' : p.size === 'small' ? 'either' : 'none');
     expect(prompts.every(p => !/forge|superpowers/i.test(p.text))).toBe(true);
     expect(prompts.filter(p => p.size === 'agent').every(p => /^<[a-z]/i.test(p.text))).toBe(true);
     expect(new Set(prompts.map(p => p.id)).size).toBe(prompts.length);

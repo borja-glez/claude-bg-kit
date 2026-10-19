@@ -67,24 +67,29 @@ export function projectSettingsFor(withSuperpowers, installedKeys) {
 }
 
 /** Per configuration: forge:route first in how many of the prompts that expect it (Medium and Large), the false
- *  negatives, the false positives among the rest (Trivial, Small, questions and agent messages) and the cost. */
+ *  negatives, the false positives among those that expect none (Trivial, questions and agent messages), the Small ones
+ *  apart (`either`: forge's rules load forge:route for them and it steps aside, so loading it or not are both right; I1),
+ *  and the cost. */
 export function summarize(results) {
   return [...new Set(results.map(r => r.config))].map(config => {
     const mine = results.filter(r => r.config === config);
     const fired = r => r.firstSkill === 'forge:route';
     const routable = mine.filter(r => r.expected === 'route');
-    const others = mine.filter(r => r.expected !== 'route');
+    const others = mine.filter(r => r.expected === 'none');
+    const either = mine.filter(r => r.expected === 'either');
     const routed = routable.filter(fired).length;
     const costs = mine.map(r => r.cost).filter(c => typeof c === 'number');
     return {
       config, routed, routable: routable.length, rate: routable.length ? routed / routable.length : 0,
       falseNegatives: routable.length - routed, falsePositives: others.filter(fired).length, others: others.length,
+      either: either.length, eitherRouted: either.filter(fired).length,
       cost: costs.length ? Math.round(costs.reduce((a, b) => a + b, 0) * 10000) / 10000 : null,
     };
   });
 }
 
-/** The target: forge:route first in 90 % or more of the prompts that expect it and in none of the rest, in every configuration. */
+/** The target: forge:route first in 90 % or more of the prompts that expect it and in none of those that expect none, in
+ *  every configuration. The Small ones (`either`) count for neither. */
 export const passes = summary => summary.length > 0 && summary.every(s => s.routable > 0 && s.rate >= 0.9 && s.falsePositives === 0);
 
 export function table(results, summary) {
@@ -93,10 +98,10 @@ export function table(results, summary) {
   for (const r of results) {
     lines.push(`| ${r.id} | ${r.size} | ${r.lang} | ${r.expected} | ${r.config} | ${r.firstSkill ?? '—'} | ${usd(r.cost, 4)} | ${r.error ?? ''} |`);
   }
-  lines.push('');
+  lines.push('', '| config | forge:route first | false negatives | false positives | Small (either) | cost |', '|---|---|---|---|---|---|');
   for (const s of summary) {
-    lines.push(`- ${s.config}: forge:route first in ${s.routed}/${s.routable} that expect it (${Math.round(s.rate * 100)} %), ${s.falseNegatives} false negatives, `
-      + `${s.falsePositives}/${s.others} false positives (Trivial, Small, questions and agent messages); cost ${usd(s.cost, 2)}`);
+    lines.push(`| ${s.config} | ${s.routed}/${s.routable} (${Math.round(s.rate * 100)} %) | ${s.falseNegatives} | ${s.falsePositives}/${s.others} | `
+      + `${s.eitherRouted}/${s.either} | ${usd(s.cost, 2)} |`);
   }
   return lines.join('\n');
 }
