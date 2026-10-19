@@ -403,6 +403,33 @@ describe('multi-session commands', () => {
       expect(r).toMatchObject({ code: 1, stdout: '', stderr: 'launch --exec: spawn EACCES\n' });
       expect(existsSync(path.join(dir, '.claude', 'worktrees', 'ui'))).toBe(true);
     });
+    it('refuses a launch/ folder that is a link before anything starts, and writes nothing through it (M2)', () => {
+      init();
+      const outside = path.join(dir, 'outside');
+      mkdirSync(outside);
+      mkdirSync(path.join(dir, '.waypoint', 'demo-shop'), { recursive: true });
+      symlinkSync(outside, path.join(dir, '.waypoint', 'demo-shop', 'launch'), 'junction');
+      const calls: string[] = [];
+      const r = run(['launch', 'plan.yaml', 'ui', '--exec'], { ...io, spawn: command => { calls.push(command); return { unref: () => undefined }; } });
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('launch --exec:');
+      expect(calls).toEqual([]);
+      expect(readdirSync(outside)).toEqual([]);
+      expect(existsSync(path.join(dir, '.claude', 'worktrees', 'ui'))).toBe(false);
+    });
+    it('does not write through a log that is a link: it replaces the link with a file (M2)', (ctx) => {
+      init();
+      const target = path.join(dir, 'outside.txt');
+      writeFileSync(target, 'untouched');
+      const logDir = path.join(dir, '.waypoint', 'demo-shop', 'launch');
+      mkdirSync(logDir, { recursive: true });
+      const log = path.join(logDir, 'wp-demo-shop-ui.log');
+      try { symlinkSync(target, log, 'file'); } catch { ctx.skip(); return; } // file links need privileges on Windows
+      const r = run(['launch', 'plan.yaml', 'ui', '--exec'], { ...io, spawn: () => ({ unref: () => undefined }) });
+      expect(r.code, r.stderr).toBe(0);
+      expect(readFileSync(target, 'utf8')).toBe('untouched');
+      expect(lstatSync(log).isFile()).toBe(true);
+    });
   });
 });
 

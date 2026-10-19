@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, statSync, renameSync, openSync, readSync, closeSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, statSync, lstatSync, renameSync, openSync, readSync, closeSync, realpathSync, type Stats } from 'node:fs';
 import path from 'node:path';
 import { isSyncBatch } from '../lib/sync-files.js';
 import { leftoversOf, removeLeftovers } from './doctor.js';
@@ -411,6 +411,14 @@ export function run(argv: string[], io: Io): Result {
         // `run` starts it from any directory without moving the caller's shell: a cd outside a subshell would
         // leave a coordinator working in the worktree. Single quotes, with any quote in the path escaped.
         const inWorktree = launchRun({ name, prompt, worktree });
+        // --exec keeps claude's output in a log of the main checkout. M2: never written through a link: a launch/ that is
+        // not a real folder is refused before anything is created, and a log that is a link is replaced below.
+        const log = path.join(root, '.waypoint', p.project, 'launch', `${name}.log`);
+        if (args.includes('--exec')) {
+          let launchDir: Stats | undefined;
+          try { launchDir = lstatSync(path.dirname(log)); } catch { launchDir = undefined; }
+          if (launchDir && !launchDir.isDirectory()) return fail(`launch --exec: ${path.dirname(log)} is not a folder (a link?): remove it and launch again`, 1);
+        }
         if (!existsSync(worktree)) {
           excludeHere();
           const exists = git('branch', '--list', branch) !== '';
@@ -420,11 +428,12 @@ export function run(argv: string[], io: Io): Result {
         // permission. With shell: true, Windows finds claude.cmd or claude.exe; the prompt only holds checked ids.
         // claude's output goes to a log in the main checkout: it says why a session did not start.
         if (args.includes('--exec')) {
-          const log = path.join(root, '.waypoint', p.project, 'launch', `${name}.log`);
           let fd: number | undefined;
           try {
             mkdirSync(path.dirname(log), { recursive: true });
-            fd = openSync(log, 'w');
+            // The old log goes first, a link included (rm never follows one), and 'wx' creates a new file or fails.
+            rmSync(log, { force: true });
+            fd = openSync(log, 'wx');
             (io.spawn ?? nodeSpawn)(command, { cwd: worktree, detached: true, shell: true, windowsHide: true, stdio: ['ignore', fd, fd] }).unref();
           } catch (e) {
             return fail(`launch --exec: ${(e as Error).message}`, 1);

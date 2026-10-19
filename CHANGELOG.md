@@ -16,7 +16,7 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.31.0 — 2026-10-19
 
 #### Added
-- `waypoint launch <plan> <track> --exec` starts the session's `claude --bg` itself, detached and in the worktree, with its output in `.waypoint/<project>/launch/<name>.log`; `/waypoint:launch` uses it and needs no `claude --bg` permission any more (A-22).
+- `waypoint launch <plan> <track> --exec` starts the session's `claude --bg` itself, detached and in the worktree, with its output in `.waypoint/<project>/launch/<name>.log`, never written through a link (a `launch/` that is one exits 1); `/waypoint:launch` uses it and needs no `claude --bg` permission any more (A-22).
 - `waypoint doctor <plan> [--fix]` lists what older versions left under `.waypoint/<project>/` (`last-head`, files of `sync/` the plan no longer writes, caches of collections the roadmap does not have), and `--fix` deletes them; it reports what it could not delete (`failed`) and exits 1 (A-24).
 - `page --publish-info --assets`: the roadmap declares `assets` only when its caller asks for it; `/waypoint:plan assets` passes it, and forge's Large path asks for it when its screenshots are uploaded (A-19).
 - `page --publish-info --no-assets` drops `assets` even when the published roadmap has them; `/waypoint:plan no-assets` passes it and asks once before the roadmap becomes shareable again. `--assets` and `--no-assets` together exit 2 (ruling R6b).
