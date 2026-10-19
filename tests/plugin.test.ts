@@ -602,7 +602,8 @@ describe('plugin layout', () => {
       expect(md).toMatch(new RegExp(`^model: ${model}$`, 'm'));
       expect(md).toMatch(/^effort: high$/m);
       expect(md).not.toMatch(/^tools:/m);
-      expect(md).toContain('Never edit, create or delete files of the project');
+      for (const w of ['git check-ignore -q <path>', 'FORGE verify-spawn --dir <evidence dir> --', 'FORGE verify-cleanup --dir <evidence dir>', '--user-data-dir <profileDir>',
+        '"env": false', '"defects"']) expect(md, w).toContain(w);
       expect(md).toContain('pids.json');
       expect(md).toContain('"result": "pass" | "fail" | "blocked"');
       expect(md).toContain('learned');
@@ -2097,5 +2098,9 @@ describe('plugin layout', () => {
     for (const f of ['decisions/SKILL.md', 'run/references/autonomy.md', 'member/SKILL.md', 'infinite/SKILL.md']) {
       expect(read(`plugins/forge/skills/${f}`), f).toContain('shas');
     }
+  });
+  it('the two verify agents have the same body: only their frontmatter differs (K2-18)', () => {
+    const body = (f: string) => read(`plugins/forge/agents/${f}.md`).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+    expect(body('forge-verify-heavy')).toBe(body('forge-verify'));
   });
 });
