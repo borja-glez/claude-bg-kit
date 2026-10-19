@@ -3,17 +3,21 @@
 // did not free lapses 2 × verify.limits.minutes after it was made, so an agent that died does not hold its port forever.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { samePath } from '../lib/worktree.js';
 import { writeAtomic } from './execution.js';
+import { removeFileIf } from './pid.js';
 
 export interface EnvReservation { key: string; task: string; port: number; profileDir: string; evidence: string; dir: string; startedAt: string }
 export interface EnvInput {
   main: string; key: string; task: string; dir: string; evidence: string; range: { from: number; to: number }; now: Date; ttlMs: number;
   /** Whether a port is free now; by default a listen on 127.0.0.1 (and ::1) in a child process. */
   free?: (port: number) => boolean;
+  /** Test seams: the exclusive create of a lock file, and a hook that runs between judging a lock stale and removing it. */
+  open?: (file: string, flags: string) => number;
+  beforeTakeover?: (file: string) => void;
 }
 
 export const envDir = (main: string) => path.join(main, '.forge', 'verify-env');
@@ -72,37 +76,51 @@ const rmProfile = (dir: string) => {
   if (!samePath(path.dirname(dir), tmpdir()) || !path.basename(dir).startsWith('forge-verify-')) return;
   try { rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); } catch { /* a browser still holds it: the temp folder takes it */ }
 };
-const readLock = (file: string): { key: string; startedAt: string } | null => {
-  try {
-    const o = JSON.parse(readFileSync(file, 'utf8'));
-    return typeof o?.key === 'string' && typeof o.startedAt === 'string' ? o : null;
-  } catch { return null; }
+const readText = (file: string): string | null => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
+const lockKey = (text: string | null): string | null => {
+  try { const o = JSON.parse(text ?? ''); return typeof o?.key === 'string' ? o.key : null; } catch { return null; }
 };
+/** When a lock was made: the startedAt it holds, else (corrupt or empty) the file's mtime. NaN when it is gone. */
+const lockTime = (file: string, text: string): number => {
+  try { const t = Date.parse(JSON.parse(text).startedAt); if (Number.isFinite(t)) return t; } catch { /* the mtime says */ }
+  try { return statSync(file).mtimeMs; } catch { return NaN; }
+};
+// On Windows a create is refused with EPERM/EACCES/EBUSY (not EEXIST) while the same name is being deleted.
+const REFUSED = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
 
-/** Takes the port's lock file with an exclusive create: only one reservation holds it. A lock older than the TTL is stale
- *  (its reservation lapsed or was never finished) and is taken over. */
-function lockPort(main: string, port: number, key: string, now: Date, ttlMs: number): boolean {
-  const file = lockFile(main, port);
+/**
+ * Takes the port's lock file with an exclusive create ('wx'): of two callers only one creates it, so only one holds the
+ * port. A create the system refuses (EEXIST, or EPERM/EACCES/EBUSY while it is being deleted) means the port is busy now.
+ * A lock past the TTL is stale (its reservation lapsed or never got finished); it is taken over with removeFileIf, which
+ * moves it aside and deletes it only if it still holds the text judged stale. A lock another caller replaced meanwhile is
+ * put back and the port is skipped, so two callers never both hold it. Returns the text written, or null.
+ */
+function lockPort(i: EnvInput, port: number): string | null {
+  const file = lockFile(i.main, port);
+  const mine = JSON.stringify({ key: i.key, startedAt: i.now.toISOString() });
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const fd = openSync(file, 'wx');
-      try { writeSync(fd, JSON.stringify({ key, startedAt: now.toISOString() })); } finally { closeSync(fd); }
-      return true;
+      const fd = (i.open ?? openSync)(file, 'wx');
+      try { writeSync(fd, mine); } finally { closeSync(fd); }
+      return mine;
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-      const held = readLock(file);
-      // Unreadable: another session is writing it right now, not ours to take.
-      if (!held || now.getTime() - Date.parse(held.startedAt) < ttlMs) return false;
-      rmSync(file, { force: true });
+      if (!REFUSED.has((e as NodeJS.ErrnoException).code ?? '')) throw e;
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') return null;
     }
+    const text = readText(file);
+    if (text === null) continue; // it went while we looked: create again
+    if (i.now.getTime() - lockTime(file, text) < i.ttlMs) return null;
+    i.beforeTakeover?.(file);
+    if (!removeFileIf(file, text)) return null;
   }
-  return false;
+  return null;
 }
 
 /** Removes a reservation: its file, its port lock when it holds it, and its profile folder. */
 function dropOne(main: string, r: EnvReservation): void {
   rmSync(path.join(envDir(main), `${r.key}.json`), { force: true });
-  if (readLock(lockFile(main, r.port))?.key === r.key) rmSync(lockFile(main, r.port), { force: true });
+  const lock = lockFile(main, r.port), text = readText(lock);
+  if (text !== null && lockKey(text) === r.key) removeFileIf(lock, text);
   rmProfile(r.profileDir);
 }
 
@@ -140,9 +158,11 @@ export function reserveEnv(i: EnvInput): EnvReservation | null {
   for (let port = i.range.from; port <= i.range.to && probes < MAX_PROBES; port++) {
     if (held(port)) continue;
     probes++;
-    if (!free(port) || !lockPort(i.main, port, i.key, i.now, i.ttlMs)) continue;
+    if (!free(port)) continue;
+    const lock = lockPort(i, port);
+    if (lock === null) continue;
     // A reservation written without a lock (an older forge) may have taken the port while it was probed.
-    if (held(port)) { rmSync(lockFile(i.main, port), { force: true }); continue; }
+    if (held(port)) { removeFileIf(lockFile(i.main, port), lock); continue; }
     const r: EnvReservation = { key: i.key, task: i.task, port, profileDir, evidence: i.evidence, dir: i.dir, startedAt: i.now.toISOString() };
     try { writeAtomic(file, JSON.stringify(r, null, 2) + '\n'); mkdirSync(profileDir, { recursive: true }); } catch (e) { dropOne(i.main, r); throw e; }
     return r;

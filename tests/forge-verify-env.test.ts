@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { useTempDirs } from './helpers/tmp.js';
@@ -111,15 +111,49 @@ describe.skipIf(P === null)('forge verify-env (K2-07)', () => {
     expect(existsSync(a.profileDir)).toBe(false);
     expect(existsSync(path.join(envDir(root), `port-${a.port}.lock`))).toBe(true); // retaken by S-2-1
   });
+  it('a lapsed reservation\'s lock is gone when its port is not retaken', () => {
+    const a = reserve('S-1-1')!;
+    const b = reserve('S-2-1', { now: new Date(now.getTime() + 61_000), free: p => p !== a.port })!;
+    expect(b.port).toBe(a.port + 1);
+    expect(existsSync(path.join(envDir(root), `port-${a.port}.lock`))).toBe(false);
+  });
+  it('a stale lock replaced by a fresh one between the read and the removal stays; the port is skipped', () => {
+    lock(P!, 'old', new Date(now.getTime() - 61_000));
+    const lockPath = path.join(envDir(root), `port-${P}.lock`);
+    const beforeTakeover = () => writeFileSync(lockPath, JSON.stringify({ key: 'C-1-1', startedAt: now.toISOString() }));
+    expect(reserve('B-1-1', { beforeTakeover })?.port).toBe(P! + 1);
+    expect(JSON.parse(readFileSync(lockPath, 'utf8')).key).toBe('C-1-1');
+  });
+  it('a create the system refuses while the lock is being removed (EPERM) skips the port and throws nothing', () => {
+    const open = (f: string, flags: string) => {
+      if (f.endsWith(`port-${P}.lock`)) throw Object.assign(new Error('refused'), { code: 'EPERM' });
+      return openSync(f, flags);
+    };
+    expect(reserve('R-1-1', { open })?.port).toBe(P! + 1);
+  });
+  it('a corrupt lock is judged by its mtime: fresh blocks the port, past the ttl it is taken over', () => {
+    mkdirSync(envDir(root), { recursive: true });
+    const lockPath = path.join(envDir(root), `port-${P}.lock`);
+    writeFileSync(lockPath, '{oops');
+    expect(reserve('J-1-1')?.port).toBe(P! + 1);
+    utimesSync(lockPath, new Date(now.getTime() - 61_000), new Date(now.getTime() - 61_000));
+    expect(reserve('J-2-1')?.port).toBe(P);
+  });
+  it('when writing the output files fails, the reservation, its lock and its profile are released', () => {
+    mkdirSync(path.join(root, '.forge/work/T1/reviews-1-1/verify-env.json'), { recursive: true }); // writing the file there fails
+    try { env('T1-1', '.forge/work/T1/reviews-1-1'); } catch { /* expected */ }
+    expect(existsSync(envDir(root)) ? readdirSync(envDir(root)) : []).toEqual([]);
+  });
   it('probes at most 50 ports per call', () => {
     let n = 0;
     expect(reserve('M-1-1', { range: { from: P!, to: P! + 9999 }, free: () => { n++; return false; } })).toBeNull();
     expect(n).toBe(50);
   });
-  it('a free-port probe sees a server bound to ::1 as busy when IPv6 exists', async () => {
+  it('a free-port probe sees a server bound to ::1 as busy', async ({ skip }) => {
     const srv = createServer();
     const bound = await new Promise<boolean>(res => { srv.once('error', () => res(false)); srv.listen(P! + 11, '::1', () => res(true)); });
-    try { if (bound) expect(portFree(P! + 11)).toBe(false); } finally { if (bound) await new Promise<void>(res => srv.close(() => res())); }
+    if (!bound) { srv.close(); skip('IPv6 (::1) is not available on this machine'); }
+    try { expect(portFree(P! + 11)).toBe(false); } finally { await new Promise<void>(res => srv.close(() => res())); }
   });
   it('logs a verify-env event the ledger reads, and the forge status of a planned verification stays as it was', () => {
     out(env('T1-1', '.forge/work/T1/reviews-1-1'));
