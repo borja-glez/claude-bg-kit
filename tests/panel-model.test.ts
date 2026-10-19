@@ -226,6 +226,13 @@ describe('buildPanelModel', () => {
     expect(m.subagents[1].seconds).toBe(0);
     expect(m.ccTasks).toEqual({ open: 3, done: 2, recent: ['s3', 's4', 's5'] });
   });
+  it("a live subagent's type and description come out on one clean line", () => {
+    const c = (...codes: number[]) => String.fromCharCode(...codes);
+    const m = buildPanelModel({ ...base, activity: act({
+      subagents: [{ id: 'x', type: `Ex${c(0x1b)}[2Jplore${c(0x202e)}`, description: `a${c(0x1b)}[31m${c(10)}b${c(0x202e)}c`, status: 'running', since: 70_000 }],
+    }) });
+    expect(m.subagents[0]).toMatchObject({ type: 'Ex [2Jplore', description: 'a [31m bc' });
+  });
   it('omits todos when none were ever written', () => {
     expect(buildPanelModel({ ...base, activity: act({ todos: [] }) }).todos).toBeNull();
   });

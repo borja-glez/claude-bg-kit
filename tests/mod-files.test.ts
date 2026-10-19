@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { loadBandFiles, loadBandModel, renewBindings, RENEW_MS, type Engine } from '../src/mod/files.js';
+import { clip, loadBandFiles, loadBandModel, renewBindings, RENEW_MS, type Engine } from '../src/mod/files.js';
 import { openTasksFrom, seatsOf } from '../src/mod/model.js';
 import { checkoutSid, openTasksOf, readSeats } from '../src/lib/bound-fs.js';
 import { BOUND_REREAD_MS } from '../src/lib/bound.js';
@@ -92,6 +92,15 @@ const base = (root: string) => ({
   [`${root}/docs/waypoint/demo-shop/plan.yaml`]: plan,
   [`${root}/.waypoint/demo-shop/session.json`]: JSON.stringify({ sessionId: 'main', track: null }),
   [`${root}/.waypoint/demo-shop/bound.json`]: bound('main'),
+});
+
+describe('clip, as lens takes it from here', () => {
+  it('puts a text on one clean line, then cuts it by the cells it takes', () => {
+    const c = (...codes: number[]) => String.fromCharCode(...codes);
+    expect(clip(`a${c(0x1b)}[31m${c(10)}b${c(0x202e)}c`)).toBe('a [31m bc');
+    expect(clip(`${c(0x2066)}${'x'.repeat(50)}`, 10)).toBe(`${'x'.repeat(9)}…`);
+    expect(clip('Bash')).toBe('Bash');
+  });
 });
 
 describe('loadBandModel · decisions', () => {

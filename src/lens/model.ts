@@ -10,6 +10,7 @@ import { summarizeUsage } from './usage-summary.js';
 import { PRICES_AS_OF } from '../lib/prices.js';
 import { freshFinished, type FinishedAgent } from './finished.js';
 import { decisionsSummary } from '../lib/decisions.js';
+import { oneLine } from '../lib/one-line.js';
 import { buildActivities, leftOpen, linkHomes, parseJob, runRoleOf, withSlotAgents, type ActivityView, type LensJob, type Models, type Role } from './activities.js';
 import type { AgentLink } from './links.js';
 
@@ -614,8 +615,9 @@ export function buildPanelModel(input: {
       const loop = loopOfAgent(s.id);
       const task = taskOf.get(s.id);
       return {
-        id: s.id, type: s.type,
-        ...(s.description !== undefined ? { description: clip(s.description) } : {}),
+        // The engine's own text, as lens draws it: one clean line.
+        id: s.id, type: oneLine(s.type),
+        ...(s.description !== undefined ? { description: clip(oneLine(s.description)) } : {}),
         ...(s.status !== undefined ? { status: s.status } : {}),
         seconds: secs(now, s.since),
         ...(loop?.model ? { model: loop.model } : {}),

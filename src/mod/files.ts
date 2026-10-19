@@ -8,6 +8,8 @@ import { FORGE_DOC_MAX_BYTES, isSafeId, parseExecution } from '../lib/execution-
 import { newestMemberFiles } from '../lib/member-doc.js';
 import { CRITIQUE_FILE, LEGACY_CRITIQUE_FILE } from '../lib/critique.js';
 import { DISMISSED_MAX_CHARS } from '../lib/design-gate.js';
+import { oneLine } from '../lib/one-line.js';
+import { clip as clipCells } from './band-line.js';
 
 export type Engine = EngineInterface;
 
@@ -56,7 +58,11 @@ export async function readCollection($: Engine, dir: string, keep: 'first' | 'la
   return out;
 }
 
-export { clip } from './band-line.js';
+/**
+ * A text lens draws (a subagent's description and type, a tool, a toast reason) as one clean line (oneLine), cut by the
+ * cells it takes (band-line's clip, which only cuts: the band's own text comes clean from buildBandModel).
+ */
+export const clip = (text: string, max?: number): string => clipCells(oneLine(String(text)), max);
 
 /** C3: $.session.id() when the engine gives a safe id; null otherwise, and then this conversation owns nothing. */
 export async function sessionIdOf($: Engine): Promise<string | null> {
