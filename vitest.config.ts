@@ -35,6 +35,7 @@ export const SLOW = [
   'tests/forge-jobs.test.ts',
   'tests/forge-trust.test.ts',
   'tests/forge-verify-proc.test.ts',
+  'tests/forge-verify-env.test.ts',
 ];
 
 // I-17: vitest 5 fails a synchronous test that outran its timeout (vitest 2 let it pass), and the slow suites take 5–20 s under load.

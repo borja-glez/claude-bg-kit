@@ -310,10 +310,10 @@ describe('verify-spawn and verify-cleanup with real processes (K2-03, K2-20)', (
     ]);
     const cmds = [commandOf(path.join(root, 'a.json')), commandOf(path.join(root, 'b.json'))];
     expect(cmds.map(stateOf)).toEqual(['running', 'running']);
-    expect(json(run(['verify-cleanup', '--dir', ev], io(root)))).toEqual({ ...clean, killed: [a.pid, b.pid] });
+    expect(json(run(['verify-cleanup', '--dir', ev], io(root)))).toEqual({ ...clean, released: [], killed: [a.pid, b.pid] });
     for (const c of cmds) expect(await endedSoon(c)).toBe(true);
     // verify-close runs a second pass: nothing is left to look at.
-    expect(json(run(['verify-cleanup', '--dir', ev], io(root)))).toEqual(clean);
+    expect(json(run(['verify-cleanup', '--dir', ev], io(root)))).toEqual({ ...clean, released: [] });
   }, 90_000);
 
   // The window is 15 s here, not verify-spawn's 1 s: the command always ends long before, so nothing races the clock.
@@ -372,7 +372,7 @@ describe('verify-spawn and verify-cleanup with real processes (K2-03, K2-20)', (
     const cmd = commandOf(path.join(root, 'cmd.json'));
     expect(cmd.argv).toEqual(own);
     expect(existsSync(path.join(root, 'x.json'))).toBe(false);
-    expect(json(run(['verify-cleanup', '--dir', ev], io(root)))).toEqual({ ...clean, killed: [out.pid] });
+    expect(json(run(['verify-cleanup', '--dir', ev], io(root)))).toEqual({ ...clean, released: [], killed: [out.pid] });
     expect(await endedSoon(cmd)).toBe(true);
   }, 60_000);
 

@@ -43,7 +43,7 @@ export const command: Command = (args, ctx) => {
     commit.push(surfaceFile(name));
   }
   // 2. The processes the verify agent left running.
-  const cleanup = cleanupEvidence(evidence);
+  const cleanup = cleanupEvidence(evidence, io.cwd);
   // 3. The result, once: closing again (or after review-close or verify-result logged it) adds no event.
   const passed = v.checks.filter(c => c.ok).length, total = v.checks.length;
   // The `evidence` field logVerifyResult writes: only for a `reviews-<n>-<k>` dir.

@@ -7,5 +7,5 @@ export const command: Command = (args, ctx) => {
   const { io, flag, json } = ctx;
   const dir = flag('dir');
   if (!dir) throw new UsageError('verify-cleanup: --dir is required');
-  return json(cleanupEvidence(path.resolve(io.cwd, dir)));
+  return json(cleanupEvidence(path.resolve(io.cwd, dir), io.cwd));
 };

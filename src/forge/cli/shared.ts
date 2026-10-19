@@ -24,6 +24,7 @@ import { eventsOf, isTask } from '../task-ref.js';
 import { detectValidators, globMatch } from '../validators.js';
 import { mcpInventory } from '../tools.js';
 import { defaultProcDeps, stopEvidence, type EvidenceCleanup, type ProcDeps } from '../verify-proc.js';
+import { releaseEnv } from '../verify-env.js';
 import { readLocal, mainCheckout, readLearned, recordLearned, surfacePermissions, OBJECT_ID } from '../local.js';
 import { appendLearned, surfaceFile, permissionHash, hashMatches } from '../surfaces.js';
 import { claudeConfigDir, claudeJsonDir, locateSuperpowersFor, spLedgerDone, spSkillPath, SP_WINDOW_MS } from '../superpowers.js';
@@ -229,10 +230,11 @@ export function learnSurface(io: Io, dir: string, name: string, notes: string[],
  * writes one per spawn) and its pids.json (the older list) that are still the ones recorded. It deletes a record once each
  * of its entries is stopped, gone or reused, rewrites pids.json without those (keeping the date of its last write), keeps
  * what is unknown, and leaves alone a record in logs/ verify-spawn did not write (`skipped`). It deletes no file of the
- * project.
+ * project. It also frees the port and the browser profile verify-env reserved for the dir (K2-07); `cwd` is forge's own
+ * directory, whose main checkout holds the reservations.
  */
-export function cleanupEvidence(dir: string, deps: ProcDeps = defaultProcDeps()): EvidenceCleanup {
-  return stopEvidence(dir, deps);
+export function cleanupEvidence(dir: string, cwd: string, deps: ProcDeps = defaultProcDeps()): EvidenceCleanup & { released: number[] } {
+  return { ...stopEvidence(dir, deps), released: releaseEnv(mainCheckout(cwd), dir) };
 }
 
 /** What a triage computes (K1-01): everything `forge triage` prints, before anything is written. */

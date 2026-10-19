@@ -34,6 +34,7 @@ import { command as validate } from './validate.js';
 import { command as verdict } from './verdict.js';
 import { command as verifyCleanup } from './verify-cleanup.js';
 import { command as verifyClose } from './verify-close.js';
+import { command as verifyEnv } from './verify-env.js';
 import { command as verifyPlan } from './verify-plan.js';
 import { command as verifyResult } from './verify-result.js';
 import { command as verifySpawn } from './verify-spawn.js';
@@ -44,7 +45,7 @@ export const COMMANDS: Readonly<Record<string, Command>> = {
   triage, brief, validate, stats, verdict, round,
   'review-prep': review, 'review-close': review, prep: review, shadow: review,
   log, decision, agents, last, proposals, surfaces, tools, local, prefs, begin, route,
-  'verify-plan': verifyPlan, 'verify-result': verifyResult, 'verify-cleanup': verifyCleanup, 'verify-close': verifyClose, 'verify-spawn': verifySpawn,
+  'verify-env': verifyEnv, 'verify-plan': verifyPlan, 'verify-result': verifyResult, 'verify-cleanup': verifyCleanup, 'verify-close': verifyClose, 'verify-spawn': verifySpawn,
   'waypoint-cli': waypointCli, 'sp-path': spPath, 'sp-specs': spSpecs, 'sp-plans': spPlans, 'sp-plan': spPlan,
   tdd, tree, config, infinite, cycle, authorize, swarm, setup, stop, hook,
   'roadmap-doc': roadmap, 'roadmap-run': roadmap,
