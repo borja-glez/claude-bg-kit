@@ -54,8 +54,9 @@ const withGenerated = (generated = 'generated: [gen.txt]\n') => {
     `${generated}detect: false\nvalidators:\n  - name: check\n    cmd: node -e "require('fs').writeFileSync('gen.txt',String(Date.now()))"\n`);
 };
 
+// The fixture's task is sensitive by the person's word: its diff (a.txt) touches no zone (K4-06).
 const prep = (...extra: string[]) => run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json',
-  '--dir', '.forge/work/T1', '--cwd', wt, ...extra], io);
+  '--dir', '.forge/work/T1', '--cwd', wt, '--sensitive', ...extra], io);
 
 describe('forge review-prep', () => {
   it('round 1 writes validators, diff, head.txt and review-plan.json and prints spawn with the triage model and effort', () => {
@@ -218,7 +219,7 @@ describe('forge review-prep', () => {
     mkdirSync(loose, { recursive: true });
     writeFileSync(path.join(loose, 'brief-1.md'), '# T1-2\n');
     const r = run(['review-prep', '--task', 'T1-2-1', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json',
-      '--dir', '.forge/work/T1-2', '--cwd', wt], io);
+      '--dir', '.forge/work/T1-2', '--cwd', wt, '--sensitive'], io);
     expect(r.stderr).toBe('');
     expect(r.code).toBe(0);
     const out = JSON.parse(r.stdout);
@@ -361,7 +362,7 @@ describe('forge prep', () => {
     const p = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).stdout);
     expect(p.threatModel).toBe('.forge/work/T1/threat-model.md');
     expect(readFileSync(path.join(work(), 'threat-model.md'), 'utf8')).toBe('## Threat model\n\n- Protects: files outside the repository\n');
-    const out = JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', p.base, '--baseline', '.forge/work/T1/baseline-1.json', '--dir', '.forge/work/T1', '--cwd', wt], io).stdout);
+    const out = JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', p.base, '--baseline', '.forge/work/T1/baseline-1.json', '--dir', '.forge/work/T1', '--cwd', wt, '--sensitive'], io).stdout);
     expect(out.spawn.find((s: { role: string }) => s.role === 'review-security').inputs.threatModel).toBe('.forge/work/T1/threat-model.md');
     expect(out.spawn.find((s: { role: string }) => s.role === 'review-correctness').inputs.threatModel).toBeUndefined();
   });
@@ -1361,7 +1362,7 @@ describe('the express review (measure 7)', () => {
     const before = validates();
     const self = path.join(root, 'plugin', 'dist', 'forge.cjs');
     const out = JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json', '--dir', '.forge/work/T1',
-      '--cwd', wt, '--locale', 'en'], { ...io, scriptPath: self }).stdout);
+      '--cwd', wt, '--sensitive', '--locale', 'en'], { ...io, scriptPath: self }).stdout);
     expect(out).toMatchObject({ round: 2, reviews: { n: 2, max: 4 }, express: true, carried: ['security'], delegated: ['correctness'] });
     expect(out.spawn).toEqual([expect.objectContaining({ role: 'review-correctness', model: 'sonnet', effort: 'medium', mode: 'delta', express: true, taskLine: 'forge-task: T1-1' })]);
     expect(out.spawn[0].inputs.findings).toBe('.forge/work/T1/reviews-1-2/previous-express.json');
@@ -1687,5 +1688,38 @@ describe('a verification in a forge task worktree reaches the main checkout (D-1
       expect(readEvents(main).some(e => e.kind === 'verdict' && e.task === 'T1-1')).toBe(true);
       expect(existsSync(path.join(task, '.forge', 'ledger.jsonl'))).toBe(false);
     } finally { rmSync(path.join(task, big), { force: true }); }
+  });
+});
+
+describe('security by the zones of the real diff (K4-06)', () => {
+  // The fixture's triage asked for security from its words («auth»); what the diff touches decides now.
+  const prepOnly = (...extra: string[]) => JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', base,
+    '--baseline', '.forge/work/T1/baseline-1.json', '--dir', '.forge/work/T1', '--cwd', wt, ...extra], io).stdout);
+  const roles = (out: { spawn: { role: string }[] }) => out.spawn.map(s => s.role);
+  const commit = (file: string, text: string) => {
+    mkdirSync(path.dirname(path.join(wt, file)), { recursive: true });
+    writeFileSync(path.join(wt, file), text);
+    git('add', '-A');
+    git('commit', '-q', '-m', file);
+  };
+  it('a diff that touches no sensitive zone gets no security reviewer, whatever the task said, and no --sensitive flag', () => {
+    commit('src/ui/Button.tsx', 'export const Button = () => null;\n');
+    expect(roles(prepOnly())).toEqual(['review-correctness']);
+    expect(JSON.parse(readFileSync(path.join(work(), 'reviews-1-1', 'review-plan.json'), 'utf8')).flags).toEqual([]);
+  });
+  it('an added line with a zone word (jwt.verify) brings security in', () => {
+    commit('src/ui/session.ts', 'export const check = (t: string) => jwt.verify(t, key);\n');
+    expect(roles(prepOnly())).toContain('review-security');
+  });
+  it('--sensitive keeps security on a diff that touches no zone', () => {
+    commit('src/ui/Button.tsx', 'export const Button = () => null;\n');
+    expect(roles(prepOnly('--sensitive'))).toContain('review-security');
+  });
+  it('deleting a file under auth/ touches the zone (Review Focus 5)', () => {
+    commit('src/auth/token.ts', 'export const ttl = 60;\n');
+    base = git('rev-parse', 'HEAD');
+    git('rm', '-q', 'src/auth/token.ts');
+    git('commit', '-q', '-m', 'drop the token');
+    expect(roles(prepOnly())).toContain('review-security');
   });
 });

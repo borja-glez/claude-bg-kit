@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { triage, implementerFor, isMechanical, announce, parseNumstat, isBookkeeping, diffPath, DIFF_MEDIUM_LINES, isPerfTask, reviewFor, announceReview, stripMentions, zonesFromText, type RepoFacts } from '../src/forge/triage.js';
+import { triage, implementerFor, isMechanical, announce, parseNumstat, isBookkeeping, diffPath, DIFF_MEDIUM_LINES, isPerfTask, reviewFor, announceReview, stripMentions, zonesFromText, diffZones, type RepoFacts } from '../src/forge/triage.js';
 
 const FILES = ['src/app.ts', 'src/auth/login.ts', 'src/util/format.ts', 'src/db/migrations/001.sql', 'package.json', '.github/workflows/ci.yml',
   ...Array.from({ length: 20 }, (_, i) => `src/feature/f${i}.ts`)];
@@ -496,5 +496,18 @@ describe('zonesFromText (K2-16)', () => {
     expect(zonesFromText('Add an index to the orders schema')).toEqual(['data']);
     expect(zonesFromText('Rename `auth.ts` helpers')).toEqual(['auth']);
     expect(zonesFromText('Tidy the parser')).toEqual([]);
+  });
+});
+
+describe('diffZones (K4-06)', () => {
+  it('the zones of the paths a diff changes and of the words of its added lines, never of removed ones', () => {
+    expect(diffZones(['src/ui/Button.tsx'], '+++ b/src/ui/Button.tsx\n+export const Button = 1;\n')).toEqual([]);
+    expect(diffZones(['src/ui/x.ts'], '+++ b/src/ui/x.ts\n+  return jwt.verify(t, key);\n')).toEqual(['auth']);
+    expect(diffZones(['src/ui/x.ts'], '--- a/src/ui/x.ts\n-  return jwt.verify(t, key);\n')).toEqual([]);
+    expect(diffZones(['db/migrations/001.sql', 'package.json'], '')).toEqual(['data', 'deps']);
+  });
+  it('reads a long diff whole: a zone word past the first 20 000 characters still counts', () => {
+    const filler = '+const x = 1;\n'.repeat(3000);
+    expect(diffZones(['src/ui/x.ts'], `+++ b/src/ui/x.ts\n${filler}+  jwt.verify(t, key);\n`)).toEqual(['auth']);
   });
 });

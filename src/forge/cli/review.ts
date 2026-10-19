@@ -9,7 +9,7 @@ import {
   detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, failingLabel,
   type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult,
 } from '../validators.js';
-import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
+import { PATH_ORDER, diffZones, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
 import {
   parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative,
   type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding,
@@ -31,7 +31,7 @@ import { loadTrustedConfig } from '../trust.js';
 import { eventsSince, executionHolding } from '../execution.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { noSlot, type Slot } from '../jobs.js';
-import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type SpawnEntry, type TriageReview } from '../review-round.js';
+import { reviewRound, reviewerKey, withSecurity, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type SpawnEntry, type TriageReview } from '../review-round.js';
 
 // The review commands. run.ts dispatches here; this module never imports run.ts (that would be a cycle).
 
@@ -194,6 +194,7 @@ function writeThreatModel(dir: string, config: ForgeConfig): string | null {
  * It prints reviews {n, max}, the review of the brief as the person counts it (C-13), which its say begins with.
  * An express review (measure 7) does not validate: it prints validators {pending, cmd}, the validation to run in the
  * background, one correctness reviewer on Sonnet and delegated.
+ * --sensitive (K4-06): security reviews whatever the diff touches; without it, only when the diff touches a sensitive zone.
  */
 export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
@@ -223,13 +224,17 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   // A Medium brief run as a loose task has the id `<parent>-<k>` and no triage of its own: it reviews with the
   // parent's (that id exactly, never a sibling brief's).
   const parent = /^(.+)-\d+$/.exec(id)?.[1];
-  const review = triageReview(events, id, config.profile)
+  const triaged = triageReview(events, id, config.profile)
     ?? (parent ? triageReview(eventsOf(all, { project, task: parent }).filter(e => isTask(e, parent)), parent, config.profile) : null);
-  if (!review) throw new UsageError(`review-prep: no triage of ${id}${parent ? ` nor of ${parent}` : ''} logged a review: run FORGE triage --task ${id} first`);
+  if (!triaged) throw new UsageError(`review-prep: no triage of ${id}${parent ? ` nor of ${parent}` : ''} logged a review: run FORGE triage --task ${id} first`);
   const head = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
   if (!head) throw new UsageError('review-prep: cannot read HEAD');
   const diff = deps.git(['diff', `${baseSha}..HEAD`]);
   if (diff === null) throw new UsageError(`review-prep: cannot diff ${baseSha}..HEAD`);
+  // K4-06: security follows the zones the real diff touches (its paths and the zone words of its added lines), whatever the
+  // task's words were; --sensitive, the person's word, keeps it on any diff. The other reviewers stay as triaged.
+  const touched = (deps.git(['diff', '--name-only', `${baseSha}..HEAD`]) ?? '').split('\n').map(s => s.trim()).filter(Boolean);
+  const review = withSecurity(triaged, diffZones(touched, diff), args.includes('--sensitive'), config.profile);
 
   const dir = path.resolve(deps.cwd, dirArg);
   // Carry 3: in an execution, only its own verdicts count (the round, the redo, the express review, the validators rounds).

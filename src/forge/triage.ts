@@ -34,6 +34,20 @@ export function zonesFromText(text: string): Zone[] {
   const t = String(text).slice(0, MAX_TEXT);
   return ZONES.filter(z => z.text.some(re => re.test(t))).map(z => z.zone);
 }
+/** K4-06: the sensitive zones of a real diff: the paths it changes (deleted and renamed files included) and the zone
+ *  words of its added lines, read in chunks of MAX_TEXT (zonesFromText's limit), in table order. */
+export function diffZones(names: string[], patch: string): Zone[] {
+  const found = new Set<Zone>(zonesFromPaths(names));
+  let chunk = '';
+  const read = () => { for (const z of zonesFromText(chunk)) found.add(z); chunk = ''; };
+  for (const l of patch.split('\n')) {
+    if (!l.startsWith('+') || /^\+\+\+ (?:b\/|\/dev\/null)/.test(l)) continue;
+    if (chunk.length + l.length > MAX_TEXT) read();
+    chunk += `${l.slice(1, MAX_TEXT)}\n`;
+  }
+  read();
+  return ZONE_ORDER.filter(z => found.has(z));
+}
 const LARGE = [/\b(architecture|redesign|rewrite|subsystem|new (project|app|service|system)|from scratch|migrat(e|ion) (to|from))\b/i,
   es('arquitect|rediseñ|reescrib|reescritur|subsistem', 'desde cero|(?:nuev[oa]|otr[oa]) (?:proyecto|aplicaci[oó]n|app|servicio|sistema)|migr(?:ar|aci[oó]n) (?:a|al|desde)')];
 

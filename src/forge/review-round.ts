@@ -1,4 +1,5 @@
 import type { PathName, ReviewEffort, ReviewRole, Zone } from './triage.js';
+import { agentFor, type Profile } from './config.js';
 import type { Finding } from './verdict.js';
 
 // Who reviews in each round of a brief (design «Rondas de arreglo» and «Validación en sombra»).
@@ -128,4 +129,24 @@ export function reviewRound(input: RoundInput): RoundPlan {
     spawn: [{ role: 'review-correctness', name: 'correctness', agent: correctness.agent, model: 'sonnet', effort: 'medium', mode: 'delta', twin: false, express: true,
       inputs: { brief: files.brief, diff: files.diff, validators: files.validators, out: files.out, ...(files.fix ? { fix: files.fix } : {}), findings: files.expressFindings } }],
   };
+}
+
+/**
+ * K4-06: who reviews, with security decided by the real diff: it reviews when the diff touches a sensitive zone (high;
+ * xhigh on auth or with the quality profile) or when the person said the task is sensitive (`forced`), and not otherwise,
+ * whatever the task's words were. The verdict flag --sensitive goes with it. A light review never gets security, and no
+ * other reviewer, nor its effort, changes.
+ */
+export function withSecurity(review: TriageReview, zones: Zone[], forced: boolean, profile: Profile): TriageReview {
+  if (review.light) return review;
+  const want = forced || zones.length > 0;
+  const has = review.reviewers.some(r => r.role === 'review-security');
+  if (want === has) return review;
+  const flags = review.flags.filter(f => f !== '--sensitive');
+  if (!want) return { ...review, reviewers: review.reviewers.filter(r => r.role !== 'review-security'), flags };
+  const effort: ReviewEffort = profile === 'quality' || zones.includes('auth') ? 'xhigh' : 'high';
+  const security: RoundReviewer = { role: 'review-security', agent: agentFor('review-security', profile), model: null, effort };
+  const perf = review.reviewers.findIndex(r => r.role === 'review-perf');
+  const reviewers = perf < 0 ? [...review.reviewers, security] : [...review.reviewers.slice(0, perf), security, ...review.reviewers.slice(perf)];
+  return { ...review, reviewers, flags: ['--sensitive', ...flags] };
 }
