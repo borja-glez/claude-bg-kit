@@ -500,11 +500,19 @@ describe('zonesFromText (K2-16)', () => {
 });
 
 describe('diffZones (K4-06)', () => {
-  it('the zones of the paths a diff changes and of the words of its added lines, never of removed ones', () => {
+  it('the zones of the paths a diff changes and of the words of its added and removed lines, never of its context or file headers', () => {
     expect(diffZones(['src/ui/Button.tsx'], '+++ b/src/ui/Button.tsx\n+export const Button = 1;\n')).toEqual([]);
     expect(diffZones(['src/ui/x.ts'], '+++ b/src/ui/x.ts\n+  return jwt.verify(t, key);\n')).toEqual(['auth']);
-    expect(diffZones(['src/ui/x.ts'], '--- a/src/ui/x.ts\n-  return jwt.verify(t, key);\n')).toEqual([]);
+    expect(diffZones(['src/ui/x.ts'], '--- a/src/ui/x.ts\n-  if (!jwt.verify(t, key)) throw new Error();\n')).toEqual(['auth']);
+    expect(diffZones(['src/ui/x.ts'], '--- a/src/ui/x.ts\n+++ b/src/ui/x.ts\n @@\n   return jwt.verify(t, key);\n+  return 1;\n')).toEqual([]);
+    expect(diffZones(['src/ui/x.ts'], '--- "a/src/ui/jwt.verify.ts"\n+++ "b/src/ui/jwt.verify.ts"\n+  return 1;\n')).toEqual([]);
     expect(diffZones(['db/migrations/001.sql', 'package.json'], '')).toEqual(['data', 'deps']);
+  });
+  it('a single line longer than the read limit is read in overlapping pieces, so a zone word is never cut', () => {
+    for (const pad of [19_990, 19_995, 19_999, 20_000, 40_000]) {
+      expect(diffZones([], `+${'x '.repeat(pad / 2)}jwt.verify(t)\n`)).toEqual(['auth']);
+    }
+    expect(diffZones([], `-${'a'.repeat(19_990)} jwt.verify(t)${'a'.repeat(30_000)}\n`)).toEqual(['auth']);
   });
   it('reads a long diff whole: a zone word past the first 20 000 characters still counts', () => {
     const filler = '+const x = 1;\n'.repeat(3000);

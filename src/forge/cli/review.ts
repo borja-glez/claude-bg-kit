@@ -70,6 +70,19 @@ export function triageReview(events: LedgerEvent[], base: string, profile: Profi
   return { light: r.light === true, reviewers, flags: Array.isArray(r.flags) ? r.flags.filter((f): f is string => typeof f === 'string') : [] };
 }
 
+/** K4-06: whether a round of the brief before `round` had security (spawned or carried) or was flagged --sensitive. */
+function hadSecurity(dir: string, n: string, round: number): boolean {
+  const roles = (x: unknown): unknown[] => (Array.isArray(x) ? x.map(e => (e as { role?: unknown } | null)?.role) : []);
+  for (let k = 1; k < round; k++) {
+    const roundDir = path.join(dir, `reviews-${n}-${k}`);
+    const plan = readJson(path.join(roundDir, 'review-plan.json')) as { spawn?: unknown; carried?: unknown; flags?: unknown } | undefined;
+    if (plan && (roles(plan.spawn).includes('review-security') || roles(plan.carried).includes('review-security')
+      || (Array.isArray(plan.flags) && plan.flags.includes('--sensitive')))) return true;
+    if (existsSync(path.join(roundDir, 'security.json'))) return true;
+  }
+  return false;
+}
+
 /** The round a brief's review is in: 1 + the review dirs that already have a verdict (a re-run verdict counts once).
  *  Carry 3: with `since` (the start of the execution that holds the task), only the verdicts logged from then. */
 export function reviewRoundOf(events: LedgerEvent[], task: string, since: string | null = null): number {
@@ -229,12 +242,11 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   if (!triaged) throw new UsageError(`review-prep: no triage of ${id}${parent ? ` nor of ${parent}` : ''} logged a review: run FORGE triage --task ${id} first`);
   const head = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
   if (!head) throw new UsageError('review-prep: cannot read HEAD');
-  const diff = deps.git(['diff', `${baseSha}..HEAD`]);
-  if (diff === null) throw new UsageError(`review-prep: cannot diff ${baseSha}..HEAD`);
-  // K4-06: security follows the zones the real diff touches (its paths and the zone words of its added lines), whatever the
-  // task's words were; --sensitive, the person's word, keeps it on any diff. The other reviewers stay as triaged.
-  const touched = (deps.git(['diff', '--name-only', `${baseSha}..HEAD`]) ?? '').split('\n').map(s => s.trim()).filter(Boolean);
-  const review = withSecurity(triaged, diffZones(touched, diff), args.includes('--sensitive'), config.profile);
+  const diffGit = ['-c', 'core.quotePath=false', 'diff', '--no-renames'];
+  const diff = deps.git([...diffGit, `${baseSha}..HEAD`]);
+  const names = deps.git([...diffGit, '--name-only', `${baseSha}..HEAD`]);
+  if (diff === null || names === null) throw new UsageError(`review-prep: cannot diff ${baseSha}..HEAD`);
+  const touched = names.split('\n').map(s => s.trim()).filter(Boolean);
 
   const dir = path.resolve(deps.cwd, dirArg);
   // Carry 3: in an execution, only its own verdicts count (the round, the redo, the express review, the validators rounds).
@@ -284,9 +296,9 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     const prevHead = existsSync(path.join(prevDir, 'head.txt')) ? readFileSync(path.join(prevDir, 'head.txt'), 'utf8').trim() : '';
     // Without the commit the previous round reviewed, or when git cannot diff from it, the whole diff stands in for the fix.
     const diffFrom = (from: string) => {
-      const names = deps.git(['diff', '--name-only', `${from}..HEAD`]);
-      const patch = names === null ? null : deps.git(['diff', `${from}..HEAD`]);
-      return names === null || patch === null ? null : { names, patch };
+      const changedNames = deps.git([...diffGit, '--name-only', `${from}..HEAD`]);
+      const patch = changedNames === null ? null : deps.git([...diffGit, `${from}..HEAD`]);
+      return changedNames === null || patch === null ? null : { names: changedNames, patch };
     };
     const fix = (prevHead ? diffFrom(prevHead) : null) ?? diffFrom(baseSha);
     if (!fix) throw new UsageError(`review-prep: cannot diff the fix (${prevHead || baseSha}..HEAD)`);
@@ -295,6 +307,11 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   }
   // After a redo the work was started again: every reviewer reviews it in full, nothing is carried.
   const redo = round >= 2 && counted.filter(e => e.kind === 'verdict' && isTask(e, task)).at(-1)?.action === 'redo';
+  // K4-06: security follows the zones the real diff touches (its paths and the zone words of its added and removed lines),
+  // whatever the task's words were. It is forced by --sensitive (the person's word) and, from round 2 and not after a redo,
+  // by an earlier round of this brief having had it: a fix that rewrites the zone word away does not silence a reviewer.
+  const forced = args.includes('--sensitive') || (round >= 2 && !redo && hadSecurity(dir, n, round));
+  const review = withSecurity(triaged, diffZones(touched, diff), forced, config.profile);
 
   // Measure 7 (§4.9): an express review when the previous review asked for a fix with green validators and left one or
   // two important findings with file and line, none from security, a regression or out of the model; never after a redo,
@@ -314,9 +331,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase: 'validate', brief: Number(n), round });
 
   // Validation, as `FORGE validate --all --path <p> --base <sha> --baseline <f>` runs it.
-  const changed = deps.git(['diff', '--name-only', `${baseSha}..HEAD`]);
-  const scope: Scope = pathName === 'trivial' || pathName === 'small' ? { mode: 'small' }
-    : { mode: 'heavy', changed: changed === null ? null : changed.split('\n').map(s => s.trim()).filter(Boolean) };
+  const scope: Scope = pathName === 'trivial' || pathName === 'small' ? { mode: 'small' } : { mode: 'heavy', changed: touched };
   const restored: string[] = [];
   const validation = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes('--no-cache'));
   const results: ValidatorResult[] = markPreexisting(validation.results, baseline);

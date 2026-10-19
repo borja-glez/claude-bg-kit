@@ -1722,4 +1722,66 @@ describe('security by the zones of the real diff (K4-06)', () => {
     git('commit', '-q', '-m', 'drop the token');
     expect(roles(prepOnly())).toContain('review-security');
   });
+  it('a rename out of auth/ touches the zone, and a non-ASCII path is read unquoted', () => {
+    commit('src/auth/token.ts', 'export const ttl = 60;\n');
+    base = git('rev-parse', 'HEAD');
+    mkdirSync(path.join(wt, 'src', 'ui'), { recursive: true });
+    git('mv', 'src/auth/token.ts', 'src/ui/token.ts');
+    git('commit', '-q', '-m', 'move the token');
+    expect(roles(prepOnly())).toContain('review-security');
+    git('rm', '-q', '-r', 'src/ui');
+    commit('src/ui/ñandú.ts', 'export const x = 1;\n');
+    expect(roles(prepOnly())).toContain('review-security'); // the base diff still holds the auth/ rename
+  });
+  it('deleting a guard (a removed line with a zone word) brings security in', () => {
+    commit('src/ui/guard.ts', 'export const g = (t: string) => { if (!jwt.verify(t, key)) throw new Error(); return t; };\n');
+    base = git('rev-parse', 'HEAD');
+    commit('src/ui/guard.ts', 'export const g = (t: string) => t;\n');
+    expect(roles(prepOnly())).toContain('review-security');
+  });
+  it('a threat model in the config does not force security', () => {
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'threatModel:\n  protects: ["files outside the repository"]\ndetect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(0)"\n');
+    commit('src/ui/Button.tsx', 'export const Button = () => null;\n');
+    expect(roles(prepOnly())).toEqual(['review-correctness']);
+  });
+  it('--sensitive brings security to a light review', () => {
+    appendEvent(root, { ts: '2026-10-14T09:30:00.000Z', kind: 'triage', task: 'T1', path: 'medium', sensitive: [],
+      review: { light: true, flags: [], reviewers: [{ role: 'review-correctness', model: null, effort: 'high', agent: 'forge-review-correctness' }] } });
+    commit('src/ui/Button.tsx', 'export const Button = () => null;\n');
+    expect(roles(prepOnly())).toEqual(['review-correctness']);
+    expect(roles(prepOnly('--sensitive'))).toEqual(['review-correctness', 'review-security']);
+  });
+  describe('a fix round keeps the security reviewer that already reviewed the brief', () => {
+    const failRound1 = () => {
+      const r1 = path.join(work(), 'reviews-1-1');
+      writeFileSync(path.join(r1, 'correctness.json'), JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] }));
+      writeFileSync(path.join(r1, 'security.json'), JSON.stringify({ verdict: 'fail', confidence: 0.8, findings: [{ severity: 'critical', file: 'src/ui/session.ts', line: 1, problem: 'decode without verify' }] }));
+      appendEvent(root, { ts: '2026-10-14T10:05:00.000Z', kind: 'verdict', task: 'T1-1', dir: '.forge/work/T1/reviews-1-1', action: 'fix', score: 0.6, signature: 'x' });
+    };
+    it('a fix that rewrites the zone word away still gets security in round 2', () => {
+      commit('src/ui/session.ts', 'export const check = (t: string) => jwt.decode(t);\n');
+      expect(roles(prepOnly())).toEqual(['review-correctness', 'review-security']);
+      failRound1();
+      commit('src/ui/session.ts', 'export const check = (t: string) => JSON.parse(atob(t));\n');
+      const out = prepOnly();
+      expect(roles(out)).toEqual(['review-correctness', 'review-security']);
+      expect(out.spawn.find((s: { role: string }) => s.role === 'review-security').mode).toBe('delta');
+    });
+    it('a --sensitive of round 1 is inherited when round 2 drops the flag, and the plan keeps it', () => {
+      commit('src/ui/Button.tsx', 'export const Button = () => null;\n');
+      expect(roles(prepOnly('--sensitive'))).toContain('review-security');
+      failRound1();
+      commit('src/ui/Button.tsx', 'export const Button = () => 1;\n');
+      expect(roles(prepOnly())).toContain('review-security');
+      expect(JSON.parse(readFileSync(path.join(work(), 'reviews-1-2', 'review-plan.json'), 'utf8')).flags).toContain('--sensitive');
+    });
+    it('a brief whose earlier rounds had no security does not gain it from a fix without a zone', () => {
+      commit('src/ui/Button.tsx', 'export const Button = () => null;\n');
+      expect(roles(prepOnly())).toEqual(['review-correctness']);
+      writeFileSync(path.join(work(), 'reviews-1-1', 'correctness.json'), JSON.stringify({ verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'src/ui/Button.tsx', line: 1, problem: 'p' }] }));
+      appendEvent(root, { ts: '2026-10-14T10:05:00.000Z', kind: 'verdict', task: 'T1-1', dir: '.forge/work/T1/reviews-1-1', action: 'fix', score: 0.6, signature: 'x' });
+      commit('src/ui/Button.tsx', 'export const Button = () => 2;\n');
+      expect(roles(prepOnly())).toEqual(['review-correctness']);
+    });
+  });
 });

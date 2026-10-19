@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reviewRound, type PreviousResult, type RoundInput, type TriageReview } from '../src/forge/review-round.js';
+import { reviewRound, withSecurity, type PreviousResult, type RoundInput, type TriageReview } from '../src/forge/review-round.js';
 
 const files = { brief: 'w/brief-1.md', diff: 'w/diff-1.patch', validators: 'w/validators-1.json', out: 'w/reviews-1-R', shadow: 'w/reviews-1-R/shadow',
   fix: 'w/fix-1-R.patch', findings: (name: string) => `w/reviews-1-R/previous-${name}.json` };
@@ -154,5 +154,35 @@ describe('reviewRound', () => {
       expect(plan(c).express, JSON.stringify(c)).toBe(false);
     }
     expect(plan(pass)).toMatchObject({ express: true, delegated: ['perf'] });
+  });
+});
+
+describe('withSecurity (K4-06)', () => {
+  const perfOnly: TriageReview = { light: false, flags: ['--perf'], reviewers: [
+    { role: 'review-correctness', agent: 'forge-review-correctness', model: null, effort: 'high' },
+    { role: 'review-perf', agent: 'forge-review-perf', model: null, effort: 'medium' },
+  ] };
+  const roles = (r: TriageReview) => r.reviewers.map(x => [x.role, x.effort]);
+  it('a zone diff on a triage without security inserts it before perf, with the effort of the zone, and prepends --sensitive', () => {
+    const r = withSecurity(perfOnly, ['data'], false, 'balanced');
+    expect(roles(r)).toEqual([['review-correctness', 'high'], ['review-security', 'high'], ['review-perf', 'medium']]);
+    expect(r.flags).toEqual(['--sensitive', '--perf']);
+    expect(roles(withSecurity(perfOnly, ['auth'], false, 'balanced'))[1]).toEqual(['review-security', 'xhigh']);
+    expect(roles(withSecurity(perfOnly, ['data'], false, 'quality'))[1]).toEqual(['review-security', 'xhigh']);
+  });
+  it('forced adds it without a zone, appended when there is no perf reviewer', () => {
+    expect(roles(withSecurity(plain, [], true, 'balanced'))).toEqual([['review-correctness', 'high'], ['review-security', 'high']]);
+  });
+  it('no zone and not forced takes it out with its flag; a triaged security keeps the higher effort', () => {
+    const r = withSecurity(medium, [], false, 'balanced');
+    expect(r.reviewers.map(x => x.role)).toEqual(['review-correctness', 'review-perf']);
+    expect(r.flags).toEqual(['--perf']);
+    expect(roles(withSecurity(medium, ['auth'], false, 'balanced'))[1]).toEqual(['review-security', 'xhigh']);
+    expect(roles(withSecurity(medium, ['data'], false, 'balanced'))[1]).toEqual(['review-security', 'high']);
+  });
+  it('a light review gets security only when forced', () => {
+    const light: TriageReview = { ...plain, light: true };
+    expect(withSecurity(light, ['auth'], false, 'balanced')).toBe(light);
+    expect(withSecurity(light, [], true, 'balanced').reviewers.map(x => x.role)).toEqual(['review-correctness', 'review-security']);
   });
 });

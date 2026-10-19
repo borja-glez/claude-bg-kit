@@ -35,15 +35,22 @@ export function zonesFromText(text: string): Zone[] {
   return ZONES.filter(z => z.text.some(re => re.test(t))).map(z => z.zone);
 }
 /** K4-06: the sensitive zones of a real diff: the paths it changes (deleted and renamed files included) and the zone
- *  words of its added lines, read in chunks of MAX_TEXT (zonesFromText's limit), in table order. */
+ *  words of its added and removed lines (a deleted guard is a change to the zone), read in chunks of MAX_TEXT
+ *  (zonesFromText's limit), in table order. A line longer than MAX_TEXT is read in overlapping pieces. */
 export function diffZones(names: string[], patch: string): Zone[] {
   const found = new Set<Zone>(zonesFromPaths(names));
   let chunk = '';
   const read = () => { for (const z of zonesFromText(chunk)) found.add(z); chunk = ''; };
+  const OVERLAP = 64;
   for (const l of patch.split('\n')) {
-    if (!l.startsWith('+') || /^\+\+\+ (?:b\/|\/dev\/null)/.test(l)) continue;
-    if (chunk.length + l.length > MAX_TEXT) read();
-    chunk += `${l.slice(1, MAX_TEXT)}\n`;
+    if ((!l.startsWith('+') && !l.startsWith('-')) || /^(?:\+\+\+|---) (?:"?[ab]\/|\/dev\/null)/.test(l)) continue;
+    const text = l.slice(1);
+    for (let i = 0; i === 0 || i < text.length; i += MAX_TEXT - OVERLAP) {
+      const piece = text.slice(i, i + MAX_TEXT);
+      if (chunk.length + piece.length >= MAX_TEXT) read();
+      chunk += `${piece}\n`;
+      if (i + MAX_TEXT >= text.length) break;
+    }
   }
   read();
   return ZONE_ORDER.filter(z => found.has(z));

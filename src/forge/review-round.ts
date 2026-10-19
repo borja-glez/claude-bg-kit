@@ -133,18 +133,24 @@ export function reviewRound(input: RoundInput): RoundPlan {
 
 /**
  * K4-06: who reviews, with security decided by the real diff: it reviews when the diff touches a sensitive zone (high;
- * xhigh on auth or with the quality profile) or when the person said the task is sensitive (`forced`), and not otherwise,
- * whatever the task's words were. The verdict flag --sensitive goes with it. A light review never gets security, and no
- * other reviewer, nor its effort, changes.
+ * xhigh on auth or with the quality profile) or when it is `forced` (the person said the task is sensitive, or an earlier
+ * round of the brief had security), and not otherwise, whatever the task's words were. The verdict flag --sensitive goes
+ * with it. `forced` brings security even to a light review; a triaged security keeps the higher of its effort and the
+ * diff's. No other reviewer, nor its effort, changes.
  */
 export function withSecurity(review: TriageReview, zones: Zone[], forced: boolean, profile: Profile): TriageReview {
-  if (review.light) return review;
+  if (review.light && !forced) return review;
   const want = forced || zones.length > 0;
   const has = review.reviewers.some(r => r.role === 'review-security');
+  const effort: ReviewEffort = profile === 'quality' || zones.includes('auth') ? 'xhigh' : 'high';
+  if (want && has) {
+    const rank: ReviewEffort[] = ['medium', 'high', 'xhigh'];
+    const reviewers = review.reviewers.map(r => r.role === 'review-security' && rank.indexOf(effort) > rank.indexOf(r.effort) ? { ...r, effort } : r);
+    return { ...review, reviewers, flags: forced && !review.flags.includes('--sensitive') ? ['--sensitive', ...review.flags] : review.flags };
+  }
   if (want === has) return review;
   const flags = review.flags.filter(f => f !== '--sensitive');
   if (!want) return { ...review, reviewers: review.reviewers.filter(r => r.role !== 'review-security'), flags };
-  const effort: ReviewEffort = profile === 'quality' || zones.includes('auth') ? 'xhigh' : 'high';
   const security: RoundReviewer = { role: 'review-security', agent: agentFor('review-security', profile), model: null, effort };
   const perf = review.reviewers.findIndex(r => r.role === 'review-perf');
   const reviewers = perf < 0 ? [...review.reviewers, security] : [...review.reviewers.slice(0, perf), security, ...review.reviewers.slice(perf)];
