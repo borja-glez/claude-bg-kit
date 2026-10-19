@@ -10,6 +10,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { bindingLive, BOUND_MAX_BYTES, BOUND_REREAD_MS, CACHE_DOCS_MAX, MAX_PROJECTS, MAX_SEATS, parseBound, SESSION_MAX_BYTES, type BoundDoc } from './bound.js';
 import { isSafeId } from './execution-state.js';
+import { isPlanId } from './ids.js';
 import { PREVIOUS_OFFER_MS } from './viewer-role.js';
 import { pidAlive } from './pid.js';
 
@@ -135,6 +136,7 @@ export function openTasksOf(wpDir: string): Record<string, string> {
   let names: string[] = [];
   try { names = readdirSync(dir).filter(f => f.endsWith('.json')).sort().slice(0, CACHE_DOCS_MAX); } catch { return out; }
   for (const f of names) {
+    if (!isPlanId(f.slice(0, -5))) continue; // a file that is no plan id names no task (the band reads the same rule)
     try {
       const st = JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as { status?: unknown; owner?: unknown } | null;
       if ((st?.status === 'claimed' || st?.status === 'in_progress') && typeof st.owner === 'string' && !(st.owner in out)) out[st.owner] = f.slice(0, -5);

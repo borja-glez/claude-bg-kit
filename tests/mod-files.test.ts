@@ -351,6 +351,16 @@ describe('loadBandFiles · who looks, and the seats of its project (C3, A-15)', 
     expect(openTasksFrom(states)).toEqual({ early: 'S0100' });
     expect(openTasksOf(path.join(onDisk(f, root), '.waypoint', 'demo-shop'))).toEqual({ early: 'S0100' });
   });
+  it('a state file named with a space or a control character is not an open task of openTasksOf (isPlanId, as the band reads it)', () => {
+    const wp = tmp('open-tasks-');
+    const dir = path.join(wp, 'dbcache', 'state');
+    mkdirSync(dir, { recursive: true });
+    const open = JSON.stringify({ status: 'in_progress', owner: 'main' });
+    writeFileSync(path.join(dir, 'T001.json'), JSON.stringify({ status: 'claimed', owner: 'ui' }));
+    writeFileSync(path.join(dir, 'T 002.json'), open);
+    try { writeFileSync(path.join(dir, `T${String.fromCharCode(7)}003.json`), open); } catch { /* Windows refuses a control character in a name */ }
+    expect(openTasksOf(wp)).toEqual({ ui: 'T001' });
+  });
   it("keeps the newest 500 messages, by their time-ordered ids: an open one addressed to the seat counts in its inbox (round 2)", async () => {
     const root = '/repo';
     const f: Record<string, string> = { ...base(root) };
