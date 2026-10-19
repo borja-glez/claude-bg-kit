@@ -43,13 +43,13 @@ export const declaresAssets = (capabilities: unknown): boolean =>
  * Re-review I1: whether a republish with `assets` (true or false) changes who can see and share a roadmap whose listed
  * meta/page recorded `published` (undefined when unknown: no page, or one from before this record), and the line to ask
  * the person with. A first publication changes nothing here (`sharingNotice` speaks for it); an unknown record counts as
- * changed when the file declares assets. Ruling R6c: without them it is asked too, with a line of its own, unless the
- * caller said which it wants (`chosen`: --assets or --no-assets), so a store the roadmap may have is never dropped unattended.
+ * changed when the file declares assets. Ruling R6c: without them it is asked too, with a line of its own, also under
+ * --no-assets, so a store the roadmap may have is never dropped unattended.
  */
-export function sharingChange(plan: Plan, assets: boolean, published: boolean | undefined, chosen: boolean): { capabilitiesChanged: boolean; ask: string | null } {
+export function sharingChange(plan: Plan, assets: boolean, published: boolean | undefined): { capabilitiesChanged: boolean; ask: string | null } {
   if (!plan.artifacts.roadmap) return { capabilitiesChanged: false, ask: null };
-  if (published === undefined ? assets : published !== assets) return { capabilitiesChanged: true, ask: sharingChangeAsk(plan, assets) };
-  if (published === undefined && !chosen) return { capabilitiesChanged: true, ask: unknownSharingAsk(plan) };
+  if (published === undefined) return { capabilitiesChanged: true, ask: assets ? sharingChangeAsk(plan, true) : unknownSharingAsk(plan) };
+  if (published !== assets) return { capabilitiesChanged: true, ask: sharingChangeAsk(plan, assets) };
   return { capabilitiesChanged: false, ask: null };
 }
 

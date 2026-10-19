@@ -221,9 +221,9 @@ export function run(argv: string[], io: Io): Result {
         const rules = rulesOf(published);
         // Re-review I1: meta/page records whether this publish declared `assets`; with --page, whether that changes who can
         // see and share the published roadmap (a listed page without the record, or none, is unknown), and the line to ask.
-        // R6c: an unknown record is asked about unless --assets or --no-assets says which.
+        // R6c: an unknown record is always asked about, --no-assets included.
         const assets = declaresAssets(published);
-        const changed = pageArg ? sharingChange(p, assets, before, noAssets || args.includes('--assets')) : {};
+        const changed = pageArg ? sharingChange(p, assets, before) : {};
         return ok(JSON.stringify({
           out, capabilities: roadmapCapabilities(internal), internal, say: sharingNotice(p, internal), pageVersion: WAYPOINT_VERSION, rules, ...changed,
           write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WAYPOINT_VERSION, rules, assets, roadmap: p.project, publishedAt: now } },

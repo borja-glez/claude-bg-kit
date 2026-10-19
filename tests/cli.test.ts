@@ -2647,8 +2647,8 @@ describe('page --publish-info and the sync line', () => {
       expect(r, JSON.stringify(page)).toMatchObject({ capabilities: caps, internal: false, say: null, capabilitiesChanged: true, write: { data: { assets: false } } });
       expect(r.ask).toContain('/waypoint:plan assets');
       asks.push(r.ask);
-      // The caller said which: --no-assets is what it asked for, --assets asks to make it internal.
-      expect(pub(page, '--no-assets'), JSON.stringify(page)).toMatchObject({ capabilitiesChanged: false, ask: null });
+      // With --no-assets the same line is asked: the roadmap may hold a store, and dropping it is a change of sharing.
+      expect(pub(page, '--no-assets'), JSON.stringify(page)).toMatchObject({ capabilities: caps, internal: false, capabilitiesChanged: true, ask: r.ask });
     }
     // Neither the line that makes it internal nor the one that makes it shareable again: its own, in the plan language.
     const toPublic = pub({ assets: true }).ask;
