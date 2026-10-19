@@ -255,6 +255,17 @@ describe('verify.json', () => {
     const h = (x: typeof a) => ({ action: x.action, score: x.score, signature: x.signature });
     expect(decideRound([h(a), h(b)], 'medium').next).toBe('stalled');
   });
+
+  it('reads defects: each needs a title, its shot is kept as written, at most 20 (K2-12, Review Focus 4)', () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ surface: 'web', title: `d${i}`, observed: '', where: '' }));
+    const v = parseVerifyFile(file({ result: 'pass', checks: [check(1, true)], defects: [
+      { surface: 'web', title: ' Footer overlaps the cart ', observed: 'at 390 px', where: '/cart', shot: '03-footer.png' },
+      { surface: 'web', title: '', observed: 'x', where: 'y' }, 'junk', ...many,
+    ] }))!;
+    expect(v.defects[0]).toEqual({ surface: 'web', title: 'Footer overlaps the cart', observed: 'at 390 px', where: '/cart', shot: '03-footer.png' });
+    expect(v.defects).toHaveLength(20);
+    expect(parseVerifyFile(file({ result: 'pass', checks: [] }))!.defects).toEqual([]);
+  });
 });
 
 describe('fix rounds: origin and deferred', () => {

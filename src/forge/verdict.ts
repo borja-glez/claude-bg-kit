@@ -214,9 +214,11 @@ export function weightsFor(opts: { sensitive: boolean; perf: boolean }): Weights
 }
 
 export interface VerifyCheck { id: number; surface: string; name: string; main: boolean; ok: boolean; expected: string; observed: string; shot: string | null; env: boolean }
+/** K2-12: a real problem the verify agent saw outside what the brief asked; verify-close makes it a proposal. */
+export interface VerifyDefect { surface: string; title: string; observed: string; where: string; shot: string | null }
 export interface VerifyFile {
   surfaces: string[]; result: 'pass' | 'fail' | 'blocked'; reason: string | null; checks: VerifyCheck[]; unchecked: string[];
-  learned: { surface: string; note: string }[]; proposals: { surface: string; change: string }[];
+  learned: { surface: string; note: string }[]; proposals: { surface: string; change: string }[]; defects: VerifyDefect[];
 }
 
 const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
@@ -256,6 +258,9 @@ export function parseVerifyFile(text: string | null): VerifyFile | null {
     unchecked: Array.isArray(r.unchecked) ? r.unchecked.map(s) : [],
     learned: objs(r.learned).filter(l => typeof l.note === 'string' && l.note.trim()).map(l => ({ surface: s(l.surface), note: s(l.note) })),
     proposals: objs(r.proposals).filter(p => typeof p.change === 'string' && p.change.trim()).map(p => ({ surface: s(p.surface), change: s(p.change) })),
+    defects: objs(r.defects).filter(d => typeof d.title === 'string' && d.title.trim()).slice(0, 20).map(d => ({
+      surface: s(d.surface), title: s(d.title).trim(), observed: s(d.observed), where: s(d.where), shot: typeof d.shot === 'string' && d.shot.trim() ? d.shot : null,
+    })),
   };
 }
 

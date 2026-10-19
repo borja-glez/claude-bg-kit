@@ -4,15 +4,15 @@ import path from 'node:path';
 import { appendEvent, readEvents, forgeDir } from '../../ledger.js';
 import { parsePlan, PlanError } from '../../../lib/plan.js';
 import {
-  PROPOSAL_ID, proposalId, saveProposal, loadProposals, loadProposal, decideDoc, mirrorProposal, saveApproval, loadApproval, loadApprovals,
-  removeApproval, type DecideError,
+  PROPOSAL_ID, saveProposal, loadProposals, loadProposal, decideDoc, mirrorProposal, saveApproval, loadApproval, loadApprovals,
+  removeApproval, addProposal, ProposalInputError, type AddOutcome, type DecideError,
 } from '../../proposals.js';
 import {
   normalizeProposal, isActionable, canDecide, normalizeApproval, ownerCheck, ownerApproved, proposalDigest, PROPOSAL_STATUSES,
   type Decision, type ProposalDoc, type ApprovalDoc,
 } from '../../../lib/proposals.js';
 import { PAGE_RULES } from '../../../lib/publish.js';
-import { autoApprovable, similarRejected, similarOpen } from '../../policy.js';
+import { autoApprovable } from '../../policy.js';
 import { proposalToTask, proposalOfIncludes, proposalsOfIncludes } from '../../to-task.js';
 import type { PlanTask } from '../../../lib/types.js';
 import { parseDocument } from 'yaml';
@@ -87,24 +87,22 @@ export const command: Command = (args, ctx) => {
       try { raw = JSON.parse(readText(file, '--file')); } catch (e) { if (e instanceof UsageError) throw e; throw new UsageError('proposals add: --file must be a JSON object'); }
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new UsageError('proposals add: --file must be a JSON object');
       const o = raw as Record<string, unknown>;
-      const doc = normalizeProposal({ ...o, ts: typeof o.ts === 'string' ? o.ts : ts(), status: 'proposed', decidedBy: undefined, decidedAt: undefined,
-        reason: undefined, taskId: undefined, history: undefined, author: subFlag('author') ?? o.author ?? 'session' });
-      if (!doc) throw new UsageError('proposals add: invalid proposal (category, risk, title and source are required and must be valid)');
-      if (doc.source === 'scout' && (!doc.pillar?.trim() || !doc.evidence?.trim())) throw new UsageError('proposals add: a scout proposal needs a pillar and evidence');
-      // Anti-repetition: a hit means the evidence adds nothing new to a rejected proposal.
-      const existing = loadProposals(io.cwd);
-      const hit = similarRejected(doc, existing.filter(p => p.status === 'rejected'));
-      if (hit) return { code: 3, stdout: '', stderr: `proposals add: similar to rejected proposal ${hit} and without new evidence\n` };
-      // Nor a repeat of one still open (pending or being done), whatever its evidence; a v2 names the
-      // proposal it revises with --revises, and only that one is exempt.
+      // A v2 names the proposal it revises with --revises, and only that one is exempt from the open-proposal check.
       const revises = subFlag('revises');
       if (has('revises') && (!revises || !PROPOSAL_ID.test(revises))) throw new UsageError('proposals add: --revises needs a proposal id');
-      const open = similarOpen(doc, existing.filter(p => p.id !== revises));
-      if (open) return { code: 3, stdout: '', stderr: `proposals add: similar to open proposal ${open}\n` };
-      const id = proposalId(io.now(), io.rand ?? Math.random);
-      saveProposal(io.cwd, id, doc);
-      appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'add', id, digest: proposalDigest(id, doc), ...(revises ? { revises } : {}) });
-      return json({ id, doc });
+      let r: AddOutcome;
+      try {
+        r = addProposal(io.cwd, o, { ts: ts(), author: subFlag('author') ?? o.author ?? 'session', now: io.now(), rand: io.rand ?? Math.random, ...(revises ? { revises } : {}) });
+      } catch (e) {
+        if (e instanceof ProposalInputError) throw new UsageError(`proposals add: ${e.message}`);
+        throw e;
+      }
+      if (!r.ok) {
+        // Anti-repetition: a rejected one without new evidence, or one still open whatever its evidence.
+        const why = r.why === 'rejected' ? `similar to rejected proposal ${r.similar} and without new evidence` : `similar to open proposal ${r.similar}`;
+        return { code: 3, stdout: '', stderr: `proposals add: ${why}\n` };
+      }
+      return json({ id: r.id, doc: r.doc });
     }
     case 'list': {
       const status = subFlag('status');

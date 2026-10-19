@@ -57,6 +57,10 @@ describe('normalizeProposal', () => {
     void rationale; void evidence; void pillar; void ts;
     expect(normalizeProposal(rest)).toMatchObject({ rationale: '', evidence: '', pillar: '', ts: '' });
   });
+  it('takes source verify, and still refuses an unknown source (K2-12)', () => {
+    expect(normalizeProposal({ ...base, source: 'verify' })).toEqual({ ...base, source: 'verify' });
+    expect(normalizeProposal({ ...base, source: 'bot' })).toBeNull();
+  });
 });
 
 describe('clipWords', () => {

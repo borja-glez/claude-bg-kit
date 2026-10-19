@@ -567,8 +567,8 @@ function closeVerify(c: Ctx, task: string, t: ExecTask, n: number, round: number
     if (head) writeJson(path.join(r.abs, `validators-head-${n}.json`), { round: round + 1, head, runId: c.runId });
     else c.actions.push({ type: 'error', task, command: 'git commit', code: 1, stderr: `could not commit ${files.join(', ')} in ${slash(t.worktree)}: commit them with the task's work` });
   }
-  const { result, learned, cleanup, evidence, commit, proposals, say } = out;
-  return { result, learned, cleanup, evidence, commit, proposals, say };
+  const { result, learned, cleanup, evidence, commit, proposals, defects, say } = out;
+  return { result, learned, cleanup, evidence, commit, proposals, defects, say };
 }
 
 /** The integrate the tick emitted (one at most; none while a merge is in flight): its result is the action's type. */

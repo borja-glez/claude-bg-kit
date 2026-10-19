@@ -10,7 +10,14 @@ import { readKeptAssets, runHolding } from '../../roadmap-sources.js';
 import { eventsOf, isTask, resolveProject } from '../../task-ref.js';
 import { mainCheckout } from '../../local.js';
 import { surfaceFile, type NoteSkip } from '../../surfaces.js';
+import { addProposal, defectProposal, defectUnsafe, ProposalInputError } from '../../proposals.js';
+import type { ProposalDoc } from '../../../lib/proposals.js';
 import { logVerifyResult, learnSurface, cleanupEvidence } from '../shared.js';
+
+type DefectsOut = {
+  added: { id: string; doc: ProposalDoc }[];
+  skipped: { title: string; why: 'rejected' | 'open' | 'looks-secret' | 'looks-like-instruction'; similar: string }[];
+};
 
 /** A screenshot above this is converted to JPEG before it is uploaded to the roadmap. */
 const SHOT_MAX_BYTES = 2 * 1024 * 1024;
@@ -95,16 +102,37 @@ export const command: Command = (args, ctx) => {
     const stale = new Set(kept.filter(a => !linked(a)).map(a => a.id));
     previous = published.filter(id => stale.has(id) && !live.has(id));
   }
+  // 6. K2-12: each defect the agent saw outside the brief becomes a pending proposal in the main checkout (C7: only the
+  // roadmap's owner approves it); one that repeats an open or rejected proposal is not added again. A defect's text comes
+  // from an agent that read untrusted pages, so one that reads as an instruction or holds a secret is counted, not proposed.
+  const shotOf = (shot: string | null): string | null => {
+    if (!shot) return null;
+    const file = path.resolve(evidence, shot);
+    try { return inside(realpathSync(file)) ? path.relative(io.cwd, file).split(path.sep).join('/') : null; } catch { return null; }
+  };
+  const defects: DefectsOut = { added: [], skipped: [] };
+  for (const d of v.defects) {
+    const unsafe = defectUnsafe(d);
+    if (unsafe) { defects.skipped.push({ title: d.title.slice(0, 80), why: unsafe, similar: '' }); continue; }
+    try {
+      const r = addProposal(mainCheckout(io.cwd), defectProposal(d, task, shotOf(d.shot), es),
+        { ts: ts(), author: 'forge:verify', now: io.now(), rand: io.rand ?? Math.random, from: 'verify' });
+      if (r.ok) defects.added.push({ id: r.id, doc: r.doc });
+      else defects.skipped.push({ title: d.title, why: r.why, similar: r.similar });
+    } catch (e) { if (!(e instanceof ProposalInputError)) throw e; }
+  }
+  const defectsText = defects.added.length
+    ? (es ? `; ${defects.added.length} defecto(s) propuesto(s)` : `; ${defects.added.length} defect(s) proposed`) : '';
   const big = shots.filter(s => s.oversize).length;
   const learnedText = Object.entries(learned).map(([n, k]) => `${n} (${k})`).join(', ');
   const say = es
     ? `Verificación ${v.result}: ${passed}/${total} comprobaciones${learnedText ? `; aprendido en ${learnedText}` : ''}`
-      + `${shots.length ? `; ${shots.length} captura(s)${big ? ` (${big} de más de 2 MB)` : ''}` : ''}.`
+      + `${shots.length ? `; ${shots.length} captura(s)${big ? ` (${big} de más de 2 MB)` : ''}` : ''}${defectsText}.`
     : `Verification ${v.result}: ${passed}/${total} checks${learnedText ? `; learned in ${learnedText}` : ''}`
-      + `${shots.length ? `; ${shots.length} screenshot(s)${big ? ` (${big} over 2 MB)` : ''}` : ''}.`;
+      + `${shots.length ? `; ${shots.length} screenshot(s)${big ? ` (${big} over 2 MB)` : ''}` : ''}${defectsText}.`;
   return json({
     task, result: v.result, passed, total, learned, ...(skipped.length ? { skipped } : {}),
-    ...(notesSkipped.length ? { notesSkipped } : {}), proposals: v.proposals, cleanup,
+    ...(notesSkipped.length ? { notesSkipped } : {}), proposals: v.proposals, defects, cleanup,
     evidence: { mode, dir: path.relative(io.cwd, evidence).split(path.sep).join('/'), shots, previous }, commit, say,
   });
 };

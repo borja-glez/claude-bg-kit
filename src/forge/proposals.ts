@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { forgeDir } from './ledger.js';
-import { normalizeProposal, normalizeApproval, type ApprovalDoc, canDecide, applyDecision, MAX_PROPOSAL_HISTORY, type ProposalDoc, type ProposalHistoryEntry, type Decision } from '../lib/proposals.js';
+import { appendEvent, forgeDir } from './ledger.js';
+import { similarOpen, similarRejected } from './policy.js';
+import { filterNotes, NOTE_MAX, type NoteSkip } from './surfaces.js';
+import { normalizeProposal, normalizeApproval, proposalDigest, type ApprovalDoc, canDecide, applyDecision, MAX_PROPOSAL_HISTORY, type ProposalDoc, type ProposalHistoryEntry, type Decision } from '../lib/proposals.js';
 
 export const PROPOSAL_ID = /^p\d{14}[0-9a-z]{4}$/;
 
@@ -127,4 +129,69 @@ export function loadApprovals(root: string): Record<string, ApprovalDoc> {
 
 export function removeApproval(root: string, id: string): void {
   if (PROPOSAL_ID.test(id)) rmSync(path.join(approvalsDir(root), `${id}.json`), { force: true });
+}
+
+/** A proposal the CLI cannot take: not a valid one, or a scout one without a pillar or evidence. */
+export class ProposalInputError extends Error {}
+export type AddOutcome = { ok: true; id: string; doc: ProposalDoc } | { ok: false; why: 'rejected' | 'open'; similar: string };
+
+/**
+ * A new proposal (`proposals add`, and the defects verify-close turns into proposals, K2-12): `raw` normalized as a pending
+ * one with no decision. Refused (ProposalInputError) when it is not a valid proposal, or is a scout one without a pillar or
+ * evidence; not added when it says the same as a rejected one without new evidence, or as one still open (but the one it
+ * `revises`). Saved in .forge/proposals/ and logged as a proposal event: with `from` when given (a verify defect, which
+ * carries no digest, so `proposals policy` answers origin and only the owner approves), else with the digest of its text.
+ */
+export function addProposal(root: string, raw: Record<string, unknown>,
+  ctx: { ts: string; author: unknown; now: Date; rand: () => number; revises?: string; from?: string }): AddOutcome {
+  const doc = normalizeProposal({ ...raw, ts: typeof raw.ts === 'string' ? raw.ts : ctx.ts, status: 'proposed', decidedBy: undefined, decidedAt: undefined,
+    reason: undefined, taskId: undefined, history: undefined, author: ctx.author });
+  if (!doc) throw new ProposalInputError('invalid proposal (category, risk, title and source are required and must be valid)');
+  if (doc.source === 'scout' && (!doc.pillar?.trim() || !doc.evidence?.trim())) throw new ProposalInputError('a scout proposal needs a pillar and evidence');
+  const existing = loadProposals(root);
+  const rejected = similarRejected(doc, existing.filter(p => p.status === 'rejected'));
+  if (rejected) return { ok: false, why: 'rejected', similar: rejected };
+  const open = similarOpen(doc, existing.filter(p => p.id !== ctx.revises));
+  if (open) return { ok: false, why: 'open', similar: open };
+  const id = proposalId(ctx.now, ctx.rand);
+  saveProposal(root, id, doc);
+  appendEvent(root, { ts: ctx.ts, kind: 'proposal', action: 'add', id, ...(ctx.from ? { from: ctx.from } : { digest: proposalDigest(id, doc) }),
+    ...(ctx.revises ? { revises: ctx.revises } : {}) });
+  return { ok: true, id, doc };
+}
+
+/**
+ * K2-12: the proposal a defect a verify agent saw outside its brief becomes: quality, medium risk, source verify. Its
+ * rationale is what was observed and where, so two defects never read alike to the anti-repetition (it compares title
+ * and rationale); its evidence is that, who saw it, and its screenshot when it is inside the evidence dir (`shot`, else
+ * null). The fixed sentence follows the person's language.
+ */
+export function defectProposal(d: { surface: string; title: string; observed: string; where: string }, task: string, shot: string | null, es: boolean): Record<string, unknown> {
+  const surface = d.surface || 'app';
+  const seen = `${d.where ? `${d.where}: ` : ''}${d.observed}`.trim() || d.title;
+  const who = es ? `Lo vio la verificación de ${task} en la superficie ${surface}, fuera de lo que pedía su brief.`
+    : `Seen by the verification of ${task} on surface ${surface}, outside what its brief asked.`;
+  return {
+    category: 'quality', risk: 'medium', source: 'verify', title: d.title, pillar: `verify/${surface}`, rationale: seen,
+    evidence: [seen, who, ...(shot ? [`${es ? 'Captura' : 'Screenshot'}: ${shot}`] : [])].join('\n'),
+  };
+}
+
+/**
+ * A defect's text comes from an agent that read untrusted pages and reaches the person through the roadmap: its title,
+ * what was observed and where run through the learned-notes filters, and one that reads as an instruction or holds a
+ * secret is not proposed (the first reason found, else null).
+ */
+export function defectUnsafe(d: { title: string; observed: string; where: string }): Extract<NoteSkip, 'looks-secret' | 'looks-like-instruction'> | null {
+  // filterNotes refuses a text past NOTE_MAX unread, so a long one is read in overlapping windows.
+  const step = NOTE_MAX - 60;
+  for (const text of [d.title, d.observed, d.where]) {
+    for (let at = 0; at < Math.max(text.length, 1); at += step) {
+      const part = text.slice(at, at + NOTE_MAX);
+      if (!part.trim()) continue;
+      const why = filterNotes([part], [], null).skipped[0]?.why;
+      if (why === 'looks-secret' || why === 'looks-like-instruction') return why;
+    }
+  }
+  return null;
 }

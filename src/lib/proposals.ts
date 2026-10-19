@@ -2,6 +2,8 @@ import { sha256Hex } from './sha256.js';
 export const PROPOSAL_CATEGORIES = ['feature', 'security', 'perf', 'quality', 'tests', 'deps'] as const;
 export const PROPOSAL_RISKS = ['low', 'medium', 'high'] as const;
 export const PROPOSAL_STATUSES = ['proposed', 'approved', 'rejected', 'discussing', 'auto_approved', 'done'] as const;
+// verify (K2-12): a defect a verify agent saw outside its brief.
+export const PROPOSAL_SOURCES = ['scout', 'user', 'verify'] as const;
 export type ProposalCategory = (typeof PROPOSAL_CATEGORIES)[number];
 export type ProposalRisk = (typeof PROPOSAL_RISKS)[number];
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
@@ -12,7 +14,7 @@ export const MAX_PROPOSAL_TITLE = 200;
 export interface ProposalDoc {
   ts: string; category: ProposalCategory; risk: ProposalRisk; title: string; rationale: string; evidence: string; pillar: string;
   estimate?: string; path?: string; taskId?: string; status: ProposalStatus; decidedBy?: string; decidedAt?: string; reason?: string;
-  source: 'scout' | 'user'; author: string; history?: ProposalHistoryEntry[];
+  source: (typeof PROPOSAL_SOURCES)[number]; author: string; history?: ProposalHistoryEntry[];
 }
 
 /** A decision a reopen replaced: the old status and who decided it, and who reopened it and when. */
@@ -44,7 +46,7 @@ export function normalizeProposal(x: unknown): ProposalDoc | null {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
   const o = x as Record<string, unknown>;
   if (!oneOf(PROPOSAL_CATEGORIES, o.category) || !oneOf(PROPOSAL_RISKS, o.risk) || !oneOf(PROPOSAL_STATUSES, o.status)) return null;
-  if (o.source !== 'scout' && o.source !== 'user') return null;
+  if (!oneOf(PROPOSAL_SOURCES, o.source)) return null;
   if (!str(o.title) || !o.title.trim() || !str(o.author)) return null;
   const text = (v: unknown, max = MAX_PROPOSAL_TEXT) => (str(v) ? clipWords(v, max) : '');
   // One-line fields: whitespace runs (newlines included) collapse to one space, so they never fake brief lines.
