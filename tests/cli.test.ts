@@ -456,8 +456,10 @@ describe('multi-session commands', () => {
     const left = writeDocs('c/left', { T001: { status: 'in_progress', owner: 'old' } });
     const multi = (states: string, sessions: string, ...extra: string[]) =>
       JSON.parse(run(['next', 'plan.yaml', '--states', states, '--sessions', sessions, '--session', 'be', ...extra], io).stdout).multi as boolean;
+    // A session without a track may recover a task of any track (multisession.md, item 2 of the §1 part).
     expect(multi(left, writeDocs('c/sessions', { be: me, old }))).toBe(true);
-    // T001 is a task of track backend: a session of track ui has nothing to recover there.
+    // T001 is a task of track backend: a session of that track recovers it, one of track ui has nothing to recover there.
+    expect(multi(left, writeDocs('c/sessions1', { be: me, old }), '--track', 'backend')).toBe(true);
     expect(multi(left, writeDocs('c/sessions2', { be: me, old }), '--track', 'ui')).toBe(false);
     // Its own task, left while its own session went idle, is resumed by next, not recovered.
     expect(multi(writeDocs('c/mine', { T001: { status: 'in_progress', owner: 'be' } }), writeDocs('c/sessions3', { be: { ...me, status: 'idle' } }))).toBe(false);
