@@ -2699,3 +2699,54 @@ describe('every event a command writes carries its session, run and project (C4)
     expect(readEvents(root).at(-1)).not.toHaveProperty('runId');
   });
 });
+
+describe('forge begin (J-12)', () => {
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const repo = () => {
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 't@t'); git('config', 'user.name', 't'); git('config', 'core.autocrlf', 'false');
+    writeFileSync(path.join(root, 'a.txt'), 'a\n');
+    git('add', '.'); git('commit', '-q', '-m', 'init');
+  };
+  const put = (rel: string, text: string) => {
+    mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    writeFileSync(path.join(root, rel), text);
+  };
+  // superpowers with its TDD skill in a config dir of the test, never the person's ~/.claude.
+  const withTdd = (): Io => {
+    const cfg = tmp('forge-begin-cfg-');
+    const p = path.join(cfg, 'plugins', 'cache', 'm', 'superpowers', '6.4.1');
+    mkdirSync(path.join(p, 'skills', 'test-driven-development'), { recursive: true });
+    writeFileSync(path.join(p, 'skills', 'test-driven-development', 'SKILL.md'), '# tdd\n');
+    writeFileSync(path.join(cfg, 'plugins', 'installed_plugins.json'),
+      JSON.stringify({ version: 2, plugins: { 'superpowers@m': [{ scope: 'user', installPath: p, version: '6.4.1' }] } }));
+    return { ...io, env: { CLAUDE_CONFIG_DIR: cfg } };
+  };
+  it("lists the person's changes, never forge's, takes the snapshot and prints tdd and the preferences", () => {
+    repo();
+    writeFileSync(path.join(root, 'a.txt'), 'edited by hand\n');
+    put('.forge/work/cart/task.txt', 'add coupons to the cart\n');
+    put('.forge/config.yaml', 'tdd: superpowers\n');
+    put('.forge/verify/web.md', '# web\n');
+    const r = run(['begin', '--task', 'cart', '--locale', 'es'], withTdd());
+    expect(r.code, r.stderr).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect([...out.foreign].sort()).toEqual(['.forge/config.yaml', '.forge/verify/web.md', 'a.txt']);
+    expect(out.say).toContain('a.txt');
+    expect(out.snapshot).toBe(true);
+    expect(existsSync(path.join(root, '.forge', 'work', 'cart', 'tree-start.json'))).toBe(true);
+    expect(out.tdd.mode).toBe('superpowers');
+    expect(out.tdd.line).toMatch(/^TDD: required/);
+    expect(out).toMatchObject({ autonomy: 'ask', workflow: 'ask', untracked: ['.forge/.gitignore'] });
+    expect(JSON.parse(run(['begin', '--task', 'cart', '--autonomy', 'auto'], withTdd()).stdout).autonomy).toBe('auto');
+  });
+  it("with only forge's files there is nothing foreign and no question; a bad flag exits 2", () => {
+    repo();
+    put('.forge/work/cart/task.txt', 'add coupons\n');
+    const none: Io = { ...io, env: { CLAUDE_CONFIG_DIR: tmp('forge-begin-none-') } };
+    expect(JSON.parse(run(['begin', '--task', 'cart'], none).stdout)).toMatchObject({ foreign: [], say: null, snapshot: true, tdd: { mode: 'off', line: null } });
+    for (const bad of [['begin'], ['begin', '--task', '../x'], ['begin', '--task', 'cart', '--locale', 'fr'], ['begin', '--task', 'cart', '--autonomy', 'maybe']]) {
+      expect(run(bad, none).code, bad.join(' ')).toBe(2);
+    }
+  });
+});

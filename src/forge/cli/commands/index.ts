@@ -11,6 +11,7 @@ import { command as last } from './last.js';
 import { command as local } from './local.js';
 import { command as log } from './log.js';
 import { command as prefs } from './prefs.js';
+import { command as begin } from './begin.js';
 import { command as proposals } from './proposals.js';
 import { command as review } from './review.js';
 import { command as roadmap } from './roadmap.js';
@@ -41,7 +42,7 @@ import { command as waypointCli } from './waypoint-cli.js';
 export const COMMANDS: Readonly<Record<string, Command>> = {
   triage, brief, validate, stats, verdict, round,
   'review-prep': review, 'review-close': review, prep: review, shadow: review,
-  log, decision, agents, last, proposals, surfaces, tools, local, prefs, route,
+  log, decision, agents, last, proposals, surfaces, tools, local, prefs, begin, route,
   'verify-plan': verifyPlan, 'verify-result': verifyResult, 'verify-cleanup': verifyCleanup, 'verify-close': verifyClose,
   'waypoint-cli': waypointCli, 'sp-path': spPath, 'sp-specs': spSpecs, 'sp-plans': spPlans, 'sp-plan': spPlan,
   tdd, tree, config, infinite, cycle, authorize, swarm, setup, stop, hook,
