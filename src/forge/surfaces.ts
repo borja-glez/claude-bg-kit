@@ -75,7 +75,8 @@ export function learnedNotes(text: string): string[] {
 /**
  * K2-11: the notes surfaces learn takes: one line each, at most NOTE_MAX characters, saying nothing of one task (a path
  * under .forge/work/, or the task's id or its brief's as a whole word) and not already in the surface (`existing`) or
- * earlier in the list, spaces and case set aside. The others come back with why.
+ * earlier in the list, spaces and case set aside. The others come back with why, and without their text when it may hold
+ * a secret or an order (M5).
  */
 export function filterNotes(notes: string[], existing: string[], task: string | null): { keep: string[]; skipped: { note: string; why: NoteSkip }[] } {
   const ids = task ? [...new Set([task, task.replace(/-\d+$/, '')])].filter(id => ID_SHAPE.test(id)) : [];
@@ -93,7 +94,8 @@ export function filterNotes(notes: string[], existing: string[], task: string | 
           : INSTRUCTION.some(re => re.test(note)) ? 'looks-like-instruction'
             : named.some(re => re.test(note)) ? 'names-the-task'
               : seen.has(normNote(note)) ? 'duplicate' : null;
-    if (why) { skipped.push({ note: note.slice(0, 300), why }); continue; }
+    // M5: a note dropped as a secret or an instruction is never echoed back (the caller prints what was skipped).
+    if (why) { skipped.push({ note: why === 'looks-secret' || why === 'looks-like-instruction' ? '' : note.slice(0, 300), why }); continue; }
     seen.add(normNote(note));
     keep.push(note);
   }

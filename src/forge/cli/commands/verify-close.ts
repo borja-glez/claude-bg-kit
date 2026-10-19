@@ -150,8 +150,8 @@ export const command: Command = (args, ctx) => {
     const defects: DefectsOut = { added: [], skipped: [] };
     for (const d of v.defects) {
       const unsafe = defectUnsafe(d);
-      // A secret is never echoed, not even in the title that names it.
-      if (unsafe) { defects.skipped.push({ title: unsafe === 'looks-secret' ? '' : d.title.slice(0, 80), why: unsafe, similar: '' }); continue; }
+      // A secret is never echoed, not even in the title that names it, and neither is an instruction (M5).
+      if (unsafe) { defects.skipped.push({ title: '', why: unsafe, similar: '' }); continue; }
       try {
         const r = addProposal(mainCheckout(io.cwd), defectProposal(d, task, shotOf(d.shot), es),
           { ts: ts(), author: 'forge:verify', now: io.now(), rand: io.rand ?? Math.random, from: 'verify' });
