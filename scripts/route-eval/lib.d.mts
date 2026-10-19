@@ -7,14 +7,17 @@ export interface EvalResult {
 }
 export interface Summary {
   config: string; routed: number; routable: number; rate: number; falseNegatives: number; falsePositives: number; others: number;
-  either: number; eitherRouted: number; cost: number | null;
+  either: number; eitherRouted: number; plugins: 'ok' | 'contradicts' | null; cost: number | null;
 }
+export function parseArgs(argv: string[]): { dry: boolean; keep: boolean; only: string | null; config: string | null } | { error: string };
 export const CONFIGS: EvalConfig[];
 export const DEMO_SHOP: Record<string, string>;
+export function demoRepo(repo: string): { reset: () => void };
+export function sessionEnv(config: EvalConfig, env: Record<string, string | undefined>): Record<string, string | undefined>;
 export function readStream(text: string): { firstSkill: string | null; plugins: string[] | null; stop: string | null; cost: number | null };
 export function claudeArgs(prompt: string, o: { settings: string; pluginDirs: string[] }): string[];
 export function settingsFor(installedKeys: string[]): { enabledPlugins: Record<string, boolean> };
 export function projectSettingsFor(withSuperpowers: boolean, installedKeys: string[]): { enabledPlugins: Record<string, boolean> };
-export function summarize(results: EvalResult[]): Summary[];
+export function summarize(results: EvalResult[], configs?: EvalConfig[]): Summary[];
 export function passes(summary: Summary[]): boolean;
 export function table(results: EvalResult[], summary: Summary[]): string;

@@ -2,21 +2,22 @@
 // without the prompt hint), through `claude -p` with this worktree's forge and waypoint, in a small throwaway Node
 // repository. It costs money (README.md has the estimate): run it only after the person who pays agreed.
 // Usage: node scripts/route-eval/run.mjs [--dry-run] [--only <id>] [--config with-superpowers|without-superpowers|no-hint] [--keep]
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONFIGS, DEMO_SHOP, claudeArgs, passes, projectSettingsFor, readStream, settingsFor, summarize, table } from './lib.mjs';
+import { CONFIGS, claudeArgs, demoRepo, parseArgs, passes, projectSettingsFor, readStream, sessionEnv, settingsFor, summarize, table } from './lib.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
-const argv = process.argv.slice(2);
-const dry = argv.includes('--dry-run');
-const valueOf = name => (argv.includes(name) ? argv[argv.indexOf(name) + 1] ?? null : null);
-const keep = argv.includes('--keep');
-const only = valueOf('--only');
-const configName = valueOf('--config');
+// M1: any other argument, or a flag without its value, stops here: a mistyped --dry-run never starts the paid pass.
+const args = parseArgs(process.argv.slice(2));
+if ('error' in args) {
+  console.error(`route-eval: ${args.error}. Usage: node scripts/route-eval/run.mjs [--dry-run] [--only <id>] [--config <name>] [--keep]`);
+  process.exit(2);
+}
+const { dry, keep, only, config: configName } = args;
 const configs = CONFIGS.filter(c => !configName || c.name === configName);
 if (!configs.length) {
   console.error(`route-eval: --config must be one of ${CONFIGS.map(c => c.name).join(', ')}`);
@@ -49,14 +50,7 @@ if (dry) {
   const work = mkdtempSync(path.join(tmpdir(), 'route-eval-'));
   try {
     const repo = path.join(work, 'shop');
-    for (const [rel, text] of Object.entries(DEMO_SHOP)) {
-      mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
-      writeFileSync(path.join(repo, rel), text);
-    }
-    const git = (...a) => execFileSync('git', a, { cwd: repo, stdio: 'ignore' });
-    git('init', '-q');
-    git('add', '.');
-    git('-c', 'user.name=route-eval', '-c', 'user.email=route-eval@example.com', 'commit', '-qm', 'init');
+    const { reset } = demoRepo(repo);
 
     for (const c of configs) {
       const settings = path.join(work, `${c.name}.json`);
@@ -64,9 +58,11 @@ if (dry) {
       // K1-02: superpowers on or off in the repository's own settings, which the session and forge's CLI both read.
       mkdirSync(path.join(repo, '.claude'), { recursive: true });
       writeFileSync(path.join(repo, '.claude', 'settings.local.json'), JSON.stringify(projectSettingsFor(c.superpowers, installed), null, 2) + '\n');
-      // K1-03: the hint off through the environment, which the hooks of the session inherit.
-      const env = c.hint ? process.env : { ...process.env, FORGE_ROUTE_HINT: 'off' };
+      // K1-03, M3: the hint off through the environment, which the hooks of the session inherit; on, whatever was exported.
+      const env = sessionEnv(c, process.env);
       for (const p of prompts) {
+        // M2: every session starts from the same tree, whatever the one before it edited or committed.
+        reset();
         const args = claudeArgs(p.text, { settings, pluginDirs });
         const r = spawnSync('claude', args, { cwd: repo, env, encoding: 'utf8', timeout: 240_000, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
         const { firstSkill, plugins, stop, cost } = readStream(r.stdout ?? '');
@@ -90,6 +86,9 @@ if (!dry) {
   writeFileSync(path.join(out, `${stamp}.json`), JSON.stringify({ results, summary }, null, 2) + '\n');
   writeFileSync(path.join(out, `${stamp}.md`), table(results, summary) + '\n');
   console.log(table(results, summary));
+  // M3: a configuration whose sessions did not load what it says measured something else.
+  const wrong = summary.filter(s => s.plugins === 'contradicts').map(s => s.config);
+  if (wrong.length) console.error(`route-eval: the init plugins contradict ${wrong.join(', ')}: that part of the pass is not valid`);
   console.log(passes(summary) ? 'PASS' : 'FAIL');
   process.exitCode = passes(summary) ? 0 : 1;
 }

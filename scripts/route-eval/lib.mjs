@@ -1,4 +1,25 @@
-// The empirical routing test: pure helpers for run.mjs. Plain JavaScript, so `node` runs it as it is.
+// The empirical routing test: the helpers of run.mjs. Plain JavaScript, so `node` runs it as it is.
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+/** M1: the only arguments run.mjs takes. Anything else, a flag without its value or a value that starts with `--` is an
+ *  `error`, and run.mjs exits 2 before any work: a mistyped --dry-run must never start the paid pass. */
+export function parseArgs(argv) {
+  const out = { dry: false, keep: false, only: null, config: null };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--dry-run') out.dry = true;
+    else if (a === '--keep') out.keep = true;
+    else if (a === '--only' || a === '--config') {
+      const v = argv[i + 1];
+      if (v === undefined || v.startsWith('--')) return { error: `${a} needs a value` };
+      out[a.slice(2)] = v;
+      i++;
+    } else return { error: `unknown argument ${a}` };
+  }
+  return out;
+}
 
 /** K1-02: the three configurations of a pass. superpowers on and off (off in the test repository's own settings, so the
  *  session and forge's CLI see the same), and the prompt hint off (FORGE_ROUTE_HINT=off, K1-03). */
@@ -18,6 +39,31 @@ export const DEMO_SHOP = {
   'README.md': '# demo-shop\n\nA small shop.\n',
   '.gitignore': 'node_modules/\n',
 };
+
+/** M2: the demo shop as a git repository at `repo`, and `reset`, which brings it back to its first commit before each
+ *  session: nothing a session changed, committed or left behind (`.forge/` included) reaches the next prompt or
+ *  configuration; only `.claude/`, which holds the configuration's settings, stays. */
+export function demoRepo(repo) {
+  for (const [rel, text] of Object.entries(DEMO_SHOP)) {
+    mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+    writeFileSync(path.join(repo, rel), text);
+  }
+  const git = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  git('init', '-q');
+  git('add', '.');
+  git('-c', 'user.name=route-eval', '-c', 'user.email=route-eval@example.com', 'commit', '-qm', 'init');
+  const first = git('rev-parse', 'HEAD').trim();
+  return { reset: () => { git('reset', '-q', '--hard', first); git('clean', '-fdxq', '-e', '.claude'); } };
+}
+
+/** M3: the environment of a session. no-hint turns the hint off; the configurations with the hint drop a
+ *  FORGE_ROUTE_HINT the person exported, which would make them no-hint too. */
+export function sessionEnv(config, env) {
+  const out = { ...env };
+  delete out.FORGE_ROUTE_HINT;
+  if (!config.hint) out.FORGE_ROUTE_HINT = 'off';
+  return out;
+}
 
 /** The first skill a Skill tool_use loads, the plugins the init message lists, why the session stopped (the result
  *  message's subtype, e.g. `error_max_turns`) and what it cost (its `total_cost_usd`), from `claude -p` stream-json. */
@@ -69,8 +115,10 @@ export function projectSettingsFor(withSuperpowers, installedKeys) {
 /** Per configuration: forge:route first in how many of the prompts that expect it (Medium and Large), the false
  *  negatives, the false positives among those that expect none (Trivial, questions and agent messages), the Small ones
  *  apart (`either`: forge's rules load forge:route for them and it steps aside, so loading it or not are both right; I1),
- *  and the cost. */
-export function summarize(results) {
+ *  whether the init plugins agree with the configuration (`plugins`, M3: `contradicts` when a session lists superpowers
+ *  where it is off, or lacks it where it is on; null when no session listed them or the configuration is not one of
+ *  `configs`) and the cost. */
+export function summarize(results, configs = CONFIGS) {
   return [...new Set(results.map(r => r.config))].map(config => {
     const mine = results.filter(r => r.config === config);
     const fired = r => r.firstSkill === 'forge:route';
@@ -79,10 +127,14 @@ export function summarize(results) {
     const either = mine.filter(r => r.expected === 'either');
     const routed = routable.filter(fired).length;
     const costs = mine.map(r => r.cost).filter(c => typeof c === 'number');
+    const want = configs.find(c => c.name === config)?.superpowers;
+    const listed = mine.filter(r => Array.isArray(r.plugins));
+    const hasSuperpowers = r => r.plugins.some(p => /^superpowers(?:@|$)/.test(p));
     return {
       config, routed, routable: routable.length, rate: routable.length ? routed / routable.length : 0,
       falseNegatives: routable.length - routed, falsePositives: others.filter(fired).length, others: others.length,
       either: either.length, eitherRouted: either.filter(fired).length,
+      plugins: want === undefined || !listed.length ? null : listed.some(r => hasSuperpowers(r) !== want) ? 'contradicts' : 'ok',
       cost: costs.length ? Math.round(costs.reduce((a, b) => a + b, 0) * 10000) / 10000 : null,
     };
   });
@@ -98,10 +150,10 @@ export function table(results, summary) {
   for (const r of results) {
     lines.push(`| ${r.id} | ${r.size} | ${r.lang} | ${r.expected} | ${r.config} | ${r.firstSkill ?? '—'} | ${usd(r.cost, 4)} | ${r.error ?? ''} |`);
   }
-  lines.push('', '| config | forge:route first | false negatives | false positives | Small (either) | cost |', '|---|---|---|---|---|---|');
+  lines.push('', '| config | forge:route first | false negatives | false positives | Small (either) | plugins | cost |', '|---|---|---|---|---|---|---|');
   for (const s of summary) {
     lines.push(`| ${s.config} | ${s.routed}/${s.routable} (${Math.round(s.rate * 100)} %) | ${s.falseNegatives} | ${s.falsePositives}/${s.others} | `
-      + `${s.eitherRouted}/${s.either} | ${usd(s.cost, 2)} |`);
+      + `${s.eitherRouted}/${s.either} | ${s.plugins ?? '—'} | ${usd(s.cost, 2)} |`);
   }
   return lines.join('\n');
 }

@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { CONFIGS, DEMO_SHOP, claudeArgs, passes, projectSettingsFor, readStream, settingsFor, summarize, table, type EvalPrompt, type EvalResult } from '../scripts/route-eval/lib.mjs';
+import {
+  CONFIGS, DEMO_SHOP, claudeArgs, demoRepo, parseArgs, passes, projectSettingsFor, readStream, sessionEnv, settingsFor, summarize, table, type EvalPrompt, type EvalResult,
+} from '../scripts/route-eval/lib.mjs';
 import { locateSuperpowers } from '../src/forge/superpowers.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
@@ -54,7 +56,7 @@ describe('route-eval', () => {
     const r = (id: string, expected: EvalResult['expected'], firstSkill: string | null, cost: number | null = 0.01): EvalResult =>
       ({ id, size: expected === 'route' ? 'medium' : 'question', lang: 'en', expected, config: 'with', firstSkill, plugins: null, cost, error: null });
     const ok = [...Array.from({ length: 10 }, (_, i) => r(`m${i}`, 'route', 'forge:route')), r('q', 'none', null), r('a', 'none', null, null)];
-    expect(summarize(ok)).toEqual([{ config: 'with', routed: 10, routable: 10, rate: 1, falseNegatives: 0, falsePositives: 0, others: 2, either: 0, eitherRouted: 0, cost: 0.11 }]);
+    expect(summarize(ok)).toEqual([{ config: 'with', routed: 10, routable: 10, rate: 1, falseNegatives: 0, falsePositives: 0, others: 2, either: 0, eitherRouted: 0, plugins: null, cost: 0.11 }]);
     expect(passes(summarize(ok))).toBe(true);
     expect(passes(summarize([...ok.slice(0, 9), r('m9', 'route', 'superpowers:brainstorming'), ...ok.slice(10)]))).toBe(true);
     const missed = [...ok.slice(0, 8), r('m8', 'route', null), r('m9', 'route', null), ...ok.slice(10)];
@@ -84,6 +86,59 @@ describe('route-eval', () => {
     expect(cell('Small (either)')).toBe('1/2');
     expect(cell('false positives')).toBe('0/1');
   });
+  it('flags a configuration whose init plugins contradict it: superpowers listed when it is off, or missing when it is on (M3)', () => {
+    const r = (config: string, plugins: string[] | null): EvalResult =>
+      ({ id: 'm', size: 'medium', lang: 'en', expected: 'route', config, firstSkill: 'forge:route', plugins, cost: null, error: null });
+    const flags = (results: EvalResult[]) => summarize(results).map(s => [s.config, s.plugins]);
+    expect(flags([r('with-superpowers', ['forge', 'waypoint', 'superpowers']), r('without-superpowers', ['forge', 'waypoint']), r('no-hint', ['superpowers@m', 'forge'])]))
+      .toEqual([['with-superpowers', 'ok'], ['without-superpowers', 'ok'], ['no-hint', 'ok']]);
+    expect(flags([r('without-superpowers', ['forge', 'superpowers']), r('with-superpowers', ['forge', 'waypoint']), r('no-hint', null)]))
+      .toEqual([['without-superpowers', 'contradicts'], ['with-superpowers', 'contradicts'], ['no-hint', null]]);
+    // One session out of line is enough; a configuration this script does not know is not checked.
+    expect(flags([r('without-superpowers', ['forge']), r('without-superpowers', ['forge', 'superpowers'])])).toEqual([['without-superpowers', 'contradicts']]);
+    expect(flags([r('other', ['superpowers'])])).toEqual([['other', null]]);
+    const results = [r('without-superpowers', ['forge', 'superpowers'])];
+    const out = table(results, summarize(results)).split('\n');
+    const head = out.find(l => l.startsWith('| config |'))!.split('|').map(c => c.trim());
+    expect(out.find(l => l.startsWith('| without-superpowers |'))!.split('|').map(c => c.trim())[head.indexOf('plugins')]).toBe('contradicts');
+  });
+  it('the configurations with the hint drop a FORGE_ROUTE_HINT the person exported; no-hint sets it off (M3)', () => {
+    const [withSp, withoutSp, noHint] = CONFIGS;
+    expect(sessionEnv(withSp, { PATH: 'p', FORGE_ROUTE_HINT: 'off' })).toEqual({ PATH: 'p' });
+    expect(sessionEnv(withoutSp, { PATH: 'p', FORGE_ROUTE_HINT: 'on' })).toEqual({ PATH: 'p' });
+    expect(sessionEnv(noHint, { PATH: 'p' })).toEqual({ PATH: 'p', FORGE_ROUTE_HINT: 'off' });
+  });
+  it('takes only --dry-run, --keep, --only <v> and --config <v> (M1)', () => {
+    expect(parseArgs([])).toEqual({ dry: false, keep: false, only: null, config: null });
+    expect(parseArgs(['--keep', '--only', 'm-es-1', '--config', 'no-hint', '--dry-run'])).toEqual({ dry: true, keep: true, only: 'm-es-1', config: 'no-hint' });
+    for (const bad of [['--dryrun'], ['--dry_run'], ['-n'], ['dry-run'], ['--only'], ['--config'], ['--only', '--dry-run'], ['--config', '--keep']]) {
+      expect(parseArgs(bad), bad.join(' ')).toHaveProperty('error');
+    }
+  });
+  it('resets the demo shop before each session: its first commit, and nothing else on disk but .claude/ (M2)', () => {
+    const repo = tmp('route-eval-reset-');
+    const { reset } = demoRepo(repo);
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const first = g('rev-parse', 'HEAD').trim();
+    const read = (rel: string) => readFileSync(path.join(repo, rel), 'utf8').replace(/\r\n/g, '\n');
+    expect(read('src/cart.js')).toBe(DEMO_SHOP['src/cart.js']);
+    // A session renamed withTax, committed it, left forge's state and a note, and the configuration wrote its settings.
+    writeFileSync(path.join(repo, 'src', 'cart.js'), 'export const totalWithTax = 1;\n');
+    g('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qam', 'rename');
+    writeFileSync(path.join(repo, 'src', 'index.js'), 'changed\n');
+    mkdirSync(path.join(repo, '.forge', 'work', 's'), { recursive: true });
+    writeFileSync(path.join(repo, '.forge', 'work', 's', 'task.txt'), 'x\n');
+    writeFileSync(path.join(repo, 'notes.md'), 'x\n');
+    mkdirSync(path.join(repo, '.claude'));
+    writeFileSync(path.join(repo, '.claude', 'settings.local.json'), '{}\n');
+    reset();
+    expect(g('rev-parse', 'HEAD').trim()).toBe(first);
+    expect(read('src/cart.js')).toBe(DEMO_SHOP['src/cart.js']);
+    expect(read('src/index.js')).toBe(DEMO_SHOP['src/index.js']);
+    expect([existsSync(path.join(repo, '.forge')), existsSync(path.join(repo, 'notes.md'))]).toEqual([false, false]);
+    expect(g('status', '--porcelain', '-uall', '--ignored', '--', '.', ':!.claude').trim()).toBe('');
+    expect(existsSync(path.join(repo, '.claude', 'settings.local.json'))).toBe(true);
+  });
   it('has 16 prompts: Medium and Large expect forge:route; Small either; Trivial, questions and agent messages do not (K1-02, I1)', () => {
     const prompts = JSON.parse(readFileSync(new URL('../scripts/route-eval/prompts.json', import.meta.url), 'utf8')) as EvalPrompt[];
     const count = (size: string, lang?: string) => prompts.filter(p => p.size === size && (!lang || p.lang === lang)).length;
@@ -106,6 +161,12 @@ describe('route-eval', () => {
     expect(dry('--config', 'nope').status).toBe(2);
     expect(dry('--only', 'nope').status).toBe(2);
     expect(dry('--only', 'm-es-1').stdout.trim().split(/\r?\n/)).toHaveLength(3);
+    // M1: a mistyped flag or a flag without its value stops before any work (here behind a --dry-run, so nothing is paid).
+    for (const bad of [['--dryrun'], ['--only'], ['--config'], ['--only', '--keep'], ['-n']]) {
+      const r = dry(...bad);
+      expect(r.status, bad.join(' ')).toBe(2);
+      expect(r.stdout, bad.join(' ')).toBe('');
+    }
   });
   it('a --dry-run creates nothing on disk: no work folder under the temp root', () => {
     const temp = tmp('route-eval-tmproot-');
@@ -117,14 +178,7 @@ describe('route-eval', () => {
   it("forge's own triage agrees with what each prompt expects in the demo shop: Medium and Large route, Trivial and Small step aside (K1-02)", () => {
     const repo = tmp('route-eval-shop-');
     const cfg = tmp('route-eval-shop-cfg-');
-    for (const [rel, text] of Object.entries(DEMO_SHOP)) {
-      mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
-      writeFileSync(path.join(repo, rel), text);
-    }
-    const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, stdio: 'ignore' });
-    git('init', '-q');
-    git('add', '.');
-    git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init');
+    demoRepo(repo);
     const io: Io = { cwd: repo, now: () => new Date('2026-10-15T10:00:00.000Z'), env: { CLAUDE_CONFIG_DIR: cfg, CLAUDE_CODE_SESSION_ID: 'sess-0' } };
     const prompts = JSON.parse(readFileSync(new URL('../scripts/route-eval/prompts.json', import.meta.url), 'utf8')) as EvalPrompt[];
     const paths: Record<string, string> = {};
