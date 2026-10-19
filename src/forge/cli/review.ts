@@ -624,6 +624,9 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
       throw new UsageError(`review-close: the validation of ${task} gave no results (${error}); ${rel(deps.cwd, validatorsPath)} was removed: run its validators command again`);
     }
   }
+  // K2-09: verify-env.json in the round dir means a verify agent was spawned (FORGE verify-env): it is a reviewer like the
+  // others, and the round waits for its verify.json.
+  if (existsSync(path.join(roundDir, 'verify-env.json')) && !existsSync(path.join(roundDir, 'verify.json'))) missing.push(path.join(roundDir, 'verify.json'));
   if (missing.length) return json({ missing: missing.map(f => rel(deps.cwd, f)) }, 3);
 
   const reviews: Partial<Record<ReviewerName, Review>> = {};
@@ -819,7 +822,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     ...(result.action === 'accept' && !fresh ? carriedOutOfModel(index, round, result) : [])];
   return json({
     action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer, reviews: reviewsCount, ...(express ? { express: true } : {}),
-    findings, deferred, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null, handover, revert,
+    findings, deferred, minor: result.minor, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null, handover, revert,
     invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
     incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name), round, reasons: result.reasons,
     ...(twins.shadow.length ? { shadow: twins.shadow } : {}), ...(twins.shadowSkipped.length ? { shadowSkipped: twins.shadowSkipped } : {}),

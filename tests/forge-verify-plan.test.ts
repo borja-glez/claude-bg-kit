@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { verifyPlan, askFor, capLines } from '../src/forge/verify.js';
@@ -325,5 +325,25 @@ describe('verdict with verify.json and verify-cleanup', () => {
   it('verify-cleanup with no pids.json does nothing', () => {
     mkdirSync(path.join(root, 'ev'));
     expect(JSON.parse(run(['verify-cleanup', '--dir', 'ev'], io).stdout)).toEqual({ killed: [], gone: [], reused: [], unknown: [], skipped: [], released: [] });
+  });
+  it('verdict waits for verify.json when verify-env.json is next to it; --verify reads one from elsewhere and logs no verify event (K2-09, K2-13)', () => {
+    const at = { ...io, env: {} };
+    const final = path.join(root, '.forge', 'work', 'shop', 'final-1');
+    mkdirSync(final, { recursive: true });
+    writeFileSync(path.join(final, 'correctness.json'), JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] }));
+    writeFileSync(path.join(final, 'verify-env.json'), '{}');
+    const wait = run(['verdict', '--task', 'shop-final', '--dir', '.forge/work/shop/final-1'], at);
+    expect(wait.code).toBe(3);
+    expect(JSON.parse(wait.stdout).missing).toEqual(['.forge/work/shop/final-1/verify.json']);
+    rmSync(path.join(final, 'verify-env.json'));
+    const flow = path.join(root, '.forge', 'work', 'flow-r1-1');
+    mkdirSync(flow, { recursive: true });
+    writeFileSync(path.join(flow, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'fail',
+      checks: [{ id: 1, surface: 'web', name: 'checkout', main: true, ok: false, expected: 'paid', observed: 'error 500' }] }));
+    const r = JSON.parse(run(['verdict', '--task', 'shop-final', '--dir', '.forge/work/shop/final-1', '--verify', '.forge/work/flow-r1-1/verify.json'], at).stdout);
+    expect(r.critical.map((f: { file: string; check: string }) => [f.file, f.check])).toEqual([['verify/web', 'checkout']]);
+    expect(readEvents(root).some(e => e.kind === 'verify')).toBe(false);
+    const none = run(['verdict', '--task', 'shop-final', '--dir', '.forge/work/shop/final-1', '--verify', '.forge/work/flow-r1-1/none.json'], at);
+    expect(none.code).toBe(3);
   });
 });

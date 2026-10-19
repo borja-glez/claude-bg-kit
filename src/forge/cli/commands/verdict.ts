@@ -19,7 +19,15 @@ export const command: Command = (args, ctx) => {
     const file = path.join(dir, `${name}.json`);
     if (existsSync(file)) reviews[name] = parseReview(readFileSync(file, 'utf8'));
   }
-  const verifyPath = path.join(dir, 'verify.json');
+  // K2-13: --verify <file> takes the verify.json of a flow pass into the final review; the pass records its own
+  // result (verify-close --flow), so no verify event is logged for it here. K2-09: the verdict waits (exit 3) for a
+  // verify.json it was given, or for one a verify-env.json next to it says an agent is writing.
+  const verifyArg = flag('verify');
+  if (has('verify') && !verifyArg) throw new UsageError('verdict: --verify needs the path of a verify.json');
+  const verifyPath = verifyArg ? path.resolve(io.cwd, verifyArg) : path.join(dir, 'verify.json');
+  if (!existsSync(verifyPath) && (verifyArg || existsSync(path.join(path.dirname(verifyPath), 'verify-env.json')))) {
+    return json({ missing: [path.relative(io.cwd, verifyPath).split(path.sep).join('/')] }, 3);
+  }
   const verifyFile = existsSync(verifyPath) ? parseVerifyFile(readFileSync(verifyPath, 'utf8')) : undefined;
   if (verifyFile !== undefined) reviews.verify = verifyReview(verifyFile);
   if (!Object.keys(reviews).length) throw new UsageError(`no reviews found in ${dirArg}`);
@@ -51,7 +59,7 @@ export const command: Command = (args, ctx) => {
   // dir lets `round` count a re-run verdict on the same review dir once.
   appendEvent(io.cwd, { ts: ts(), kind: 'verdict', task, dir: path.relative(io.cwd, dir).split(path.sep).join('/') || '.', action: result.action, score: result.score, signature: result.signature,
     critical: result.critical.length, important: result.important.length, minor: result.minor.length });
-  if (verifyFile !== undefined) logVerifyResult(io.cwd, ts(), task, dir, verifyFile);
+  if (verifyFile !== undefined && !verifyArg) logVerifyResult(io.cwd, ts(), task, dir, verifyFile);
   // invalid and incomplete (a draft with "complete": false) name the reviewers to respawn once.
   return json({ ...result, invalid: result.reviewers.filter(r => r.invalid).map(r => r.name), incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name) });
 };

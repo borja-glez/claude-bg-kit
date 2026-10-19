@@ -1218,6 +1218,26 @@ describe('forge review-close', () => {
     expect(note).toContain('- Reviews so far: 3: F1 open');
     expect(note).toContain('- Validators now: green');
   });
+
+  it('with verify-env.json the round waits for verify.json like any reviewer; a blocked one is an abstention, not invalid (K2-09)', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    writeFileSync(path.join(r1(), 'verify-env.json'), JSON.stringify({ task: 'T1-1', port: 41000, profileDir: 'p', startedAt: '2026-10-14T10:00:00.000Z' }));
+    const r = close();
+    expect(r.code).toBe(3);
+    expect(JSON.parse(r.stdout).missing).toEqual(['.forge/work/T1/reviews-1-1/verify.json']);
+    write(r1(), 'verify', { surfaces: ['web'], result: 'blocked', reason: 'the emulator did not boot', checks: [] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'accept', invalid: [] });
+  });
+
+  it('prints the minor findings too, for a report that lists them (K2-17)', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [{ severity: 'minor', file: 'a.txt', line: 1, problem: 'naming' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout).minor).toEqual([expect.objectContaining({ problem: 'naming', file: 'a.txt' })]);
+  });
 });
 
 describe('the tree cache (C6), with forge in the worktree itself', () => {
