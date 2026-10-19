@@ -23,7 +23,7 @@ import { keepEvidence } from '../evidence-copy.js';
 import { eventsOf, isTask } from '../task-ref.js';
 import { detectValidators, globMatch } from '../validators.js';
 import { mcpInventory } from '../tools.js';
-import { cleanupPids, killTarget } from '../verify.js';
+import { defaultProcDeps, stopEvidence, type Cleanup, type ProcDeps } from '../verify-proc.js';
 import { readLocal, mainCheckout, readLearned, recordLearned, surfacePermissions, OBJECT_ID } from '../local.js';
 import { appendLearned, surfaceFile, permissionHash, hashMatches } from '../surfaces.js';
 import { claudeConfigDir, claudeJsonDir, locateSuperpowersFor, spLedgerDone, spSkillPath, SP_WINDOW_MS } from '../superpowers.js';
@@ -224,24 +224,10 @@ export function learnSurface(io: Io, dir: string, name: string, notes: string[],
   return { count: r.count };
 }
 
-/** `verify-cleanup` of an evidence dir: stops the processes its pids.json lists (deletes no files). */
-export function cleanupEvidence(dir: string): { killed: number[]; gone: number[] } {
-  let pids: number[] = [];
-  try { const raw = JSON.parse(readFileSync(path.join(dir, 'pids.json'), 'utf8')); if (Array.isArray(raw)) pids = raw.filter((p): p is number => Number.isInteger(p)); } catch { pids = []; }
-  const pgid = (pid: number): number | null => {
-    try { const n = Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)],
-      { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()); return Number.isInteger(n) && n > 0 ? n : null; } catch { return null; }
-  };
-  const kill = (pid: number) => {
-    try {
-      if (process.platform === 'win32') execFileSync('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
-      else process.kill(killTarget(pid, pgid(pid)), 'SIGTERM');
-      return true;
-    } catch {
-      try { process.kill(pid, 'SIGTERM'); return true; } catch { return false; }
-    }
-  };
-  return cleanupPids(pids, kill);
+/** `verify-cleanup` of an evidence dir: stops the processes its pids.json lists that are still the ones recorded (K2-03,
+ *  K2-20). It deletes no file of the project. */
+export function cleanupEvidence(dir: string, deps: ProcDeps = defaultProcDeps()): Cleanup {
+  return stopEvidence(dir, deps);
 }
 
 /** What a triage computes (K1-01): everything `forge triage` prints, before anything is written. */

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { verifyPlan, cleanupPids, killTarget, askFor, capLines } from '../src/forge/verify.js';
+import { verifyPlan, askFor, capLines } from '../src/forge/verify.js';
 import { surfaceHash, type Surface, type Draft } from '../src/forge/surfaces.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readEvents } from '../src/forge/ledger.js';
@@ -322,23 +322,8 @@ describe('verdict with verify.json and verify-cleanup', () => {
     writeFileSync(path.join(root, 'v.json'), '[]');
     expect(run(['verdict', '--task', 't-1', '--dir', 'r', '--validators', 'v.json'], io).code).toBe(0);
   });
-  it('cleanupPids kills what is alive and reports the rest', () => {
-    expect(cleanupPids([10, 11], pid => pid === 10)).toEqual({ killed: [10], gone: [11] });
-  });
-  it('cleanupPids never kills pid <= 1, its own process or its parent', () => {
-    const asked: number[] = [];
-    const kill = (pid: number) => { asked.push(pid); return true; };
-    expect(cleanupPids([0, 1, -5, process.pid, process.ppid, 4242], kill))
-      .toEqual({ killed: [4242], gone: [0, 1, -5, process.pid, process.ppid] });
-    expect(asked).toEqual([4242]);
-  });
-  it('killTarget kills the group only when the pid leads it', () => {
-    expect(killTarget(500, 500)).toBe(-500);
-    expect(killTarget(500, 400)).toBe(500);
-    expect(killTarget(500, null)).toBe(500);
-  });
   it('verify-cleanup with no pids.json does nothing', () => {
     mkdirSync(path.join(root, 'ev'));
-    expect(JSON.parse(run(['verify-cleanup', '--dir', 'ev'], io).stdout)).toEqual({ killed: [], gone: [] });
+    expect(JSON.parse(run(['verify-cleanup', '--dir', 'ev'], io).stdout)).toEqual({ killed: [], gone: [], reused: [] });
   });
 });

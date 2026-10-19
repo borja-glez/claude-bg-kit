@@ -83,14 +83,3 @@ export function capLines(text: string, max: number, es: boolean): string {
   const note = es ? `… (${more} ${more === 1 ? 'línea más' : 'líneas más'})` : `… (${more} more ${more === 1 ? 'line' : 'lines'})`;
   return `${[...lines.slice(0, max), note].join('\n')}\n`;
 }
-
-/** Kills each pid (its whole tree); `kill` returns false when the process is already gone. A pid <= 1, this
- *  process or its parent is never killed: it is reported as gone. */
-export function cleanupPids(pids: number[], kill: (pid: number) => boolean, protect: number[] = [process.pid, process.ppid]): { killed: number[]; gone: number[] } {
-  const killed: number[] = [], gone: number[] = [];
-  for (const pid of pids) (pid > 1 && !protect.includes(pid) && kill(pid) ? killed : gone).push(pid);
-  return { killed, gone };
-}
-
-/** POSIX kill target: the whole process group (`-pid`) only when `pid` leads it, else the single pid. */
-export const killTarget = (pid: number, pgid: number | null): number => (pgid === pid ? -pid : pid);

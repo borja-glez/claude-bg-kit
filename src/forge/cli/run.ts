@@ -5,7 +5,7 @@ import { isSafeId } from '../../lib/execution-state.js';
 import { loadConfig, ConfigError } from '../config.js';
 import { claudeSessionId } from '../../lib/claude-session.js';
 import { UsageError } from './errors.js';
-import { makeCtx, type Result } from './context.js';
+import { makeCtx, ownArgs, type Result } from './context.js';
 import type { fitForgeDoc } from '../../lib/roadmap-doc.js';
 import { projectOfDir } from '../task-ref.js';
 import type { ExecMany } from '../validators.js';
@@ -29,7 +29,7 @@ export { findWaypointCli } from './commands/waypoint-cli.js';
 export { roundDecision } from '../round.js';
 export { cleanProbe } from './commands/route.js';
 
-const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|begin|route|verify-plan|verify-result|verify-cleanup|verify-close|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|authorize|swarm|setup|stop|hook|roadmap-doc|roadmap-run> ...';
+const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|begin|route|verify-plan|verify-result|verify-cleanup|verify-close|verify-spawn|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|authorize|swarm|setup|stop|hook|roadmap-doc|roadmap-run> ...';
 
 /** C-03: the commands that run as a job with --out, and the task each works on. */
 function jobOf(argv: string[]): { cmd: string; task: string | null } | null {
@@ -52,7 +52,7 @@ function jobOf(argv: string[]): { cmd: string; task: string | null } | null {
  * `waitedMs` when it is an object; one that failed writes `{error, code}`. Any other command runs as it is.
  */
 function runOrJob(argv: string[], io: Io): Result {
-  const job = argv.includes('--out') ? jobOf(argv) : null;
+  const job = ownArgs(argv).includes('--out') ? jobOf(ownArgs(argv)) : null;
   if (!job) return runCommand(argv, io);
   const at = argv.indexOf('--out');
   const file = argv[at + 1];
@@ -90,14 +90,14 @@ function eventContextOf(argv: string[], io: Io): EventContext {
 /** The forge CLI (see runOrJob): every event a command appends carries its session, run and project (C4). A command a
  *  swarm step runs (its deps.cli) that names no project keeps the step's (withEventContext). */
 export function run(argv: string[], io: Io): Result {
-  return withEventContext(eventContextOf(argv, io), () => runOrJob(argv, io));
+  return withEventContext(eventContextOf(ownArgs(argv), io), () => runOrJob(argv, io));
 }
 
 function runCommand(argv: string[], io: Io): Result {
   // --cwd <dir>: the code lives there (validators, git and the project's files), so a coordinator never has to cd
   // into a worktree (a cd outside a subshell sticks). forge's own state (ledger, .forge/work, the execution) and
   // every file flag stay with the caller's directory.
-  const cwdAt = argv.indexOf('--cwd');
+  const cwdAt = ownArgs(argv).indexOf('--cwd');
   if (cwdAt >= 0) {
     const dir = argv[cwdAt + 1];
     if (!dir || dir.startsWith('--')) return { code: 2, stdout: '', stderr: 'forge: --cwd needs a directory\n' };

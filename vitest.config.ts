@@ -6,7 +6,8 @@ const waypoint = JSON.parse(readFileSync('plugins/waypoint/.claude-plugin/plugin
 
 // I-16: the test files that take long run in the project `slow`. `npm test` runs both projects; `npm run test:unit`
 // only `unit`, for a quick loop. The list: forge-swarm-integrate, the files over 5 s in vitest's duration report
-// when plan 5a started, slowest first, and those 5a added that take longer (forge-trust, about 20 s).
+// when plan 5a started, slowest first, and those 5a added that take longer (forge-trust, about 20 s); since 5d, the
+// files that start real processes (forge-verify-proc).
 export const SLOW = [
   'tests/forge-swarm-integrate.test.ts',
   'tests/forge-execution-lock.test.ts',
@@ -33,6 +34,7 @@ export const SLOW = [
   'tests/forge-local.test.ts',
   'tests/forge-jobs.test.ts',
   'tests/forge-trust.test.ts',
+  'tests/forge-verify-proc.test.ts',
 ];
 
 // I-17: vitest 5 fails a synchronous test that outran its timeout (vitest 2 let it pass), and the slow suites take 5–20 s under load.

@@ -36,6 +36,7 @@ import { command as verifyCleanup } from './verify-cleanup.js';
 import { command as verifyClose } from './verify-close.js';
 import { command as verifyPlan } from './verify-plan.js';
 import { command as verifyResult } from './verify-result.js';
+import { command as verifySpawn } from './verify-spawn.js';
 import { command as waypointCli } from './waypoint-cli.js';
 
 /** I-12: every forge command by the name it is called with, the same names as USAGE in ../run.ts (tests/forge-cli-modules). */
@@ -43,7 +44,7 @@ export const COMMANDS: Readonly<Record<string, Command>> = {
   triage, brief, validate, stats, verdict, round,
   'review-prep': review, 'review-close': review, prep: review, shadow: review,
   log, decision, agents, last, proposals, surfaces, tools, local, prefs, begin, route,
-  'verify-plan': verifyPlan, 'verify-result': verifyResult, 'verify-cleanup': verifyCleanup, 'verify-close': verifyClose,
+  'verify-plan': verifyPlan, 'verify-result': verifyResult, 'verify-cleanup': verifyCleanup, 'verify-close': verifyClose, 'verify-spawn': verifySpawn,
   'waypoint-cli': waypointCli, 'sp-path': spPath, 'sp-specs': spSpecs, 'sp-plans': spPlans, 'sp-plan': spPlan,
   tdd, tree, config, infinite, cycle, authorize, swarm, setup, stop, hook,
   'roadmap-doc': roadmap, 'roadmap-run': roadmap,
