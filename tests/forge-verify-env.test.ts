@@ -6,7 +6,7 @@ import { useTempDirs } from './helpers/tmp.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readEvents, type LedgerEvent } from '../src/forge/ledger.js';
 import { deriveStatus } from '../src/lib/forge-status.js';
-import { envDir, portFree, reserveEnv } from '../src/forge/verify-env.js';
+import { envDir, portFree, readReservations, releaseEnv, reserveEnv } from '../src/forge/verify-env.js';
 
 const tmp = useTempDirs();
 // A block of 12 consecutive free ports, found once; without one the suite skips (it never fails on a busy machine).
@@ -143,6 +143,31 @@ describe.skipIf(P === null)('forge verify-env (K2-07)', () => {
     mkdirSync(path.join(root, '.forge/work/T1/reviews-1-1/verify-env.json'), { recursive: true }); // writing the file there fails
     try { env('T1-1', '.forge/work/T1/reviews-1-1'); } catch { /* expected */ }
     expect(existsSync(envDir(root)) ? readdirSync(envDir(root)) : []).toEqual([]);
+  });
+  describe('a reservation file never names the file that goes: a planted key that climbs out of the folder deletes nothing (I3)', () => {
+    const plant = (name: string, victim: string, over: Record<string, unknown>) => {
+      mkdirSync(envDir(root), { recursive: true });
+      writeFileSync(path.join(root, victim), '{"keep":true}\n');
+      writeFileSync(path.join(envDir(root), name), JSON.stringify({ key: `../../${victim.replace(/\.json$/, '')}`, task: 'x', port: 1, profileDir: 'nope', dir: 'd', ...over }));
+    };
+    it('the sweep of a lapsed one', () => {
+      plant('evil.json', 'victim.json', { evidence: 'e', startedAt: '2000-01-01T00:00:00.000Z' });
+      expect(reserve('T1-1-1')?.port).toBe(P);
+      expect(existsSync(path.join(root, 'victim.json'))).toBe(true);
+    });
+    it('the release of an evidence dir', () => {
+      plant('evil2.json', 'victim2.json', { evidence: path.join(root, 'ev2'), startedAt: now.toISOString() });
+      expect(releaseEnv(root, path.join(root, 'ev2'))).toEqual([]);
+      expect(existsSync(path.join(root, 'victim2.json'))).toBe(true);
+    });
+    it('a file whose key is not its name, or whose port is out of range, reserves nothing', () => {
+      mkdirSync(envDir(root), { recursive: true });
+      const r = (key: string, port: number) => ({ key, task: 'x', port, profileDir: 'p', evidence: path.join(root, 'ev3'), dir: 'd', startedAt: now.toISOString() });
+      writeFileSync(path.join(envDir(root), 'A-1-1.json'), JSON.stringify(r('B-1-1', P!)));
+      writeFileSync(path.join(envDir(root), 'C-1-1.json'), JSON.stringify(r('C-1-1', 70000)));
+      expect(readReservations(root, now.getTime(), 60_000)).toEqual([]);
+      expect(releaseEnv(root, path.join(root, 'ev3'))).toEqual([]);
+    });
   });
   it('probes at most 50 ports per call', () => {
     let n = 0;

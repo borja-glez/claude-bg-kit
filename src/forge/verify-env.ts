@@ -34,10 +34,13 @@ export function envKey(statusKey: string, dir: string): string | null {
   return KEY.test(key) ? key : null;
 }
 
+/** A reservation file as written, or null: its key must be a safe name and the file's own name (I3: no path is ever built
+ *  from what a file says), and its port one there is. */
 function readOne(file: string): EnvReservation | null {
   try {
     const o = JSON.parse(readFileSync(file, 'utf8')) as Partial<EnvReservation> | null;
-    if (!o || typeof o !== 'object' || typeof o.key !== 'string' || !Number.isInteger(o.port) || typeof o.profileDir !== 'string'
+    if (!o || typeof o !== 'object' || typeof o.key !== 'string' || !KEY.test(o.key) || path.basename(file) !== `${o.key}.json`
+      || !Number.isInteger(o.port) || o.port! < 1 || o.port! > 65535 || typeof o.profileDir !== 'string'
       || typeof o.evidence !== 'string' || typeof o.startedAt !== 'string') return null;
     return o as EnvReservation;
   } catch { return null; }
@@ -118,11 +121,12 @@ function lockPort(i: EnvInput, port: number): string | null {
   return null;
 }
 
-/** Removes a reservation: its file, its port lock when it holds it, and its profile folder. */
-function dropOne(main: string, r: EnvReservation): void {
-  rmSync(path.join(envDir(main), `${r.key}.json`), { force: true });
+/** Removes a reservation: the file it was read from (or is written to), its port lock when it holds it, and its profile
+ *  folder. A file the system will not remove now (EBUSY on Windows) lapses later; it never throws out of a cleanup. */
+function dropOne(main: string, file: string, r: EnvReservation): void {
+  try { rmSync(file, { force: true }); } catch { /* it lapses */ }
   const lock = lockFile(main, r.port), text = readText(lock);
-  if (text !== null && lockKey(text) === r.key) removeFileIf(lock, text);
+  try { if (text !== null && lockKey(text) === r.key) removeFileIf(lock, text); } catch { /* a lock past the ttl is taken over */ }
   rmProfile(r.profileDir);
 }
 
@@ -131,8 +135,9 @@ function sweepLapsed(main: string, now: number, ttlMs: number): void {
   let names: string[] = [];
   try { names = readdirSync(envDir(main)).filter(f => f.endsWith('.json')); } catch { return; }
   for (const f of names) {
-    const r = readOne(path.join(envDir(main), f));
-    if (r && now - Date.parse(r.startedAt) >= ttlMs) dropOne(main, r);
+    const file = path.join(envDir(main), f);
+    const r = readOne(file);
+    if (r && now - Date.parse(r.startedAt) >= ttlMs) dropOne(main, file, r);
   }
 }
 
@@ -152,7 +157,7 @@ export function reserveEnv(i: EnvInput): EnvReservation | null {
   const mine = readOne(file);
   if (mine) {
     if (mine.task === i.task && samePath(mine.evidence, i.evidence) && samePath(mine.dir, i.dir)) return mine;
-    dropOne(i.main, mine); // the same name for another folder: its cleanup would never free this one
+    dropOne(i.main, file, mine); // the same name for another folder: its cleanup would never free this one
   }
   const profileDir = path.join(tmpdir(), `forge-verify-${i.key}`);
   const held = (port: number) => readReservations(i.main, at, i.ttlMs).some(r => r.key !== i.key && r.port === port);
@@ -166,7 +171,7 @@ export function reserveEnv(i: EnvInput): EnvReservation | null {
     // A reservation written without a lock (an older forge) may have taken the port while it was probed.
     if (held(port)) { removeFileIf(lockFile(i.main, port), lock); continue; }
     const r: EnvReservation = { key: i.key, task: i.task, port, profileDir, evidence: i.evidence, dir: i.dir, startedAt: i.now.toISOString() };
-    try { writeAtomic(file, JSON.stringify(r, null, 2) + '\n'); mkdirSync(profileDir, { recursive: true }); } catch (e) { dropOne(i.main, r); throw e; }
+    try { writeAtomic(file, JSON.stringify(r, null, 2) + '\n'); mkdirSync(profileDir, { recursive: true }); } catch (e) { dropOne(i.main, file, r); throw e; }
     return r;
   }
   return null;
@@ -179,9 +184,10 @@ export function releaseEnv(main: string, evidence: string): number[] {
   let names: string[] = [];
   try { names = readdirSync(envDir(main)).filter(f => f.endsWith('.json')); } catch { return out; }
   for (const f of names) {
-    const r = readOne(path.join(envDir(main), f));
+    const file = path.join(envDir(main), f);
+    const r = readOne(file);
     if (!r || !samePath(r.evidence, evidence)) continue;
-    dropOne(main, r);
+    dropOne(main, file, r);
     out.push(r.port);
   }
   return out;
