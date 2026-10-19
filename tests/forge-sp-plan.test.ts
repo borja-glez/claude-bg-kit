@@ -124,7 +124,7 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
     root = tmp('forge-sp-');
     mkdirSync(path.join(root, 'docs', 'superpowers', 'plans'), { recursive: true });
     writeFileSync(path.join(root, F), PLAN.replace(/\n/g, '\r\n'));
-    io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z'), git: () => null };
+    io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z'), git: () => null, env: {} };
   });
   it('tasks prints the plan and its tasks', () => {
     const r = JSON.parse(run(['sp-plan', 'tasks', F], io).stdout);
