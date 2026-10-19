@@ -94,6 +94,8 @@ const REFUSED = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
  * A lock past the TTL is stale (its reservation lapsed or never got finished); it is taken over with removeFileIf, which
  * moves it aside and deletes it only if it still holds the text judged stale. A lock another caller replaced meanwhile is
  * put back and the port is skipped, so two callers never both hold it. Returns the text written, or null.
+ * Best-effort: in a three-way race within microseconds the rename-aside takeover can still leave two verifications on one
+ * port. That outcome is self-revealing (the second server fails with EADDRINUSE), so it is accepted (R3-RESIDUAL).
  */
 function lockPort(i: EnvInput, port: number): string | null {
   const file = lockFile(i.main, port);

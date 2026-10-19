@@ -103,6 +103,9 @@ export const executionLock = (root: string) => path.join(root, '.forge', 'execut
 export const LOCK_STALE_MS = 30_000;
 export const LOCK_RETRY_MS = 50;
 export const LOCK_WAIT_MS = 10_000;
+/** On Windows a create of the lock while another process removes it (its release, a takeover) is refused with EPERM
+ *  (the name is delete-pending until the remove completes), not EEXIST; EACCES and EBUSY likewise: the lock is busy. */
+const LOCK_REFUSED = new Set(['EPERM', 'EACCES', 'EBUSY']);
 /** How updateExecution waits: the CLI passes io.now and io.sleep, so a test never waits for real. `waitMs`: how long a
  *  live lock is waited for (LOCK_WAIT_MS by default; the Stop hook waits less). */
 export interface LockDeps { now?: () => Date; sleep?: (ms: number) => void; alive?: (pid: number) => boolean; waitMs?: number }
@@ -155,6 +158,7 @@ function acquireLock(root: string, d: Required<LockDeps>): Holder {
   const file = executionLock(root);
   const attempts = Math.ceil(d.waitMs / LOCK_RETRY_MS);
   let holder: number | null = null;
+  let refused: NodeJS.ErrnoException | null = null;
   for (let i = 0; ; i++) {
     const mine = { pid: process.pid, at: d.now().toISOString() };
     try {
@@ -162,7 +166,9 @@ function acquireLock(root: string, d: Required<LockDeps>): Holder {
       try { writeSync(fd, JSON.stringify(mine)); } finally { closeSync(fd); }
       return mine;
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      const code = (e as NodeJS.ErrnoException).code ?? '';
+      if (code !== 'EEXIST' && !LOCK_REFUSED.has(code)) throw e;
+      refused = code === 'EEXIST' ? null : e as NodeJS.ErrnoException;
     }
     const h = lockHolder(file);
     if (h) holder = h.pid;
@@ -180,6 +186,7 @@ function acquireLock(root: string, d: Required<LockDeps>): Holder {
     if (i >= attempts) break;
     d.sleep(LOCK_RETRY_MS);
   }
+  if (refused && holder === null) throw refused;
   throw new UsageError(`execution.json is locked by ${holder ?? 'another process'}`);
 }
 
