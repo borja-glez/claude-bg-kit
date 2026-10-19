@@ -26,7 +26,7 @@ import { mcpInventory } from '../tools.js';
 import { defaultProcDeps, stopEvidence, type EvidenceCleanup, type ProcDeps } from '../verify-proc.js';
 import { releaseEnv } from '../verify-env.js';
 import { readLocal, mainCheckout, readLearned, recordLearned, surfacePermissions, OBJECT_ID } from '../local.js';
-import { appendLearned, surfaceFile, permissionHash, hashMatches } from '../surfaces.js';
+import { appendLearned, filterNotes, learnedNotes, type NoteSkip, surfaceFile, permissionHash, hashMatches } from '../surfaces.js';
 import { claudeConfigDir, claudeJsonDir, locateSuperpowersFor, spLedgerDone, spSkillPath, SP_WINDOW_MS } from '../superpowers.js';
 import { listRoutes } from '../route.js';
 import { markDone, parseSpPlan, SpPlanError } from '../../lib/sp-plan.js';
@@ -205,24 +205,29 @@ export function logVerifyResult(cwd: string, at: string, task: string, dir: stri
 }
 
 /**
- * `surfaces learn` of one surface: appends the notes under the Learned/Aprendido heading of `<dir>/.forge/verify/<name>.md`
- * (the code checked) and, when the surface is allowed as it is now, records them in the main checkout, so they never ask
- * for its permission again. A missing file or a symlink is a reason, not a write.
+ * `surfaces learn` of one surface (K2-06, K2-11): appends to `<dir>/.forge/verify/<name>.md` (the code checked: the
+ * worktree of --cwd) the notes filterNotes keeps, under its Learned/Aprendido heading, and, when the surface is allowed as
+ * it is now, records them in the main checkout, so they never ask for its permission again. `added`: how many it
+ * appended; `count`: the notes the section holds. A missing file or a symlink is a reason, not a write.
  */
-export function learnSurface(io: Io, dir: string, name: string, notes: string[], heading: string): { count: number } | { reason: string } {
+export function learnSurface(io: Io, dir: string, name: string, notes: string[], heading: string, task: string | null = null):
+  { count: number; added: number; skipped: { note: string; why: NoteSkip }[] } | { reason: string } {
   const file = path.join(dir, surfaceFile(name));
   if (!existsSync(file)) return { reason: `${surfaceFile(name)} does not exist` };
   if (lstatSync(file).isSymbolicLink()) return { reason: `${surfaceFile(name)} is a symlink` };
   const before = readFileSync(file, 'utf8');
+  const have = learnedNotes(before);
+  const { keep, skipped } = filterNotes(notes, have, task);
+  if (!keep.length) return { count: have.length, added: 0, skipped };
   // Only a surface allowed as it is now records what it appends (and local.yaml is never touched), so learning on a
   // changed or never allowed surface cannot make it allowed: its new lines are just more unknown text.
   const cur = surfacePermissions(io.cwd)[name];
   const allowed = cur?.state === 'allowed' && hashMatches(cur.hash, permissionHash(before, readLearned(io.cwd).get(name)));
   const at = io.now().toISOString();
-  const r = appendLearned(before, at.slice(0, 10), notes, heading);
+  const r = appendLearned(before, at.slice(0, 10), keep, heading);
   writeFileSync(file, r.text);
   if (allowed) recordLearned(io.cwd, name, r.added, at);
-  return { count: r.count };
+  return { count: r.count, added: keep.length, skipped };
 }
 
 /**

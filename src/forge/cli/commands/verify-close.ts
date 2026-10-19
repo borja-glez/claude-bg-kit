@@ -9,7 +9,7 @@ import { UsageError } from '../errors.js';
 import { readKeptAssets, runHolding } from '../../roadmap-sources.js';
 import { eventsOf, isTask, resolveProject } from '../../task-ref.js';
 import { mainCheckout } from '../../local.js';
-import { surfaceFile } from '../../surfaces.js';
+import { surfaceFile, type NoteSkip } from '../../surfaces.js';
 import { logVerifyResult, learnSurface, cleanupEvidence } from '../shared.js';
 
 /** A screenshot above this is converted to JPEG before it is uploaded to the roadmap. */
@@ -35,10 +35,14 @@ export const command: Command = (args, ctx) => {
   const learned: Record<string, number> = {};
   const skipped: { surface: string; reason: string }[] = [];
   const commit: string[] = [];
+  const notesSkipped: { surface: string; note: string; why: NoteSkip }[] = [];
   for (const [name, list] of notes) {
     if (!NAME.test(name)) { skipped.push({ surface: name.slice(0, 80), reason: 'not a surface name' }); continue; }
-    const r = learnSurface(io, repoDir, name, list, es ? 'Aprendido' : 'Learned');
+    const r = learnSurface(io, repoDir, name, list, es ? 'Aprendido' : 'Learned', task);
     if ('reason' in r) { skipped.push({ surface: name, reason: r.reason }); continue; }
+    // K2-11: the notes the filter dropped are named; a surface that gained none is neither learned nor committed.
+    notesSkipped.push(...r.skipped.map(s => ({ surface: name, ...s })));
+    if (!r.added) continue;
     learned[name] = r.count;
     commit.push(surfaceFile(name));
   }
@@ -99,7 +103,8 @@ export const command: Command = (args, ctx) => {
     : `Verification ${v.result}: ${passed}/${total} checks${learnedText ? `; learned in ${learnedText}` : ''}`
       + `${shots.length ? `; ${shots.length} screenshot(s)${big ? ` (${big} over 2 MB)` : ''}` : ''}.`;
   return json({
-    task, result: v.result, passed, total, learned, ...(skipped.length ? { skipped } : {}), proposals: v.proposals, cleanup,
+    task, result: v.result, passed, total, learned, ...(skipped.length ? { skipped } : {}),
+    ...(notesSkipped.length ? { notesSkipped } : {}), proposals: v.proposals, cleanup,
     evidence: { mode, dir: path.relative(io.cwd, evidence).split(path.sep).join('/'), shots, previous }, commit, say,
   });
 };

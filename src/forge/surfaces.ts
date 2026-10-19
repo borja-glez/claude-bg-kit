@@ -33,6 +33,44 @@ export function lineDigest(line: string): string {
 /** The headings of the section where `surfaces learn` writes its notes. */
 export const LEARNED_HEADINGS = ['Learned', 'Aprendido'] as const;
 
+/** K2-11: what a learned note may be: one general line about using the surface, at most this long. */
+export const NOTE_MAX = 240;
+export type NoteSkip = 'too-long' | 'names-a-work-path' | 'names-the-task' | 'duplicate';
+const normNote = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The notes of a surface's Learned/Aprendido sections, without their `- <date>: ` prefix. */
+export function learnedNotes(text: string): string[] {
+  const t = text.replace(/\r\n/g, '\n');
+  return learnedSections(t, t.split('\n').length)
+    .flatMap(s => s.body.map(l => /^- (?:\d{4}-\d{2}-\d{2}: )?(.*)$/.exec(l.text)?.[1]?.trim() ?? ''))
+    .filter(Boolean);
+}
+
+/**
+ * K2-11: the notes surfaces learn takes: one line each, at most NOTE_MAX characters, saying nothing of one task (a path
+ * under .forge/work/, or the task's id or its brief's as a whole word) and not already in the surface (`existing`) or
+ * earlier in the list, spaces and case set aside. The others come back with why.
+ */
+export function filterNotes(notes: string[], existing: string[], task: string | null): { keep: string[]; skipped: { note: string; why: NoteSkip }[] } {
+  const ids = task ? [...new Set([task, task.replace(/-\d+$/, '')])].filter(Boolean) : [];
+  const named = ids.map(id => new RegExp(`(?<![A-Za-z0-9_])${escapeRe(id)}(?![A-Za-z0-9_])`, 'i'));
+  const seen = new Set(existing.map(normNote));
+  const keep: string[] = [];
+  const skipped: { note: string; why: NoteSkip }[] = [];
+  for (const raw of notes) {
+    const note = raw.replace(/\s*\r?\n\s*/g, ' ').trim();
+    const why: NoteSkip | null = note.length > NOTE_MAX ? 'too-long'
+      : /\.forge[\\/]+work[\\/]/i.test(note) ? 'names-a-work-path'
+        : named.some(re => re.test(note)) ? 'names-the-task'
+          : seen.has(normNote(note)) ? 'duplicate' : null;
+    if (why) { skipped.push({ note: note.slice(0, 300), why }); continue; }
+    seen.add(normNote(note));
+    keep.push(note);
+  }
+  return { keep, skipped };
+}
+
 /**
  * What a permission is tied to: surfaceHash of the file without the lines forge appended to its Learned/Aprendido
  * sections (`learned`: the digests `surfaces learn` recorded for this surface), so notes learned by parallel tasks never

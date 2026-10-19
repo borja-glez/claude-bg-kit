@@ -1,13 +1,15 @@
 // tests/forge-surfaces.test.ts
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { parseSurface, readSurfaces, detectDrafts, appendLearned, surfaceHash, permissionHash, lineDigest, draftHeader } from '../src/forge/surfaces.js';
+import { parseSurface, readSurfaces, detectDrafts, appendLearned, surfaceHash, permissionHash, lineDigest, draftHeader, filterNotes, learnedNotes } from '../src/forge/surfaces.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readLocal, writeLocal, readLearned, learnedFile } from '../src/forge/local.js';
 import type { RepoReader } from '../src/forge/validators.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { seedExecution } from './helpers/execution.js';
+import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
 const tmp = useTempDirs();
 
 const repo = (files: Record<string, string>): RepoReader => ({
@@ -180,7 +182,7 @@ describe('forge surfaces CLI', () => {
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\n');
     writeFileSync(path.join(root, 'n.json'), '["tarda 15 s"]');
-    expect(JSON.parse(run(['surfaces', 'learn', '--name', 'web', '--notes-file', 'n.json', '--heading', 'Aprendido'], io).stdout)).toEqual({ name: 'web', count: 1 });
+    expect(JSON.parse(run(['surfaces', 'learn', '--name', 'web', '--notes-file', 'n.json', '--heading', 'Aprendido'], io).stdout)).toEqual({ name: 'web', count: 1, skipped: [] });
     expect(readFileSync(path.join(root, '.forge', 'verify', 'web.md'), 'utf8')).toBe('# Web\n\n## Aprendido\n- 2026-10-12: tarda 15 s\n');
     expect(run(['surfaces', 'learn', '--name', 'nope', '--notes-file', 'n.json'], io).code).toBe(2);
     expect(run(['surfaces', 'learn', '--name', '../x', '--notes-file', 'n.json'], io).code).toBe(2);
@@ -279,6 +281,81 @@ describe('forge surfaces CLI', () => {
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { dev: 'vite' }, devDependencies: { vite: '5' } }));
     const [d] = JSON.parse(run(['surfaces'], { ...io, env: {} }).stdout).drafts;
     expect(d.header).toMatch(/^---\naffects:\n {2}flow: \[/);
+  });
+  it("learn writes the surface of --cwd and leaves the main checkout's as it was (K2-06)", () => {
+    const wt = tmp('forge-surf-wt-');
+    for (const d of [root, wt]) {
+      mkdirSync(path.join(d, '.forge', 'verify'), { recursive: true });
+      writeFileSync(path.join(d, '.forge', 'verify', 'web.md'), '# Web\n');
+    }
+    writeFileSync(path.join(root, 'n.json'), '["takes 5 s"]');
+    const out = JSON.parse(run(['surfaces', 'learn', '--name', 'web', '--notes-file', 'n.json', '--cwd', wt], { ...io, env: {} }).stdout);
+    expect(out).toEqual({ name: 'web', count: 1, skipped: [] });
+    expect(readFileSync(path.join(wt, '.forge', 'verify', 'web.md'), 'utf8')).toContain('takes 5 s');
+    expect(readFileSync(path.join(root, '.forge', 'verify', 'web.md'), 'utf8')).toBe('# Web\n');
+  });
+  it('learn drops a note over 240 characters, one that names the task and a repeated one, and says so (K2-11)', () => {
+    mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\n\n## Learned\n- 2026-10-01: Takes 5 s\n');
+    writeFileSync(path.join(root, 'n.json'), JSON.stringify(['y'.repeat(300), 'T7 needs a login', 'TAKES 5 s', 'Use the port verify-env gives']));
+    const out = JSON.parse(run(['surfaces', 'learn', '--name', 'web', '--notes-file', 'n.json', '--task', 'T7-1'], { ...io, env: {} }).stdout);
+    expect(out.count).toBe(2);
+    expect(out.skipped.map((s: { why: string }) => s.why)).toEqual(['too-long', 'names-the-task', 'duplicate']);
+    expect(run(['surfaces', 'learn', '--name', 'web', '--notes-file', 'n.json', '--task', '../x'], { ...io, env: {} }).code).toBe(2);
+  });
+  it('learn records nothing for a surface a git-tracked local.yaml allows (final-carries 7, R6)', () => {
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    git('init', '-q', '-b', 'main'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 't'); git('config', 'core.autocrlf', 'false');
+    mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\n');
+    writeLocal(root, { surfaces: { web: { state: 'allowed', hash: surfaceHash('# Web\n') } }, known: [], proposed: [] });
+    git('add', '-f', '.forge/verify/web.md', '.forge/local.yaml');
+    git('commit', '-qm', 'ship an allowance');
+    writeFileSync(path.join(root, 'n.json'), '["takes 5 s"]');
+    expect(run(['surfaces', 'learn', '--name', 'web', '--notes-file', 'n.json'], { ...io, env: {} }).code).toBe(0);
+    expect(readFileSync(path.join(root, '.forge', 'verify', 'web.md'), 'utf8')).toContain('takes 5 s');
+    expect(existsSync(path.join(root, '.forge', 'learned.jsonl'))).toBe(false);
+    expect(readLearned(root).size).toBe(0);
+  });
+  it("surfaces digest groups the notes and proposals of the run's verifications by surface, once each (K2-11)", () => {
+    const at = '2020-01-01T00:00:00.000Z';
+    const task: ExecTask = { status: 'integrated', stage: 'integrate', round: 1, worktree: '', branch: 'task/x', executor: 'subagents', attempts: 0, agent: null,
+      startedAt: at, stageSince: at, updatedAt: at, detail: null };
+    const e: ExecutionState = {
+      runId: 'shop-1', kind: 'plan', mode: 'subagents', parallel: 2, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+      coordinator: 'main', hookSession: null, active: false, stopReason: 'finished', stallReason: null, startedAt: at, lastStepAt: null, lastBlockStep: null,
+      sleepUntil: null, closedAt: null, closedBy: null, tasks: { T1: { ...task }, T2: { ...task } },
+    };
+    seedExecution(root, e);
+    const put = (rel: string, learned: unknown[], proposals: unknown[]) => {
+      mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
+      writeFileSync(path.join(root, rel), JSON.stringify({ surfaces: ['web'], result: 'pass', checks: [], learned, proposals }));
+    };
+    put('.forge/work/shop/T1/reviews-1-1/verify.json', [{ surface: 'web', note: 'Takes 5 s' }, { surface: 'web', note: 'T1 needed a reload' }], [{ surface: 'web', change: 'Name the port' }]);
+    put('.forge/work/shop/T2/reviews-1-2/verify.json', [{ surface: 'web', note: 'takes 5 s' }, { surface: 'cli', note: 'Needs NODE_ENV' }], [{ surface: 'web', change: 'name the port' }]);
+    put('.forge/work/flow-shop-1-1/verify.json', [{ surface: 'web', note: 'The cart page loads last' }], []);
+    put('.forge/work/shop/T2/reviews-1-1/verify.json', [{ surface: 'web', note: 'From an earlier run' }], []);
+    utimesSync(path.join(root, '.forge/work/shop/T2/reviews-1-1/verify.json'), new Date('2019-01-01'), new Date('2019-01-01'));
+    const out = JSON.parse(run(['surfaces', 'digest', '--run', 'shop-1', '--locale', 'en'], { ...io, env: {} }).stdout);
+    expect(out.surfaces).toEqual([
+      { name: 'cli', learned: [{ note: 'Needs NODE_ENV', tasks: ['T2'] }], proposals: [] },
+      { name: 'web', learned: [{ note: 'Takes 5 s', tasks: ['T1', 'T2'] }, { note: 'The cart page loads last', tasks: ['flow-shop-1-1'] }],
+        proposals: [{ change: 'Name the port', tasks: ['T1', 'T2'] }] },
+    ]);
+    expect(out.say).toContain('web: 2 notes, 1 proposal');
+    expect(run(['surfaces', 'digest', '--run', 'other'], { ...io, env: {} }).code).toBe(2);
+  });
+});
+
+describe('learned notes that help (K2-11)', () => {
+  it('filterNotes keeps general lines and says why it drops the rest (Review Focus 3)', () => {
+    const r = filterNotes(['x'.repeat(241), 'Open .forge\\work\\T1\\brief-1.md first', 'T1 needs the flag', 'T10 builds slower', 'The dev server takes 5 s',
+      '  the DEV server   takes 5 s ', 'Log in with the test user'], ['log in with the TEST user'], 'T1-1');
+    expect(r.keep).toEqual(['T10 builds slower', 'The dev server takes 5 s']);
+    expect(r.skipped.map(s => s.why)).toEqual(['too-long', 'names-a-work-path', 'names-the-task', 'duplicate', 'duplicate']);
+  });
+  it('learnedNotes reads the notes of the Learned sections without their date', () => {
+    expect(learnedNotes('# Web\n\n## Learned\n- 2026-10-12: takes 5 s\n- no date\n\n## Other\n- not a note\n')).toEqual(['takes 5 s', 'no date']);
   });
 });
 

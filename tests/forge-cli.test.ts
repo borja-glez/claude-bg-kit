@@ -2617,6 +2617,18 @@ describe('forge stats (C-09)', () => {
     expect(readFileSync(path.join(root, '.forge', 'learned.jsonl'), 'utf8')).toContain('"surface":"web"');
     expect(existsSync(path.join(wt, '.forge', 'learned.jsonl'))).toBe(false);
   });
+  it('verify-close keeps only general learned notes and lists the rest in notesSkipped (K2-11)', () => {
+    mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\n');
+    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'pass', checks: [], learned: [{ surface: 'web', note: 'T1 needed the cart seeded' }] }));
+    const args = ['verify-close', '--task', 'T1-1', '--dir', '.forge/work/T1/reviews-1-1', '--evidence', '.forge/work/T1/evidence/1-1', '--locale', 'en'];
+    const out = JSON.parse(run(args, { ...io, env: {} }).stdout);
+    expect(out).toMatchObject({ commit: [], notesSkipped: [{ surface: 'web', note: 'T1 needed the cart seeded', why: 'names-the-task' }] });
+    expect(out.learned).toEqual({});
+    expect(readFileSync(path.join(root, '.forge', 'verify', 'web.md'), 'utf8')).toBe('# Web\n');
+  });
 
   it('setup installs the dependencies of a directory as swarm does: the lockfile, or swarm.setup in --cwd (J-17)', () => {
     writeFileSync(path.join(root, 'package.json'), '{}');
