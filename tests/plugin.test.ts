@@ -14,6 +14,10 @@ const tmp = useTempDirs();
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 // A reference of forge:run (plugins/forge/skills/run/references/<name>.md).
 const runRef = (name: string) => read(`plugins/forge/skills/run/references/${name}.md`);
+// J-12: what /waypoint:work can read: its core and the multi-session protocol it reads when next says multi.
+const workText = () => `${read('plugins/waypoint/skills/work/SKILL.md')}\n${read('plugins/waypoint/skills/work/references/multisession.md')}`;
+// J-12: 60 % of waypoint:work as wave 5c found it (35 073 bytes): the cap only goes down.
+const WORK_CAP = 21043;
 /** I-17: the floor of a dependency range (`^5.0.5`, `~5.0.5`, `5.0.5`) is `min` or later. */
 const floorAtLeast = (range: string | undefined, min: string): boolean => {
   const m = /^[\^~]?(\d+)\.(\d+)\.(\d+)$/.exec(range ?? '');
@@ -82,12 +86,12 @@ describe('plugin layout', () => {
     expect(md).not.toContain('busyUntil');
   });
   it('work skill documents the multi-session protocol', () => {
-    const md = read('plugins/waypoint/skills/work/SKILL.md');
+    const md = workText();
     for (const w of ['SendMessage', 'ListAgents', ' inbox ', ' recover ', ' conflicts ', 'seen.json', 'MAIN_REPO']) expect(md).toContain(w);
   });
   it('work skill reads and writes roadmap notes', () => {
     const md = read('plugins/waypoint/skills/work/SKILL.md');
-    for (const w of ['waypoint.cjs" notes', 'lastNoteTs', 'notes/<EID>', 'session:<SID>']) expect(md).toContain(w);
+    for (const w of ['"<WP>" notes', 'lastNoteTs', 'notes/<EID>', 'session:<SID>']) expect(md).toContain(w);
     expect(read('plugins/waypoint/README.md')).toContain('Notes');
   });
   it('work skill clears pending commits and documents the stop guard', () => {
@@ -759,7 +763,9 @@ describe('plugin layout', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
     expect(Buffer.byteLength(run, 'utf8')).toBeLessThanOrEqual(25600);
     expect(Buffer.byteLength(run, 'utf8'), 'core keeps a margin: at most 22 KB').toBeLessThanOrEqual(22528);
-    // Every references/<file>.md cited by a skill of forge or waypoint exists in forge:run's references.
+    // Every references/<file>.md cited by a skill of forge or waypoint exists: in the skill it names (`/waypoint:work`'s
+    // `references/x.md`), else in the citing skill's own references/ (waypoint:work has one), else in forge:run's, which the
+    // other skills cite.
     const files: string[] = [];
     for (const p of ['forge', 'waypoint']) {
       for (const s of readdirSync(new URL(`../plugins/${p}/skills/`, import.meta.url))) {
@@ -772,9 +778,12 @@ describe('plugin layout', () => {
     }
     let cited = 0;
     for (const f of files) {
-      for (const m of read(f).matchAll(/references\/([A-Za-z0-9_-]+)\.md/g)) {
+      for (const m of read(f).matchAll(/(?:`\/([a-z]+):([a-z-]+)`'s `)?references\/([A-Za-z0-9_-]+)\.md/g)) {
         cited++;
-        expect(existsSync(new URL(`../plugins/forge/skills/run/references/${m[1]}.md`, import.meta.url)), `${f} cites references/${m[1]}.md`).toBe(true);
+        const skillDir = f.replace(/\/(SKILL\.md|references\/[^/]+\.md)$/, '');
+        const dirs = m[1] ? [`plugins/${m[1]}/skills/${m[2]}`] : [skillDir, 'plugins/forge/skills/run'];
+        const found = dirs.some(d => existsSync(new URL(`../${d}/references/${m[3]}.md`, import.meta.url)));
+        expect(found, `${f} cites ${m[1] ? `/${m[1]}:${m[2]}'s ` : ''}references/${m[3]}.md`).toBe(true);
       }
     }
     expect(cited).toBeGreaterThan(0);
@@ -1284,10 +1293,10 @@ describe('plugin layout', () => {
     }
   });
   it('the skills bind the conversation to its seat, and work lets the CLI build its batches (wave 2a)', () => {
-    const work = read('plugins/waypoint/skills/work/SKILL.md');
+    const work = workText();
     for (const w of ['bind <plan> --via work --claude ${CLAUDE_SESSION_ID}', '--second-seat', '--takeover', '--resume', 'heartbeat --register', '--sessions DB/sessions',
-      'waypoint.cjs" claim <plan> --db DB', '--recovered-from', '`solo`', 'waypoint.cjs" done <plan> --db DB', '--summary-file <SEAT>/summary.txt',
-      'waypoint.cjs" block <plan> --db DB', '--why-file <SEAT>/block-reason.txt', '--busy-until', '--idle', 'waiting_on', '--base <MAIN_BRANCH>',
+      '"<WP>" claim <plan> --db DB', '--recovered-from', '`solo`', '"<WP>" done <plan> --db DB', '--summary-file <SEAT>/summary.txt',
+      '"<WP>" block <plan> --db DB', '--why-file <SEAT>/block-reason.txt', '--busy-until', '--idle', 'waiting_on', '--base <MAIN_BRANCH>',
       'release <plan> --seat <SID> --free <T>', '<SEAT>/pending-commits.jsonl', '<SEAT>/seen.json', '<SEAT>/queue.jsonl', 'git status --porcelain --untracked-files=no',
       '## 7. Release', '**Arguments.**']) expect(work, w).toContain(w);
     for (const w of ['PREV_AGENT', 'busyUntil:', '.waypoint/<project>/pending-commits.jsonl', '.waypoint/<project>/queue.jsonl', 'git -C MAIN_REPO status',
@@ -1360,7 +1369,8 @@ describe('plugin layout', () => {
     const skills = ['plugins/forge/skills', 'plugins/waypoint/skills'].flatMap(d => walk(path.join(repo, d))).filter(f => f.endsWith('.md'));
     expect(skills.length).toBeGreaterThan(10);
     for (const f of skills) expect(readFileSync(f, 'utf8'), path.relative(repo, f)).not.toContain('status: "free"');
-    for (const f of ['plugins/forge/skills/infinite/SKILL.md', 'plugins/waypoint/skills/work/SKILL.md']) expect(read(f), f).toContain('--keep-seat');
+    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('--keep-seat');
+    expect(workText(), 'waypoint:work and its multisession.md').toContain('--keep-seat');
   });
   it('the ephemeral run says its tick closes it when it finishes (wave 0 handoff)', () => {
     expect(runRef('ephemeral')).toContain('`closedBy: merge`');
@@ -1971,5 +1981,16 @@ describe('plugin layout', () => {
     }
     // 220 KiB, not 200: the band parses YAML, so the bundle cannot go lower (ruling R9; tests/mod-bundle.test.ts bounds it the same).
     expect(Buffer.byteLength(read('plugins/waypoint/hooks/register.js'))).toBeLessThan(220 * 1024);
+  });
+
+  it('waypoint:work keeps the core of a lone session and reads references/multisession.md only with multi (J-12)', () => {
+    const work = read('plugins/waypoint/skills/work/SKILL.md');
+    const multi = read('plugins/waypoint/skills/work/references/multisession.md');
+    expect(Buffer.byteLength(work, 'utf8'), 'at most 60 % of its size when wave 5c started').toBeLessThanOrEqual(WORK_CAP);
+    for (const w of ['references/multisession.md', '--messages DB/messages', '`multi: true`', 'node "<WP>" next <plan>']) expect(work, w).toContain(w);
+    expect(work).not.toContain('waypoint.cjs" ');
+    for (const w of ['## 6. Messages between sessions', '## 7. Release', 'node "<WP>" inbox <plan>', 'node "<WP>" recover <plan>', 'node "<WP>" escalations <plan>',
+      '--recovered-from', '**Lost task.**', '**Zone expansion.**', '**Delegation.**', '**Phase close.**', '`WP`', '`DB`', '`SID`', '`<plan>`']) expect(multi, w).toContain(w);
+    for (const w of ['## 6. Messages between sessions', '## 7. Release', 'node "<WP>" inbox', 'node "<WP>" recover']) expect(work, w).not.toContain(w);
   });
 });
