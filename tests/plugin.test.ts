@@ -2039,4 +2039,22 @@ describe('plugin layout', () => {
     for (const w of ['### From a spec', '`.forge/work/<id>/task.txt`', 'FORGE route stage --stage handed-off --session <CSID>', 'FORGE route stage --stage done --session <CSID>']) expect(large, w).toContain(w);
     for (const w of ['FORGE route stage --stage handed-off --session <CSID>', 'FORGE route stage --stage done --session <CSID>']) expect(runRef('superpowers-plan'), w).toContain(w);
   });
+  it('forge:route carries the three raising rules of forge:run word for word (K1-10)', () => {
+    const rules = (md: string) => {
+      const lines = md.split(/\r?\n/);
+      const at = lines.findIndex(l => l.trim().startsWith('- changes behaviour callers rely on'));
+      return at < 0 ? [] : lines.slice(at, at + 3).map(l => l.trim());
+    };
+    const run = rules(read('plugins/forge/skills/run/SKILL.md'));
+    expect(run).toHaveLength(3);
+    for (const l of run) expect(l.startsWith('- ')).toBe(true);
+    expect(rules(read('plugins/forge/skills/route/SKILL.md'))).toEqual(run);
+  });
+  it('forge:route hands a brainstorming without a spec over to forge:run with the decisions as the task text (K1-06)', () => {
+    const lines = read('plugins/forge/skills/route/SKILL.md').split(/\r?\n/);
+    for (const opt of ['- `superpowers-design`', '- `superpowers-plan`']) {
+      const line = lines.find(l => l.trimStart().startsWith(opt))!;
+      for (const w of ['.forge/work/<id>/task.txt', 'FORGE route stage --stage handed-off --session ${CLAUDE_SESSION_ID}', '`forge:run`']) expect(line, `${opt}: ${w}`).toContain(w);
+    }
+  });
 });
