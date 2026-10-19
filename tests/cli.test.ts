@@ -434,6 +434,8 @@ describe('multi-session commands', () => {
   });
 
   it('next prints multi: false alone; true with another live session or an open message for it (J-12)', () => {
+    // A main checkout: next looks for a track worktree no higher than its .git, whatever sits above the temporary folder.
+    mkdirSync(path.join(dir, '.git'));
     const states = writeDocs('c/state', {});
     const me = { name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', leaseUntil: '2026-10-11T10:09:00.000Z', status: 'active' };
     const alone = writeDocs('c/alone', { be: me });
@@ -451,7 +453,8 @@ describe('multi-session commands', () => {
     expect(next('--sessions', alone, '--messages', 'c/nope').multi).toBe(false);
   });
   it('next counts a task an idle session left for this session, never one of its own (Review Focus 1)', () => {
-    const me = { name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', leaseUntil: '2026-10-11T10:09:00.000Z', status: 'active' };
+    mkdirSync(path.join(dir, '.git')); // a main checkout, as in the test above
+    const me ={ name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', leaseUntil: '2026-10-11T10:09:00.000Z', status: 'active' };
     const old = { name: 'old', heartbeatAt: '2026-10-11T08:00:00.000Z', status: 'active' };
     const left = writeDocs('c/left', { T001: { status: 'in_progress', owner: 'old' } });
     const multi = (states: string, sessions: string, ...extra: string[]) =>
@@ -464,10 +467,39 @@ describe('multi-session commands', () => {
     // Its own task, left while its own session went idle, is resumed by next, not recovered.
     expect(multi(writeDocs('c/mine', { T001: { status: 'in_progress', owner: 'be' } }), writeDocs('c/sessions3', { be: { ...me, status: 'idle' } }))).toBe(false);
   });
-  it('next in a linked worktree (its .git is a file into <repo>/.git/worktrees/) is multi (J-12)', () => {
-    writeFileSync(path.join(dir, '.git'), `gitdir: ${path.join(dir, 'main', '.git', 'worktrees', 'ui')}\n`);
-    const states = writeDocs('c/state', {});
-    expect(JSON.parse(run(['next', 'plan.yaml', '--states', states, '--session', 'be'], io).stdout).multi).toBe(true);
+  describe('next in a track worktree is multi (J-12)', () => {
+    // The main checkout `main` and the linked worktree `wt` beside it; next runs in a folder of the worktree.
+    const next = (cwd: string) => {
+      const r = run(['next', path.join(dir, 'plan.yaml'), '--states', path.join(dir, writeDocs('c/state', {})), '--session', 'be'], { ...io, cwd });
+      expect(r.code, r.stderr).toBe(0);
+      return (JSON.parse(r.stdout) as { multi: boolean }).multi;
+    };
+    const meta = (kind: 'worktrees' | 'modules', head: string) => {
+      const d = path.join(dir, 'main', '.git', kind, 'ui');
+      mkdirSync(d, { recursive: true });
+      writeFileSync(path.join(d, 'HEAD'), head);
+      return d;
+    };
+    const worktree = (gitdir: string) => {
+      mkdirSync(path.join(dir, 'wt', 'src'), { recursive: true });
+      writeFileSync(path.join(dir, 'wt', '.git'), `gitdir: ${gitdir}\n`);
+      return path.join(dir, 'wt', 'src');
+    };
+    const TRACK = 'ref: refs/heads/track/ui\n';
+    it('its .git file points into <repo>/.git/worktrees/, absolutely or relative to its own folder, and its branch is track/<track>', () => {
+      expect(next(worktree(meta('worktrees', TRACK)))).toBe(true);
+      // git ≥ 2.48 with worktree.useRelativePaths writes the gitdir relative to the worktree's root, not to the cwd.
+      meta('worktrees', TRACK);
+      expect(next(worktree('../main/.git/worktrees/ui'))).toBe(true);
+    });
+    it('a linked worktree on another branch or detached, a submodule and a main checkout are not track worktrees', () => {
+      // A Claude Code --worktree session works alone like the main checkout.
+      expect(next(worktree(meta('worktrees', 'ref: refs/heads/worktree-ui\n')))).toBe(false);
+      expect(next(worktree(meta('worktrees', `${'a'.repeat(40)}\n`)))).toBe(false);
+      expect(next(worktree(meta('modules', TRACK)))).toBe(false);
+      writeFileSync(path.join(dir, 'main', '.git', 'HEAD'), TRACK);
+      expect(next(path.join(dir, 'main'))).toBe(false);
+    });
   });
 });
 

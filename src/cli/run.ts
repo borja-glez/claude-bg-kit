@@ -9,7 +9,6 @@ import { normalizeMessage, normalizeMeta, normalizePhase, sessionDoc, stateDoc }
 import { readDocs } from '../lib/read-docs.js';
 import { availableTasks, commitShas } from '../lib/deps.js';
 import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, isIdle, multiSession, IDLE_MINUTES } from '../lib/coordination.js';
-import { mainCheckoutFrom } from '../lib/main-checkout.js';
 import { parseDesign, changedSections, designBody, designStatus, DesignError, setDesignStatus } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, line, mergeDismissed } from '../lib/design-gate.js';
@@ -321,7 +320,7 @@ export function run(argv: string[], io: Io): Result {
         const track = flag('track');
         const leftover = !!sessions && recoverableTasks(view, states, sessions, now)
           .some(t => t.owner !== session && (!track || view.tasks.find(x => x.id === t.taskId)?.track === track));
-        const multi = leftover || multiSession({ sessions, messages: optMessages(), sid: session, inTrackWorktree: inLinkedWorktree(io.cwd), now });
+        const multi = leftover || multiSession({ sessions, messages: optMessages(), sid: session, inTrackWorktree: inTrackWorktree(io.cwd), now });
         // unblock is only reported when true, as before
         const { unblock, ...rest } = r;
         return ok(JSON.stringify({ ...(unblock ? r : rest), multi }));
@@ -1051,12 +1050,21 @@ export function run(argv: string[], io: Io): Result {
   }
 }
 
-/** J-12: whether `cwd` is in a linked worktree (a track's), read from the nearest `.git` above it, without calling git. */
-function inLinkedWorktree(cwd: string): boolean {
+/**
+ * J-12: whether `cwd` is in a track worktree, read from the nearest `.git` above it without calling git: a `.git` file whose
+ * gitdir (absolute, or relative to that file's folder) is `<repo>/.git/worktrees/<x>`, and whose HEAD there is on a `track/`
+ * branch. Any other linked worktree (a Claude Code --worktree session, a detached HEAD) works alone like the main checkout.
+ */
+function inTrackWorktree(cwd: string): boolean {
   for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
     const git = path.join(dir, '.git');
     if (existsSync(git)) {
-      try { return statSync(git).isFile() && mainCheckoutFrom(dir, readFileSync(git, 'utf8')) !== dir; } catch { return false; }
+      try {
+        const m = statSync(git).isFile() ? /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(git, 'utf8')) : null;
+        const gitdir = m ? path.resolve(dir, m[1]) : null;
+        return !!gitdir && /[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.test(gitdir)
+          && /^ref:\s*refs\/heads\/track\//.test(readFileSync(path.join(gitdir, 'HEAD'), 'utf8'));
+      } catch { return false; }
     }
     if (path.dirname(dir) === dir) return false;
   }
