@@ -1841,4 +1841,39 @@ describe('security by the zones of the real diff (K4-06)', () => {
       expect(roles(prepOnly())).toEqual(['review-correctness']);
     });
   });
+  describe('a passing security is carried only over a fix whose paths and lines touch no zone (I1)', () => {
+    // Round 1 touches src/auth/, so security reviews it and passes; correctness asks for a fix.
+    const passRound1 = () => {
+      commit('src/auth/session.ts', 'export const ttl = 60;\n');
+      expect(roles(prepOnly())).toEqual(['review-correctness', 'review-security']);
+      const r1 = path.join(work(), 'reviews-1-1');
+      writeFileSync(path.join(r1, 'correctness.json'), JSON.stringify({ verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'src/auth/session.ts', line: 1, problem: 'p' }] }));
+      writeFileSync(path.join(r1, 'security.json'), JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] }));
+      appendEvent(root, { ts: '2026-10-14T10:05:00.000Z', kind: 'verdict', task: 'T1-1', dir: '.forge/work/T1/reviews-1-1', action: 'fix', score: 0.6, signature: 'x' });
+    };
+    const security = (out: { spawn: { role: string; mode: string }[] }) => out.spawn.find(s => s.role === 'review-security');
+    it('a fix without zone code under src/ui/ carries it', () => {
+      passRound1();
+      commit('src/ui/Button.tsx', 'export const Button = () => null;\n');
+      const out = prepOnly();
+      expect(out.carried).toEqual(['security']);
+      expect(security(out)).toBeUndefined();
+    });
+    it('a fix that adds jwt.verify( under src/ui/ spawns security in delta', () => {
+      passRound1();
+      commit('src/ui/Checkout.tsx', 'export const pay = (t: string) => jwt.verify(t, key);\n');
+      const out = prepOnly();
+      expect(out.carried).toBeUndefined();
+      expect(security(out)?.mode).toBe('delta');
+    });
+    it('a fix that deletes a jwt.verify( line under src/ui/ spawns security in delta', () => {
+      commit('src/ui/guard.ts', 'export const g = (t: string) => { if (!jwt.verify(t, key)) throw new Error(); return t; };\n');
+      base = git('rev-parse', 'HEAD');
+      passRound1();
+      commit('src/ui/guard.ts', 'export const g = (t: string) => t;\n');
+      const out = prepOnly();
+      expect(out.carried).toBeUndefined();
+      expect(security(out)?.mode).toBe('delta');
+    });
+  });
 });

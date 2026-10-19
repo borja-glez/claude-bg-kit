@@ -9,7 +9,7 @@ import {
   detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, failingLabel,
   type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult,
 } from '../validators.js';
-import { PATH_ORDER, diffZones, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
+import { PATH_ORDER, diffZones, type PathName, type ReviewRole, type Zone } from '../triage.js';
 import {
   parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative,
   type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding,
@@ -268,6 +268,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   // The previous round: each reviewer's result (a carried one included) and the fix diff from the commit it reviewed.
   const previous: Partial<Record<ReviewRole, PreviousResult>> = {};
   let fixFiles: string[] = [];
+  let fixZones: Zone[] = [];
   const fixFile = path.join(dir, `fix-${n}-${round}.patch`);
   const findingsFile = (name: ReviewerKey) => path.join(roundDir, `previous-${name}.json`);
   const prevReviews: Partial<Record<ReviewerKey, Review>> = {};
@@ -299,14 +300,18 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     }
     const prevHead = existsSync(path.join(prevDir, 'head.txt')) ? readFileSync(path.join(prevDir, 'head.txt'), 'utf8').trim() : '';
     // Without the commit the previous round reviewed, or when git cannot diff from it, the whole diff stands in for the fix.
+    // I1: its zones, like the round's, come from its paths and the zone words of its added and removed lines, read
+    // without rename detection: a passing security is carried only over a fix that touches no zone either way.
     const diffFrom = (from: string) => {
       const changedNames = deps.git([...diffGit, '--name-only', `${from}..HEAD`]);
       const patch = changedNames === null ? null : deps.git(['diff', `${from}..HEAD`]);
-      return changedNames === null || patch === null ? null : { names: changedNames, patch };
+      const zonePatch = patch === null ? null : deps.git([...diffGit, `${from}..HEAD`]);
+      return changedNames === null || patch === null || zonePatch === null ? null : { names: changedNames, patch, zonePatch };
     };
     const fix = (prevHead ? diffFrom(prevHead) : null) ?? diffFrom(baseSha);
     if (!fix) throw new UsageError(`review-prep: cannot diff the fix (${prevHead || baseSha}..HEAD)`);
     fixFiles = fix.names.split('\n').map(s => s.trim()).filter(Boolean);
+    fixZones = diffZones(fixFiles, fix.zonePatch);
     writeFileSync(fixFile, fix.patch);
   }
   // After a redo the work was started again: every reviewer reviews it in full, nothing is carried.
@@ -329,7 +334,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   if (round >= 2 && !redo && round < reviewsCount.max && (pathName === 'medium' || pathName === 'large') && config.review.express
     && lastVerdict?.action === 'fix' && Array.isArray(prevSent?.validators) && prevSent!.validators.length === 0 && expressCandidate(index, round)
     && SHA.test(baseSha)) {
-    const express = expressPrep({ deps, task, project, id, n, round, pathName, review, previous, prevReviews, fixFiles, dir, roundDir, baseSha,
+    const express = expressPrep({ deps, task, project, id, n, round, pathName, review, previous, prevReviews, fixFiles, fixZones, dir, roundDir, baseSha,
       baselineArg, diff, head, tmFile, index, reviewsCount, locale, noCache: args.includes('--no-cache') });
     if (express) return express;
   }
@@ -390,7 +395,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   let tdd = false;
   try { tdd = /^TDD: required/m.test(readFileSync(brief, 'utf8')); } catch { /* no brief file */ }
   const plan: RoundPlan = reviewRound({
-    review, round, path: pathName, previous, fixFiles, fixZones: zonesFromPaths(fixFiles), shadowOpen, redo,
+    review, round, path: pathName, previous, fixFiles, fixZones, shadowOpen, redo,
     files: {
       brief: rel(deps.cwd, brief), diff: rel(deps.cwd, diffFile), validators: rel(deps.cwd, validatorsFile),
       out: rel(deps.cwd, roundDir), shadow: rel(deps.cwd, path.join(roundDir, 'shadow')),
@@ -472,7 +477,7 @@ function writeCarried(plan: RoundPlan, dir: string, n: string, round: number, ro
 
 interface ExpressCtx {
   deps: ReviewDeps; task: string; project: string | null; id: string; n: string; round: number; pathName: PathName; review: TriageReview;
-  previous: Partial<Record<ReviewRole, PreviousResult>>; prevReviews: Partial<Record<ReviewerKey, Review>>; fixFiles: string[];
+  previous: Partial<Record<ReviewRole, PreviousResult>>; prevReviews: Partial<Record<ReviewerKey, Review>>; fixFiles: string[]; fixZones: Zone[];
   dir: string; roundDir: string; baseSha: string; baselineArg: string; diff: string; head: string; tmFile: string | null;
   index: FindingsIndex; reviewsCount: { n: number; max: number }; locale: string | undefined; noCache: boolean;
 }
@@ -491,7 +496,7 @@ function expressPrep(c: ExpressCtx): Result | null {
   const diffFile = path.join(dir, `diff-${n}.patch`);
   const expressFile = path.join(roundDir, 'previous-express.json');
   const plan = reviewRound({
-    review: c.review, round, path: c.pathName, previous: c.previous, fixFiles: c.fixFiles, fixZones: zonesFromPaths(c.fixFiles), express: true,
+    review: c.review, round, path: c.pathName, previous: c.previous, fixFiles: c.fixFiles, fixZones: c.fixZones, express: true,
     files: {
       brief: at(path.join(dir, `brief-${n}.md`)), diff: at(diffFile), validators: at(validatorsFile), out: at(roundDir),
       shadow: at(path.join(roundDir, 'shadow')), fix: at(path.join(dir, `fix-${n}-${round}.patch`)), expressFindings: at(expressFile),
