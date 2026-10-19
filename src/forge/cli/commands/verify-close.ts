@@ -1,7 +1,10 @@
 import type { Command } from '../context.js';
 import { existsSync, statSync, realpathSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { readEvents } from '../../ledger.js';
+import { readEvents, appendEvent, ledgerRoot } from '../../ledger.js';
+import { updateExecution } from '../../execution.js';
+import { readFlow, flowDirs } from '../../flow.js';
+import { samePath } from '../../../lib/worktree.js';
 import { planLocale } from '../../../lib/locale.js';
 import { loadConfig, NAME } from '../../config.js';
 import { parseVerifyFile } from '../../verdict.js';
@@ -22,12 +25,26 @@ type DefectsOut = {
 /** A screenshot above this is converted to JPEG before it is uploaded to the roadmap. */
 const SHOT_MAX_BYTES = 2 * 1024 * 1024;
 
+/**
+ * --flow <folder> (K2-13) closes a flow pass instead: verify-flow, execution.json flow, and the failed checks.
+ */
 export const command: Command = (args, ctx) => {
   const { io, repoDir, flag, has, json, ts } = ctx;
   // Measure 10: what `## After the verdict` did in about ten steps, in one call. The skill keeps the upload of the
   // shots and the `update state/T` with their urls, and shows the proposals to the person.
-  const task = flag('task'), dirArg = flag('dir'), evArg = flag('evidence');
-  if (!task || !dirArg || !evArg) throw new UsageError('verify-close: --task, --dir and --evidence are required');
+  // K2-13: --flow <folder> closes a flow pass: its verify.json and evidence/ are in that folder, its id is the pass's. It is
+  // the coordinator's, and only a folder verify-plan --run opened (its flow.json in the run's own flow-<runId>-<n>).
+  const flowArg = flag('flow');
+  if (has('flow') && !flowArg) throw new UsageError('verify-close: --flow needs the folder of a flow pass');
+  if (flowArg && !samePath(ledgerRoot(io.cwd), io.cwd)) throw new UsageError('verify-close: --flow is the coordinator\'s, from the main checkout');
+  const flowDir = flowArg ? path.resolve(io.cwd, flowArg) : null;
+  const read = flowDir ? readFlow(flowDir) : null;
+  const pass = read && flowDir && path.basename(flowDir) === read.id && flowDirs(io.cwd, read.runId).some(d => samePath(d, flowDir)) ? read : null;
+  if (flowArg && !pass) throw new UsageError(`verify-close: ${flowArg} is not a flow pass (no flow.json from FORGE verify-plan --run)`);
+  const task = pass ? pass.id : flag('task');
+  const dirArg = pass ? flowArg : flag('dir');
+  const evArg = pass && flowArg ? path.join(flowArg, 'evidence') : flag('evidence');
+  if (!task || !dirArg || !evArg) throw new UsageError('verify-close: --task, --dir and --evidence are required (or --flow <folder>)');
   const loc = flag('locale');
   if (has('locale') && loc !== 'es' && loc !== 'en') throw new UsageError('verify-close: --locale must be es|en');
   const es = (loc ?? planLocale(io.cwd)) === 'es';
@@ -62,9 +79,19 @@ export const command: Command = (args, ctx) => {
   const evRel = relDir.replace(/reviews-(\d+-\d+)$/, 'evidence/$1');
   const evField = evRel !== relDir ? evRel : undefined;
   const ledger = readEvents(io.cwd);
-  const last = eventsOf(ledger, { project: resolveProject({ flag: flag('project'), dir: dirArg, task, events: ledger }), task })
-    .filter(e => e.kind === 'verify' && isTask(e, task) && typeof e.result === 'string').at(-1);
-  if (!last || last.result !== v.result || last.passed !== passed || last.total !== total || last.evidence !== evField) logVerifyResult(io.cwd, ts(), task, dir, v);
+  if (pass) {
+    // K2-13: a flow pass logs verify-flow, never verify (that would close a light task's status), once per result, and
+    // is kept in execution.json for the next pass and for runs/<runId>.
+    const logged = ledger.filter(e => e.kind === 'verify-flow' && e.dir === relDir).at(-1);
+    if (!logged || logged.result !== v.result) {
+      appendEvent(io.cwd, { ts: ts(), kind: 'verify-flow', runId: pass.runId, result: v.result, passed, total, dir: relDir });
+    }
+    updateExecution(mainCheckout(io.cwd), cur => (cur && cur.runId === pass.runId ? { ...cur, flow: { sha: pass.head, at: ts(), result: v.result } } : null));
+  } else {
+    const last = eventsOf(ledger, { project: resolveProject({ flag: flag('project'), dir: dirArg, task, events: ledger }), task })
+      .filter(e => e.kind === 'verify' && isTask(e, task) && typeof e.result === 'string').at(-1);
+    if (!last || last.result !== v.result || last.passed !== passed || last.total !== total || last.evidence !== evField) logVerifyResult(io.cwd, ts(), task, dir, v);
+  }
   // 4. Where the evidence goes, read now (the person may have changed it).
   let mode: 'upload' | 'local' = 'upload';
   try { mode = loadConfig(mainCheckout(io.cwd)).evidence; } catch { mode = 'upload'; }
@@ -134,6 +161,10 @@ export const command: Command = (args, ctx) => {
   return json({
     task, result: v.result, passed, total, learned, ...(skipped.length ? { skipped } : {}),
     ...(notesSkipped.length ? { notesSkipped } : {}), proposals: v.proposals, defects, cleanup,
+    ...(pass ? {
+      flow: { runId: pass.runId, sha: pass.head, result: v.result },
+      failed: v.checks.filter(c => !c.ok).map(c => ({ surface: c.surface, check: c.name, expected: c.expected, observed: c.observed, env: c.env })),
+    } : {}),
     evidence: { mode, dir: path.relative(io.cwd, evidence).split(path.sep).join('/'), shots, previous }, commit, say,
   });
 };
