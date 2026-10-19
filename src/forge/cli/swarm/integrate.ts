@@ -9,12 +9,13 @@ import { isSafeId, type ExecTask } from '../../../lib/execution-state.js';
 import { isPlanId } from '../../../lib/plan.js';
 import { updateLocal } from '../../local.js';
 import { integratedSay } from '../../swarm.js';
+import { phaseToVerify } from '../../flow.js';
 import { loadTrustedConfig } from '../../trust.js';
 import type { Result } from '../context.js';
 import { mergeIn, attemptExtras, commitInfo, integratedPublish, logValidations } from './integration.js';
 import { localeArg, spanish } from './shared.js';
 
-function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
+function integrate(rest: string[], io: Io, deps: SwarmDeps, planArg?: string, db?: string): Result {
   const task = rest[0];
   if (!task || !isPlanId(task)) throw new UsageError('swarm integrate: a task id is required');
   const locale = localeArg(rest, 'integrate');
@@ -69,13 +70,16 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   const commit = commitInfo(target.git, r.sha);
   const pub = e.kind === 'plan' ? integratedPublish(io, e.project, task, t, commit, at) : { publish: null, metrics: null };
   const say = integratedSay(es, e.branch, r.newValidators, r.preexisting);
+  // K2-13, verify.flow phase: the phase this integration finished, so a coordinator running single commands sees it too.
+  const planFile = planArg ?? (e.kind === 'plan' ? `docs/waypoint/${e.project}/plan.yaml` : null);
+  const phase = planFile ? phaseToVerify(io.cwd, planFile, db ?? null, task) : null;
   return out({
     result: 'integrated', sha: r.sha, commit, ...pub, preexisting: r.preexisting, newValidators: r.newValidators, say,
-    ...(r.surfacesChanged.length ? { surfacesChanged: r.surfacesChanged } : {}), ...extras,
+    ...(r.surfacesChanged.length ? { surfacesChanged: r.surfacesChanged } : {}), ...extras, ...(phase ? { flow: { phase } } : {}),
   });
 }
 
 export const subcommand: SwarmCommand = (rest, ctx) => {
-  const { io, deps } = ctx;
-  return integrate(rest, io, deps);
+  const { io, deps, flag } = ctx;
+  return integrate(rest, io, deps, flag('plan'), flag('db'));
 };

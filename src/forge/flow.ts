@@ -101,10 +101,10 @@ export function closedPhase(tasks: Pick<PlanTask, 'id' | 'phase'>[], task: strin
 
 /**
  * K2-13, verify.flow `phase`: the phase whose last task this integration finished (every task of it integrated in the run,
- * or done on the roadmap: `<db>/state/<T>.json`), so the coordinator runs a flow pass; null otherwise, or when the config
+ * or done on the roadmap: `<db>/state/<T>.json`, when a db is given), so the coordinator runs a flow pass; null otherwise, or when the config
  * or the plan does not read.
  */
-export function phaseToVerify(root: string, planFile: string, db: string, task: string): string | null {
+export function phaseToVerify(root: string, planFile: string, db: string | null, task: string): string | null {
   let mode: FlowMode;
   try { mode = verifyFlow(loadConfig(root)); } catch { return null; }
   if (mode !== 'phase') return null;
@@ -112,6 +112,7 @@ export function phaseToVerify(root: string, planFile: string, db: string, task: 
   try { tasks = parsePlan(readFileSync(path.resolve(root, planFile), 'utf8')).tasks; } catch { return null; }
   const e = readExecution(root);
   const done = (id: string): boolean => {
+    if (db === null) return false;
     try { return (JSON.parse(readFileSync(path.resolve(root, db, 'state', `${id}.json`), 'utf8')) as { status?: unknown } | null)?.status === 'done'; } catch { return false; }
   };
   return closedPhase(tasks, task, id => e?.tasks[id]?.status === 'integrated' || done(id));

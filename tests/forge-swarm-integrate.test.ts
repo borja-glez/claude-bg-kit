@@ -68,6 +68,25 @@ describe('forge swarm integrate (into the run branch)', () => {
     expect(r.commit).toEqual({ sha: r.sha, ts: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.000Z$/), title: 'T1: add b', add: 3, del: 1 });
     expect(r.commit.sha).toBe(g(runWt(), 'rev-parse', 'HEAD'));
   });
+  it('with verify.flow phase, integrate prints the phase it finished as flow, from --plan or the project\'s plan; by default it prints none (I5)', () => {
+    const plan = 'project: shop\nlocale: en\nversion: "1"\ntracks:\n  - { id: a, name: A, color: blue }\nphases:\n  - { id: p1, name: P1 }\n  - { id: p2, name: P2 }\n'
+      + 'tasks:\n  - { id: T1, title: One, track: a, phase: p1, done_when: it works, zones: [] }\n'
+      + '  - { id: T2, title: Two, track: a, phase: p1, done_when: it works, zones: [] }\n'
+      + '  - { id: T3, title: Three, track: a, phase: p2, done_when: it works, zones: [] }\n';
+    mkdirSync(path.join(root, 'docs', 'waypoint', 'shop'), { recursive: true });
+    writeFileSync(path.join(root, 'docs', 'waypoint', 'shop', 'plan.yaml'), plan);
+    writeFileSync(path.join(root, 'other.yaml'), plan);
+    accept('T1', 'a.txt', 'a\n');
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).not.toHaveProperty('flow');
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\nverify:\n  flow: phase\n');
+    accept('T2', 'b.txt', 'b\n');
+    // T1 is integrated in the run, T2 is the last of p1: the project's plan is the default.
+    const r = out(run(['swarm', 'integrate', 'T2'], io));
+    expect(r).toMatchObject({ result: 'integrated', flow: { phase: 'p1' } });
+    // --plan names another plan file.
+    accept('T3', 'c.txt', 'c\n');
+    expect(out(run(['swarm', 'integrate', 'T3', '--plan', 'other.yaml'], io))).toMatchObject({ result: 'integrated', flow: { phase: 'p2' } });
+  });
   it('swarm task logs a stage once when review-prep already logged it as a phase (C4)', () => {
     out(run(['swarm', 'worktree', 'T1'], io));
     // review-prep of a plan task logs its phase with the run's project (its --dir names it, C4), as swarm task does.

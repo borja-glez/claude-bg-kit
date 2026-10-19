@@ -563,10 +563,11 @@ const flowOf = (c: Ctx, task: string): { flow?: { phase: string } } => {
 
 /** The integrate the tick emitted (one at most; none while a merge is in flight): its result is the action's type. */
 function integrateTask(c: Ctx, task: string): void {
-  const r = call(c, task, ['swarm', 'integrate', task, '--locale', c.locale]);
+  // `swarm integrate` prints the phase it finished (`flow`) itself, from the plan and the roadmap it is given.
+  const r = call(c, task, ['swarm', 'integrate', task, '--plan', c.planArg, '--db', c.db, '--locale', c.locale]);
   if (!r) return;
   const { result, ...rest } = r;
-  c.actions.push({ ...rest, type: String(result), task, ...(result === 'integrated' ? flowOf(c, task) : {}) });
+  c.actions.push({ ...rest, type: String(result), task });
 }
 
 /**
