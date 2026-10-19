@@ -2007,6 +2007,24 @@ describe('plugin layout', () => {
     expect(work).not.toContain('waypoint.cjs" ');
     for (const w of ['## 6. Messages between sessions', '## 7. Release', 'node "<WP>" inbox <plan>', 'node "<WP>" recover <plan>', 'node "<WP>" escalations <plan>',
       '--recovered-from', '**Lost task.**', '**Zone expansion.**', '**Delegation.**', '**Phase close.**', '`WP`', '`DB`', '`SID`', '`<plan>`']) expect(multi, w).toContain(w);
+    // Every part of the reference the core cites («the §N part», «the §1 and §2 parts») is one of its headings, and every rule the
+    // core names in one (`§6 **Receiving**`, `"Authority" in §6`, `**Lost task** in the §3 part`) is one of its bold rules.
+    const partsIn = (s: string) => [...s.matchAll(/§(\d)(?: and §(\d))? parts?\b/g)].flatMap(m => m.slice(1).filter((n): n is string => !!n));
+    expect(new Set(partsIn(work))).toEqual(new Set(['1', '2', '3', '4']));
+    const part = (n: string) => {
+      const at = multi.search(new RegExp(`^## .+ \\(the §${n} part\\)$`, 'm'));
+      expect(at, `the §${n} part`).toBeGreaterThan(-1);
+      const end = multi.indexOf('\n## ', at + 1);
+      return multi.slice(at, end < 0 ? undefined : end);
+    };
+    for (const n of partsIn(work)) part(n);
+    const rules = [...work.matchAll(/§6 \*\*([A-Z][a-z]+)\*\*|"([A-Z][a-z]+)" in §6|\*\*([A-Z][a-z ]+)\*\* in the §\d part/g)].map(m => m[1] ?? m[2] ?? m[3]);
+    expect(rules).toEqual(expect.arrayContaining(['Receiving', 'Authority', 'Lost task']));
+    for (const r of rules) expect(multi, r).toContain(`**${r}.**`);
+    // **A failed batch.** sends a lost race on the state entry to the parts that hold its rule: each part it names has one.
+    const failed = work.slice(work.indexOf('**A failed batch.**'), work.indexOf('\n', work.indexOf('**A failed batch.**')));
+    expect(partsIn(failed).length).toBeGreaterThan(0);
+    for (const n of partsIn(failed)) expect(part(n), `the §${n} part`).toContain('version_mismatch');
     for (const w of ['## 6. Messages between sessions', '## 7. Release', 'node "<WP>" inbox', 'node "<WP>" recover']) expect(work, w).not.toContain(w);
   });
   it('a run member never reads forge:run SKILL.md: the close of a review round is references/review-close.md, cited by Medium and the task steps (J-12)', () => {
