@@ -58,7 +58,8 @@ function writeAtomic(file: string, text: string): void {
   try { writeFileSync(tmp, text); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
 }
 
-/** I-15: private. updateExecution is the only writer of execution.json (and readExecution's one-time migration of swarm.json). */
+/** I-15: private. updateExecution is the only caller, and the only writer of execution.json besides readExecution's
+ *  one-time migration of swarm.json, which writes through createIfAbsent, never through here. */
 function saveExecution(root: string, e: ExecutionState): void {
   forgeDir(root);
   writeAtomic(executionFile(root), JSON.stringify(e, null, 2) + '\n');

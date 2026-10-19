@@ -190,8 +190,8 @@ function planRepoRel(planAbs: string, root: string): string | null {
  * checkout; <path> is the plan's path in its own git worktree (the same from every worktree), or from root when the
  * plan is in no repository. When that file is another plan's, it goes to <slug>-<8 hex of the sha1 of the path>.md.
  * Several processes may record at once: a new file is created whole (createIfAbsent) and a record is appended, never
- * rewritten, so none is lost (a torn last line is ignored by the reader and repaired by the next append). True when the task is
- * recorded (now or before); false when the plan is outside root. A write that fails throws.
+ * rewritten, so none is lost (a torn last line is ignored by the reader and repaired by the next append). True when the
+ * task is recorded (now or before); false when the plan is outside root. A write that fails throws.
  */
 export function recordSpDone(root: string, planAbs: string, n: number): boolean {
   const rel = planRepoRel(planAbs, root) ?? path.relative(root, planAbs).split(path.sep).join('/');

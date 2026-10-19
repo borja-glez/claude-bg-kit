@@ -35,7 +35,7 @@ export interface CacheCtx {
 
 export const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb', 'Cargo.lock', 'go.sum', 'poetry.lock', 'uv.lock', 'Pipfile.lock', 'packages.lock.json'];
 export const MAX_ENTRIES = 500;
-// forge's, waypoint's and Claude Code's own state (task worktrees live under .claude/worktrees), as LOCAL_STATE in cli/swarm.ts.
+// forge's, waypoint's and Claude Code's own state (task worktrees live under .claude/worktrees), as LOCAL_STATE in cli/swarm/setup.ts.
 const LOCAL_STATE = [':(exclude).forge', ':(exclude).waypoint', ':(exclude).claude'];
 const OBJECT = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const KEY = /^[0-9a-f]{64}$/;

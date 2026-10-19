@@ -1,4 +1,4 @@
-// I-12: the helpers more than one swarm subcommand uses. Each subcommand lives in <name>.ts of this folder.
+// I-12: the helpers the swarm subcommands share. Each subcommand lives in <name>.ts of this folder.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { UsageError } from '../errors.js';
