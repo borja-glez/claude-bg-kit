@@ -46,7 +46,7 @@ const METHOD = /(?<![\p{L}\p{N}_])(?:forge|superpowers)(?![\p{L}\p{N}_])/iu;
 // (¿…, …?) that is not a polite request, and a prompt that opens with an interrogative. «Como» without its accent opens a
 // request («Como usuario, quiero…»), so the Spanish interrogatives need theirs.
 // Only the tags of the harness and of agents; a prompt that opens with JSX or HTML («<Button> add a state…») is a request.
-const TAGGED = /^<(?:teammate-message|task-notification|system-reminder|command-|local-command-|user-prompt-submit-hook)/i;
+const TAGGED = /^<(?:teammate-message|agent-message|task-notification|system-reminder|command-|local-command-|user-prompt-submit-hook)/i;
 // A polite request, after a short lead («hola,», «please»). Every pattern is anchored and has no nested quantifier.
 const POLITE = /^(?:(?:hola|oye|hi|hello|please|por favor)[,\s]+){0,3}¿?\s*(?:me\s+)?(?:puedes|podrías|podrias|puede|podría|podria|podéis|podeis|podemos|can you|could you|would you|will you|can we|could we)(?![\p{L}\p{N}_])/iu;
 const INTERROGATIVE = /^¿?\s*(?:qué|cómo|por qué|what|how|why)(?![\p{L}\p{N}_])/iu;
@@ -150,8 +150,10 @@ export function hookRoute(io: Io, which: 'session' | 'prompt'): string {
     // K1-09: in a task or run worktree of forge, forge drives whatever happens: no rule and no hint.
     if (inForgeWorktree(io.cwd)) return '';
     const main = mainCheckout(io.cwd);
-    // With workflow: superpowers forge is optional again, as before routing existed; with off it stays out.
-    const workflow = resolvePrefs({}, readLocal(io.cwd), loadConfig(io.cwd)).workflow;
+    // With workflow: superpowers forge is optional again, as before routing existed; with off it stays out. The config is
+    // read once, here, for the workflow and the hint; an invalid one throws, and the hook says nothing (fail open).
+    const config = loadConfig(io.cwd);
+    const workflow = resolvePrefs({}, readLocal(io.cwd), config).workflow;
     if (workflow === 'superpowers' || workflow === 'off' || forgeDrives(io, main, sid)) return '';
     if (which === 'session') {
       const sp = locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: main });
@@ -166,8 +168,7 @@ export function hookRoute(io: Io, which: 'session' | 'prompt'): string {
     // A session that routed its request recently gets no hint on its follow-up prompts until the route is done.
     if (!reminder && own && own.stage !== 'done' && fresh(own, now)) return '';
     // K1-03: the hint can be turned off; a route half done is reminded anyway.
-    // The config is read only for a prompt that looks like coding and has no reminder.
-    const text = reminder ?? (typeof o.prompt === 'string' && looksLikeCoding(o.prompt) && hintOn(io.env ?? process.env, loadConfig(io.cwd)) ? ROUTE_HINT : null);
+    const text = reminder ?? (typeof o.prompt === 'string' && looksLikeCoding(o.prompt) && hintOn(io.env ?? process.env, config) ? ROUTE_HINT : null);
     return text ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } }) : '';
   } catch { return ''; }
 }

@@ -344,6 +344,22 @@ describe('the hint of route-prompt (K1-03)', () => {
       'El carrito va lento al añadir cupones, ¿no?', '<system-reminder>fix the rounding of the cart total in src/cart.js</system-reminder>',
       '<task-notification>fix the rounding of the cart total in src/cart.js</task-notification>']) expect(looksLikeCoding(p), p).toBe(false);
   });
+  it('leaves out an <agent-message>, as K1-03 lists it (M9)', () => {
+    expect(looksLikeCoding('<agent-message from="planner">fix the rounding of the cart total in src/cart.js</agent-message>')).toBe(false);
+    expect(looksLikeCoding('fix the rounding of the cart total in src/cart.js')).toBe(true);
+  });
+  it('a broken .forge/config.yaml keeps route-prompt silent, the hint and the reminder alike (M8)', () => {
+    const root = tmp('forge-hint-bad-');
+    const said = () => run(['hook', 'route-prompt'], {
+      cwd: root, now: () => NOW, env: {}, stdin: JSON.stringify({ session_id: 'S1', prompt: 'Add coupon support to the cart with validation' }),
+    });
+    expect(JSON.parse(said().stdout).hookSpecificOutput.additionalContext).toBe(ROUTE_HINT);
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'route:\n  hint: maybe\n');
+    expect(said()).toMatchObject({ code: 0, stdout: '' });
+    writeRoute(root, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'S1' });
+    expect(said()).toMatchObject({ code: 0, stdout: '' });
+  });
   it('runs in linear time on a long prompt', () => {
     const t0 = performance.now();
     for (const p of ['hola, '.repeat(40000), '¿'.repeat(200000), 'a '.repeat(100000) + '?']) looksLikeCoding(p);
