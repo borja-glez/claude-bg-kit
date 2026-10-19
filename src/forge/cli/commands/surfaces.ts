@@ -9,7 +9,7 @@ import { readExecution } from '../../execution.js';
 import { readEvents } from '../../ledger.js';
 import { readWorkDir } from '../../task-ref.js';
 import { flowDirs } from '../../flow.js';
-import { digest, digestSay, verifyFilesOf } from '../../verify-digest.js';
+import { digest, digestSay, verifyFilesOf, ENTRIES_MAX } from '../../verify-digest.js';
 import { isSafeId } from '../../../lib/execution-state.js';
 import { planLocale } from '../../../lib/locale.js';
 import { repoReader } from '../exec.js';
@@ -47,12 +47,14 @@ export const command: Command = (args, ctx) => {
       ...flowDirs(main, runId).map(dir => ({ task: path.basename(dir), dir })),
     ];
     const since = Date.parse(e.startedAt);
-    const entries = dirs.flatMap(({ task, dir }) => verifyFilesOf(dir, since).map(f => ({ task, text: readFileSync(f, 'utf8') })));
+    // Only the first ENTRIES_MAX files are read; the others are counted.
+    const files = dirs.flatMap(({ task, dir }) => verifyFilesOf(dir, since).map(file => ({ task, file })));
+    const entries = files.slice(0, ENTRIES_MAX).map(({ task, file }) => ({ task, text: readFileSync(file, 'utf8') }));
     const held = (surface: string): string[] => {
       try { return NAME.test(surface) ? learnedNotes(readFileSync(path.join(main, surfaceFile(surface)), 'utf8')) : []; } catch { return []; }
     };
-    const { surfaces, dropped, unread } = digest(entries, held);
-    return json({ runId, surfaces, dropped, unread, say: digestSay(surfaces, runId, es) });
+    const { surfaces, dropped, moreSurfaces } = digest(entries, held);
+    return json({ runId, surfaces, dropped, unread: files.length - entries.length, moreSurfaces, say: digestSay(surfaces, runId, es) });
   }
   const name = flag('name');
   if (!name || !NAME.test(name)) throw new UsageError(`surfaces ${sub}: --name must match ${NAME}`);

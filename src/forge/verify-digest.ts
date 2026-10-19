@@ -4,6 +4,7 @@
 // read untrusted pages: it goes through the same filters as a learned note, is bounded, and what is dropped is only counted.
 import { readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { NAME } from './config.js';
 import { filterNotes } from './surfaces.js';
 import { parseVerifyFile } from './verdict.js';
 
@@ -16,6 +17,7 @@ export interface DigestSurface {
 /** At most this many notes and this many proposals per surface, and this many verify files read per digest. */
 export const ITEMS_MAX = 20;
 export const ENTRIES_MAX = 200;
+export const SURFACES_MAX = 20;
 
 /** The verify.json files of a work folder (its own, and those of its reviews-<n>-<k>/ folders) written at `since` or later. */
 export function verifyFilesOf(dir: string, since: number): string[] {
@@ -33,14 +35,22 @@ const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
  * `entries`: the text of a verify.json and the task or pass it is of; past ENTRIES_MAX the rest is counted in `unread`.
  */
 export function digest(entries: { task: string; text: string }[], existing: (surface: string) => string[] = () => []):
-  { surfaces: DigestSurface[]; dropped: number; unread: number } {
+  { surfaces: DigestSurface[]; dropped: number; unread: number; moreSurfaces: number } {
   const by = new Map<string, DigestSurface>();
   const have = new Map<string, Set<string>>();
   const over = new Map<string, { learned: number; proposals: number }>();
   let dropped = 0;
-  const of = (name: string): DigestSurface => {
+  let moreSurfaces = 0;
+  // The surface of an item: its name must be a surface name (else the item is dropped and counted, the name never echoed),
+  // and past SURFACES_MAX surfaces the new ones are only counted.
+  const of = (name: string): DigestSurface | null => {
     let s = by.get(name);
-    if (!s) { s = { name, learned: [], proposals: [] }; by.set(name, s); have.set(name, new Set(existing(name).map(norm))); }
+    if (s) return s;
+    if (!NAME.test(name)) { dropped++; return null; }
+    if (by.size >= SURFACES_MAX) { moreSurfaces++; return null; }
+    s = { name, learned: [], proposals: [] };
+    by.set(name, s);
+    have.set(name, new Set(existing(name).map(norm)));
     return s;
   };
   const add = <T extends { tasks: string[] }>(surface: string, kind: 'learned' | 'proposals', list: T[], key: (x: T) => string, item: T, task: string) => {
@@ -59,17 +69,18 @@ export function digest(entries: { task: string; text: string }[], existing: (sur
     if (!v) continue;
     for (const l of v.learned) {
       const note = clean(l.note, task);
-      const surface = of(l.surface || 'app');
-      if (note && !have.get(surface.name)?.has(norm(note))) add(surface.name, 'learned', surface.learned, x => x.note, { note, tasks: [task] }, task);
+      const surface = note ? of(l.surface || 'app') : null;
+      if (note && surface && !have.get(surface.name)?.has(norm(note))) add(surface.name, 'learned', surface.learned, x => x.note, { note, tasks: [task] }, task);
     }
     for (const p of v.proposals) {
       const change = clean(p.change, task);
-      if (change) { const surface = of(p.surface || 'app'); add(surface.name, 'proposals', surface.proposals, x => x.change, { change, tasks: [task] }, task); }
+      const surface = change ? of(p.surface || 'app') : null;
+      if (change && surface) { add(surface.name, 'proposals', surface.proposals, x => x.change, { change, tasks: [task] }, task); }
     }
   }
   for (const [name, o] of over) by.get(name)!.more = o;
   const surfaces = [...by.values()].filter(s => s.learned.length || s.proposals.length).sort((a, b) => a.name.localeCompare(b.name));
-  return { surfaces, dropped, unread: Math.max(0, entries.length - ENTRIES_MAX) };
+  return { surfaces, dropped, unread: Math.max(0, entries.length - ENTRIES_MAX), moreSurfaces };
 }
 
 /** The line the coordinator prints: what each surface gathered, or that there is nothing. */

@@ -46,7 +46,8 @@ export const LEARNED_GUARD = {
 // A note comes from an agent that read untrusted pages, and the Learned section is outside the permission hash, so a
 // later verify agent reads it unasked. Anything that could pass for an order or hold a secret is dropped (erring on
 // dropping): URLs, backticks and shell text, imperatives aimed at an agent (English and Spanish); keys and tokens,
-// Bearer values, password=/token=/secret=/api_key= with a value, long hex or base64 runs, and home paths.
+// Bearer values, password=/token=/secret=/api_key= with a value, long hex or base64 runs, and home paths (a drive path
+// C:\Users\<name>, or a token starting /home/<name>/ or /Users/<name>/ with a further segment: a web route is not one).
 const INSTRUCTION = [
   /\b[a-z][a-z0-9+.-]*:\/\/\S+/i, /\bwww\./i, /`/, /\b(curl|wget|sudo)\b/i, /\|\s*(sh|bash)\b/i, /\brm\s+-/i, /^\s*[$>]\s/,
   /\b(ignore|disregard)\b/i, /\byou (must|should|have to)\b/i, /^\s*(always|never)\s+\w+/i, /^\s*(run|execute)\s/i, /\bskip the\b/i,
@@ -56,7 +57,7 @@ const SECRET = [
   /\b(sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|xox[bp]-[A-Za-z0-9-]{8,}|AKIA[0-9A-Z]{8,})/,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/i, /\b(password|passwd|token|secret|api[_-]?key)\s*=\s*\S+/i,
   /\b[0-9a-f]{32,}\b/i, /[A-Za-z0-9+/_-]{40,}/,
-  /[A-Za-z]:\\Users\\[^\\\s]+/i, /\/(home|Users)\/[^/\s]+/,
+  /[A-Za-z]:\\Users\\[^\\\s]+/i, /(^|[\s"'(=:])\/(home|Users)\/[^/\s]+\/\S/,
 ];
 /** The task ids a note may not name: a letter run and a number (T7, T7-1), never a word or a bare number. */
 const ID_SHAPE = /^[A-Za-z]+-?\d+(-\d+)?$/;
@@ -83,8 +84,10 @@ export function filterNotes(notes: string[], existing: string[], task: string | 
   const keep: string[] = [];
   const skipped: { note: string; why: NoteSkip }[] = [];
   for (const raw of notes) {
-    const note = raw.replace(/\s*\r?\n\s*/g, ' ').trim();
-    const why: NoteSkip | null = note.length > NOTE_MAX ? 'too-long'
+    // A raw note far past the limit is refused unread: normalising a huge whitespace run is quadratic.
+    const huge = raw.length > NOTE_MAX * 4;
+    const note = (huge ? raw.slice(0, NOTE_MAX * 4) : raw).replace(/\s*\r?\n\s*/g, ' ').trim();
+    const why: NoteSkip | null = huge || note.length > NOTE_MAX ? 'too-long'
       : /\.forge[\\/]+work[\\/]/i.test(note) ? 'names-a-work-path'
         : SECRET.some(re => re.test(note)) ? 'looks-secret'
           : INSTRUCTION.some(re => re.test(note)) ? 'looks-like-instruction'
