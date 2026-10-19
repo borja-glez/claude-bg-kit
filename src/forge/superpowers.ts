@@ -9,6 +9,7 @@ import path from 'node:path';
 import { parseDesign } from '../lib/design.js';
 import { specH1 } from '../lib/design-import.js';
 import { markDone, parseSpPlan, sddComplete } from '../lib/sp-plan.js';
+import { forgeDir } from './ledger.js';
 
 export interface Superpowers { installed: boolean; version: string | null; installPath: string | null }
 export interface SpSpec { path: string; title: string; modified: string }
@@ -202,6 +203,8 @@ export function recordSpDone(root: string, planAbs: string, n: number): boolean 
   let text = read(file);
   if (text !== null && sddComplete(text, rel).includes(n)) return true;
   const line = `Task ${n}: complete (forge)\n`;
+  // .forge/ with its .gitignore, as every writer of it makes it, so git never lists the record.
+  forgeDir(root);
   mkdirSync(dir, { recursive: true });
   if (text === null) {
     try { writeFileSync(file, `${header}\n${line}`, { flag: 'wx' }); return true; } catch (e) {

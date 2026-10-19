@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { checkSpTask, markDone, parseSpPlan, renderSpBrief, sddComplete, SpPlanError } from '../src/lib/sp-plan.js';
@@ -207,6 +207,14 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
     expect(JSON.parse(run(['sp-plan', 'check', A, '--task', '1'], io).stdout).recorded).toBe(true);
     expect(readdirSync(dir).filter(f => /^foo-[0-9a-f]{8}\.md$/.test(f))).toHaveLength(1);
     expect(done(A)).toEqual([true]);
+  });
+  it('the first record creates .forge with its .gitignore, so git never lists the record', () => {
+    const P = 'docs/superpowers/plans/no-boxes.md';
+    writeFileSync(path.join(root, P), '# No Boxes\n\n### Task 1: a\n\nDo a.\n');
+    expect(existsSync(path.join(root, '.forge'))).toBe(false);
+    expect(JSON.parse(run(['sp-plan', 'check', P, '--task', '1'], io).stdout).recorded).toBe(true);
+    expect(readdirSync(path.join(root, '.forge')).sort()).toEqual(['.gitignore', 'sp-done']);
+    expect(readFileSync(path.join(root, '.forge', '.gitignore'), 'utf8')).toMatch(/^\*\n/);
   });
   it('records several tasks of one plan one after the other, appending to the same ledger', () => {
     const P = 'docs/superpowers/plans/no-boxes.md';
