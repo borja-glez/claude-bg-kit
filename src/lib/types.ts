@@ -105,8 +105,6 @@ export interface SessionDoc {
   /** Claude's id (C1) of the conversation that registered this session (`waypoint heartbeat --register`). */
   claude?: string;
   worktree?: string;
-  /** The coordinator SID when a forge swarm launched this session. */
-  launchedBy?: string;
   /** What this session is in a forge execution (plan 1+): its coordinator, a session that runs one task, or one the user opened. */
   role?: 'coordinator' | 'executor' | 'manual';
   runId?: string;

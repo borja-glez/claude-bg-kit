@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildBandModel, NO_VIEWER, openTasksFrom, type BandFiles } from '../src/mod/model.js';
 import { pickProject } from '../src/lib/project-pick.js';
 import { bandLine, clip } from '../src/mod/band-line.js';
@@ -165,7 +167,7 @@ describe('buildBandModel · work', () => {
     expect(buildBandModel('demo-shop', { ...f, sessionId: 'A' })).toMatchObject({ mode: 'work', sid: 'main', run: null, viewer: { role: 'owner', coordinator: false, runId: null } });
   });
   it("a seat that works for a sessions run names it in its work band; without an execution run is null", () => {
-    const session = j({ sessionId: 'S2', track: 'backend', launchedBy: 'main' });
+    const session = j({ sessionId: 'S2', track: 'backend' });
     const pubDoc = j({ task: 'T002', runId: 'r1', stage: 'implement', status: 'running', agent: null, round: 1, since: new Date().toISOString(), updatedAt: new Date().toISOString(), leaseUntil: new Date(Date.now() + 300000).toISOString(), by: 'S2', mode: 'sessions' });
     const own = ownerOf('S2');
     const m = buildBandModel('demo-shop', { ...empty, plan, session, ...own, execution: EXEC(), execTasks: { T002: pubDoc } });
@@ -210,9 +212,16 @@ describe('buildBandModel · work', () => {
     expect(bandLine({ mode: 'run', project: 'p', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, queued: 0, total: 12, slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false, roadmapUrl: null, sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: NO_VIEWER }, 0))
       .toBe('► EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 integradas · ▲ sin señal');
   });
-  it('marks a swarm member in work mode', () => {
-    const m = buildBandModel('demo-shop', { ...files(), session: JSON.stringify({ sessionId: 'backend', track: 'backend', launchedBy: 'main' }) });
-    expect(m).toMatchObject({ mode: 'work', swarm: true });
+  it('marks the work band of a member forge launched for one task by its member file (role executor); an old launchedBy is ignored (1c)', () => {
+    const member = (role: 'executor' | 'manual') => j({ sessionId: 'backend', role, runId: 'r1', task: 'T002', name: null, since: ago(20), hookSession: 'M' });
+    const band = (role: 'executor' | 'manual') => buildBandModel('demo-shop', {
+      ...empty, plan, session: j({ sessionId: 'main', track: null }), ...ownerOf('main', 'A'), execution: EXEC({ mode: 'sessions' }),
+      members: { backend: member(role) }, sessionId: 'M',
+    });
+    expect(band('executor')).toMatchObject({ mode: 'work', sid: 'backend', swarm: true });
+    expect(band('manual')).toMatchObject({ mode: 'work', sid: 'backend', swarm: false });
+    const old = buildBandModel('demo-shop', { ...files(), session: JSON.stringify({ sessionId: 'backend', track: 'backend', launchedBy: 'main' }) });
+    expect(old).toMatchObject({ mode: 'work', swarm: false });
   });
   it('gives the current task phase, else the first phase not done, else null', () => {
     const own = j({ status: 'in_progress', owner: 'backend' });
@@ -593,5 +602,16 @@ describe('buildBandModel · every slot of the run, at most 12, and those waiting
     const stalled = buildBandModel('demo-shop', { ...coordinator(tasks), execution: EXEC({ parallel: 14, tasks, active: false, stopReason: 'stalled' }) });
     expect(stalled).toMatchObject({ mode: 'run', queued: 2, integrated: 1, stalled: true });
     expect(bandLine(stalled, Date.now())).toBe('► EJECUCIÓN · ▲ parada · 1/5 integradas · por integrar 2');
+  });
+});
+
+describe('launchedBy is gone (1c)', () => {
+  it('no file of src/ names it', () => {
+    const src = fileURLToPath(new URL('../src/', import.meta.url));
+    const walk = (d: string): string[] => readdirSync(d).flatMap(n => {
+      const p = path.join(d, n);
+      return statSync(p).isDirectory() ? walk(p) : [p];
+    });
+    expect(walk(src).filter(f => /\.tsx?$/.test(f) && readFileSync(f, 'utf8').includes('launchedBy')).map(f => path.relative(src, f))).toEqual([]);
   });
 });

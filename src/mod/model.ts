@@ -252,14 +252,14 @@ function roleBand(project: string, f: BandFiles, plan: Plan | null, states: Stat
     // B-06: a member sees its own task with the line of the execution, never the coordinator's run band.
     if (!plan) return null;
     const m = v.member;
-    return workModel(project, f, plan, states, { sid: m.sessionId, ...seatInfo(seats, m.sessionId), task: m.task, since: m.since, run: memberLine(project, m, f, exec) }, now, viewer);
+    return workModel(project, f, plan, states, { sid: m.sessionId, track: seatTrack(seats, m.sessionId), swarm: m.role === 'executor', task: m.task, since: m.since, run: memberLine(project, m, f, exec) }, now, viewer);
   }
   if (v.role === 'owner' && v.binding) {
     const b = v.binding;
     // K3-13: a design is drawn only for the conversation bound to it, and only while it is a draft.
     if (b.via === 'design') return f.design !== undefined ? designModel(project, f, viewer) : null;
     if (!plan) return null;
-    return workModel(project, f, plan, states, { sid: b.sid, ...seatInfo(seats, b.sid), task: null, since: null, run: memberRun(project, b.sid, f, exec) }, now, viewer);
+    return workModel(project, f, plan, states, { sid: b.sid, track: seatTrack(seats, b.sid), swarm: false, task: null, since: null, run: memberRun(project, b.sid, f, exec) }, now, viewer);
   }
   // Another conversation's binding or execution: a notice when there is something to say.
   if (v.role === 'other-live' || v.role === 'previous') return noticeModel(project, f, plan, v, exec, now, viewer);
@@ -340,14 +340,14 @@ function recentDone(tasks: { id: string; estimate_min?: number }[], states: Stat
   return out.sort((a, b) => b.at - a.at).slice(0, RECENT_DONE).map(({ at: _at, ...r }) => r);
 }
 
-/** The seat a work band is drawn for: its id, its track and swarm mark, the task a member works and since when, and
+/** The seat a work band is drawn for: its id, its track, whether forge launched it for one task (an executor member), the task a member works and since when, and
  *  the member's line of its execution. */
 interface WorkSeat { sid: string; track: string | null; swarm: boolean; task: string | null; since: string | null; run: { coordinator: string; stage: string } | null }
 
-/** The track and the swarm mark of seat `sid`, from its session.json (the checkout's, or the one of seats/<sid>/). */
-function seatInfo(seats: readonly BandSeat[], sid: string): { track: string | null; swarm: boolean } {
-  const s = json<{ track?: unknown; launchedBy?: unknown }>(seats.find(x => x.sid === sid)?.session) ?? {};
-  return { track: typeof s.track === 'string' ? s.track : null, swarm: typeof s.launchedBy === 'string' && !!s.launchedBy };
+/** The track of seat `sid`, from its session.json (the checkout's, or the one of seats/<sid>/). */
+function seatTrack(seats: readonly BandSeat[], sid: string): string | null {
+  const s = json<{ track?: unknown }>(seats.find(x => x.sid === sid)?.session) ?? {};
+  return typeof s.track === 'string' ? s.track : null;
 }
 
 function workModel(project: string, f: BandFiles, plan: Plan, states: States, seat: WorkSeat, now: number, viewer: BandViewer): BandModel {
