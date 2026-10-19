@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import {
@@ -138,6 +138,18 @@ describe('route-eval', () => {
     expect([existsSync(path.join(repo, '.forge')), existsSync(path.join(repo, 'notes.md'))]).toEqual([false, false]);
     expect(g('status', '--porcelain', '-uall', '--ignored', '--', '.', ':!.claude').trim()).toBe('');
     expect(existsSync(path.join(repo, '.claude', 'settings.local.json'))).toBe(true);
+  });
+  it('a reset never reaches a repository above the work folder, even when a session deleted the shop\'s .git (residual 5)', () => {
+    const outer = tmp('route-eval-outer-');
+    const g = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    g(outer, 'init', '-q');
+    writeFileSync(path.join(outer, 'junk.txt'), 'the person\'s\n');
+    const repo = path.join(outer, 'work', 'shop');
+    const { reset } = demoRepo(repo);
+    rmSync(path.join(repo, '.git'), { recursive: true, force: true });
+    writeFileSync(path.join(repo, 'left.txt'), 'x\n');
+    expect(() => reset()).toThrow(/not a git repository/);
+    expect([existsSync(path.join(outer, 'junk.txt')), existsSync(path.join(repo, 'left.txt'))]).toEqual([true, true]);
   });
   it('has 16 prompts: Medium and Large expect forge:route; Small either; Trivial, questions and agent messages do not (K1-02, I1)', () => {
     const prompts = JSON.parse(readFileSync(new URL('../scripts/route-eval/prompts.json', import.meta.url), 'utf8')) as EvalPrompt[];

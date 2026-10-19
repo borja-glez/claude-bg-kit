@@ -42,13 +42,17 @@ export const DEMO_SHOP = {
 
 /** M2: the demo shop as a git repository at `repo`, and `reset`, which brings it back to its first commit before each
  *  session: nothing a session changed, committed or left behind (`.forge/` included) reaches the next prompt or
- *  configuration; only `.claude/`, which holds the configuration's settings, stays. */
+ *  configuration; only `.claude/`, which holds the configuration's settings, stays. Git never looks above the work
+ *  folder (`repo`'s parent, GIT_CEILING_DIRECTORIES): a session that deleted the shop's .git makes `reset` throw, never
+ *  reset or clean a repository above it. */
 export function demoRepo(repo) {
   for (const [rel, text] of Object.entries(DEMO_SHOP)) {
     mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
     writeFileSync(path.join(repo, rel), text);
   }
-  const git = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const env = { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(path.resolve(repo)) };
+  // stderr is kept, so a failure says why (it lands in the error's message).
+  const git = (...a) => execFileSync('git', a, { cwd: repo, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   git('init', '-q');
   git('add', '.');
   git('-c', 'user.name=route-eval', '-c', 'user.email=route-eval@example.com', 'commit', '-qm', 'init');
