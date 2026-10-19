@@ -376,6 +376,33 @@ describe('forge surfaces CLI', () => {
     expect(out.dropped).toBe(2);
     expect(JSON.stringify(out)).not.toContain('curl');
   });
+  it("surfaces digest compares with the surface as the run started: notes merged into the working file during the run are still listed (I4)", () => {
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    git('init', '-q', '-b', 'main'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 't'); git('config', 'core.autocrlf', 'false');
+    const web = path.join(root, '.forge', 'verify', 'web.md');
+    mkdirSync(path.dirname(web), { recursive: true });
+    writeFileSync(web, '# Web\n\n## Learned\n- 2026-10-01: Takes 5 s\n');
+    git('add', '-f', '-A'); git('commit', '-qm', 'base');
+    git('checkout', '-q', '-b', 'task/T1');
+    writeFileSync(web, '# Web\n\n## Learned\n- 2026-10-01: Takes 5 s\n- 2026-10-17: Fresh note\n');
+    git('commit', '-qam', 'T1: work');
+    git('checkout', '-q', 'main');
+    git('merge', '--no-ff', '-q', '-m', 'forge: integrate T1', 'task/T1');
+    const at = '2020-01-01T00:00:00.000Z';
+    const task: ExecTask = { status: 'integrated', stage: 'integrate', round: 1, worktree: '', branch: 'task/x', executor: 'subagents', attempts: 0, agent: null,
+      startedAt: at, stageSince: at, updatedAt: at, detail: null };
+    seedExecution(root, {
+      runId: 'shop-1', kind: 'plan', mode: 'subagents', parallel: 2, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+      coordinator: 'main', hookSession: null, active: false, stopReason: 'finished', stallReason: null, startedAt: at, lastStepAt: null, lastBlockStep: null,
+      sleepUntil: null, closedAt: null, closedBy: null, tasks: { T1: { ...task } },
+    });
+    const dir = path.join(root, '.forge/work/shop/T1/reviews-1-1');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'pass', checks: [],
+      learned: [{ surface: 'web', note: 'takes 5 s' }, { surface: 'web', note: 'Fresh note' }], proposals: [] }));
+    const out = JSON.parse(run(['surfaces', 'digest', '--run', 'shop-1', '--locale', 'en'], { ...io, env: {} }).stdout);
+    expect(out.surfaces).toEqual([{ name: 'web', learned: [{ note: 'Fresh note', tasks: ['T1'] }], proposals: [] }]);
+  });
   it('learn with a hostile note reports why, leaves the surface as it was and records nothing', () => {
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\n');

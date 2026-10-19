@@ -8,11 +8,11 @@ import { readSurfaces, detectDrafts, draftHeader, surfaceFile, learnedNotes, LEA
 import { readExecution } from '../../execution.js';
 import { readEvents } from '../../ledger.js';
 import { readWorkDir } from '../../task-ref.js';
-import { flowDirs } from '../../flow.js';
+import { flowDirs, runStart } from '../../flow.js';
 import { digest, digestSay, verifyFilesOf, ENTRIES_MAX } from '../../verify-digest.js';
 import { isSafeId } from '../../../lib/execution-state.js';
 import { planLocale } from '../../../lib/locale.js';
-import { repoReader } from '../exec.js';
+import { defaultGit, repoReader } from '../exec.js';
 import { learnSurface } from '../shared.js';
 
 export const command: Command = (args, ctx) => {
@@ -50,8 +50,17 @@ export const command: Command = (args, ctx) => {
     // Only the first ENTRIES_MAX files are read; the others are counted.
     const files = dirs.flatMap(({ task, dir }) => verifyFilesOf(dir, since).map(file => ({ task, file })));
     const entries = files.slice(0, ENTRIES_MAX).map(({ task, file }) => ({ task, text: readFileSync(file, 'utf8') }));
+    // What a surface already held is read as the run started it (the run's notes are in the working file by now: the
+    // tasks' merges brought them). Without a start (nothing integrated, no git) it is the working file; with a start
+    // but no file in it, the surface was born during the run and held nothing.
+    const git = io.git ?? defaultGit(main);
+    const start = runStart(e, git);
     const held = (surface: string): string[] => {
-      try { return NAME.test(surface) ? learnedNotes(readFileSync(path.join(main, surfaceFile(surface)), 'utf8')) : []; } catch { return []; }
+      if (!NAME.test(surface)) return [];
+      try {
+        if (start) return learnedNotes(git(['show', `${start}:${surfaceFile(surface)}`]) ?? '');
+        return learnedNotes(readFileSync(path.join(main, surfaceFile(surface)), 'utf8'));
+      } catch { return []; }
     };
     const { surfaces, dropped, moreSurfaces } = digest(entries, held);
     return json({ runId, surfaces, dropped, unread: files.length - entries.length, moreSurfaces, say: digestSay(surfaces, runId, es) });
