@@ -32,7 +32,7 @@ elsewhere and are reconstructed from their READMEs.
 - `/waypoint:work` may edit files without asking, and every waypoint skill allows the tools it names (A-22).
 - `/waypoint:launch` may commit the plan it asks for (A-22).
 - `--swarm` is still obsolete and its warning now says forge composes the launch (A-19).
-- The band's bundle carries no zod and is minified: `hooks/register.js` drops from about 433 KB to about 213 KB (I-13). The band marks a member forge launched for one task by its member file; `launchedBy` is no longer read. The band clips a task id like a title.
+- The band's bundle carries no zod and is minified: `hooks/register.js` drops from about 433 KB to about 213 KB (I-13). The band shows a plan or a draft design that `waypoint validate` rejects (the CLI is the one that validates), without the tracks, phases and tasks whose id breaks the plan's id rule; titles, phase names, the project and an address that is not a web link reach it as one clean line. The band marks a member forge launched for one task by its member file; `launchedBy` is no longer read.
 
 #### Removed
 - `waypoint launch --task` exits 2: forge composes the launch of its run members (A-19).
@@ -840,7 +840,7 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.13.6 — 2026-10-19
 
 #### Changed
-- Its bundle carries no zod and is minified (I-13). The band it shares with waypoint marks a member forge launched for one task by its member file, and reads the title of a plan without a ledger in linear time (carry from 4d). Nothing else lens shows changes.
+- Its bundle carries no zod and is minified (I-13). Its roadmap card shows a plan or a draft design that `waypoint validate` rejects (the CLI is the one that validates), without the tracks, phases and tasks whose id breaks the plan's id rule, and with titles and phase names as one clean line. Its superpowers card reads a plan's title in linear time (carry from 4d).
 
 ### 0.13.5 — 2026-10-18
 
