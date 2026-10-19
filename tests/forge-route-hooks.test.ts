@@ -332,6 +332,35 @@ describe('the hint of route-prompt (K1-03)', () => {
       expect(looksLikeCoding(p), p).toBe(true);
     }
   });
+  it('keeps the hint of a polite request after a lead or in plural, of an order with a tag question and of a JSX prompt', () => {
+    for (const p of ['Hola, ¿puedes añadir un cupón de descuento al carrito de la tienda?', '¿Me puedes añadir un cupón de descuento al carrito?',
+      '¿Podéis añadir un cupón de descuento al carrito?', 'Please can you add coupon support to the cart with validation?',
+      'Could we add coupon support to the cart?', 'Can we add coupon support to the cart?',
+      'Añade un cupón de descuento al carrito de la tienda, ¿vale?', 'Arregla el bug del carrito con cupones. ¿Por qué falla?',
+      '¿PUEDES AÑADIR UN CUPÓN DE DESCUENTO AL CARRITO DE LA TIENDA?',
+      '<Button> add a loading state to the Button component with props']) expect(looksLikeCoding(p), p).toBe(true);
+    for (const p of ['¿Qué hace esta función de añadir cupones al carrito?', 'Why does the cart fail when we add a coupon?',
+      '¿Cómo funciona el carrito cuando se añade un cupón?', 'What is the coupon API we add to the cart?',
+      'El carrito va lento al añadir cupones, ¿no?', '<system-reminder>fix the rounding of the cart total in src/cart.js</system-reminder>',
+      '<task-notification>fix the rounding of the cart total in src/cart.js</task-notification>']) expect(looksLikeCoding(p), p).toBe(false);
+  });
+  it('runs in linear time on a long prompt', () => {
+    const t0 = performance.now();
+    for (const p of ['hola, '.repeat(40000), '¿'.repeat(200000), 'a '.repeat(100000) + '?']) looksLikeCoding(p);
+    expect(performance.now() - t0).toBeLessThan(200);
+  });
+  it('route.hint: false and true through the hook', () => {
+    const root = tmp('forge-hint2-');
+    const said = () => {
+      const r = run(['hook', 'route-prompt'], { cwd: root, now: () => NOW, env: {}, stdin: JSON.stringify({ session_id: 'S1', prompt: '¿Puedes añadir soporte de cupones al carrito con validación?' }) });
+      return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext as string : '';
+    };
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'route:\n  hint: false\n');
+    expect(said()).toBe('');
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'route:\n  hint: true\n');
+    expect(said()).toBe(ROUTE_HINT);
+  });
   it('route.hint: off and FORGE_ROUTE_HINT=off turn the hint off, never the reminder of a route half done', () => {
     const root = tmp('forge-hint-');
     const io = (env: Record<string, string> = {}): Io => ({

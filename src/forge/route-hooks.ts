@@ -45,16 +45,22 @@ const METHOD = /(?<![\p{L}\p{N}_])(?:forge|superpowers)(?![\p{L}\p{N}_])/iu;
 // K1-03: what is not a request to change code. A message from an agent or the harness (it opens with a tag), a question
 // (¿…, …?) that is not a polite request, and a prompt that opens with an interrogative. «Como» without its accent opens a
 // request («Como usuario, quiero…»), so the Spanish interrogatives need theirs.
-const TAGGED = /^<[a-z]/i;
-const POLITE = /^¿?\s*(?:puedes|podrías|podrias|puede|podría|podria|can you|could you|would you|will you)(?![\p{L}\p{N}_])/iu;
+// Only the tags of the harness and of agents; a prompt that opens with JSX or HTML («<Button> add a state…») is a request.
+const TAGGED = /^<(?:teammate-message|task-notification|system-reminder|command-|local-command-|user-prompt-submit-hook)/i;
+// A polite request, after a short lead («hola,», «please»). Every pattern is anchored and has no nested quantifier.
+const POLITE = /^(?:(?:hola|oye|hi|hello|please|por favor)[,\s]+){0,3}¿?\s*(?:me\s+)?(?:puedes|podrías|podrias|puede|podría|podria|podéis|podeis|podemos|can you|could you|would you|will you|can we|could we)(?![\p{L}\p{N}_])/iu;
 const INTERROGATIVE = /^¿?\s*(?:qué|cómo|por qué|what|how|why)(?![\p{L}\p{N}_])/iu;
+// A first clause that opens with a coding verb is an order, whatever follows it («…, ¿vale?», «…. ¿Por qué falla?»).
+const IMPERATIVE = new RegExp(`^(?:${VERBS.join('|')})(?![\\p{L}\\p{N}_])`, 'iu');
 
 /** A prompt worth the routing hint: not a slash command nor a tagged message, not a question (a polite request still
  *  counts) nor an interrogative, six words or more, a coding verb, and no method named. */
 export function looksLikeCoding(prompt: string): boolean {
   const p = prompt.trim();
   if (!p || p.startsWith('/') || TAGGED.test(p)) return false;
-  if (!POLITE.test(p) && (INTERROGATIVE.test(p) || p.startsWith('¿') || p.endsWith('?'))) return false;
+  if (INTERROGATIVE.test(p)) return false;
+  const asks = p.startsWith('¿') || p.endsWith('?') || p.includes('¿');
+  if (asks && !POLITE.test(p) && !IMPERATIVE.test(p.split(/[¿.!?]/, 1)[0].trim())) return false;
   return p.split(/\s+/).length >= 6 && VERB.test(p) && !METHOD.test(p);
 }
 
@@ -160,8 +166,8 @@ export function hookRoute(io: Io, which: 'session' | 'prompt'): string {
     // A session that routed its request recently gets no hint on its follow-up prompts until the route is done.
     if (!reminder && own && own.stage !== 'done' && fresh(own, now)) return '';
     // K1-03: the hint can be turned off; a route half done is reminded anyway.
-    const hint = typeof o.prompt === 'string' && hintOn(io.env ?? process.env, loadConfig(io.cwd)) && looksLikeCoding(o.prompt) ? ROUTE_HINT : null;
-    const text = reminder ?? hint;
+    // The config is read only for a prompt that looks like coding and has no reminder.
+    const text = reminder ?? (typeof o.prompt === 'string' && looksLikeCoding(o.prompt) && hintOn(io.env ?? process.env, loadConfig(io.cwd)) ? ROUTE_HINT : null);
     return text ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } }) : '';
   } catch { return ''; }
 }
