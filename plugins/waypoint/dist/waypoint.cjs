@@ -12038,17 +12038,20 @@ function escalationCandidates(messages) {
   return out;
 }
 
+// src/lib/one-line.ts
+var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
+var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+var oneLine = (text) => String(text).replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim();
+
 // src/lib/batches.ts
 var REASON_MAX = 300;
 var SUMMARY_MAX = 300;
 var DEL2 = { __delete__: true };
 var MIN = 6e4;
 var iso = (ms) => new Date(ms).toISOString();
-var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
-var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 var clipPoints2 = (text, max) => text.length <= max ? text : Array.from(text).slice(0, max).join("");
 function cleanText(text, max) {
-  return clipPoints2(text.replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim(), max);
+  return clipPoints2(oneLine(text), max);
 }
 var event = (doc_id, data) => ({ op: "set", collection: "events", doc_id, data });
 function claimBatch(i) {
@@ -14588,7 +14591,7 @@ function buildDesignPageData(input) {
       diff: i === 0 ? null : { ...versionDiff(texts[numbers[i - 1]], texts[n]), ...numbers[i - 1] !== n - 1 ? { against: numbers[i - 1] } : {} }
     };
   });
-  const earlier = input.changelog.filter((c) => c.version < (numbers[from] ?? Infinity)).map(({ version, date: date2, note }) => ({ version, date: date2, note }));
+  const earlier = input.changelog.filter((c) => c.version < (numbers[from] ?? Infinity)).sort((a, b) => a.version - b.version).map(({ version, date: date2, note }) => ({ version, date: date2, note }));
   const dismissed = input.dismissed ?? {};
   const known = /* @__PURE__ */ new Set([...input.changelog.map((e) => e.version), currentNo]);
   const valid = [...input.critiques ?? []].sort((a, b) => a.round - b.round).flatMap(({ round, critique }) => critique ? [{ round, critique }] : []);
@@ -14742,7 +14745,7 @@ function normalizeExecution(x2, now) {
   const runId = str3(x2.runId), project = str3(x2.project), base = str3(x2.base), branch = str3(x2.branch), coordinator = str3(x2.coordinator);
   const startedAt = iso3(x2.startedAt);
   if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
-  if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch)) return null;
+  if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch) || !isSafeId(project)) return null;
   const tasks = {};
   if (isObj3(x2.tasks)) {
     for (const [id, t] of Object.entries(x2.tasks).slice(0, MAX_TASKS)) {
@@ -15955,15 +15958,20 @@ function rulesOf(capabilities) {
   return owner ? PAGE_RULES : 1;
 }
 var declaresAssets = (capabilities) => !!capabilities && typeof capabilities === "object" && !Array.isArray(capabilities) && Object.hasOwn(capabilities, "assets");
-function sharingChanged(plan, assets, published) {
-  if (!plan.artifacts.roadmap) return false;
-  return published === void 0 ? assets : published !== assets;
+function sharingChange(plan, assets, published, chosen) {
+  if (!plan.artifacts.roadmap) return { capabilitiesChanged: false, ask: null };
+  if (published === void 0 ? assets : published !== assets) return { capabilitiesChanged: true, ask: sharingChangeAsk(plan, assets) };
+  if (published === void 0 && !chosen) return { capabilitiesChanged: true, ask: unknownSharingAsk(plan) };
+  return { capabilitiesChanged: false, ask: null };
+}
+function unknownSharingAsk(plan) {
+  return isEs(plan.locale) ? "El roadmap publicado no registra si guarda las capturas de verificaci\xF3n de forge. Si sigues, se republica sin ellas: podr\xE1 compartirse p\xFAblicamente y las capturas ya subidas dejar\xE1n de verse. Para conservarlas, deja el roadmap como est\xE1 y ejecuta /waypoint:plan assets." : "The published roadmap does not record whether it keeps forge's verification screenshots. Going ahead republishes it without them: it can be shared publicly, and any screenshots already uploaded stop showing. To keep them, keep the roadmap as it is and run /waypoint:plan assets.";
 }
 function sharingChangeAsk(plan, assets) {
   if (assets) {
     return isEs(plan.locale) ? "Al republicar, el roadmap pasa a guardar las capturas de verificaci\xF3n de forge: quedar\xE1 interno de tu organizaci\xF3n y su enlace p\xFAblico dejar\xE1 de funcionar." : "Republishing makes the roadmap keep forge's verification screenshots: it becomes internal to your organization and its public link stops working.";
   }
-  return isEs(plan.locale) ? "Al republicar, el roadmap deja de guardar las capturas de verificaci\xF3n de forge (evidence: local en .forge/config.yaml): podr\xE1 volver a compartirse p\xFAblicamente y las capturas ya subidas dejar\xE1n de verse." : "Republishing stops the roadmap keeping forge's verification screenshots (evidence: local in .forge/config.yaml): it can be shared publicly again, and the screenshots already uploaded stop showing.";
+  return isEs(plan.locale) ? "Al republicar, el roadmap vuelve a poder compartirse: deja de guardar las capturas de verificaci\xF3n de forge, as\xED que podr\xE1 compartirse p\xFAblicamente; las capturas ya subidas dejar\xE1n de verse y las nuevas de forge se quedan en tu equipo." : "Republishing makes the roadmap shareable again: it stops keeping forge's verification screenshots, so it can be shared publicly; the screenshots already uploaded stop showing, and forge's new ones stay on your machine.";
 }
 var isEs = (locale) => (locale ?? "").toLowerCase().split(/[-_]/)[0] === "es";
 function sharingNotice(plan, internal) {
@@ -15996,16 +16004,16 @@ function run(argv, io) {
     return v === void 0 || v.startsWith("--") ? void 0 : v;
   };
   const abs = (p) => import_node_path9.default.resolve(io.cwd, p);
-  const warnings = [];
-  const ok = (stdout, stderr = warnings.join("")) => ({ code: 0, stdout: stdout.endsWith("\n") ? stdout : `${stdout}
+  const listingWarnings = [];
+  const ok = (stdout, stderr = listingWarnings.join("")) => ({ code: 0, stdout: stdout.endsWith("\n") ? stdout : `${stdout}
 `, stderr });
-  const fail = (stderr, code = 1) => ({ code, stdout: "", stderr: `${warnings.join("")}${stderr}
+  const fail = (stderr, code = 1) => ({ code, stdout: "", stderr: `${listingWarnings.join("")}${stderr}
 ` });
   const loadPlan = () => parsePlan((0, import_node_fs8.readFileSync)(abs(args[0]), "utf8"));
   const docsIn = (dir, normalize) => {
     if (!dir) return {};
     const r2 = readDocs(abs(dir), normalize);
-    for (const f of r2.skipped) warnings.push(`warning: skipped ${dir.replace(/[\\/]+$/, "")}/${f} (unreadable)
+    for (const f of r2.skipped) listingWarnings.push(`warning: skipped ${dir.replace(/[\\/]+$/, "")}/${f} (unreadable)
 `);
     return r2.docs;
   };
@@ -16030,7 +16038,7 @@ function run(argv, io) {
     return { view: planViewFromDocs(meta, phases), project: p.project, version: meta.version || p.version };
   };
   const out = (code, value) => ({ code, stdout: `${JSON.stringify(value)}
-`, stderr: warnings.join("") });
+`, stderr: listingWarnings.join("") });
   const posInt = (name) => {
     const v = flag(name);
     return v !== void 0 && /^[1-9]\d{0,9}$/.test(v) ? Number(v) : null;
@@ -16118,6 +16126,8 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
       case "hash":
         return ok(planHash(loadPlan()));
       case "page": {
+        const noAssets = args.includes("--no-assets");
+        if (noAssets && args.includes("--assets")) return fail("page: --assets and --no-assets cannot be combined", 2);
         const p = loadPlan();
         let published;
         if (args.includes("--publish-info")) {
@@ -16150,14 +16160,10 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
           }
         }
         const before = listed && typeof listed === "object" && typeof listed.assets === "boolean" ? listed.assets : void 0;
-        const internal = args.includes("--assets") || before === true;
+        const internal = !noAssets && (args.includes("--assets") || before === true);
         const rules = rulesOf(published);
         const assets = declaresAssets(published);
-        let changed = {};
-        if (pageArg) {
-          const capabilitiesChanged = sharingChanged(p, assets, before);
-          changed = { capabilitiesChanged, ask: capabilitiesChanged ? sharingChangeAsk(p, assets) : null };
-        }
+        const changed = pageArg ? sharingChange(p, assets, before, noAssets || args.includes("--assets")) : {};
         return ok(JSON.stringify({
           out: out2,
           capabilities: roadmapCapabilities(internal),
@@ -16276,14 +16282,8 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
         const locale = localeFlag ?? (plan?.locale?.toLowerCase().startsWith("es") ? "es" : "en");
         if (!(0, import_node_fs8.existsSync)(abs(dir))) return ok(JSON.stringify({ notes: [], latest: null, say: [], mentions: [] }));
         if (!(0, import_node_fs8.statSync)(abs(dir)).isDirectory()) return fail("notes cache missing \u2014 list notes first");
-        const all = [];
-        for (const f of (0, import_node_fs8.readdirSync)(abs(dir)).filter((x2) => x2.endsWith(".json")).sort()) {
-          try {
-            const n = normalizeNote(JSON.parse((0, import_node_fs8.readFileSync)(import_node_path9.default.join(abs(dir), f), "utf8")));
-            if (n) all.push({ ...n, id: f.slice(0, -5) });
-          } catch {
-          }
-        }
+        const byFile = (a, b) => `${a}.json` < `${b}.json` ? -1 : `${a}.json` > `${b}.json` ? 1 : 0;
+        const all = Object.entries(docsIn(dir, normalizeNote)).sort(([a], [b]) => byFile(a, b)).map(([id, n]) => ({ ...n, id }));
         const stamps = all.flatMap((n) => [Date.parse(n.ts), Date.parse(n.answeredAt ?? "")]).filter((t) => !Number.isNaN(t));
         const latest = stamps.length ? new Date(Math.max(...stamps)).toISOString() : null;
         const since = flag("since") ?? null;
@@ -16330,19 +16330,29 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
         const branch = `track/${track}`;
         const name = `wp-${p.project}-${track}`;
         const prompt = `/waypoint:work ${track}` + (args.includes("--merge") ? ` \u2014 the user authorizes merging ${branch} into main at phase close` : "");
-        const command = `claude --bg --name ${name} "${prompt}"`;
+        const command = launchCommand({ name, prompt });
         const inWorktree = launchRun({ name, prompt, worktree });
+        const log = import_node_path9.default.join(root, ".waypoint", p.project, "launch", `${name}.log`);
+        if (args.includes("--exec")) {
+          let launchDir;
+          try {
+            launchDir = (0, import_node_fs8.lstatSync)(import_node_path9.default.dirname(log));
+          } catch {
+            launchDir = void 0;
+          }
+          if (launchDir && !launchDir.isDirectory()) return fail(`launch --exec: ${import_node_path9.default.dirname(log)} is not a folder (a link?): remove it and launch again`, 1);
+        }
         if (!(0, import_node_fs8.existsSync)(worktree)) {
           excludeHere();
           const exists = git("branch", "--list", branch) !== "";
           git("worktree", "add", worktree, ...exists ? [branch] : ["-b", branch, ...base ? [base] : []]);
         }
         if (args.includes("--exec")) {
-          const log = import_node_path9.default.join(root, ".waypoint", p.project, "launch", `${name}.log`);
           let fd;
           try {
             (0, import_node_fs8.mkdirSync)(import_node_path9.default.dirname(log), { recursive: true });
-            fd = (0, import_node_fs8.openSync)(log, "w");
+            (0, import_node_fs8.rmSync)(log, { force: true });
+            fd = (0, import_node_fs8.openSync)(log, "wx");
             (io.spawn ?? nodeSpawn)(command, { cwd: worktree, detached: true, shell: true, windowsHide: true, stdio: ["ignore", fd, fd] }).unref();
           } catch (e) {
             return fail(`launch --exec: ${e.message}`, 1);
@@ -16902,15 +16912,15 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
             for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${line2(p.section)}" is not a section slug of the design`);
           }
           if (issues.length) throw new CritiqueError(issues);
-          const warnings2 = [];
+          const warnings = [];
           if (changedFlag !== void 0 && c.scope === "changed") {
             for (const p of c.proposals) {
-              if (!allowed.includes(p.section)) warnings2.push(`warning: proposal ${p.n} reviews "${line2(p.section)}", outside the changed sections (${line2(allowed.join(", "))})`);
+              if (!allowed.includes(p.section)) warnings.push(`warning: proposal ${p.n} reviews "${line2(p.section)}", outside the changed sections (${line2(allowed.join(", "))})`);
             }
           }
           const text = formatProposals(c, flag("locale") ?? "en", headings);
           return { code: 0, stdout: text.endsWith("\n") ? text : `${text}
-`, stderr: warnings2.length ? `${warnings2.join("\n")}
+`, stderr: warnings.length ? `${warnings.join("\n")}
 ` : "" };
         } catch (e) {
           if (!(e instanceof CritiqueError) || !args.includes("--reject-on-fail") || !(0, import_node_fs8.existsSync)(target)) throw e;

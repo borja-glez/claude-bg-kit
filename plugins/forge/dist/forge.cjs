@@ -11649,7 +11649,7 @@ function normalizeExecution(x, now) {
   const runId = str(x.runId), project = str(x.project), base = str(x.base), branch = str(x.branch), coordinator = str(x.coordinator);
   const startedAt = iso(x.startedAt);
   if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
-  if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch)) return null;
+  if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch) || !isSafeId(project)) return null;
   const tasks = {};
   if (isObj(x.tasks)) {
     for (const [id, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
@@ -15835,6 +15835,7 @@ function planAffected(list, files, platform, exists) {
   return { run: run2, skipped, notes };
 }
 var CRASH = "segmentation fault|core dumped|javascript heap out of memory|fatal error:";
+var CRASH_RE = new RegExp(CRASH, "i");
 var FAILURE = new RegExp(`(fail|error|\u2717|\xD7|assert|panic|exception|${CRASH})`, "i");
 function failureLines(output) {
   const lines = output.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim());
@@ -15890,7 +15891,8 @@ function failingTests(output, kind) {
       }
     }
   }
-  const known = kind !== "build" && found.size > 0 && !capped && !unread && !(TEST_KINDS.has(kind) && RUNNER_ERROR.test(lines.join("\n")));
+  const text3 = lines.join("\n");
+  const known = kind !== "build" && found.size > 0 && !capped && !unread && !CRASH_RE.test(text3) && !(TEST_KINDS.has(kind) && RUNNER_ERROR.test(text3));
   return { names: [...found], known };
 }
 function failingLabel(r2, locale = "en") {
@@ -16171,15 +16173,16 @@ var samePath2 = (a, b) => {
   return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
 };
 var versionKey = (v) => v.split(/[.+-]/).map((n) => /^\d+$/.test(n) ? Number(n) : 0);
-function newer(a, b) {
+function compareVersions(a, b) {
   const x = versionKey(a);
   const y = versionKey(b);
   for (let i = 0; i < Math.max(x.length, y.length); i++) {
     const d = (x[i] ?? 0) - (y[i] ?? 0);
-    if (d) return d > 0;
+    if (d) return d;
   }
-  return false;
+  return 0;
 }
+var newer = (a, b) => compareVersions(a, b) > 0;
 function enabledMaps(configDir, projectDir) {
   return [import_node_path19.default.join(projectDir, ".claude", "settings.local.json"), import_node_path19.default.join(projectDir, ".claude", "settings.json"), import_node_path19.default.join(configDir, "settings.json")].map(readJson).flatMap((s2) => isObj4(s2) && isObj4(s2.enabledPlugins) ? [s2.enabledPlugins] : []);
 }
@@ -16229,6 +16232,8 @@ function spSkillPath(sp, skill) {
   const f = import_node_path19.default.join(sp.installPath, "skills", skill, "SKILL.md");
   return (0, import_node_fs19.existsSync)(f) ? f : null;
 }
+var recordHeader = (rel3) => `# SDD ledger \u2014 plan: ${rel3}`;
+var isRecordOf = (text3, rel3) => text3.split(/\r?\n/)[0].trim() === recordHeader(rel3);
 function spLedgerDone(roots, planAbs) {
   const done = /* @__PURE__ */ new Set();
   const slug = import_node_path19.default.basename(planAbs).replace(/\.md$/i, "");
@@ -16262,7 +16267,8 @@ function spLedgerDone(roots, planAbs) {
     const forgeRel = names2.length ? planRepoRel(planAbs, root) ?? (inRoot ? rel3 : null) : null;
     for (const name of forgeRel ? names2 : []) {
       try {
-        for (const n of sddComplete((0, import_node_fs19.readFileSync)(import_node_path19.default.join(forge, name), "utf8"), forgeRel)) done.add(n);
+        const text3 = (0, import_node_fs19.readFileSync)(import_node_path19.default.join(forge, name), "utf8");
+        if (isRecordOf(text3, forgeRel)) for (const n of sddComplete(text3, forgeRel)) done.add(n);
       } catch {
       }
     }
@@ -16291,7 +16297,7 @@ function recordSpDone(root, planAbs, n) {
   const rel3 = planRepoRel(planAbs, root) ?? import_node_path19.default.relative(root, planAbs).split(import_node_path19.default.sep).join("/");
   if (!rel3 || rel3.startsWith("..") || import_node_path19.default.isAbsolute(rel3)) return false;
   const slug = import_node_path19.default.basename(planAbs).replace(/\.md$/i, "");
-  const header = `# SDD ledger \u2014 plan: ${rel3}`;
+  const header = recordHeader(rel3);
   const dir = import_node_path19.default.join(root, ".forge", "sp-done");
   const read = (f) => {
     try {
@@ -16302,24 +16308,21 @@ function recordSpDone(root, planAbs, n) {
   };
   const file = [import_node_path19.default.join(dir, `${slug}.md`), import_node_path19.default.join(dir, `${slug}-${(0, import_node_crypto3.createHash)("sha1").update(rel3).digest("hex").slice(0, 8)}.md`)].find((f) => {
     const t = read(f);
-    return t === null || t.split(/\r?\n/)[0].trim() === header;
+    return t === null || isRecordOf(t, rel3);
   });
   if (!file) return false;
   let text3 = read(file);
   if (text3 !== null && sddComplete(text3, rel3).includes(n)) return true;
   const line3 = `Task ${n}: complete (forge)
 `;
+  forgeDir(root);
   (0, import_node_fs19.mkdirSync)(dir, { recursive: true });
   if (text3 === null) {
-    try {
-      (0, import_node_fs19.writeFileSync)(file, `${header}
-${line3}`, { flag: "wx" });
-      return true;
-    } catch (e) {
-      text3 = e.code === "EEXIST" ? read(file) : null;
-      if (text3 === null || text3.split(/\r?\n/)[0].trim() !== header) throw e;
-      if (sddComplete(text3, rel3).includes(n)) return true;
-    }
+    if (createIfAbsent(file, `${header}
+${line3}`)) return true;
+    text3 = read(file);
+    if (text3 === null || !isRecordOf(text3, rel3)) throw new Error(`${import_node_path19.default.basename(file)} is in the way: it is not a record of this plan that can be read`);
+    if (sddComplete(text3, rel3).includes(n)) return true;
   }
   (0, import_node_fs19.appendFileSync)(file, `${text3.endsWith("\n") ? "" : "\n"}${line3}`);
   return true;
@@ -17275,13 +17278,16 @@ function claudeBindings(root, claude, now, alive = pidAlive) {
   return names2.flatMap((n) => readBindings(import_node_path23.default.join(root, ".waypoint", n), now)).filter((b) => b.claude === claude).map((b) => settleBinding(b, now, alive));
 }
 
-// src/lib/batches.ts
-var REASON_MAX = 300;
+// src/lib/one-line.ts
 var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
 var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+var oneLine3 = (text3) => String(text3).replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim();
+
+// src/lib/batches.ts
+var REASON_MAX = 300;
 var clipPoints = (text3, max) => text3.length <= max ? text3 : Array.from(text3).slice(0, max).join("");
 function cleanText2(text3, max) {
-  return clipPoints(text3.replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim(), max);
+  return clipPoints(oneLine3(text3), max);
 }
 
 // src/forge/infinite-doc.ts
@@ -19694,9 +19700,9 @@ function historyLine(index) {
     return `${r2.round}: ${groups.length ? groups.map(([s2, ids]) => `${ids.join(" ")} ${s2}`).join(", ") : "nothing open"}`;
   }).join(" \xB7 ");
 }
-var oneLine3 = (s2) => s2.replace(/\s+/g, " ").trim();
-var where = (f) => f.file ? f.line !== void 0 ? ` ${oneLine3(f.file)}:${f.line}` : ` ${oneLine3(f.file)}` : "";
-var quoted = (s2) => JSON.stringify(oneLine3(s2));
+var oneLine4 = (s2) => s2.replace(/\s+/g, " ").trim();
+var where = (f) => f.file ? f.line !== void 0 ? ` ${oneLine4(f.file)}:${f.line}` : ` ${oneLine4(f.file)}` : "";
+var quoted = (s2) => JSON.stringify(oneLine4(s2));
 function renderHandover(h) {
   const lines = [
     `# Handover: ${h.task}, review ${h.reviews.n} of ${h.reviews.max}${h.redo ? " (the attempt was reverted: start again from the brief with another approach)" : ""}`,
@@ -21004,7 +21010,11 @@ function checkPlanPath(sub, planPath) {
     throw new UsageError(`swarm ${sub}: the plan path may only use letters, digits, spaces and _ . / \\ : ~ @ + -`);
   }
 }
-function memberLaunch(root, planPath, task, e) {
+function checkLaunchProject(sub, project) {
+  if (!isSafeId(project)) throw new UsageError(`swarm ${sub}: the execution's project may only use letters, digits and _ - . (it names the member's session)`);
+}
+function memberLaunch(sub, root, planPath, task, e) {
+  checkLaunchProject(sub, e.project);
   const { swarm } = loadConfig(root);
   const worktree = taskWorktree(root, task);
   const name = `wp-${e.project}-${task}`;
@@ -21027,14 +21037,20 @@ function boundLiveness(root, e, now) {
 function boundElsewhere(sub, runId, hookSession, liveness2) {
   return `swarm ${sub}: the execution ${runId} is bound to another Claude session (${hookSession}, ${liveness2}): if that conversation is still open, go on from it; if it was closed or crashed, \`claude --resume ${hookSession}\` to go on at once; otherwise wait about 12 min from its last step, then run /forge:run --resume again`;
 }
+var skippedWarnings = (skipped) => skipped.map((f) => `warning: skipped ${f} (unreadable)
+`).join("");
 function readTickInput(io, deps, e, planArg, db, sub) {
   const plan = loadPlanArg(io, planArg, sub);
   if (!db) throw new UsageError(`swarm ${sub}: --plan and --db are required`);
   const stateDir = import_node_path40.default.resolve(io.cwd, db, "state");
   const sessionsDir = import_node_path40.default.resolve(io.cwd, db, "sessions");
   if (!(0, import_node_fs41.existsSync)(stateDir) || !(0, import_node_fs41.existsSync)(sessionsDir)) throw new UsageError(`swarm ${sub}: --db must hold the state and sessions listings`);
-  const states = readDocs(stateDir, stateDoc).docs;
-  const sessions = readDocs(sessionsDir, sessionDoc).docs;
+  const st = readDocs(stateDir, stateDoc);
+  const se = readDocs(sessionsDir, sessionDoc);
+  const states = st.docs;
+  const sessions = se.docs;
+  const at2 = (listing) => (f) => `${db.replace(/[\\/]+$/, "")}/${listing}/${f}`;
+  const skipped = [...st.skipped.map(at2("state")), ...se.skipped.map(at2("sessions"))];
   const integrated = [];
   for (const t of plan.tasks) {
     if (states[t.id]?.status !== "done") continue;
@@ -21042,7 +21058,7 @@ function readTickInput(io, deps, e, planArg, db, sub) {
       if (typeof c?.sha === "string" && ID3.test(c.sha) && deps.git(["merge-base", "--is-ancestor", c.sha, e.branch]) !== null) integrated.push(c.sha);
     }
   }
-  return { plan, states, sessions, integrated };
+  return { plan, states, sessions, integrated, skipped };
 }
 function localeArg(rest, sub) {
   const i = rest.indexOf("--locale");
@@ -22804,11 +22820,12 @@ function widthOf(plan) {
 var subcommand6 = (rest, ctx) => {
   const { io, deps, flag, json: json4, now, memberCtx } = ctx;
   const { e, session } = memberCtx(true);
-  const { plan, states, sessions, integrated } = readTickInput(io, deps, e, flag("plan"), flag("db"), "next");
+  const { plan, states, sessions, integrated, skipped } = readTickInput(io, deps, e, flag("plan"), flag("db"), "next");
   const running = Object.values(e.tasks).filter((t) => t.status === "running").length;
   const d = schedule({ plan, states, sessions, exec: { ...e, coordinator: session, parallel: Math.min(10, running + 1) }, integrated, now: now.getTime() });
   const start = d.actions.find((a) => a.type === "start");
-  return json4(start ? { task: start.task, reason: null } : { task: null, reason: d.next.stallReason ?? "nothing is ready" });
+  const out = json4(start ? { task: start.task, reason: null } : { task: null, reason: d.next.stallReason ?? "nothing is ready" });
+  return { ...out, stderr: skippedWarnings(skipped) };
 };
 
 // src/forge/cli/swarm/propose.ts
@@ -22870,6 +22887,7 @@ var subcommand8 = (rest, ctx) => {
   const planPath = planArg;
   if (!planPath) throw new UsageError("swarm relaunch: --plan is required");
   checkPlanPath(sub, planPath);
+  const launch = memberLaunch(sub, io.cwd, planPath, task, e);
   const verdict = relaunchOrBlock(task, t.attempts);
   if (verdict.type === "block") {
     update((cur) => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, status: "blocked", detail: verdict.reason, updatedAt: iso5, finishedAt: iso5 } } });
@@ -22899,7 +22917,7 @@ var subcommand8 = (rest, ctx) => {
     ""
   ].join("\n"));
   update((cur) => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, attempts: attempt, startedAt: iso5, nudgedAt: null, updatedAt: iso5 } } });
-  return json4({ task, attempt, note, work: workRel(ref), launch: memberLaunch(io.cwd, planPath, task, e) });
+  return json4({ task, attempt, note, work: workRel(ref), launch });
 };
 
 // src/forge/cli/swarm/report.ts
@@ -23496,7 +23514,10 @@ var subcommand18 = (rest, ctx) => {
   const { io, deps, flag, json: json4, now, iso: iso5, current, update } = ctx;
   const e = current();
   if (!e.active) throw new UsageError("swarm tick: the execution is not active");
-  if (e.mode === "sessions") checkPlanPath("tick", flag("plan"));
+  if (e.mode === "sessions") {
+    checkPlanPath("tick", flag("plan"));
+    checkLaunchProject("tick", e.project);
+  }
   const untrusted = untrustedFor([
     io.cwd,
     ...e.kind === "plan" ? [runWorktree(io.cwd)] : [],
@@ -23511,9 +23532,9 @@ var subcommand18 = (rest, ctx) => {
   const input = e.kind === "ephemeral" ? (() => {
     const loose = readLoose(io.cwd, e.runId);
     if (!loose) throw new UsageError("swarm tick: the ephemeral run has no .forge/loose.json");
-    return { plan: planOfLoose(loose.tasks), states: statesOfLoose(e), sessions: {}, integrated: [] };
+    return { plan: planOfLoose(loose.tasks), states: statesOfLoose(e), sessions: {}, integrated: [], skipped: [] };
   })() : readTickInput(io, deps, e, flag("plan"), flag("db"), "tick");
-  const { plan, states, sessions, integrated } = input;
+  const { plan, states, sessions, integrated, skipped } = input;
   const publicTasks = {};
   try {
     for (const f of (0, import_node_fs53.readdirSync)(import_node_path50.default.join(io.cwd, ".forge", "execution")).filter((n) => n.endsWith(".json")).slice(0, 500)) {
@@ -23547,8 +23568,9 @@ var subcommand18 = (rest, ctx) => {
     return d.next;
   });
   const planPath = flag("plan");
-  const actions = e.mode === "sessions" && planPath ? d.actions.map((a) => a.type === "start" ? { ...a, launch: memberLaunch(io.cwd, planPath, a.task, e) } : a) : d.actions;
-  return json4({ actions, running: Object.values(d.next.tasks).filter((t) => t.status === "running").length, parallel: e.parallel });
+  const actions = e.mode === "sessions" && planPath ? d.actions.map((a) => a.type === "start" ? { ...a, launch: memberLaunch("tick", io.cwd, planPath, a.task, e) } : a) : d.actions;
+  const out = json4({ actions, running: Object.values(d.next.tasks).filter((t) => t.status === "running").length, parallel: e.parallel });
+  return { ...out, stderr: skippedWarnings(skipped) };
 };
 
 // src/forge/cli/swarm/worktree.ts
@@ -25156,12 +25178,15 @@ function readVersions(cwd2, file) {
   }
   return out;
 }
-function call(c, task, argv) {
+function call(c, task, argv, stderr) {
   const r2 = c.deps.cli(argv);
   if (r2.code === 0) {
     try {
       const v = JSON.parse(r2.stdout);
-      if (v && typeof v === "object" && !Array.isArray(v)) return v;
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        stderr?.(r2.stderr);
+        return v;
+      }
     } catch {
     }
   }
@@ -25741,7 +25766,10 @@ function stepOnce(c, e0, returned, versions, agents, now) {
   }
   for (const [task, r2] of c.rulings) if (!ruled.has(task)) c.actions.push(stepError(task, `--ruling ${task}:${r2.kind}: ${task} is not a task of this execution back from its implementer or its reviewers`));
   for (const [task, t] of Object.entries(e0.tasks)) if (t.status === "integrated") integratedAgain(c, task, t);
-  const tick = call(c, null, ["swarm", "tick", "--plan", c.planArg, "--db", c.db, ...agents ? ["--agents", agents] : []]);
+  let warnings = "";
+  const tick = call(c, null, ["swarm", "tick", "--plan", c.planArg, "--db", c.db, ...agents ? ["--agents", agents] : []], (s2) => {
+    warnings = s2;
+  });
   let wait = null;
   for (const a of Array.isArray(tick?.actions) ? tick.actions : []) {
     if (a.type === "start" && e0.mode === "subagents" && typeof a.task === "string") {
@@ -25761,7 +25789,7 @@ function stepOnce(c, e0, returned, versions, agents, now) {
     say: stepSay(c.actions, wait, c.locale)
   };
   for (const write of c.after) write();
-  return { code: 0, stdout: JSON.stringify(out, null, 2) + "\n", stderr: "" };
+  return { code: 0, stdout: JSON.stringify(out, null, 2) + "\n", stderr: warnings };
 }
 
 // src/forge/cli/commands/swarm.ts
@@ -26295,21 +26323,16 @@ var command36 = (args, ctx) => {
 // src/forge/cli/commands/waypoint-cli.ts
 var import_node_fs68 = require("node:fs");
 var import_node_path65 = __toESM(require("node:path"), 1);
+var marketplaceOf = (key) => key.slice(key.indexOf("@") + 1);
 function findWaypointCli(scriptPath, opts) {
   const forgeRoot = import_node_path65.default.resolve(import_node_path65.default.dirname(scriptPath), "..");
   const dev = import_node_path65.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
   if ((0, import_node_fs68.existsSync)(dev)) return import_node_path65.default.resolve(dev);
-  const key = (v) => v.split(/[.+-]/).map((n) => /^\d+$/.test(n) ? Number(n) : 0);
-  const cmp = (a, b) => {
-    const x = key(a), y = key(b);
-    for (let i = 0; i < Math.max(x.length, y.length); i++) {
-      const d = (x[i] ?? 0) - (y[i] ?? 0);
-      if (d) return d;
-    }
-    return 0;
-  };
   if (opts) {
-    const installed = installedPlugins(opts, (name) => name === "waypoint").map((p) => ({ version: p.version, file: import_node_path65.default.join(p.installPath, "dist", "waypoint.cjs") })).filter((p) => (0, import_node_fs68.existsSync)(p.file)).sort((a, b) => cmp(b.version, a.version));
+    const plugins = installedPlugins(opts, (name) => name === "waypoint" || name === "forge");
+    const own = new Set(plugins.filter((p) => p.name === "forge" && samePath(p.installPath, forgeRoot)).map((p) => marketplaceOf(p.key)));
+    if (import_node_path65.default.basename(import_node_path65.default.dirname(forgeRoot)) === "forge") own.add(import_node_path65.default.basename(import_node_path65.default.resolve(forgeRoot, "..", "..")));
+    const installed = plugins.filter((p) => p.name === "waypoint").map((p) => ({ own: own.has(marketplaceOf(p.key)), version: p.version, file: import_node_path65.default.join(p.installPath, "dist", "waypoint.cjs") })).filter((p) => (0, import_node_fs68.existsSync)(p.file)).sort((a, b) => Number(b.own) - Number(a.own) || compareVersions(b.version, a.version));
     if (installed.length) return import_node_path65.default.resolve(installed[0].file);
   }
   const base = import_node_path65.default.join(forgeRoot, "..", "..", "waypoint");
@@ -26319,7 +26342,7 @@ function findWaypointCli(scriptPath, opts) {
   } catch {
     return null;
   }
-  for (const v of versions.sort((a, b) => cmp(b, a))) {
+  for (const v of versions.sort((a, b) => compareVersions(b, a))) {
     const f = import_node_path65.default.join(base, v, "dist", "waypoint.cjs");
     if ((0, import_node_fs68.existsSync)(f)) return import_node_path65.default.resolve(f);
   }
