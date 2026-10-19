@@ -28,8 +28,10 @@ describe('sessionIdFrom (A-18)', () => {
   });
   it('a name that reduces to nothing or to dots is main, and every result is a safe id of at most 40 (Review Focus 5)', () => {
     for (const s of ['.', '..', '...', '日本語', '@@@', '', '   ']) expect(sessionIdFrom(s), JSON.stringify(s)).toBe('main');
-    const names = ['Ana@trabajo:1~x', 'José María', 'Ünïcödé', 'a/b\c', '  spaces  ', '.hidden', 'trailing.', '-dash-', 'x'.repeat(100),
+    const names = ['Ana@trabajo:1~x', 'José María', 'Ünïcödé', 'a/b\\c', '  spaces  ', '.hidden', 'trailing.', '-dash-', 'x'.repeat(100),
       'tab\tname', 'emoji 🎉 name', 'node@20+lts', `${'a'.repeat(39)}.b`];
+    // The battery has a backslash (M12): 'a/b\\c' is five characters, the fourth a backslash.
+    expect(names.find(n => n.startsWith('a/b'))).toBe(`a/b${String.fromCharCode(92)}c`);
     for (const n of names) {
       const sid = sessionIdFrom(n);
       expect(isSafeId(sid), `${n} → ${sid}`).toBe(true);

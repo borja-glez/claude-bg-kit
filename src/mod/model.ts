@@ -367,8 +367,10 @@ function recentDone(tasks: { id: string; estimate_min?: number }[], states: Stat
   return out.sort((a, b) => b.at - a.at).slice(0, RECENT_DONE).map(({ at: _at, ...r }) => r);
 }
 
-/** The seat a work band is drawn for: its id, its track, whether forge launched it for one task (an executor member), the task a member works and since when, and
- *  the member's line of its execution. */
+/**
+ * The seat a work band is drawn for: its id, its track, whether forge launched it for one task (an executor member), the
+ * task a member works and since when, and the member's line of its execution.
+ */
 interface WorkSeat { sid: string; track: string | null; swarm: boolean; task: string | null; since: string | null; run: { coordinator: string; stage: string } | null }
 
 /** The track of seat `sid`, from its session.json (the checkout's, or the one of seats/<sid>/). */
