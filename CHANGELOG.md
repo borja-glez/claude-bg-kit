@@ -840,7 +840,7 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.13.6 — 2026-10-19
 
 #### Changed
-- Its bundle carries no zod and is minified (I-13). Its roadmap card shows a plan or a draft design that `waypoint validate` rejects (the CLI is the one that validates), without the tracks, phases and tasks whose id breaks the plan's id rule, and with titles and phase names as one clean line. Its superpowers card reads a plan's title in linear time (carry from 4d).
+- Its bundle carries no zod and is minified (I-13). Its roadmap card shows a plan that `waypoint validate` rejects (the CLI is the one that validates), without the tracks, phases and tasks whose id breaks the plan's id rule, and with titles and phase names as one clean line. Its superpowers card reads a plan's title in linear time (carry from 4d).
 
 ### 0.13.5 — 2026-10-18
 
