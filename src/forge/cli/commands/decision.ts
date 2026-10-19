@@ -1,10 +1,10 @@
 import type { Command } from '../context.js';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { readExecution } from '../../execution.js';
 import { UsageError } from '../errors.js';
 import { mainCheckout } from '../../local.js';
-import { addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionNoteId, decisionWrites, shasOutside, NOTE_ID, DecisionInputError } from '../../decisions.js';
+import { addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionNoteId, decisionWrites, shasOutside, shaCommits, NOTE_ID, DecisionInputError } from '../../decisions.js';
 import { defaultGit } from '../exec.js';
 import { normalizeNote } from '../../../lib/notes.js';
 import { SHA, TASK_ID, decisionScope, scopeFileName } from '../../../lib/decisions.js';
@@ -46,15 +46,19 @@ export const command: Command = (args, ctx) => {
     if (undo && undo.type === 'git-revert' && Array.isArray(undo.shas) && typeof undo.base === 'string' && typeof undo.head === 'string'
       && SHA.test(undo.base) && SHA.test(undo.head)) {
       // The undo's cwd is relative to the main checkout and must stay inside it: git never runs anywhere else.
+      const real = (p: string) => { try { return realpathSync(p); } catch { return path.resolve(p); } };
       const at = typeof undo.cwd === 'string' && undo.cwd.trim() ? path.resolve(root, undo.cwd.trim()) : null;
-      const rel = at ? path.relative(root, at) : '';
+      if (at && !existsSync(at)) throw new UsageError(`decision add: undo.cwd ${undo.cwd} does not exist`);
+      const rel = at ? path.relative(real(root), real(at)) : '';
       if (at && (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel))) throw new UsageError('decision add: undo.cwd must be inside the main checkout');
-      const git = at && existsSync(at) ? defaultGit(at) : (io.git ?? defaultGit(repoDir));
+      const git = at ? defaultGit(at) : (io.git ?? defaultGit(repoDir));
       const list = git(['rev-list', `${undo.base}..${undo.head}`]);
       if (list === null) throw new UsageError(`decision add: undo: cannot list the commits of ${undo.base}..${undo.head}`);
       const range = list.split('\n').map(s => s.trim()).filter(Boolean);
-      const outside = shasOutside(undo.shas.filter((s): s is string => typeof s === 'string'), range);
+      const named = undo.shas.filter((s): s is string => typeof s === 'string');
+      const outside = shasOutside(named, range);
       if (outside.length) throw new UsageError(`decision add: undo.shas: ${outside.join(', ')} not in ${undo.base}..${undo.head}`);
+      if (new Set(shaCommits(named, range)).size < named.length) throw new UsageError('decision add: undo.shas names one commit twice (a full sha and its short form)');
     }
     // An active execution names the run the decision belongs to (its scope), unless the data names one.
     const exec = readExecution(root);

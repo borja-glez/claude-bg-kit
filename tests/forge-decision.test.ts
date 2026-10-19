@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdirSync, appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { addDecision, allDecisions, decisionsFile, listDecisions, readDecisionsDoc, renderDecisionsMd, DecisionInputError } from '../src/forge/decisions.js';
+import { addDecision, allDecisions, decisionsFile, listDecisions, readDecisionsDoc, renderDecisionsMd, shasOutside, DecisionInputError } from '../src/forge/decisions.js';
 import { appendEvent, readEvents, withEventContext } from '../src/forge/ledger.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
@@ -285,7 +285,33 @@ describe('undo.shas: the exact commits a revert undoes (K2-19)', () => {
     expect(add(Array.from({ length: 51 }, (_, i) => i.toString(16).padStart(7, '0'))).code).toBe(2);
     expect(readEvents(root).filter(e => e.kind === 'decision')).toEqual([]);
   });
-  it('refuses a cwd outside the main checkout', () => {
+  it('refuses a cwd outside the main checkout, even a repo that holds the same commits', () => {
+    const sibling = tmp('forge-sib-');
+    execFileSync('git', ['clone', '-q', root, sibling], { stdio: 'ignore' });
+    const r = add([mine], sibling);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('inside the main checkout');
     expect(add([mine], '..').code).toBe(2);
+  });
+  it('accepts a cwd inside the checkout and refuses one that does not exist', () => {
+    mkdirSync(path.join(root, 'sub'));
+    expect(add([mine], '.').code).toBe(0);
+    expect(add([mine], 'sub').code).toBe(0);
+    const gone = add([mine], 'nope');
+    expect(gone.code).toBe(2);
+    expect(gone.stderr).toContain('does not exist');
+  });
+  it('refuses a full sha and its short form as one commit named twice', () => {
+    const r = add([mine, mine.slice(0, 9)]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('twice');
+  });
+  it('shasOutside counts a short sha that prefixes two range commits as outside', () => {
+    const range = ['abc1234' + '0'.repeat(33), 'abc1235' + '0'.repeat(33), 'def5678' + '0'.repeat(33)];
+    expect(shasOutside(['abc123', 'def5678', 'abc1234'], range)).toEqual(['abc123']);
+  });
+  it('the schema itself refuses more than 50 shas', () => {
+    const shas = Array.from({ length: 51 }, (_, i) => i.toString(16).padStart(7, '0'));
+    expect(() => addDecision(root, { ...INPUT, point: 'design-apply', undo: { type: 'git-revert', base: 'abc1234', head: 'def5678', shas } }, { ts: at(0) })).toThrow(DecisionInputError);
   });
 });

@@ -56,6 +56,8 @@ describe('normalizeUndo', () => {
     expect(normalizeUndo({ type: 'git-revert', base: 'abc1234', head: 'def5678', shas: ['aaa1111', 'aaa1111', 'nope', 3, 'bbb2222'] }))
       .toEqual({ type: 'git-revert', base: 'abc1234', head: 'def5678', shas: ['aaa1111', 'bbb2222'] });
     expect(normalizeUndo({ type: 'git-revert', base: 'abc1234', head: 'def5678', shas: [] })).toEqual({ type: 'git-revert', base: 'abc1234', head: 'def5678' });
+    const many = Array.from({ length: 51 }, (_, i) => i.toString(16).padStart(7, '0'));
+    expect((normalizeUndo({ type: 'git-revert', base: 'abc1234', head: 'def5678', shas: many }) as { shas: string[] }).shas).toEqual(many.slice(0, 50));
   });
 });
 

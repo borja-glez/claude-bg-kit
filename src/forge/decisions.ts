@@ -222,3 +222,8 @@ export function decisionWrites(i: { event: LedgerEvent; session: string; eid: st
 export function shasOutside(shas: readonly string[], range: readonly string[]): string[] {
   return shas.filter(s => range.filter(r => r.toLowerCase().startsWith(s.toLowerCase())).length !== 1);
 }
+
+/** The commit of the range each sha names (null when it names none or several): two shas with one commit are one commit written twice. */
+export function shaCommits(shas: readonly string[], range: readonly string[]): (string | null)[] {
+  return shas.map(s => { const m = range.filter(r => r.toLowerCase().startsWith(s.toLowerCase())); return m.length === 1 ? m[0]!.toLowerCase() : null; });
+}

@@ -71,6 +71,7 @@ export function normalizeUndo(x: unknown): DecisionUndo | null {
       const head = str(x.head) && SHA.test(x.head) ? x.head : null;
       if (!base || !head) return null;
       const cwd = text(x.cwd, 500);
+      // Stored shas that are all invalid collapse to none: the revert then falls back to the range, which step 2 lists first.
       const shas = Array.isArray(x.shas) ? [...new Set(x.shas.filter((s): s is string => str(s) && SHA.test(s)))].slice(0, UNDO_SHAS_MAX) : [];
       return { type: 'git-revert', base, head, ...(cwd ? { cwd } : {}), ...(shas.length ? { shas } : {}) };
     }
