@@ -26,7 +26,7 @@ import { mcpInventory } from '../tools.js';
 import { defaultProcDeps, stopEvidence, type EvidenceCleanup, type ProcDeps } from '../verify-proc.js';
 import { releaseEnv } from '../verify-env.js';
 import { readLocal, mainCheckout, readLearned, recordLearned, surfacePermissions, OBJECT_ID } from '../local.js';
-import { appendLearned, filterNotes, learnedNotes, type NoteSkip, surfaceFile, permissionHash, hashMatches } from '../surfaces.js';
+import { appendLearned, LEARNED_GUARD, filterNotes, learnedNotes, type NoteSkip, surfaceFile, permissionHash, hashMatches } from '../surfaces.js';
 import { claudeConfigDir, claudeJsonDir, locateSuperpowersFor, spLedgerDone, spSkillPath, SP_WINDOW_MS } from '../superpowers.js';
 import { listRoutes } from '../route.js';
 import { markDone, parseSpPlan, SpPlanError } from '../../lib/sp-plan.js';
@@ -224,7 +224,7 @@ export function learnSurface(io: Io, dir: string, name: string, notes: string[],
   const cur = surfacePermissions(io.cwd)[name];
   const allowed = cur?.state === 'allowed' && hashMatches(cur.hash, permissionHash(before, readLearned(io.cwd).get(name)));
   const at = io.now().toISOString();
-  const r = appendLearned(before, at.slice(0, 10), keep, heading);
+  const r = appendLearned(before, at.slice(0, 10), keep, heading, LEARNED_GUARD[heading === 'Aprendido' ? 'Aprendido' : 'Learned']);
   writeFileSync(file, r.text);
   if (allowed) recordLearned(io.cwd, name, r.added, at);
   return { count: r.count, added: keep.length, skipped };
