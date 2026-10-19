@@ -140,22 +140,34 @@ export function spLedgerDone(roots: string[], planAbs: string): number[] {
       try { for (const n of sddComplete(readFileSync(path.join(dir, 'progress.md'), 'utf8'), rel)) done.add(n); } catch { /* no ledger */ }
     }
     // forge's record names the plan by its path in its repository, the same from every worktree (see recordSpDone).
-    const forgeRel = planRepoRel(planAbs) ?? (inRoot ? rel : null);
+    // Git is asked only when the root has a candidate record.
     const forge = path.join(root, '.forge', 'sp-done');
-    for (const name of forgeRel ? list(forge).filter(n => n.endsWith('.md') && mine(n.slice(0, -3))) : []) {
+    const names = list(forge).filter(n => n.endsWith('.md') && mine(n.slice(0, -3)));
+    const forgeRel = names.length ? planRepoRel(planAbs, root) ?? (inRoot ? rel : null) : null;
+    for (const name of forgeRel ? names : []) {
       try { for (const n of sddComplete(readFileSync(path.join(forge, name), 'utf8'), forgeRel!)) done.add(n); } catch { /* unreadable */ }
     }
   }
   return [...done].sort((a, b) => a - b);
 }
 
-/** The path of a plan from the top level of the git worktree that holds it: the same in every worktree of a repository.
- *  Null when the plan is in no repository (or git is unavailable). */
-function planRepoRel(planAbs: string): string | null {
+// The top level and the real common git dir (the same for a repository and all its worktrees) of the checkout holding `at`.
+function gitFamily(at: string): { top: string; common: string } | null {
   try {
-    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: path.dirname(planAbs), encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
-    const rel = path.relative(realpathSync(top), realpathSync(planAbs)).split(path.sep).join('/');
-    return top && rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : null;
+    const [top, common] = execFileSync('git', ['rev-parse', '--show-toplevel', '--git-common-dir'], { cwd: at, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+      .split(/\r?\n/).map(l => l.trim());
+    return top && common ? { top: realpathSync(top), common: realpathSync(path.resolve(at, common)) } : null;
+  } catch { return null; }
+}
+
+/** The path of a plan from the top level of the git worktree that holds it: the same in every worktree of a repository.
+ *  Null when the plan is in no repository, or in another repository than `root` (or git is unavailable). */
+function planRepoRel(planAbs: string, root: string): string | null {
+  const plan = gitFamily(path.dirname(planAbs));
+  if (!plan || gitFamily(root)?.common !== plan.common) return null;
+  try {
+    const rel = path.relative(plan.top, realpathSync(planAbs)).split(path.sep).join('/');
+    return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : null;
   } catch { return null; }
 }
 
@@ -169,7 +181,7 @@ function planRepoRel(planAbs: string): string | null {
  * recorded (now or before); false when the plan is outside root. A write that fails throws.
  */
 export function recordSpDone(root: string, planAbs: string, n: number): boolean {
-  const rel = planRepoRel(planAbs) ?? path.relative(root, planAbs).split(path.sep).join('/');
+  const rel = planRepoRel(planAbs, root) ?? path.relative(root, planAbs).split(path.sep).join('/');
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
   const slug = path.basename(planAbs).replace(/\.md$/i, '');
   const header = `# SDD ledger — plan: ${rel}`;
@@ -178,15 +190,17 @@ export function recordSpDone(root: string, planAbs: string, n: number): boolean 
   const file = [path.join(dir, `${slug}.md`), path.join(dir, `${slug}-${createHash('sha1').update(rel).digest('hex').slice(0, 8)}.md`)]
     .find(f => { const t = read(f); return t === null || t.split(/\r?\n/)[0].trim() === header; });
   if (!file) return false;
-  const text = read(file);
+  let text = read(file);
   if (text !== null && sddComplete(text, rel).includes(n)) return true;
   const line = `Task ${n}: complete (forge)\n`;
   mkdirSync(dir, { recursive: true });
   if (text === null) {
     try { writeFileSync(file, `${header}\n${line}`, { flag: 'wx' }); return true; } catch (e) {
-      // Another process created it first: take the file as it is now.
-      if ((e as NodeJS.ErrnoException).code === 'EEXIST') return recordSpDone(root, planAbs, n);
-      throw e;
+      // Another process created it first: read it once more and append to it. A file that still cannot be read (a
+      // directory, a permission error) or is another plan's is not ours to write: the error stands.
+      text = (e as NodeJS.ErrnoException).code === 'EEXIST' ? read(file) : null;
+      if (text === null || text.split(/\r?\n/)[0].trim() !== header) throw e;
+      if (sddComplete(text, rel).includes(n)) return true;
     }
   }
   appendFileSync(file, `${text.endsWith('\n') ? '' : '\n'}${line}`);

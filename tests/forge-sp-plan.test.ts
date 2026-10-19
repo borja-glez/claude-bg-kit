@@ -221,6 +221,27 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain('sp-plan check: cannot record task 1 in docs/superpowers/plans/no-boxes.md:');
   });
+  it('a directory where the ledger should be fails the check once, without a second ledger beside it', () => {
+    const P = 'docs/superpowers/plans/no-boxes.md';
+    writeFileSync(path.join(root, P), '# No Boxes\n\n### Task 1: a\n\nDo a.\n');
+    const dir = path.join(root, '.forge', 'sp-done');
+    mkdirSync(path.join(dir, 'no-boxes.md'), { recursive: true });
+    const r = run(['sp-plan', 'check', P, '--task', '1'], { ...io, env: {} });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain('sp-plan check: cannot record task 1 in docs/superpowers/plans/no-boxes.md:');
+    expect(readdirSync(dir)).toEqual(['no-boxes.md']);
+  });
+  it("a plan of another repository is not recorded as this root's", () => {
+    const git = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const P = 'docs/superpowers/plans/no-boxes.md';
+    git(root, 'init', '-q');
+    const other = tmp('forge-sp-other-');
+    mkdirSync(path.join(other, 'docs', 'superpowers', 'plans'), { recursive: true });
+    writeFileSync(path.join(other, P), '# No Boxes\n\n### Task 1: a\n\nDo a.\n');
+    git(other, 'init', '-q');
+    const r = run(['sp-plan', 'check', path.join(other, P), '--task', '1'], { ...io, env: {} });
+    expect(JSON.parse(r.stdout).recorded).toBe(false);
+  });
   it('the same plan gives the same record from the main checkout and from a worktree', () => {
     const git = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'core.autocrlf=false', ...a], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     const P = 'docs/superpowers/plans/no-boxes.md';
