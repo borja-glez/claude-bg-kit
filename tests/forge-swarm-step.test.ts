@@ -318,6 +318,13 @@ describe('forge swarm step (D-12)', () => {
       }
     }
   });
+  it("passes the tick's warnings on to its own stderr, its JSON as it was (M5)", () => {
+    writeFileSync(path.join(root, 'db', 'state', 'T9.json'), '{oops');
+    const r = run(['swarm', 'step', '--plan', 'plan.yaml', '--db', 'db'], io);
+    expect(r.code).toBe(0);
+    expect(Object.keys(JSON.parse(r.stdout))).toEqual(['actions', 'publish', 'running', 'parallel', 'wait', 'say']);
+    expect(r.stderr).toBe('warning: skipped db/state/T9.json (unreadable)\n');
+  });
   it('refuses an ephemeral run: it steps with the single commands', () => {
     expect(run(['swarm', 'stop'], io).code).toBe(0);
     writeFileSync(path.join(root, '.forge', 'tasks.json'), JSON.stringify(['x1', 'x2'].map(id => ({ id, title: id, path: 'small', zones: [`${id}.txt`], depends_on: [] }))));

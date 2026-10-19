@@ -166,7 +166,13 @@ export function boundElsewhere(sub: string, runId: string, hookSession: string, 
     `if it was closed or crashed, \`claude --resume ${hookSession}\` to go on at once; otherwise wait about 12 min from its last step, then run /forge:run --resume again`;
 }
 
-/** What `tick` and `next` schedule from: the plan, the roadmap listings and the done commits already on the run branch. */
+/** I-14: the stderr lines of the listing documents a command skipped (`<db>/<listing>/<file>`), as waypoint words them. */
+export const skippedWarnings = (skipped: readonly string[]): string => skipped.map(f => `warning: skipped ${f} (unreadable)\n`).join('');
+
+/**
+ * What `tick` and `next` schedule from: the plan, the roadmap listings and the done commits already on the run branch.
+ * `skipped`: the listing documents that did not read (A-06, I-14), which the caller says on stderr (skippedWarnings).
+ */
 export function readTickInput(io: Io, deps: SwarmDeps, e: ExecutionState, planArg: string | undefined, db: string | undefined, sub: string) {
   const plan = loadPlanArg(io, planArg, sub);
   if (!db) throw new UsageError(`swarm ${sub}: --plan and --db are required`);
@@ -174,8 +180,12 @@ export function readTickInput(io: Io, deps: SwarmDeps, e: ExecutionState, planAr
   const sessionsDir = path.resolve(io.cwd, db, 'sessions');
   // Missing listings would make every task look free: refuse instead.
   if (!existsSync(stateDir) || !existsSync(sessionsDir)) throw new UsageError(`swarm ${sub}: --db must hold the state and sessions listings`);
-  const states = readDocs(stateDir, stateDoc).docs;
-  const sessions = readDocs(sessionsDir, sessionDoc).docs;
+  const st = readDocs(stateDir, stateDoc);
+  const se = readDocs(sessionsDir, sessionDoc);
+  const states = st.docs;
+  const sessions = se.docs;
+  const at = (listing: string) => (f: string) => `${db.replace(/[\\/]+$/, '')}/${listing}/${f}`;
+  const skipped = [...st.skipped.map(at('state')), ...se.skipped.map(at('sessions'))];
   const integrated: string[] = [];
   for (const t of plan.tasks) {
     if (states[t.id]?.status !== 'done') continue;
@@ -183,7 +193,7 @@ export function readTickInput(io: Io, deps: SwarmDeps, e: ExecutionState, planAr
       if (typeof c?.sha === 'string' && ID.test(c.sha) && deps.git(['merge-base', '--is-ancestor', c.sha, e.branch]) !== null) integrated.push(c.sha);
     }
   }
-  return { plan, states, sessions, integrated };
+  return { plan, states, sessions, integrated, skipped };
 }
 
 /** --locale es|en; null when not given. */

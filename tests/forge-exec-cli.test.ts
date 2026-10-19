@@ -717,6 +717,17 @@ describe('forge swarm (execution)', () => {
     expect(sub.length).toBeGreaterThan(0);
     for (const a of sub) expect(a).not.toHaveProperty('launch');
   });
+  it('tick says on stderr each listing document it skipped, as waypoint says it, and still exits 0 (M5)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    writeDocs(path.join(root, 'db', 'state'), {});
+    writeDocs(path.join(root, 'db', 'sessions'), {});
+    writeFileSync(path.join(root, 'db', 'state', 'T1.json'), '{oops');
+    writeFileSync(path.join(root, 'db', 'sessions', 'S9.json'), 'null');
+    const r = run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db/'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout).actions).toEqual(expect.any(Array));
+    expect(r.stderr).toBe('warning: skipped db/state/T1.json (unreadable)\nwarning: skipped db/sessions/S9.json (unreadable)\n');
+  });
   const sessionsStarts = () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--mode', 'sessions'], io));
     writeDocs(path.join(root, 'db', 'state'), {});
@@ -1323,6 +1334,9 @@ describe('forge swarm (execution)', () => {
       const none = out(run(['swarm', 'next', '--plan', 'plan.yaml', '--db', 'db', '--session', 'M1'], wio));
       expect(none.task).toBeNull();
       expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+      // A document it skipped is said on stderr, as the tick says it (M5).
+      writeFileSync(path.join(wt, 'db', 'state', 'T3.json'), '{oops');
+      expect(run(['swarm', 'next', '--plan', 'plan.yaml', '--db', 'db', '--session', 'M1'], wio).stderr).toBe('warning: skipped db/state/T3.json (unreadable)\n');
     });
     it('an executor reports only its own task', () => {
       out(run(['swarm', 'join', '--session', 'E1', '--role', 'executor', '--task', 'T1'], wio));

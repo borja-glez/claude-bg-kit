@@ -109,13 +109,14 @@ function readVersions(cwd: string, file: string | undefined): Versions {
   return out;
 }
 
-/** Runs one FORGE command; its JSON, or null after recording an `error` action (for `task`) when it failed. */
-function call(c: Ctx, task: string | null, argv: string[]): Json | null {
+/** Runs one FORGE command; its JSON, or null after recording an `error` action (for `task`) when it failed. `stderr`
+ *  gets what a command that succeeded said on its stderr (the tick's warnings); else that is dropped. */
+function call(c: Ctx, task: string | null, argv: string[], stderr?: (text: string) => void): Json | null {
   const r = c.deps.cli(argv);
   if (r.code === 0) {
     try {
       const v = JSON.parse(r.stdout) as unknown;
-      if (v && typeof v === 'object' && !Array.isArray(v)) return v as Json;
+      if (v && typeof v === 'object' && !Array.isArray(v)) { stderr?.(r.stderr); return v as Json; }
     } catch { /* not JSON: an error below */ }
   }
   c.actions.push({ type: 'error', ...(task ? { task } : {}), command: argv.slice(0, argv[0] === 'swarm' ? 2 : 1).join(' '), code: r.code, stderr: (r.stderr || r.stdout).trim().slice(0, 500) });
@@ -732,8 +733,9 @@ function stepOnce(c: Ctx, e0: ExecutionState, returned: Set<string>, versions: V
   }
   for (const [task, r] of c.rulings) if (!ruled.has(task)) c.actions.push(stepError(task, `--ruling ${task}:${r.kind}: ${task} is not a task of this execution back from its implementer or its reviewers`));
   for (const [task, t] of Object.entries(e0.tasks)) if (t.status === 'integrated') integratedAgain(c, task, t);
-  // 3. The tick.
-  const tick = call(c, null, ['swarm', 'tick', '--plan', c.planArg, '--db', c.db, ...(agents ? ['--agents', agents] : [])]);
+  // 3. The tick. Its warnings (listing documents it skipped, I-14) go on to the step's stderr, never into its JSON.
+  let warnings = '';
+  const tick = call(c, null, ['swarm', 'tick', '--plan', c.planArg, '--db', c.db, ...(agents ? ['--agents', agents] : [])], s => { warnings = s; });
   let wait: number | null = null;
   for (const a of (Array.isArray(tick?.actions) ? tick!.actions as StepAction[] : [])) {
     if (a.type === 'start' && e0.mode === 'subagents' && typeof a.task === 'string') { if (startTask(c, a.task, false)) started.add(a.task); }
@@ -750,5 +752,5 @@ function stepOnce(c: Ctx, e0: ExecutionState, returned: Set<string>, versions: V
   };
   // 5. Last, the writes that must not outlive a step that died before its output (respawned.json, asked.json's re-ask).
   for (const write of c.after) write();
-  return { code: 0, stdout: JSON.stringify(out, null, 2) + '\n', stderr: '' };
+  return { code: 0, stdout: JSON.stringify(out, null, 2) + '\n', stderr: warnings };
 }

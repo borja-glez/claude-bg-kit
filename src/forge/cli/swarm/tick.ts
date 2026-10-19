@@ -8,7 +8,7 @@ import { schedule, type BgAgent } from '../../schedule.js';
 import { normalizePublicTask, type PublicTask } from '../../../lib/execution-state.js';
 import { planOfLoose, statesOfLoose, readLoose } from '../../loose.js';
 import { noteOnce, trustOutput, untrustedFor } from '../../trust.js';
-import { checkLaunchProject, checkPlanPath, memberLaunch, readTickInput, spanish } from './shared.js';
+import { checkLaunchProject, checkPlanPath, memberLaunch, readTickInput, skippedWarnings, spanish } from './shared.js';
 
 export const subcommand: SwarmCommand = (rest, ctx) => {
   const { io, deps, flag, json, now, iso, current, update } = ctx;
@@ -34,10 +34,10 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     ? (() => {
         const loose = readLoose(io.cwd, e.runId);
         if (!loose) throw new UsageError('swarm tick: the ephemeral run has no .forge/loose.json');
-        return { plan: planOfLoose(loose.tasks), states: statesOfLoose(e), sessions: {}, integrated: [] as string[] };
+        return { plan: planOfLoose(loose.tasks), states: statesOfLoose(e), sessions: {}, integrated: [] as string[], skipped: [] as string[] };
       })()
     : readTickInput(io, deps, e, flag('plan'), flag('db'), 'tick');
-  const { plan, states, sessions, integrated } = input;
+  const { plan, states, sessions, integrated, skipped } = input;
   const publicTasks: Record<string, PublicTask> = {};
   try {
     for (const f of readdirSync(path.join(io.cwd, '.forge', 'execution')).filter(n => n.endsWith('.json')).slice(0, 500)) {
@@ -69,5 +69,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   const actions = e.mode === 'sessions' && planPath
     ? d.actions.map(a => a.type === 'start' ? { ...a, launch: memberLaunch('tick', io.cwd, planPath, a.task, e) } : a)
     : d.actions;
-  return json({ actions, running: Object.values(d.next.tasks).filter(t => t.status === 'running').length, parallel: e.parallel });
+  const out = json({ actions, running: Object.values(d.next.tasks).filter(t => t.status === 'running').length, parallel: e.parallel });
+  // I-14: a listing document that did not read is said on stderr; the exit code stays 0.
+  return { ...out, stderr: skippedWarnings(skipped) };
 };
