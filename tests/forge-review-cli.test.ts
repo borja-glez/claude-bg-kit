@@ -1249,6 +1249,38 @@ describe('forge review-close', () => {
     expect(out).toMatchObject({ action: 'accept', invalid: [] });
   });
 
+  it('a check that fails only for the environment leaves its open finding open, and its next real failure blocks as the same id (I2)', () => {
+    noExpress();
+    const r3 = path.join(work(), 'reviews-1-3');
+    const next = (k: number) => { writeFileSync(path.join(wt, 'a.txt'), `one\ntwo\n${k}\n`); git('commit', '-q', '-am', `fix ${k}`); prep(); };
+    const verify = (dir: string, checks: Record<string, unknown>[]) => {
+      write(dir, 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+      if (dir === r1()) write(dir, 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+      write(dir, 'verify', { surfaces: ['web'], result: 'fail', checks: checks.map((c, i) => ({ id: i + 1, surface: 'web', expected: 'x', ...c })) });
+    };
+    const index = (k: number) => JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8')).rounds[k - 1].findings
+      .map((f: { id: string; check?: string; status: string }) => [f.id, f.check, f.status]);
+    // Review 1: check A of the main flow fails for real: F1.
+    prep();
+    verify(r1(), [{ name: 'A', main: true, ok: false, observed: 'y' }]);
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    expect(index(1)).toEqual([['F1', 'A', 'open']]);
+    // Review 2: A fails because the port was taken, B fails for real. A judged nothing: F1 stays open, and B is new.
+    next(2);
+    verify(r2(), [{ name: 'A', main: true, ok: false, env: true, observed: 'port busy' }, { name: 'B', ok: false, observed: 'z' }]);
+    const two = JSON.parse(close().stdout);
+    expect(two).toMatchObject({ action: 'fix', deferred: [] });
+    expect(index(2)).toEqual([['F2', 'B', 'open'], ['F1', 'A', 'open']]);
+    // Review 3: B passes, A fails for real again: it blocks as F1, never as a new finding nor as hardening.
+    next(3);
+    verify(r3, [{ name: 'A', main: true, ok: false, observed: 'y' }, { name: 'B', ok: true, observed: 'x' }]);
+    const three = JSON.parse(close().stdout);
+    expect(three).toMatchObject({ action: 'fix', deferred: [] });
+    expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-3.json'), 'utf8')).findings.map((f: { id: string; severity: string }) => [f.id, f.severity]))
+      .toEqual([['F1', 'critical']]);
+    expect(index(3)).toEqual([['F1', 'A', 'open'], ['F2', 'B', 'closed']]);
+  });
+
   it('prints the minor findings too, for a report that lists them (K2-17)', () => {
     prep();
     write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [{ severity: 'minor', file: 'a.txt', line: 1, problem: 'naming' }] });

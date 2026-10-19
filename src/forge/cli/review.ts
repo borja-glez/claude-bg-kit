@@ -18,7 +18,7 @@ import { roundDecision } from '../round.js';
 import { eventsOf, isTask, ofTask, readWorkDir, resolveProject, taskLine } from '../task-ref.js';
 import { keepEvidence } from '../evidence-copy.js';
 import {
-  parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, carriedOutOfModel, openIds, closedFor, previousFindings,
+  parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, carriedOutOfModel, openIds, closedFor, envHeld, previousFindings,
   asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex,
 } from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
@@ -708,6 +708,8 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const fresh = round >= 2 && eventsOf(before, { project, task: id }).filter(e => e.kind === 'verdict' && isTask(e, task) && e.dir !== roundRel).at(-1)?.action === 'redo';
   const withIds = assignIds(index, round, reviews, { express, fresh });
   const open = fresh ? {} : openIds(index, round);
+  // I2: a check that failed only because of the environment judged nothing: its open finding stays as it was.
+  const envKept = fresh ? [] : envHeld(index, round, withIds);
   // Rulings on findings stay for the brief: the ids given now are kept in this review's overrides.json, and the overrides
   // of every review of brief n apply (K4-02, §4.8). M2: only ids of this review or left open by the previous one: a
   // mistyped id would otherwise rule silently on whatever finding gets it later. One that is not refuses the whole call.
@@ -741,7 +743,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   } : undefined;
   const result = synthesize(withIds, weightsFor({ sensitive: flags.includes('--sensitive'), perf: flags.includes('--perf') }), validatorsOk, failing, {
     round, fixHunks: parseHunks(fixPatch), root: deps.repoDir, carried, last: round >= reviewsCount.max, personDocs: config.review.personDocs,
-    open, closed: fresh ? {} : closedFor(index, round, idsOf(withIds), answered), outOfModel: overrides.outOfModel, defer: overrides.defer,
+    open, closed: fresh ? {} : closedFor(index, round, new Set([...idsOf(withIds), ...envKept]), answered), outOfModel: overrides.outOfModel, defer: overrides.defer,
     ...(hold ? { hold } : {}), ...(fresh ? { fresh } : {}),
   });
   // An index that exists but cannot be read is set aside next to the new one, never overwritten.
@@ -750,7 +752,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     renameSync(indexPath, aside);
     result.reasons.push(`unreadable findings index set aside as ${rel(deps.cwd, aside)}`);
   }
-  const indexNow = recordRound(index, round, result, answered, { fresh });
+  const indexNow = recordRound(index, round, result, answered, { fresh, keep: envKept });
   writeFileSync(indexPath, JSON.stringify(indexNow, null, 2) + '\n');
   // I1: on an accept, the residuals earlier reviews left that no reviewer gets back (hardening, architecture) are still
   // open: they go to deferred, and so to the ruling and the final report, with this review's own (§4.7). After a redo

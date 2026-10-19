@@ -176,10 +176,10 @@ const judgedIds = (verdict: Judged) =>
  * lowered it; then each finding the previous review left open that is not here again: closed when its reviewer answered
  * this review (answeredBy, plus the reviewers an express review covered), else carried as it was. A residual no reviewer
  * gets back (hardening, architecture) is always carried as it was: nobody could name it (I1); so is a finding ruled out of
- * the threat model, until it is named again (M1). After a redo (`fresh`, I4) the reverted attempt's findings are not
- * carried: they were about code that is gone.
+ * the threat model, until it is named again (M1), and so are the ids in `keep` (envHeld). After a redo (`fresh`, I4) the
+ * reverted attempt's findings are not carried: they were about code that is gone.
  */
-export function recordRound(index: FindingsIndex, round: number, verdict: Judged, answered: ReviewerName[], opts: { fresh?: boolean } = {}): FindingsIndex {
+export function recordRound(index: FindingsIndex, round: number, verdict: Judged, answered: ReviewerName[], opts: { fresh?: boolean; keep?: string[] } = {}): FindingsIndex {
   const entries: IndexedFinding[] = [];
   const seen = new Set<string>();
   const add = (f: Finding, status: IndexStatus) => {
@@ -194,10 +194,19 @@ export function recordRound(index: FindingsIndex, round: number, verdict: Judged
     if (seen.has(o.id)) continue;
     if (outOfModelEntry(o)) { entries.push(o); continue; }
     if (!isOpen(o)) continue;
-    entries.push(answered.includes(o.reviewer) && !unsent(o) ? { ...o, status: 'closed' } : o);
+    entries.push(answered.includes(o.reviewer) && !unsent(o) && !opts.keep?.includes(o.id) ? { ...o, status: 'closed' } : o);
   }
   const rounds = [...index.rounds.filter(r => r.round !== round), { round, findings: entries, ...(opts.fresh ? { fresh: true as const } : {}) }].sort((a, b) => a.round - b.round);
   return { task: index.task, next: nextId(rounds), rounds };
+}
+
+/** I2: the open verify findings of the previous review whose check failed this time only because of the environment (a
+ *  minor verify finding of the same check and evidence: verifyReview): that check judged nothing, so they stay as they
+ *  were, neither closed (recordRound's `keep`) nor taken as closed by a new finding (closedFor's `present`). */
+export function envHeld(index: FindingsIndex, round: number, reviews: Partial<Record<ReviewerName, Review>>): string[] {
+  const env = (reviews.verify?.findings ?? []).filter(f => f.severity === 'minor' && f.check !== undefined);
+  return (previousOf(index, round)?.findings ?? [])
+    .filter(o => o.reviewer === 'verify' && isOpen(o) && env.some(f => f.check === o.check && f.file === o.file)).map(o => o.id);
 }
 
 /** I1: the residuals the previous review left that no reviewer gets back (hardening, architecture) and this verdict does
