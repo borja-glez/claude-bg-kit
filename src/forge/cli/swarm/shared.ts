@@ -12,7 +12,7 @@ import { planLocale } from '../../../lib/locale.js';
 import { coordinatorLiveness } from '../../../lib/execution-view.js';
 import { coordinatorInputs } from '../../live.js';
 import { launchCommand, launchRun, PLAN_PATH } from '../../../lib/launcher.js';
-import type { ExecutionState } from '../../../lib/execution-state.js';
+import { isSafeId, type ExecutionState } from '../../../lib/execution-state.js';
 import { parsePlan, PlanError } from '../../../lib/plan.js';
 import { readDocs } from '../../../lib/read-docs.js';
 import { sessionDoc, stateDoc } from '../../../page/normalize.js';
@@ -118,16 +118,23 @@ export function checkPlanPath(sub: string, planPath: string | undefined): void {
   }
 }
 
+/** M4: refuses, before anything is written, a project that cannot name a member's session (`wp-<project>-<T>`, outside
+ *  the quotes of its launch). readExecution already reads such an execution as none; this holds the launch on its own. */
+export function checkLaunchProject(sub: string, project: string): void {
+  if (!isSafeId(project)) throw new UsageError(`swarm ${sub}: the execution's project may only use letters, digits and _ - . (it names the member's session)`);
+}
+
 /** How the coordinator starts the session of a sessions-mode member: what it runs (`run`) and its parts. */
 export interface MemberLaunch { worktree: string; branch: string; name: string; prompt: string; command: string; run: string; note?: string }
 
 /**
  * A-19: the launch of the session of a sessions-mode member of task <T>: in the task worktree (`swarm worktree <T>`
  * creates it and runs its setup) on task/<T>, with /forge:member and the member's effort and model from swarm.member.
- * forge composes it, never waypoint. The caller checked planPath with checkPlanPath. An old swarm.launcher herdr reads
- * as bg, and the note says so (I-18).
+ * forge composes it, never waypoint. The caller checked planPath with checkPlanPath; a project that is not a safe id is
+ * refused here (checkLaunchProject). An old swarm.launcher herdr reads as bg, and the note says so (I-18).
  */
-export function memberLaunch(root: string, planPath: string, task: string, e: ExecutionState): MemberLaunch {
+export function memberLaunch(sub: string, root: string, planPath: string, task: string, e: ExecutionState): MemberLaunch {
+  checkLaunchProject(sub, e.project);
   const { swarm } = loadConfig(root);
   const worktree = taskWorktree(root, task);
   const name = `wp-${e.project}-${task}`;

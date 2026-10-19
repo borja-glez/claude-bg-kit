@@ -22,6 +22,8 @@ import { STEP_WAIT_SECONDS } from '../src/forge/schedule.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { seedExecution } from './helpers/execution.js';
 import { launchRun } from '../src/lib/launcher.js';
+import { memberLaunch } from '../src/forge/cli/swarm/shared.js';
+import { UsageError } from '../src/forge/cli/errors.js';
 const tmp = useTempDirs();
 
 // swarm start and takeover bind Claude's session id (C1). The tests run inside Claude Code, which sets
@@ -766,6 +768,20 @@ describe('forge swarm (execution)', () => {
     expect(r.stderr).toContain('swarm relaunch: the plan path may only use');
     expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
     expect(existsSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'handover.md'))).toBe(false);
+  });
+  it('an execution whose project is not a safe id reads as none: tick and relaunch refuse it before writing, as memberLaunch does (M4)', () => {
+    sessionsRun();
+    const e = { ...readExecution(root)!, project: 'shop;touch x' };
+    seedExecution(root, e);
+    expect(readExecution(root)).toBeNull();
+    const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    for (const argv of [['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], ['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml']]) {
+      expect(run(argv, io).code, argv[1]).toBe(2);
+      expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+    }
+    expect(existsSync(path.join(root, '.forge', 'work', 'shop;touch x', 'T1', 'handover.md'))).toBe(false);
+    expect(() => memberLaunch('relaunch', root, 'plan.yaml', 'T1', e)).toThrow(UsageError);
+    expect(() => memberLaunch('tick', root, 'plan.yaml', 'T1', e)).toThrow(/^swarm tick: the execution's project may only use/);
   });
   it('relaunch counts the attempt, writes the handover note and blocks at the cap', () => {
     sessionsRun();

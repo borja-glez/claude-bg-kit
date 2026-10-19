@@ -8,14 +8,14 @@ import { schedule, type BgAgent } from '../../schedule.js';
 import { normalizePublicTask, type PublicTask } from '../../../lib/execution-state.js';
 import { planOfLoose, statesOfLoose, readLoose } from '../../loose.js';
 import { noteOnce, trustOutput, untrustedFor } from '../../trust.js';
-import { checkPlanPath, memberLaunch, readTickInput, spanish } from './shared.js';
+import { checkLaunchProject, checkPlanPath, memberLaunch, readTickInput, spanish } from './shared.js';
 
 export const subcommand: SwarmCommand = (rest, ctx) => {
   const { io, deps, flag, json, now, iso, current, update } = ctx;
   const e = current();
   if (!e.active) throw new UsageError('swarm tick: the execution is not active');
-  // A-19: a --plan that cannot go into a member's launch is refused before the scheduler writes anything.
-  if (e.mode === 'sessions') checkPlanPath('tick', flag('plan'));
+  // A-19, M4: a --plan or a project that cannot go into a member's launch is refused before the scheduler writes anything.
+  if (e.mode === 'sessions') { checkPlanPath('tick', flag('plan')); checkLaunchProject('tick', e.project); }
   // I-03: without the person's trust for the commands of a config this run would use (the main checkout's, the run
   // worktree's, those of the task worktrees not integrated yet), nothing of it runs: the run stalls here, and the
   // first stall over those commands says so (`note`: leave one question note).
@@ -67,7 +67,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   // A-19: in sessions mode a start carries the launch of its member's session; the coordinator runs its `run`.
   const planPath = flag('plan');
   const actions = e.mode === 'sessions' && planPath
-    ? d.actions.map(a => a.type === 'start' ? { ...a, launch: memberLaunch(io.cwd, planPath, a.task, e) } : a)
+    ? d.actions.map(a => a.type === 'start' ? { ...a, launch: memberLaunch('tick', io.cwd, planPath, a.task, e) } : a)
     : d.actions;
   return json({ actions, running: Object.values(d.next.tasks).filter(t => t.status === 'running').length, parallel: e.parallel });
 };

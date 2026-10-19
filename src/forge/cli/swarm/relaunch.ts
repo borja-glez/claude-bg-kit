@@ -31,6 +31,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   const planPath = planArg;
   if (!planPath) throw new UsageError('swarm relaunch: --plan is required');
   checkPlanPath(sub, planPath);
+  // M4: composed before anything is written, so a launch it refuses leaves no note and counts no attempt.
+  const launch = memberLaunch(sub, io.cwd, planPath, task, e);
   // The cap and the reason live in schedule.ts: one rule for the scheduler and this command.
   const verdict = relaunchOrBlock(task, t.attempts);
   if (verdict.type === 'block') {
@@ -61,5 +63,5 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
       + `do not redo a step whose output file is already written, and continue from the last stage.`, '',
   ].join('\n'));
   update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), attempts: attempt, startedAt: iso, nudgedAt: null, updatedAt: iso } } });
-  return json({ task, attempt, note, work: workRel(ref), launch: memberLaunch(io.cwd, planPath, task, e) });
+  return json({ task, attempt, note, work: workRel(ref), launch });
 };

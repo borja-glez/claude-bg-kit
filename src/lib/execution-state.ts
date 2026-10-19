@@ -101,8 +101,9 @@ export function normalizeExecution(x: unknown, now?: number): ExecutionState | n
   const runId = str(x.runId), project = str(x.project), base = str(x.base), branch = str(x.branch), coordinator = str(x.coordinator);
   const startedAt = iso(x.startedAt);
   if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
-  // These reach the model's context (SessionStart) and name files: a crafted value makes the whole execution invalid.
-  if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch)) return null;
+  // These reach the model's context (SessionStart), name files and, the project, a member's session in its launch (outside
+  // the quotes): a crafted value makes the whole execution invalid.
+  if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch) || !isSafeId(project)) return null;
   const tasks: Record<string, ExecTask> = {};
   if (isObj(x.tasks)) {
     for (const [id, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
