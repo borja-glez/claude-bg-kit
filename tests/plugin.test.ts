@@ -1983,11 +1983,15 @@ describe('plugin layout', () => {
     expect(Buffer.byteLength(read('plugins/waypoint/hooks/register.js'))).toBeLessThan(220 * 1024);
   });
 
-  it('waypoint:work keeps the core of a lone session and reads references/multisession.md only with multi (J-12)', () => {
+  it('waypoint:work keeps the core of a lone session and reads references/multisession.md next to other sessions or for a multi-session step (J-12)', () => {
     const work = read('plugins/waypoint/skills/work/SKILL.md');
     const multi = read('plugins/waypoint/skills/work/references/multisession.md');
     expect(Buffer.byteLength(work, 'utf8'), 'at most 60 % of its size when wave 5c started').toBeLessThanOrEqual(WORK_CAP);
-    for (const w of ['references/multisession.md', '--messages DB/messages', '`multi: true`', 'node "<WP>" next <plan>']) expect(work, w).toContain(w);
+    for (const w of ['references/multisession.md', '--messages DB/messages', '`multi: true`', 'node "<WP>" next <plan>', '`[waypoint`']) expect(work, w).toContain(w);
+    // The routing to the reference sits where the core reads next's output, before the claim.
+    const at = work.indexOf('`multi: true`');
+    expect(at, '`multi: true` after next').toBeGreaterThan(work.indexOf('node "<WP>" next <plan>'));
+    expect(at, '`multi: true` before ## 2.').toBeLessThan(work.indexOf('\n## 2. '));
     expect(work).not.toContain('waypoint.cjs" ');
     for (const w of ['## 6. Messages between sessions', '## 7. Release', 'node "<WP>" inbox <plan>', 'node "<WP>" recover <plan>', 'node "<WP>" escalations <plan>',
       '--recovered-from', '**Lost task.**', '**Zone expansion.**', '**Delegation.**', '**Phase close.**', '`WP`', '`DB`', '`SID`', '`<plan>`']) expect(multi, w).toContain(w);
