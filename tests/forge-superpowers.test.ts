@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync, utimesSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { claudeConfigDir, doneByCommits, locateSuperpowers, spPlans, spSkillPath, spSpecs } from '../src/forge/superpowers.js';
+import { claudeConfigDir, doneByCommits, locateSuperpowers, spPlanPool, spPlans, spSkillPath, spSpecPool, spSpecs } from '../src/forge/superpowers.js';
 import { writeRoute } from '../src/forge/route.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { parsePlan } from '../src/lib/plan.js';
@@ -102,6 +102,24 @@ describe('sp-specs and sp-plans', () => {
     // A plan superpowers finished with its own executor (ledger lines, boxes never ticked) is not listed.
     file('.superpowers/sdd/open/progress.md', '# SDD ledger — plan: docs/superpowers/plans/open.md\n\nTask 2: complete (commits a..b, tests: x → 1/1 pass)\n', 0);
     expect(spPlans(project, NOW)).toEqual([]);
+  });
+  it('the pools forge route matches a request against: every pending one with no cut, and the rest of the folder (I2)', () => {
+    for (const [n, d] of [['a', 1], ['b', 2], ['c', 3], ['d', 4], ['e', 5], ['old', 20]] as const) file(`docs/superpowers/specs/${n}.md`, `# Spec ${n}\n\n## A\n`, d);
+    const specs = spSpecPool(project, NOW, { declined: ['docs/superpowers/specs/a.md'] });
+    expect(specs.pending.map(s => s.path)).toEqual(['b', 'c', 'd', 'e'].map(n => `docs/superpowers/specs/${n}.md`));
+    expect(specs.others).toEqual([{ path: 'docs/superpowers/specs/a.md', title: 'Spec a' }, { path: 'docs/superpowers/specs/old.md' }]);
+    expect(spSpecs(project, NOW, { declined: ['docs/superpowers/specs/a.md'] })).toEqual(specs.pending.slice(0, 3));
+    const plan = (box: string) => `# P Implementation Plan\n\n### Task 1: one\n\n- [${box}] a\n`;
+    for (const d of [1, 2, 3, 4]) file(`docs/superpowers/plans/open-${d}.md`, plan(' '), d);
+    file('docs/superpowers/plans/done.md', plan('x'), 1);
+    file('docs/superpowers/plans/broken.md', '# no tasks\n', 1);
+    file('docs/superpowers/plans/old.md', plan(' '), 30);
+    const plans = spPlanPool(project, NOW);
+    expect(plans.pending.map(p => p.path)).toEqual([1, 2, 3, 4].map(d => `docs/superpowers/plans/open-${d}.md`));
+    expect([...plans.others].sort((x, y) => x.path.localeCompare(y.path))).toEqual([
+      { path: 'docs/superpowers/plans/broken.md' }, { path: 'docs/superpowers/plans/done.md', title: 'P' }, { path: 'docs/superpowers/plans/old.md' },
+    ]);
+    expect(spPlans(project, NOW)).toEqual(plans.pending.slice(0, 3));
   });
   it('times a tracked file by its last commit, and leaves out declined specs', () => {
     file('docs/superpowers/specs/fresh-clone.md', '# Old spec\n\n## A\n', 0);

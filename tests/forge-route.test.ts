@@ -59,6 +59,47 @@ describe('routeOptions', () => {
     expect(routeOptions(input({ plans: [NEW, CART], runPlan: true, text: 'fix the cart and carry out the plan' })).recommended.plan).toBe(NEW.path);
     expect(namedOrFirst([], 'anything')).toBeUndefined();
   });
+  it('a named plan or spec that is not pending recommends none, never the newest instead (I2)', () => {
+    const NEW = { path: 'docs/superpowers/plans/2026-10-12-coupons.md', title: 'Coupons', tasks: 2, done: 0 };
+    const DONE = { path: 'docs/superpowers/plans/2026-10-02-cart-totals.md', title: 'Cart totals' };
+    const none = { pending: [], others: [] };
+    for (const text of ['Carry out the cart-totals plan', 'Run the "Cart totals" plan', 'carry out 2026-10-02-cart-totals.md', 'carry out docs/superpowers/plans/2026-10-02-cart-totals.md']) {
+      expect(namedOrFirst([NEW], text, [DONE]), text).toBeUndefined();
+      const pools = { plans: { pending: [NEW], others: [DONE] }, specs: none };
+      expect(routeOptions(input({ plans: [NEW], runPlan: true, text, pools })).recommended, text).toEqual({ option: 'forge', why: expect.any(String) });
+    }
+    // A path into the plans' folder that names no plan at all names none either; one that names nothing still falls back.
+    expect(namedOrFirst([NEW], 'carry out docs/superpowers/plans/2026-10-20-nope.md, please')).toBeUndefined();
+    expect(namedOrFirst([NEW], 'carry out docs\\superpowers\\plans\\2026-10-12-coupons.md.')).toBe(NEW);
+    expect(namedOrFirst([NEW], 'carry out the plan in docs/superpowers/plans/', [DONE])).toBe(NEW);
+    expect(namedOrFirst([NEW], 'carry out the plan', [DONE])).toBe(NEW);
+    // The spec side, the same way: a spec a plan already cites, named, is not replaced by the newest one.
+    const SPEC_NEW = { path: 'docs/superpowers/specs/2026-10-12-coupons-design.md', title: 'Coupons', modified: '2026-10-12T00:00:00.000Z' };
+    const pools = { plans: none, specs: { pending: [SPEC_NEW], others: [{ path: 'docs/superpowers/specs/2026-10-01-checkout-design.md', title: 'Checkout' }] } };
+    expect(routeOptions(input({ specs: [SPEC_NEW], buildSpec: true, text: 'build the checkout-design spec', pools })).recommended.option).toBe('forge');
+    expect(routeOptions(input({ path: 'large', specs: [SPEC_NEW], buildSpec: true, text: 'build the checkout-design spec', pools })).recommended).toEqual({ option: 'forge', why: expect.stringContaining('large') });
+  });
+  it('a request is matched against every pending plan, not only the three offered (I2)', () => {
+    const plans = [12, 11, 10, 9].map(d => ({ path: `docs/superpowers/plans/2026-10-${String(d).padStart(2, '0')}-plan-${d}.md`, title: `Plan number ${d}`, tasks: 2, done: 0 }));
+    const r = routeOptions(input({ plans: plans.slice(0, 3), runPlan: true, text: 'carry out plan-9', pools: { plans: { pending: plans, others: [] }, specs: { pending: [], others: [] } } }));
+    expect(r.recommended.plan).toBe(plans[3].path);
+    expect(r.plans.map(p => p.path)).toEqual(plans.slice(0, 3).map(p => p.path));
+  });
+  it('the longest name the request holds wins, and accents and Unicode forms count for nothing (T8)', () => {
+    const BASE = { path: 'docs/superpowers/plans/2026-10-12-cart-totals.md', title: 'Cart totals', tasks: 2, done: 0 };
+    const V2 = { path: 'docs/superpowers/plans/2026-10-02-cart-totals-v2.md', title: 'Cart totals v2', tasks: 2, done: 0 };
+    expect(namedOrFirst([BASE, V2], 'carry out the cart-totals-v2 plan')).toBe(V2);
+    expect(namedOrFirst([BASE, V2], 'run "Cart totals v2"')).toBe(V2);
+    expect(namedOrFirst([V2, BASE], 'carry out the cart-totals plan')).toBe(BASE);
+    // The longer name is a done plan's: none, not the pending plan whose name it contains.
+    expect(namedOrFirst([BASE], 'carry out the cart-totals-v2 plan', [{ path: V2.path, title: V2.title }])).toBeUndefined();
+    const ES = { path: 'docs/superpowers/plans/2026-10-02-carrito.md', title: 'Diseño del carrito', tasks: 2, done: 0 };
+    const OTHER = { path: 'docs/superpowers/plans/2026-10-12-coupons.md', title: 'Coupons', tasks: 2, done: 0 };
+    for (const text of ['ejecuta el plan «diseño del carrito»', 'ejecuta el plan «Diseno del carrito»', 'ejecuta el plan «DISEÑO DEL CARRITO»']) {
+      expect(namedOrFirst([OTHER, ES], text), text).toBe(ES);
+    }
+    expect(namedOrFirst([OTHER, { ...ES, title: 'Diseño del carrito' }], 'ejecuta el plan «diseño del carrito»')!.path).toBe(ES.path);
+  });
   it('in auto mode a Large request without a spec goes to forge, whose design loop never asks', () => {
     const auto = resolvePrefs({ autonomy: 'auto' }, {}, {});
     expect(routeOptions(input({ path: 'large', prefs: auto })).recommended).toEqual({ option: 'forge', why: expect.stringContaining('auto mode') });
@@ -275,6 +316,28 @@ describe('forge route CLI', () => {
     writeFileSync(path.join(root, '.forge', 'work', 't1', 'task.txt'), 'Carry out the cart-totals plan and review each task\n');
     const r = JSON.parse(run(['route', '--task', 't1', '--text-file', '.forge/work/t1/task.txt', '--run-plan'], io).stdout);
     expect(r.recommended).toMatchObject({ option: 'superpowers-plan', plan: 'docs/superpowers/plans/2026-10-02-cart-totals.md' });
+  });
+  it('route recommends the named plan even 4th in recency, and none when the named one is done (I2)', () => {
+    installSuperpowers();
+    const plan = (name: string, title: string, daysAgo: number, box = ' ') => {
+      const f = path.join(root, 'docs', 'superpowers', 'plans', name);
+      mkdirSync(path.dirname(f), { recursive: true });
+      writeFileSync(f, `# ${title} Implementation Plan\n\n### Task 1: one\n\n- [${box}] a\n`);
+      const t = new Date(io.now().getTime() - daysAgo * 86_400_000);
+      utimesSync(f, t, t);
+    };
+    for (const [d, name] of [[1, '12-coupons'], [2, '11-search'], [3, '10-checkout'], [4, '09-invoices']] as const) plan(`2026-10-${name}.md`, name.slice(3), d);
+    plan('2026-10-05-cart-totals.md', 'Cart totals', 5, 'x');
+    const rec = (text: string) => {
+      writeFileSync(path.join(root, 'req.txt'), text);
+      return JSON.parse(run(['route', '--task', 't1', '--text-file', 'req.txt', '--path', 'medium', '--run-plan'], io).stdout);
+    };
+    const fourth = rec('Carry out the invoices plan and review each task\n');
+    expect(fourth.plans.map((p: { path: string }) => p.path)).toHaveLength(3);
+    expect(fourth.recommended).toMatchObject({ option: 'superpowers-plan', plan: 'docs/superpowers/plans/2026-10-09-invoices.md' });
+    const done = rec('Carry out the cart-totals plan and review each task\n');
+    expect(done.recommended).toEqual({ option: 'forge', why: expect.any(String) });
+    expect(rec('Carry out the plan and review each task\n').recommended).toMatchObject({ plan: 'docs/superpowers/plans/2026-10-12-coupons.md' });
   });
 });
 

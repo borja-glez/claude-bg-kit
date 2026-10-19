@@ -15,10 +15,16 @@ import { createIfAbsent } from './execution.js';
 export interface Superpowers { installed: boolean; version: string | null; installPath: string | null }
 export interface SpSpec { path: string; title: string; modified: string }
 export interface SpPlanEntry { path: string; title: string; tasks: number; done: number }
+/** A plan or a spec of docs/superpowers that is not offered: its path, and its title when it was read (I2). */
+export interface SpNamed { path: string; title?: string }
+/** I2: what forge route matches a request against: every plan (or spec) still to take in the window, newest first, with
+ *  no SP_MAX cut, and the rest of its folder (`others`: those of the window that are done, cited, handed off or declined,
+ *  with their titles, and the older files by name), which only keep a request that names one from getting another. */
+export interface SpPool<T> { pending: T[]; others: SpNamed[] }
 
 /** sp-specs and sp-plans look this far back, and list at most SP_MAX, newest first. */
 export const SP_WINDOW_MS = 14 * 24 * 3600_000;
-const SP_MAX = 3;
+export const SP_MAX = 3;
 const NONE: Superpowers = { installed: false, version: null, installPath: null };
 
 /** Claude Code's configuration directory: CLAUDE_CONFIG_DIR, else ~/.claude. */
@@ -265,6 +271,13 @@ function recentMarkdown(root: string, relDir: string, now: number, committedAt?:
   return out.sort((a, b) => b.time - a.time);
 }
 
+// I2: the .md files of `<root>/<relDir>` that `seen` (the window's) does not hold, by their path only.
+function olderMarkdown(root: string, relDir: string, seen: ReadonlySet<string>): SpNamed[] {
+  let names: string[];
+  try { names = readdirSync(path.join(root, relDir)); } catch { return []; }
+  return names.filter(n => n.endsWith('.md') && !seen.has(n)).map(n => ({ path: `${relDir}/${n}` }));
+}
+
 const titleOf = (file: string): string | null => { try { return specH1(readFileSync(file, 'utf8')); } catch { return null; } };
 
 // A spec's path as a plan, a design or a route gives it, made a path in the repository: forward slashes, no ./, and an
@@ -294,7 +307,20 @@ function planSpecs(root: string): string[] {
  * as its `source`, none a plan of docs/superpowers/plans cites in its **Spec:** and none a route handed off or finished
  * (`routed`; K1-07), and none the user turned down.
  */
-export function spSpecs(root: string, now: number, opts: { committedAt?: CommittedAt; declined?: string[]; routed?: readonly string[] } = {}): SpSpec[] {
+export function spSpecs(root: string, now: number, opts: SpecOpts = {}): SpSpec[] {
+  return specPool(root, now, opts, SP_MAX).pending;
+}
+
+/** I2: spSpecs with no SP_MAX cut, and the rest of docs/superpowers/specs (SpPool). */
+export function spSpecPool(root: string, now: number, opts: SpecOpts = {}): SpPool<SpSpec> {
+  return specPool(root, now, opts, Infinity);
+}
+
+type SpecOpts = { committedAt?: CommittedAt; declined?: string[]; routed?: readonly string[] };
+
+// The pending specs, at most `max`; the others only without a cut.
+function specPool(root: string, now: number, opts: SpecOpts, max: number): SpPool<SpSpec> {
+  const all = max === Infinity;
   const cited = new Set<string>([...planSpecs(root), ...(opts.routed ?? []).map(s => repoRelOf(root, s))]);
   let projects: string[] = [];
   try { projects = readdirSync(path.join(root, 'docs', 'waypoint')); } catch { /* no waypoint project */ }
@@ -304,34 +330,56 @@ export function spSpecs(root: string, now: number, opts: { committedAt?: Committ
       if (s) cited.add(s.replace(/\\/g, '/').replace(/^\.\//, ''));
     } catch { /* no design, or not a valid one */ }
   }
-  const out: SpSpec[] = [];
-  for (const f of recentMarkdown(root, 'docs/superpowers/specs', now, opts.committedAt)) {
+  const pool: SpPool<SpSpec> = { pending: [], others: [] };
+  const recent = recentMarkdown(root, 'docs/superpowers/specs', now, opts.committedAt);
+  for (const f of recent) {
+    if (pool.pending.length >= max) break;
     const rel = `docs/superpowers/specs/${f.name}`;
-    if (cited.has(rel) || opts.declined?.includes(rel)) continue;
-    out.push({ path: rel, title: titleOf(f.abs) ?? f.name.replace(/\.md$/, ''), modified: new Date(f.time).toISOString() });
-    if (out.length === SP_MAX) break;
+    const taken = cited.has(rel) || !!opts.declined?.includes(rel);
+    if (taken && !all) continue;
+    const title = titleOf(f.abs) ?? f.name.replace(/\.md$/, '');
+    if (taken) pool.others.push({ path: rel, title });
+    else pool.pending.push({ path: rel, title, modified: new Date(f.time).toISOString() });
   }
-  return out;
+  if (all) pool.others.push(...olderMarkdown(root, 'docs/superpowers/specs', new Set(recent.map(f => f.name))));
+  return pool;
 }
+
+type PlanOpts = { committedAt?: CommittedAt; main?: string; subjects?: readonly string[] };
 
 /**
  * The plans superpowers wrote in the last 14 days that still have a task to do; a file that is not a plan is skipped.
  * A task is done by its boxes, by an SDD ledger or forge's record here or in the main checkout (`main`), or by a
  * `<title>: task N done` commit among `subjects` (K1-07: the commits of this branch and the main checkout's).
  */
-export function spPlans(root: string, now: number, opts: { committedAt?: CommittedAt; main?: string; subjects?: readonly string[] } = {}): SpPlanEntry[] {
-  const out: SpPlanEntry[] = [];
-  for (const f of recentMarkdown(root, 'docs/superpowers/plans', now, opts.committedAt)) {
+export function spPlans(root: string, now: number, opts: PlanOpts = {}): SpPlanEntry[] {
+  return planPool(root, now, opts, SP_MAX).pending;
+}
+
+/** I2: spPlans with no SP_MAX cut, and the rest of docs/superpowers/plans (SpPool). */
+export function spPlanPool(root: string, now: number, opts: PlanOpts = {}): SpPool<SpPlanEntry> {
+  return planPool(root, now, opts, Infinity);
+}
+
+// The pending plans, at most `max`; the others only without a cut.
+function planPool(root: string, now: number, opts: PlanOpts, max: number): SpPool<SpPlanEntry> {
+  const all = max === Infinity;
+  const pool: SpPool<SpPlanEntry> = { pending: [], others: [] };
+  const recent = recentMarkdown(root, 'docs/superpowers/plans', now, opts.committedAt);
+  for (const f of recent) {
+    if (pool.pending.length >= max) break;
+    const rel = `docs/superpowers/plans/${f.name}`;
     let plan;
     try {
       const parsed = parseSpPlan(readFileSync(f.abs, 'utf8'));
       const ledger = spLedgerDone(opts.main ? [root, opts.main] : [root], f.abs);
       plan = markDone(parsed, [...new Set([...ledger, ...doneByCommits(opts.subjects ?? [], parsed.plan.title)])]);
-    } catch { continue; }
+    } catch { if (all) pool.others.push({ path: rel }); continue; }
     const done = plan.tasks.filter(t => t.done).length;
-    if (done === plan.tasks.length) continue;
-    out.push({ path: `docs/superpowers/plans/${f.name}`, title: plan.plan.title || f.name.replace(/\.md$/, ''), tasks: plan.tasks.length, done });
-    if (out.length === SP_MAX) break;
+    const title = plan.plan.title || f.name.replace(/\.md$/, '');
+    if (done === plan.tasks.length) { if (all) pool.others.push({ path: rel, title }); continue; }
+    pool.pending.push({ path: rel, title, tasks: plan.tasks.length, done });
   }
-  return out;
+  if (all) pool.others.push(...olderMarkdown(root, 'docs/superpowers/plans', new Set(recent.map(f => f.name))));
+  return pool;
 }

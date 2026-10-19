@@ -7,7 +7,7 @@ import { TASK_ID } from '../lib/decisions.js';
 import { isSafeId } from '../lib/execution-state.js';
 import type { PathName } from './triage.js';
 import type { Prefs } from './prefs.js';
-import type { SpPlanEntry, SpSpec } from './superpowers.js';
+import type { SpNamed, SpPlanEntry, SpPool, SpSpec } from './superpowers.js';
 
 export const ROUTE_OPTIONS = ['forge', 'superpowers', 'superpowers-design', 'superpowers-plan', 'none'] as const;
 export type RouteOption = (typeof ROUTE_OPTIONS)[number];
@@ -24,27 +24,59 @@ export interface RouteOutput {
   options: RouteOption[]; recommended: Recommendation;
 }
 
+/** T8: case, accents and Unicode forms count for nothing when a request names a plan or a spec. */
+const fold = (s: string) => s.normalize('NFD').replace(/\p{M}+/gu, '').normalize('NFC').toLowerCase();
+// What follows a folder's path in a request: the file it names, up to a space, a quote or a bracket.
+const NAMED_FILE = /[^\s"'`<>()[\]{},;|*]*/y;
+
 /**
- * K1-07: the plan or the spec a request names, by its path, its file name with or without `.md` and the date, or its
- * title (names of 6 characters or more: a short word names nothing), else the first, the most recent with work left.
+ * K1-07, I2: the plan or the spec a request names, else the first (the most recent with work left). `entries` are every
+ * pending one, newest first (not only the SP_MAX offered); `others`, the rest of their folder (done, cited, handed off,
+ * declined or older than the window), are named only so that naming one never recommends another.
+ * - A path into their folder (`docs/superpowers/plans/<file>`) decides alone: the entry with that file, else none.
+ * - Else the longest name the text holds (T8: `cart-totals-v2` over `cart-totals`), among the entries and the others:
+ *   its path, its file name with or without `.md` and the date, or its title (6 characters or more: a short word names
+ *   nothing). An entry's: that entry; one of the others': none.
+ * - Nothing named: the first.
  */
-export function namedOrFirst<T extends { path: string; title: string }>(entries: readonly T[], text: string): T | undefined {
-  const t = text.toLowerCase().replace(/\\/g, '/');
-  const names = (e: T) => {
-    const file = e.path.split('/').pop() ?? e.path;
-    const stem = file.replace(/\.md$/i, '');
-    return [e.path, file, stem, stem.replace(/^\d{4}-\d{2}-\d{2}-/, ''), e.title].map(s => s.toLowerCase()).filter(s => s.length >= 6);
+export function namedOrFirst<T extends { path: string; title: string }>(entries: readonly T[], text: string, others: readonly SpNamed[] = []): T | undefined {
+  const t = fold(text).replace(/\\/g, '/');
+  const fileOf = (p: string) => fold(p).split('/').pop() ?? '';
+  const stemOf = (p: string) => fileOf(p).replace(/\.md$/, '');
+  const named = new Set<string>();
+  for (const dir of new Set([...entries, ...others].map(e => fold(e.path).split('/').slice(0, -1).join('/')).filter(Boolean))) {
+    // Each search starts where the last file ended, so a long request is read once per folder.
+    for (let at = t.indexOf(`${dir}/`); at >= 0;) {
+      NAMED_FILE.lastIndex = at + dir.length + 1;
+      const file = NAMED_FILE.exec(t)?.[0] ?? '';
+      // Without the punctuation that ends a sentence («… cart-totals.md.»).
+      let end = file.length;
+      while (end > 0 && '.:!?'.includes(file[end - 1])) end--;
+      if (end) named.add(file.slice(0, end));
+      at = t.indexOf(`${dir}/`, at + dir.length + 1 + file.length);
+    }
+  }
+  if (named.size) return entries.find(e => named.has(fileOf(e.path)) || named.has(stemOf(e.path)));
+  const longest = (e: SpNamed) => {
+    const stem = stemOf(e.path);
+    return [fold(e.path), fileOf(e.path), stem, stem.replace(/^\d{4}-\d{2}-\d{2}-/, ''), fold(e.title ?? '')]
+      .filter(n => n.length >= 6 && t.includes(n)).reduce((m, n) => Math.max(m, n.length), 0);
   };
-  return entries.find(e => names(e).some(n => t.includes(n))) ?? entries[0];
+  // Ties go to the entries, the most recent first.
+  let best: { entry: T | undefined; length: number } = { entry: undefined, length: 0 };
+  for (const e of entries) { const n = longest(e); if (n > best.length) best = { entry: e, length: n }; }
+  for (const o of others) { const n = longest(o); if (n > best.length) best = { entry: undefined, length: n }; }
+  return best.length ? best.entry : entries[0];
 }
 
 /** The options and the recommendation: a plan the request asks to carry out, then a spec it asks to build (K1-07: the one
- *  it names, else the most recent), else forge, Large included (K1-06: forge designs it with waypoint). Without
- *  superpowers: forge or no forge. A recent spec or plan the request does not ask for is only listed: it may be about
- *  another task. */
+ *  it names, else the most recent; I2: none when it names one that is not pending), else forge, Large included (K1-06:
+ *  forge designs it with waypoint). Without superpowers: forge or no forge. A recent spec or plan the request does not
+ *  ask for is only listed: it may be about another task. `pools`: what the request is matched against, every pending
+ *  spec and plan and the rest of their folders (I2; `specs` and `plans`, the offered ones, when absent). */
 export function routeOptions(i: {
   path: PathName; prefs: Prefs; superpowers: { installed: boolean; version: string | null }; specs: SpSpec[]; plans: SpPlanEntry[];
-  runPlan: boolean; buildSpec: boolean; text?: string;
+  runPlan: boolean; buildSpec: boolean; text?: string; pools?: { specs: SpPool<SpSpec>; plans: SpPool<SpPlanEntry> };
 }): RouteOutput {
   const base = {
     workflow: i.prefs.workflow, autonomy: i.prefs.autonomy, sources: i.prefs.sources, superpowers: i.superpowers,
@@ -53,8 +85,8 @@ export function routeOptions(i: {
   if (!i.superpowers.installed) {
     return { ...base, options: ['forge', 'none'], recommended: { option: 'forge', why: 'superpowers is not installed: forge triages, implements and reviews it' } };
   }
-  const plan = namedOrFirst(i.plans, i.text ?? '');
-  const spec = namedOrFirst(i.specs, i.text ?? '');
+  const plan = namedOrFirst(i.pools?.plans.pending ?? i.plans, i.text ?? '', i.pools?.plans.others);
+  const spec = namedOrFirst(i.pools?.specs.pending ?? i.specs, i.text ?? '', i.pools?.specs.others);
   let recommended: Recommendation;
   if (i.runPlan && plan) recommended = { option: 'superpowers-plan', why: 'an unfinished superpowers plan to carry out: forge executes and reviews each task', plan: plan.path };
   else if (i.buildSpec && spec) recommended = { option: 'superpowers-design', why: 'a recent superpowers spec not imported yet: forge builds from it', spec: spec.path };
