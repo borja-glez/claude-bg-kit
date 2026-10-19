@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { buildBandModel, NO_VIEWER, openTasksFrom, type BandFiles } from '../src/mod/model.js';
 import { pickProject } from '../src/lib/project-pick.js';
 import { bandLine, clip } from '../src/mod/band-line.js';
+import { oneLine } from '../src/lib/one-line.js';
 
 const plan = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8')
   .replace('version: "0.1"', 'version: "0.1"\nartifacts:\n  roadmap: https://claude.ai/artifact/abc');
@@ -521,27 +522,53 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     expect(n({ kind: 'previous', since: '2026-10-15T10:00:00.000Z' }, 'en')).toBe('◌ left in progress: T002 API de pedidos · 2 h ago');
     expect(n({ kind: 'previous', title: 'Un título muy largo que pasa de cuarenta caracteres con holgura' })).toContain('Un título muy largo que pasa de cuarent…');
     expect(n({ kind: 'previous', subject: 'design', task: null, title: null })).toBe('◌ diseño a medias: demo-shop · hace 3 min');
-    // M7: the project is a folder name nobody checks: one line, without controls, at most 40 characters.
-    const c = (...codes: number[]) => String.fromCharCode(...codes);
-    expect(n({ kind: 'previous', subject: 'design', task: null, title: null, project: `a|b${c(0x1b)}[2J${c(0x202e)}${'x'.repeat(60)}` }))
-      .toBe(`◌ diseño a medias: a|b [2J${'x'.repeat(32)}… · hace 3 min`);
+    // The project is cut at 40 cells (buildBandModel cleans it: the next tests).
+    expect(n({ kind: 'previous', subject: 'design', task: null, title: null, project: `a|b ${'x'.repeat(60)}` }))
+      .toBe(`◌ diseño a medias: a|b ${'x'.repeat(35)}… · hace 3 min`);
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', since: '2026-10-13T12:00:00.000Z' })).toBe('◌ ejecución parada: 3/12 integradas · hace 2 d');
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: null }, 'en')).toBe('◌ execution without a coordinator: 3/12 integrated · 3 min ago');
   });
-  it('a title loses its control and bidi characters, in a notice and in the work band', () => {
+  it('oneLine drops the control and bidi characters, and clip only cuts by width (M1)', () => {
     const c = (...codes: number[]) => String.fromCharCode(...codes);
     // A bell and a C1 CSI become spaces; the bidi overrides and isolates go.
     const dirty = `API${c(0x202e)} de${c(0x07)}pedidos${c(0x2066)}${c(0x9b)}${c(0x2069)}${c(0x202a, 0x202b, 0x202c, 0x202d, 0x2067, 0x2068)}`;
-    expect(clip(dirty)).toBe('API de pedidos');
-    expect(clip(`${c(0x1b)}[31m${'x'.repeat(50)}`)).toBe(`[31m${'x'.repeat(35)}…`);
-    const notice = bandLine({ mode: 'notice', project: 'demo-shop', locale: 'es', kind: 'previous', subject: 'task', seat: 'main', task: 'T002', title: dirty,
-      since: null, runId: null, roadmapUrl: null, key: 'task:T002', viewer: NO_VIEWER } as never, 0);
-    expect(notice).toBe('◌ quedó a medias: T002 API de pedidos');
-    const work = bandLine({ mode: 'work', project: 'p', locale: 'es', sid: 'main', track: null, roadmapUrl: null, current: { id: 'T002', title: dirty },
-      trackDone: 0, trackTotal: 2, percent: 0, inbox: 0, escalation: false, phase: null, cells: 'ap', swarm: false, run: null, viewer: NO_VIEWER } as never, 0);
-    expect(work).toBe('● main · T002 API de pedidos · tareas 0/2 · global 0 %');
+    expect(oneLine(dirty)).toBe('API de pedidos');
+    expect(clip(oneLine(`${c(0x1b)}[31m${'x'.repeat(50)}`))).toBe(`[31m${'x'.repeat(35)}…`);
+    // Clean text shows as before.
+    expect(clip('API de pedidos')).toBe('API de pedidos');
+    expect(clip('Un título muy largo que pasa de cuarenta caracteres con holgura')).toBe('Un título muy largo que pasa de cuarent…');
   });
-  it('a task id loses them too: planLite reads an id the CLI rejects, and the work band cleans it (I-13)', () => {
+  it('the model cleans the free text a band shows: a title, a phase name, the notice title, an address that is not a web link, and the project (M1)', () => {
+    const c = (...codes: number[]) => String.fromCharCode(...codes);
+    const dirty = `API${c(0x202e)} de${c(0x07)}pedidos${c(0x2066)}${c(0x9b)}${c(0x2069)}${c(0x202a, 0x202b, 0x202c, 0x202d, 0x2067, 0x2068)}`;
+    // A YAML double-quoted scalar that spells every character outside printable ASCII as an escape.
+    const yq = (s: string) => `"${[...s].map(ch => (/[ -~]/.test(ch) && ch !== '"' && ch !== '\\' ? ch : `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`)).join('')}"`;
+    const dirtyPlan = plan
+      .replace('title: API de pedidos', `title: ${yq(dirty)}`)
+      .replace('name: Base,', `name: ${yq(dirty)},`)
+      .replace('roadmap: https://claude.ai/artifact/abc', `roadmap: ${yq(`local:${dirty}`)}`);
+    const session = j({ sessionId: 'backend', track: 'backend' });
+    const states = { T002: j({ status: 'in_progress', owner: 'backend' }) };
+    const clean = 'API de pedidos';
+    const work = buildBandModel('demo-shop', { ...empty, ...ownerOf('backend'), session, plan: dirtyPlan, states });
+    expect(work).toMatchObject({ mode: 'work', current: { id: 'T002', title: clean }, phase: { name: clean }, roadmapUrl: `local:${clean}` });
+    expect(bandLine(work, 0)).toContain(` · T002 ${clean} · `);
+    expect(buildBandModel('demo-shop', { ...empty, plan: dirtyPlan, session, states, bindings: { '.': bound('backend', 'A') }, sessionId: 'B' }))
+      .toMatchObject({ mode: 'notice', title: clean, roadmapUrl: `local:${clean}` });
+    expect(buildBandModel('demo-shop', { ...empty, plan: dirtyPlan, session: j({ sessionId: 'main', track: 'backend' }), execution: EXEC(), sessionId: 's1' }))
+      .toMatchObject({ mode: 'run', phase: { name: clean }, roadmapUrl: `local:${clean}` });
+    // A web link stays as it is: the band opens or copies it.
+    expect(buildBandModel('demo-shop', { ...empty, ...ownerOf('backend'), session, plan, states })).toMatchObject({ roadmapUrl: 'https://claude.ai/artifact/abc' });
+    const designer = ownerOf('main', 'A', { via: 'design' });
+    const d = design.replace('start_prompt:', `artifact: ${yq(`local:${dirty}`)}\nstart_prompt:`);
+    expect(buildBandModel('demo-shop', { ...empty, ...designer, design: d })).toMatchObject({ mode: 'design', designUrl: `local:${clean}` });
+    // M7: the project is a folder name nobody checks: one line, without controls, and the band cuts it at 40 cells.
+    const project = `a|b${c(0x1b)}[2J${c(0x202e)}${'x'.repeat(60)}`;
+    const left = buildBandModel(project, { ...empty, design, bindings: { '.': bound('main', 'A', { via: 'design', endedAt: ago(60), endReason: 'prompt_input_exit' }) }, sessionId: 'B' });
+    expect(left).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'design', project: `a|b [2J${'x'.repeat(60)}` });
+    expect(bandLine(left, Date.now())).toContain(`◌ diseño a medias: a|b [2J${'x'.repeat(32)}… · `);
+  });
+  it('a task id the CLI rejects never reaches the band: planLite leaves its task out (M1)', () => {
     const c = (...codes: number[]) => String.fromCharCode(...codes);
     const dirty = `T002${c(0x202e)}${c(0x0a)}rm`;
     const files: BandFiles = {
@@ -550,8 +577,9 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
       states: { [dirty]: j({ status: 'in_progress', owner: 'backend' }) },
     };
     const m = buildBandModel('demo-shop', files);
-    expect(m).toMatchObject({ mode: 'work', current: { id: dirty, title: 'API de pedidos' } });
-    expect(bandLine(m, 0)).toContain(' · T002 rm API de pedidos · ');
+    expect(m).toMatchObject({ mode: 'work', current: null });
+    expect(JSON.stringify(m)).not.toContain(c(0x202e));
+    expect(bandLine(m, 0)).toContain('sin tarea en curso');
     // A valid id shows whole, up to the 64 characters of the plan's id rule.
     const long = 'x'.repeat(64);
     const work = bandLine({ mode: 'work', project: 'p', locale: 'es', sid: 'main', track: null, roadmapUrl: null, current: { id: long, title: 'API' },

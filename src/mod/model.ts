@@ -3,6 +3,7 @@ import { escalationCandidates, inboxFor } from '../lib/coordination.js';
 import { parseDismissed, pendingProposals, unionDismissed, type GateCritique } from '../lib/design-gate.js';
 import { changelogLite, critiqueLite, designMetaLite } from '../lib/design-lite.js';
 import { planLite } from '../lib/plan-lite.js';
+import { oneLine } from '../lib/one-line.js';
 import { coordinatorGone, executionView, isVisibleRun } from '../lib/execution-view.js';
 import { isSafeId, normalizeLive, normalizePublicTask, parseExecution, type ExecutionState, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import type { MessageDoc, Plan, States } from '../lib/types.js';
@@ -205,9 +206,38 @@ export function executionViewer(f: BandFiles): BandViewer {
  * bindings, the execution, its members and the seats' tasks in progress) picks the band: the coordinator sees the run,
  * whole until it is closed; a member of it, its own task with the run's line (B-06); the owner of a seat, its work band,
  * or the draft it is bound to (K3-13); anyone else, a notice when there is something to say. Every band carries the
- * role as `viewer`.
+ * role as `viewer`, and its free text comes clean (M1: cleaned).
  */
 export function buildBandModel(project: string, f: BandFiles): BandModel {
+  return cleaned(bandOf(project, f));
+}
+
+type BandPhase = { index: number; total: number; name: string };
+type BandAuto = { count: number; lastMajor: string | null };
+const WEB_URL = /^https?:\/\//i;
+
+/**
+ * M1: the free text a band carries, cleaned once here so no reader (the band, lens) repeats it: the project (a folder
+ * name nobody checks), a task's title, a phase's name, a notice's title, forge's last major decision and an address
+ * that is not a web link (the band shows one as a text label). A web link stays as it is: it is opened or copied. The
+ * ids come clean from planLite, which keeps only plan ids.
+ */
+function cleaned(m: BandModel): BandModel {
+  const url = (u: string | null): string | null => (u && !WEB_URL.test(u) ? oneLine(u) : u);
+  const phase = (p: BandPhase | null): BandPhase | null => (p ? { ...p, name: oneLine(p.name) } : null);
+  const auto = (a: BandAuto | undefined) => (a ? { auto: { ...a, lastMajor: a.lastMajor === null ? null : oneLine(a.lastMajor) } } : {});
+  switch (m.mode) {
+    case 'none': return m;
+    case 'work':
+      return { ...m, project: oneLine(m.project), roadmapUrl: url(m.roadmapUrl), current: m.current && { ...m.current, title: oneLine(m.current.title) }, phase: phase(m.phase), ...auto(m.auto) };
+    case 'run': return { ...m, project: oneLine(m.project), roadmapUrl: url(m.roadmapUrl), phase: phase(m.phase), ...auto(m.auto) };
+    case 'design': return { ...m, project: oneLine(m.project), designUrl: url(m.designUrl), ...auto(m.auto) };
+    case 'notice': return { ...m, project: oneLine(m.project), roadmapUrl: url(m.roadmapUrl), title: m.title === null ? null : oneLine(m.title) };
+  }
+}
+
+/** The band before its text is cleaned. */
+function bandOf(project: string, f: BandFiles): BandModel {
   const now = f.now ?? Date.now();
   try {
     const plan = f.plan !== undefined ? planLite(f.plan) : null;

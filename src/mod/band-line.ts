@@ -11,21 +11,15 @@ const TITLE_MAX = 40;
 // A slot's task id in the run line: loose task ids (`<slug>-<tag>`) run up to 45 characters.
 const SLOT_ID_MAX = 20;
 // The seat's task id in the work line: the plan's id rule allows 64 characters (src/lib/ids.ts), so a valid id shows
-// whole. I-13: the band reads the plan with planLite, which does not check ids, so the id is cleaned as a title is.
+// whole. M1: planLite keeps only tasks whose id follows that rule.
 const TASK_ID_MAX = 64;
 
-// As cleanText (src/lib/batches.ts): bidi controls reorder what a reader sees; they are built from their code points, so
-// none is written in this file. C0 and C1 controls become spaces.
-const BIDI = new RegExp(`[${[0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069].map(c => String.fromCharCode(c)).join('')}]`, 'g');
-// eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
-
 /**
- * A title or an id as the band shows it: one line, without control or bidi characters, cut by the cells it takes (F-13),
- * not by code points: a wide title is cut where the terminal would cut it.
+ * A title or an id as the band shows it, cut by the cells it takes (F-13), not by code points: a wide title is cut where
+ * the terminal would cut it. M1: the text is already one clean line: buildBandModel cleans it (oneLine, src/lib/one-line.ts).
  */
 export function clip(text: string, max = TITLE_MAX): string {
-  return clipWidth(String(text).replace(CONTROL, ' ').replace(BIDI, '').replace(/\s+/g, ' ').trim(), max);
+  return clipWidth(String(text), max);
 }
 
 /** F-09: a stage as a short band says it: «T001 impl · T002 rev r2 · T003 val». The same in every language. */

@@ -2,6 +2,7 @@
 // `block`, `heartbeat` and `release --free` print {now, eid, eids, leaseUntil, batch} and the skill hands `batch` to
 // ArtifactData `batch` as it is. Pure: src/cli/run.ts reads the flags, the clock, git and the files.
 import { LEASE_CAP_MINUTES, LEASE_MINUTES } from './coordination.js';
+import { oneLine } from './one-line.js';
 import type { Write } from './sync.js';
 import type { Commit } from './types.js';
 
@@ -12,17 +13,13 @@ export const SUMMARY_MAX = 300;
 const DEL = { __delete__: true } as const;
 const MIN = 60_000;
 const iso = (ms: number): string => new Date(ms).toISOString();
-// Bidi controls reorder what a reader sees; they are built from their code points, so none is written in this file.
-const BIDI = new RegExp(`[${[0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069].map(c => String.fromCharCode(c)).join('')}]`, 'g');
-// eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 
 /** At most `max` code points, so a clip never splits a surrogate pair (carry 1). */
 export const clipPoints = (text: string, max: number): string => (text.length <= max ? text : Array.from(text).slice(0, max).join(''));
 
 /** Free text for the roadmap (a block reason, a summary): one line, without control or bidi characters, at most `max`. */
 export function cleanText(text: string, max: number): string {
-  return clipPoints(text.replace(CONTROL, ' ').replace(BIDI, '').replace(/\s+/g, ' ').trim(), max);
+  return clipPoints(oneLine(text), max);
 }
 
 const event = (doc_id: string, data: Record<string, unknown>): Write => ({ op: 'set', collection: 'events', doc_id, data });
