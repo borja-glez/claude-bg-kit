@@ -2570,6 +2570,28 @@ describe('forge stats (C-09)', () => {
     expect(run(['verify-close', '--task', 'T1-1', '--dir', 'nope', '--evidence', 'nope'], io).code).toBe(2);
   });
 
+  it('verify-close stops and frees before it reads verify.json: an unusable one exits 2 and names the cleanup (I4)', () => {
+    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    const ev = path.join(root, '.forge', 'work', 'T1', 'evidence', '1-1');
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(path.join(ev, 'logs'), { recursive: true });
+    // The agent ran out of turns: blocked without a reason, after verify-spawn and before its own verify-cleanup.
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({ result: 'blocked', checks: [] }));
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+    const record = path.join(ev, 'logs', '1.pid.json');
+    writeFileSync(record, JSON.stringify([{ pid: dead, startedAt: Date.now() - 60_000, image: 'node' }]));
+    const reservation = path.join(root, '.forge', 'verify-env', 'T1-1-1-1.json');
+    mkdirSync(path.dirname(reservation), { recursive: true });
+    writeFileSync(reservation, JSON.stringify({ key: 'T1-1-1-1', task: 'T1-1', port: 47311, profileDir: 'p', evidence: ev, dir, startedAt: new Date().toISOString() }));
+    const r = run(['verify-close', '--task', 'T1-1', '--dir', '.forge/work/T1/reviews-1-1', '--evidence', '.forge/work/T1/evidence/1-1', '--locale', 'en'], { ...io, env: {} });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('is not a usable verify result');
+    expect(r.stderr).toContain(`"gone":[${dead}]`);
+    expect(r.stderr).toContain('"released":[47311]');
+    expect(existsSync(record)).toBe(false);
+    expect(existsSync(reservation)).toBe(false);
+  });
+
   it('verify-close never lists a shot that resolves outside the evidence dir (absolute path, symlink)', () => {
     const dir = path.join(root, '.forge', 'work', 'T2', 'reviews-1-1');
     const ev = path.join(root, '.forge', 'work', 'T2', 'evidence', '1-1');
