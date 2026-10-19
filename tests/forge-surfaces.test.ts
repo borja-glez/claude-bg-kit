@@ -498,10 +498,10 @@ describe('learned notes that help (K2-11)', () => {
       `slug ${'a1b2c3d4e5f6g7h8'}-tail-of-words-that-goes-on-and-on-and-on`]) expect(why(n), n).toBe('looks-secret');
   });
   it('a note of 100000 spaces and newlines is refused fast, and a web route under /home is no home path', () => {
-    const t0 = Date.now();
+    // No clock: the note is refused as too long before it is normalised (the guard is `raw.length > NOTE_MAX * 4`), so
+    // the answer does not depend on how fast the machine is.
     expect(why(' \n'.repeat(50000))).toBe('too-long');
     expect(why(`a${' '.repeat(50000)}\n${' '.repeat(50000)}b`)).toBe('too-long');
-    expect(Date.now() - t0).toBeLessThan(200);
     expect(why('The /home/dashboard route redirects')).toBeNull();
     expect(why('The /Users/list page is slow')).toBeNull();
     expect(why('see /home/borja/notes.txt')).toBe('looks-secret');

@@ -11,10 +11,11 @@ import { envDir, portFree, readReservations, releaseEnv, reserveEnv } from '../s
 import { runIdOf } from '../src/forge/execution.js';
 
 const tmp = useTempDirs();
-// A block of 12 consecutive free ports, found once; without one the suite skips (it never fails on a busy machine).
+// A block of 12 consecutive free ports, found once; without one the suite skips (it never fails on a busy machine). Below
+// 32768, so it lies outside the ephemeral ranges of Linux (32768-60999) and Windows (49152-65535) that the OS hands out.
 const P = (() => {
-  for (let b = 47310; b < 47900; b += 20) if (Array.from({ length: 12 }, (_, k) => b + k).every(p => portFree(p))) return b;
-  console.warn('forge-verify-env: no free block of 12 ports in 47310-47899; the suite is skipped');
+  for (let b = 14310; b < 14900; b += 20) if (Array.from({ length: 12 }, (_, k) => b + k).every(p => portFree(p))) return b;
+  console.warn('forge-verify-env: no free block of 12 ports in 14310-14899; the suite is skipped');
   return null;
 })();
 let root: string;
@@ -68,7 +69,7 @@ describe.skipIf(P === null)('forge verify-env (K2-07)', () => {
   });
   it('two reservations that pick the same port at once: the key that sorts first keeps it, the other takes the next (Review Focus 2)', () => {
     mkdirSync(envDir(root), { recursive: true });
-    // While T1-1-1 probes 47310, another session reserves it for A-1-1.
+    // While T1-1-1 probes the first port of the block, another session reserves it for A-1-1.
     const free = (port: number) => {
       if (port === P) {
         writeFileSync(path.join(envDir(root), 'A-1-1.json'), JSON.stringify({ key: 'A-1-1', task: 'A-1', port: P, profileDir: 'p', evidence: 'e', dir: 'd', startedAt: now.toISOString() }));
