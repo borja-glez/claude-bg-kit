@@ -48,17 +48,45 @@ export const LEARNED_GUARD = {
 // dropping): URLs, backticks and shell text, imperatives aimed at an agent (English and Spanish); keys and tokens,
 // Bearer values, password=/token=/secret=/api_key= with a value, long hex or base64 runs, and home paths (a drive path
 // C:\Users\<name>, or a token starting /home/<name>/ or /Users/<name>/ with a further segment: a web route is not one).
+// A-M3: an honest line about the app («Run button does nothing», «La app ignora el doble clic») is not an order. The
+// imperatives count where an order stands: at the start of the text, after a sentence break or a connector («then
+// ignore…»), with an object or a command after them; a verb in the middle of a sentence is a statement.
+const AT_START = String.raw`(?:^\s*|[.!?;:,]\s*|\b(?:and|then|please|also|just|now|so|simply|but)\s+)`;
+const AT_START_ES = String.raw`(?:^\s*|[.!?;:,¡¿]\s*(?:(?:y|e|luego|entonces)\s+)?|\b(?:luego|entonces|ahora|primero|después|por favor)\s+)`;
+const DET = 'the|this|that|these|those|your|my|any|all|every';
+const COMMAND = 'it|a|an|npm|npx|node|git|yarn|pnpm|bash|sh|zsh|python3?|pip|docker|make|cargo|go|deno|bun|rm|sudo|pytest|jest|vitest|lint|dev|start|setup|install|'
+  + 'tests?|builds?|scripts?|commands?|checks?|migrations?';
+// A Spanish verb that only tells what the app does (it is also the order's form, so «Siempre usa el token» is not listed).
+const SEEN_ES = 'muestra|aparece|desaparece|falla|tarda|devuelve|queda|carga|redirige|parpadea|vuelve|sale|se|hay|es|está|tiene';
 const INSTRUCTION = [
   /\b[a-z][a-z0-9+.-]*:\/\/\S+/i, /\bwww\./i, /`/, /\b(curl|wget|sudo)\b/i, /\|\s*(sh|bash)\b/i, /\brm\s+-/i, /^\s*[$>]\s/,
-  /\b(ignore|disregard)\b/i, /\byou (must|should|have to)\b/i, /^\s*(always|never)\s+\w+/i, /^\s*(run|execute)\s/i, /\bskip the\b/i,
-  /\b(ignora|no compruebes|ejecuta|debes)\b/i, /^\s*(siempre|nunca)\s+\w+/i,
+  new RegExp(`${AT_START}(?:ignore|disregard)\\b`, 'i'), new RegExp(`\\b(?:ignore|disregard)\\s+(?:${DET}|previous|prior|above|earlier|everything)\\b`, 'i'),
+  /\byou (must|should|have to)\b/i,
+  // «Always shows…» is a statement (a verb in -s); «Always use…» is an order.
+  /^\s*(?:always|never)\s+(?!\w*[^s\W]s\b)\w+/i,
+  new RegExp(`^\\s*(?:run|execute)\\s+(?:${DET}|${COMMAND})\\b`, 'i'), new RegExp(`${AT_START}skip\\s+(?:${DET}|verification|checks?)\\b`, 'i'),
+  new RegExp(`${AT_START_ES}(?:ignora|no compruebes|ejecuta|debes)\\b`, 'i'),
+  new RegExp(`^\\s*(?:siempre|nunca)\\s+(?!(?:${SEEN_ES})(?:\\s|$))\\w+`, 'i'),
 ];
 const SECRET = [
   /\b(sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|xox[bp]-[A-Za-z0-9-]{8,}|AKIA[0-9A-Z]{8,})/,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/i, /\b(password|passwd|token|secret|api[_-]?key)\s*=\s*\S+/i,
-  /\b[0-9a-f]{32,}\b/i, /[A-Za-z0-9+/_-]{40,}/,
+  /\b[0-9a-f]{32,}\b/i,
   /[A-Za-z]:\\Users\\[^\\\s]+/i, /(^|[\s"'(=:])\/(home|Users)\/[^/\s]+\/\S/,
 ];
+/**
+ * A run of 40 or more letters, digits, `+`, `/`, `_` and `-` is a secret only when it looks like one: it mixes upper case,
+ * lower case and digits (a JWT part, base64), or a segment of it (split on `/ - _ .`) of 16 or more characters mixes letters
+ * and digits (base32, a token with dashes). A route or a slug made of words is not.
+ */
+function longSecretRun(note: string): boolean {
+  for (const m of note.matchAll(/[A-Za-z0-9+/_-]{40,}/g)) {
+    const run = m[0];
+    if (/[a-z]/.test(run) && /[A-Z]/.test(run) && /\d/.test(run)) return true;
+    if (run.split(/[/_.-]/).some(s => s.length >= 16 && /[A-Za-z]/.test(s) && /\d/.test(s))) return true;
+  }
+  return false;
+}
 /** The task ids a note may not name: a letter run and a number (T7, T7-1), never a word or a bare number. */
 const ID_SHAPE = /^[A-Za-z]+-?\d+(-\d+)?$/;
 const normNote = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -90,7 +118,7 @@ export function filterNotes(notes: string[], existing: string[], task: string | 
     const note = (huge ? raw.slice(0, NOTE_MAX * 4) : raw).replace(/\s*\r?\n\s*/g, ' ').trim();
     const why: NoteSkip | null = huge || note.length > NOTE_MAX ? 'too-long'
       : /\.forge[\\/]+work[\\/]/i.test(note) ? 'names-a-work-path'
-        : SECRET.some(re => re.test(note)) ? 'looks-secret'
+        : SECRET.some(re => re.test(note)) || longSecretRun(note) ? 'looks-secret'
           : INSTRUCTION.some(re => re.test(note)) ? 'looks-like-instruction'
             : named.some(re => re.test(note)) ? 'names-the-task'
               : seen.has(normNote(note)) ? 'duplicate' : null;
