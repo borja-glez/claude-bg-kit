@@ -24,7 +24,7 @@ import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
 import { isCommitCommand, runHook } from './hooks.js';
-import { launchRun, PLAN_PATH } from '../lib/launcher.js';
+import { launchCommand, launchRun, PLAN_PATH } from '../lib/launcher.js';
 import { PAGE_RULES, declaresAssets, roadmapCapabilities, rulesOf, sharingChange, sharingNotice, syncSummary } from '../lib/publish.js';
 import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
 import { TASK_STATUSES } from '../lib/types.js';
@@ -373,7 +373,8 @@ export function run(argv: string[], io: Io): Result {
       case 'launch': {
         // A-19: forge composes the launch of its run members itself (swarm tick and swarm relaunch print it).
         if (args.includes('--task')) return fail('launch --task moved to forge swarm tick: forge composes the launch of its run members', 2);
-        // The plan path goes into a shell command: only the safe set.
+        // The plan path goes into no command nor prompt (the prompt names only the track): the check is kept so a launch
+        // never takes a plan path forge would refuse (PLAN_PATH, the rule forge's launches use).
         if (args[0] !== undefined && !PLAN_PATH.test(args[0])) return fail('launch: the plan path may only use letters, digits, spaces and _ . / \\ : ~ @ + -', 2);
         const p = loadPlan();
         const track = args[1];
@@ -407,7 +408,7 @@ export function run(argv: string[], io: Io): Result {
         // J-16: --swarm is obsolete (forge composes the launch of its run members): it keeps its checks and changes nothing.
         const prompt = `/waypoint:work ${track}`
           + (args.includes('--merge') ? ` — the user authorizes merging ${branch} into main at phase close` : '');
-        const command = `claude --bg --name ${name} "${prompt}"`;
+        const command = launchCommand({ name, prompt });
         // `run` starts it from any directory without moving the caller's shell: a cd outside a subshell would
         // leave a coordinator working in the worktree. Single quotes, with any quote in the path escaped.
         const inWorktree = launchRun({ name, prompt, worktree });

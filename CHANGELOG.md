@@ -21,7 +21,6 @@ elsewhere and are reconstructed from their READMEs.
 - `page --publish-info --assets`: the roadmap declares `assets` only when its caller asks for it; `/waypoint:plan assets` passes it, and forge's Large path asks for it when its screenshots are uploaded (A-19).
 - `page --publish-info --no-assets` drops `assets` even when the published roadmap has them; `/waypoint:plan no-assets` passes it and asks once before the roadmap becomes shareable again. `--assets` and `--no-assets` together exit 2 (ruling R6b).
 - `page --publish-info` keeps `assets` when the listed `--page` says the published roadmap has them, so forge's routine syncs do not change who can see it. A listed page that does not record it (a roadmap not republished since 0.26.0, or no `meta/page`) is asked about: `capabilitiesChanged` with its own `ask`, unless `--assets` or `--no-assets` says which (A-19, ruling R6c).
-- One plan-path rule (`PLAN_PATH`) shared by `launch` and forge (A-19).
 
 #### Changed
 - waypoint no longer reads `.forge/config.yaml` nor bundles forge's config schema (A-19, I-18).

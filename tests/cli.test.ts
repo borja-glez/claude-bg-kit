@@ -8,7 +8,7 @@ import { run, isCommitCommand, type Io } from '../src/cli/run.js';
 import { makesCommits, readForge } from '../src/cli/hooks.js';
 import { describeViewer } from '../src/lib/viewer-role.js';
 import { parsePlan } from '../src/lib/plan.js';
-import { launchRun } from '../src/lib/launcher.js';
+import { launchCommand, launchRun } from '../src/lib/launcher.js';
 import { buildDocs, planHash } from '../src/lib/sync.js';
 import { parseDesign } from '../src/lib/design.js';
 import { PAGE_RULES } from '../src/lib/publish.js';
@@ -362,6 +362,7 @@ describe('multi-session commands', () => {
       const bg = JSON.parse(run([...args, '--launcher', 'bg'], io).stdout);
       expect(bg.run).toBe(def.run);
       expect(bg.run).toBe(launchRun({ name: bg.name, prompt: bg.prompt, worktree: bg.worktree }));
+      expect(bg.command).toBe(launchCommand({ name: bg.name, prompt: bg.prompt }));
       expect(run([...args, '--launcher', 'herdr'], io)).toMatchObject({ code: 2, stderr: 'launch: herdr was removed; use bg\n' });
       expect(run([...args, '--launcher', 'nope'], io)).toMatchObject({ code: 2, stderr: 'launch: --launcher must be bg\n' });
     });

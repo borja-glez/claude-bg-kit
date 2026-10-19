@@ -11,6 +11,11 @@ describe('launchRun', () => {
     expect(launchRun({ ...x, effort: 'high', model: 'sonnet' })).toBe(`(cd '/r/it'\\''s/task-T1' && claude --bg --name wp-shop-T1 --effort high --model sonnet "${x.prompt}")`);
     expect(launchCommand({ name: x.name, prompt: x.prompt, effort: 'high', model: 'sonnet' })).toBe(`claude --bg --name wp-shop-T1 --effort high --model sonnet "${x.prompt}"`);
   });
+  it('launchRun ends with launchCommand, so waypoint and forge compose the same command (I-18)', () => {
+    for (const spec of [x, { ...x, effort: 'high' as const }, { ...x, effort: 'low' as const, model: 'haiku' as const }]) {
+      expect(launchRun(spec).endsWith(`${launchCommand(spec)})`), JSON.stringify(spec)).toBe(true);
+    }
+  });
   it('the closed lists', () => {
     expect([...EFFORTS]).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
     expect([...MODELS]).toEqual(['opus', 'sonnet', 'haiku']);
