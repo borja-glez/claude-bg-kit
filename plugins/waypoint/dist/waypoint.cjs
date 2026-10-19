@@ -15958,10 +15958,10 @@ function rulesOf(capabilities) {
   return owner ? PAGE_RULES : 1;
 }
 var declaresAssets = (capabilities) => !!capabilities && typeof capabilities === "object" && !Array.isArray(capabilities) && Object.hasOwn(capabilities, "assets");
-function sharingChange(plan, assets, published, chosen) {
+function sharingChange(plan, assets, published) {
   if (!plan.artifacts.roadmap) return { capabilitiesChanged: false, ask: null };
-  if (published === void 0 ? assets : published !== assets) return { capabilitiesChanged: true, ask: sharingChangeAsk(plan, assets) };
-  if (published === void 0 && !chosen) return { capabilitiesChanged: true, ask: unknownSharingAsk(plan) };
+  if (published === void 0) return { capabilitiesChanged: true, ask: assets ? sharingChangeAsk(plan, true) : unknownSharingAsk(plan) };
+  if (published !== assets) return { capabilitiesChanged: true, ask: sharingChangeAsk(plan, assets) };
   return { capabilitiesChanged: false, ask: null };
 }
 function unknownSharingAsk(plan) {
@@ -16163,7 +16163,7 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
         const internal = !noAssets && (args.includes("--assets") || before === true);
         const rules = rulesOf(published);
         const assets = declaresAssets(published);
-        const changed = pageArg ? sharingChange(p, assets, before, noAssets || args.includes("--assets")) : {};
+        const changed = pageArg ? sharingChange(p, assets, before) : {};
         return ok(JSON.stringify({
           out: out2,
           capabilities: roadmapCapabilities(internal),
