@@ -395,4 +395,23 @@ describe('the versions before the embedded ones (A-24)', () => {
     expect(renderDesignPage({ ...data, earlier: [] }, data.current)).not.toContain('class="earlier"');
     expect(renderDesignPage(data, data.current)).not.toContain('class="earlier"');
   });
+  it('five versions are all embedded with none earlier; at six the first is earlier; they are listed by version (M9)', () => {
+    const entry = (version: number) => ({ version, date: `2026-10-${String(version).padStart(2, '0')}`, note: `nota ${version}`, words: 40, round: 0 });
+    const build = (n: number, changelog = Array.from({ length: n }, (_, i) => entry(i + 1))) => buildDesignPageData({
+      current: fixture, history: Object.fromEntries(Array.from({ length: n - 1 }, (_, i) => [i + 1, fixture])), changelog, source: 's/',
+    });
+    const five = build(5);
+    expect(five.versions.map(v => v.version)).toEqual([1, 2, 3, 4, 5]);
+    expect(five.earlier).toEqual([]);
+    const six = build(6);
+    expect(six.versions.map(v => v.version)).toEqual([2, 3, 4, 5, 6]);
+    expect(six.earlier).toEqual([{ version: 1, date: '2026-10-01', note: 'nota 1' }]);
+    // A changelog out of order still lists the earlier versions by version.
+    expect(build(7, [entry(2), entry(1), ...[3, 4, 5, 6, 7].map(entry)]).earlier?.map(e => e.version)).toEqual([1, 2]);
+  });
+  it('their summary gets the focus ring and the 44 px touch target a round\'s has (M9)', () => {
+    const css = readFileSync(path.join(process.cwd(), 'src/design-page/theme.css'), 'utf8');
+    expect(css).toMatch(/\.earlier>summary:focus-visible[^{}]*\{outline:2px solid var\(--t-blue\)/);
+    expect(/@media \(pointer: coarse\)\{([^{}]*)\{([^}]*)\}/.exec(css)?.[1]).toContain('.earlier>summary');
+  });
 });

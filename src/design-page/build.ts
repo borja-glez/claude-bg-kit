@@ -107,7 +107,8 @@ export function buildDesignPageData(input: {
       diff: i === 0 ? null : { ...versionDiff(texts[numbers[i - 1]], texts[n]), ...(numbers[i - 1] !== n - 1 ? { against: numbers[i - 1] } : {}) },
     };
   });
-  const earlier = input.changelog.filter(c => c.version < (numbers[from] ?? Infinity)).map(({ version, date, note }) => ({ version, date, note }));
+  const earlier = input.changelog.filter(c => c.version < (numbers[from] ?? Infinity))
+    .sort((a, b) => a.version - b.version).map(({ version, date, note }) => ({ version, date, note }));
   const dismissed = input.dismissed ?? {};
   const known = new Set([...input.changelog.map(e => e.version), currentNo]);
   // The page data stays bounded and clean like the gate's lists: the newest GATE_LIST_MAX rounds and, in each, the newest
