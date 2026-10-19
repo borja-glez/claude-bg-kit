@@ -117,6 +117,12 @@ describe('the roadmap contract (C7, wave 4)', () => {
     seedExecution(root, execution({ active: false, stopReason: 'stopped', closedAt: ROADMAP_AT(250), closedBy: 'close' }));
     const summary = JSON.parse(readFileSync(out(run(['roadmap-run', '--run', RUN], io)).write.file_path, 'utf8'));
     expect(normalizeRunSummary(summary, d.rep)).toEqual(summary);
+    // K2-13: the run's last flow pass survives the page's normalizer; a malformed one is dropped with a report.
+    const flowed = { ...summary, flow: { result: 'fail', at: ROADMAP_AT(260) } };
+    expect(normalizeRunSummary(flowed, d.rep)).toEqual(flowed);
+    const dropped: string[] = [];
+    expect(normalizeRunSummary({ ...summary, flow: { result: 'fail', at: 'later' } }, f => { dropped.push(f); })).toEqual(summary);
+    expect(dropped).toEqual(['flow']);
     const infinite = out(run(['infinite', 'start', '--cycles', '2', '--session', 'c1'], io)).publish.infinite;
     expect(normalizeInfinite(infinite, d.rep)).toEqual(infinite);
     expect(d.list).toEqual([]);

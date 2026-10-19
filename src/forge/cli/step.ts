@@ -572,14 +572,18 @@ function closeVerify(c: Ctx, task: string, t: ExecTask, n: number, round: number
   return { result, learned, cleanup, evidence, commit, proposals, defects, say };
 }
 
-/** The integrate the tick emitted (one at most; none while a merge is in flight): its result is the action's type. With
- *  verify.flow phase, an integration that finished the last task of its phase carries `flow: {phase}` (K2-13). */
+/** With verify.flow phase, an integration that finished the last task of its phase carries `flow: {phase}` (K2-13). */
+const flowOf = (c: Ctx, task: string): { flow?: { phase: string } } => {
+  const phase = phaseToVerify(c.io.cwd, c.planArg, c.db, task);
+  return phase ? { flow: { phase } } : {};
+};
+
+/** The integrate the tick emitted (one at most; none while a merge is in flight): its result is the action's type. */
 function integrateTask(c: Ctx, task: string): void {
   const r = call(c, task, ['swarm', 'integrate', task, '--locale', c.locale]);
   if (!r) return;
   const { result, ...rest } = r;
-  const phase = result === 'integrated' ? phaseToVerify(c.io.cwd, c.planArg, c.db, task) : null;
-  c.actions.push({ ...rest, type: String(result), task, ...(phase ? { flow: { phase } } : {}) });
+  c.actions.push({ ...rest, type: String(result), task, ...(result === 'integrated' ? flowOf(c, task) : {}) });
 }
 
 /**
@@ -601,7 +605,7 @@ function integratedAgain(c: Ctx, task: string, t: ExecTask): void {
   if (!sha) return;
   // The same publish and metrics as the integrate that was lost (I3): the skill never composes the done state itself.
   const commit = commitInfo(git, sha);
-  c.actions.push({ type: 'integrated', task, sha, commit, again: true, ...integratedPublish(c.io, c.project, task, t, commit, t.finishedAt ?? c.iso()) });
+  c.actions.push({ type: 'integrated', task, sha, commit, again: true, ...integratedPublish(c.io, c.project, task, t, commit, t.finishedAt ?? c.iso()), ...flowOf(c, task) });
 }
 
 /**

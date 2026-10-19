@@ -576,6 +576,28 @@ describe('swarm step: robustness (M1, M2, M7, M9)', () => {
     writeFileSync(path.join(root, 'db', 'state', 'T1.json'), JSON.stringify({ status: 'done', version: 4 }));
     expect(step().actions.filter(a => a.task === 'T1')).toEqual([]);
   });
+  it('verify.flow phase: the integration that finishes the last task of a phase carries its phase, also the one that comes again (K2-13)', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted', '--no-agent'], io));
+    for (const t of ['T2', 'T3']) writeFileSync(path.join(root, 'db', 'state', `${t}.json`), JSON.stringify({ status: 'done', version: 2 }));
+    const first = step().actions.find(a => a.type === 'integrated')!;
+    expect(first).not.toHaveProperty('flow');
+    writeFileSync(path.join(root, 'db', 'state', 'T1.json'), JSON.stringify({ status: 'in_progress', version: 3 }));
+    expect(step().actions.find(a => a.task === 'T1')).not.toHaveProperty('flow');
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'verify:\n  flow: phase\n');
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'integrated', again: true, flow: { phase: 'p1' } });
+  });
+  it('verify.flow phase: the first integration carries the phase when the rest of it is done (K2-13)', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted', '--no-agent'], io));
+    for (const t of ['T2', 'T3']) writeFileSync(path.join(root, 'db', 'state', `${t}.json`), JSON.stringify({ status: 'done', version: 2 }));
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'verify:\n  flow: phase\n');
+    expect(step().actions.find(a => a.type === 'integrated')).toMatchObject({ task: 'T1', flow: { phase: 'p1' } });
+  });
   it('the integrated action again carries the publish and the metrics of a normal integrate: the task done with its commit (final review I3)', () => {
     step();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
