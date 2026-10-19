@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { useTempDirs } from './helpers/tmp.js';
 import { run, type Io } from '../src/forge/cli/run.js';
@@ -112,6 +113,17 @@ describe.skipIf(P === null)('forge verify-env (K2-07)', () => {
     expect(a.port).toBe(P);
     const names = readdirSync(envDir(root)).filter(f => f.endsWith('.json'));
     expect(names).toEqual([expect.stringMatching(new RegExp(`^${id}-[0-9a-f]{8}\\.json$`))]);
+  });
+  it('two checkouts with the same reservation name never share a browser profile: its folder names the checkout (M11)', () => {
+    const other = tmp('forge-venv-');
+    const a = reserve('T1-1-1')!;
+    const b = reserve('T1-1-1', { main: other })!;
+    expect(path.dirname(a.profileDir)).toBe(tmpdir());
+    expect(path.basename(a.profileDir)).toMatch(/^forge-verify-[0-9a-f]{8}-T1-1-1$/);
+    expect(a.profileDir).not.toBe(b.profileDir);
+    expect(releaseEnv(other, b.evidence)).toEqual([b.port]);
+    expect(existsSync(b.profileDir)).toBe(false);
+    expect(existsSync(a.profileDir)).toBe(true);
   });
   it('a lapsed reservation is swept: its file, its lock and its profile folder', () => {
     const a = reserve('S-1-1')!;

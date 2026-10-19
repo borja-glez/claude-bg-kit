@@ -145,9 +145,10 @@ function sweepLapsed(main: string, now: number, ttlMs: number): void {
 /**
  * The reservation of `key`: the one it already has while it stands and is for the same task, folder and evidence (a
  * respawned agent keeps its port and profile), else the first port of the range no other reservation holds, that is free
- * and whose lock file this call creates exclusively, with the profile folder os.tmpdir()/forge-verify-<key>. The lock is
- * what makes the claim atomic: two sessions never take one port. At most MAX_PROBES ports are probed. Null when no port
- * is left.
+ * and whose lock file this call creates exclusively, with the profile folder os.tmpdir()/forge-verify-<hash>-<key>, the
+ * hash being of the main checkout's path (M11: reservations are per checkout, the temporary folder is the machine's, so two
+ * clones running the same task never share a profile). The lock is what makes the claim atomic: two sessions never take
+ * one port. At most MAX_PROBES ports are probed. Null when no port is left.
  */
 export function reserveEnv(i: EnvInput): EnvReservation | null {
   const free = i.free ?? portFree;
@@ -160,7 +161,8 @@ export function reserveEnv(i: EnvInput): EnvReservation | null {
     if (mine.task === i.task && samePath(mine.evidence, i.evidence) && samePath(mine.dir, i.dir)) return mine;
     dropOne(i.main, file, mine); // the same name for another folder: its cleanup would never free this one
   }
-  const profileDir = path.join(tmpdir(), `forge-verify-${i.key}`);
+  const checkout = createHash('sha1').update(path.resolve(i.main)).digest('hex').slice(0, 8);
+  const profileDir = path.join(tmpdir(), `forge-verify-${checkout}-${i.key}`);
   const held = (port: number) => readReservations(i.main, at, i.ttlMs).some(r => r.key !== i.key && r.port === port);
   let probes = 0;
   for (let port = i.range.from; port <= i.range.to && probes < MAX_PROBES; port++) {
