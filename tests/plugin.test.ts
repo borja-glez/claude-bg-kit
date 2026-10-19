@@ -2114,6 +2114,8 @@ describe('plugin layout', () => {
     expect(runRef('ephemeral')).toContain('FORGE surfaces digest --run <runId>');
     for (const w of ['FORGE verify-env --task T-<n>', '--unattended']) expect(runRef('task-steps'), w).toContain(w);
     expect(runRef('review-close')).toContain('FORGE verify-env');
+    expect(v).toContain('the code checkout');
+    for (const a of ['forge-verify', 'forge-verify-heavy']) expect(read(`plugins/forge/agents/${a}.md`), a).toContain('--cwd <code checkout>');
     const manual = read('plugins/forge/skills/verify/SKILL.md');
     for (const w of ['FORGE verify-env --task manual-<date>', 'smoke']) expect(manual, w).toContain(w);
   });
