@@ -364,13 +364,13 @@ elsewhere and are reconstructed from their READMEs.
 
 #### Added
 - `swarm tick` (a `start` in sessions mode) and `swarm relaunch` print `launch`: the member's session as forge composes it (worktree, branch, name, the `/forge:member` prompt, `command` and `run`, with `swarm.member`'s effort and model); the coordinator runs `launch.run`. A `--plan` that cannot go into it exits 2 before anything is written (A-19).
-- `sp-plan check` of a superpowers task without checkboxes records it in `.forge/sp-done/<slug>.md`, which `sp-plan tasks`, the triage and the routing read; the output gains `recorded`. The record names the plan by its repository path (the same from any worktree), appends instead of rewriting, and a failed write fails the check (exit 2) (D-17).
+- `sp-plan check` of a superpowers task without checkboxes records it in `.forge/sp-done/<slug>.md` of the main checkout, which `sp-plan tasks` and the triage read from any worktree, and the routing from the main checkout; the output gains `recorded`. The record names the plan by its repository path (the same from any worktree), appends instead of rewriting, and a failed write fails the check (exit 2) (D-17).
 
 #### Changed
-- forge finds waypoint's CLI through `installed_plugins.json` before scanning the cache, so a higher version left by a downgrade is no longer picked (I-18).
-- A crash of a test run (a segfault, a core dump, V8 out of heap, a fatal error) beside a test the base already failed is no longer excused as a failure that was there; a crash line also counts as a failure line (handover from 1a).
-- `execution.json` is only written under its lock (`saveExecution` is private), and two real processes test it (I-15).
-- `swarm tick` reads the roadmap's listings with the shared tolerant reader (I-14).
+- forge finds waypoint's CLI through `installed_plugins.json` (the entry of forge's own marketplace first) before scanning the cache, so a higher version left by a downgrade, or one from another marketplace, is no longer picked (I-18).
+- A crash of a validator run (a segfault, a core dump, V8 out of heap, a fatal error) beside a failure the base already had, a failing test or a tsc error, is no longer excused as a failure that was there; a crash line also counts as a failure line (handover from 1a).
+- `execution.json` is only written under its lock (`saveExecution` is private), and two real processes test it (I-15). One whose `project` is not a safe id reads as none, as one with such a run id or coordinator already did.
+- `swarm tick` and `swarm next` read the roadmap's listings with the shared tolerant reader and say on stderr each document they skipped, as waypoint does; `swarm step` passes the tick's warnings on to its stderr (I-14).
 - The CLI is one module per command (`src/forge/cli/commands/`, `src/forge/cli/swarm/`), with the same commands, flags and outputs (I-12).
 - A `swarm.launcher: herdr` left in a config reads as `bg`, and the member's launch says so (I-18).
 - Depends on waypoint ^0.31.0.
