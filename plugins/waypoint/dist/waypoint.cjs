@@ -11628,7 +11628,7 @@ function findCycle(plan) {
 var import_node_crypto = require("node:crypto");
 
 // src/lib/waypoint-version.ts
-var WAYPOINT_VERSION = true ? "0.31.0" : "0.0.0";
+var WAYPOINT_VERSION = true ? "0.32.0" : "0.0.0";
 var VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})/;
 var partsOf = (v) => {
   const m = typeof v === "string" ? VERSION.exec(v) : null;
@@ -12016,6 +12016,11 @@ function inboxFor(messages, sessionId) {
     const ta = String(a.ts ?? ""), tb = String(b.ts ?? "");
     return ta < tb ? -1 : ta > tb ? 1 : 0;
   });
+}
+function multiSession(i) {
+  if (i.inTrackWorktree) return true;
+  if (i.messages && inboxFor(i.messages, i.sid).some((m) => m.to === i.sid)) return true;
+  return !!i.sessions && Object.entries(i.sessions).some(([id, s]) => id !== i.sid && !isIdle(s, i.now));
 }
 function threadKey(m) {
   return `${m.taskId ?? "-"}|${[String(m.from), String(m.to)].sort().join("|")}`;
@@ -12544,6 +12549,13 @@ function readDocs(dir, normalize) {
     docs[id] = doc;
   }
   return { docs, skipped };
+}
+
+// src/lib/main-checkout.ts
+function mainCheckoutFrom(root, gitFileText) {
+  const m = gitFileText ? /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/\r\n]+\s*$/m.exec(gitFileText) : null;
+  const dir = m ? m[1] : null;
+  return dir && (/^[A-Za-z]:/.test(dir) || dir.startsWith("/")) ? dir : root;
 }
 
 // src/lib/design.ts
@@ -15077,6 +15089,7 @@ function openTasksOf(wpDir) {
     return out;
   }
   for (const f of names) {
+    if (!isPlanId(f.slice(0, -5))) continue;
     try {
       const st2 = JSON.parse((0, import_node_fs3.readFileSync)(import_node_path3.default.join(dir, f), "utf8"));
       if ((st2?.status === "claimed" || st2?.status === "in_progress") && typeof st2.owner === "string" && !(st2.owner in out)) out[st2.owner] = f.slice(0, -5);
@@ -15401,15 +15414,6 @@ function forecastEnd(plan, states, now, opts) {
 
 // src/lib/worktree.ts
 var import_node_path5 = __toESM(require("node:path"), 1);
-
-// src/lib/main-checkout.ts
-function mainCheckoutFrom(root, gitFileText) {
-  const m = gitFileText ? /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/\r\n]+\s*$/m.exec(gitFileText) : null;
-  const dir = m ? m[1] : null;
-  return dir && (/^[A-Za-z]:/.test(dir) || dir.startsWith("/")) ? dir : root;
-}
-
-// src/lib/worktree.ts
 function mainWorktreeFrom(porcelain) {
   if (typeof porcelain !== "string") return null;
   const line3 = porcelain.split(/\r?\n/).find((l3) => l3.startsWith("worktree "));
@@ -16027,6 +16031,7 @@ function run(argv, io) {
     if (!(0, import_node_fs8.existsSync)(abs(flag("sessions")))) throw new CacheError(`${cmd}: --sessions cache missing \u2014 list it first`);
     return docs("sessions", sessionDoc);
   };
+  const optMessages = () => flag("messages") ? docs("messages", normalizeMessage) : void 0;
   const loadView = () => {
     const p = loadPlan();
     const db = flag("db");
@@ -16248,8 +16253,12 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
         const states = optStates();
         const integrated = base ? integratedShas(view, states, base, io.cwd) : void 0;
         const r2 = pickTask(view, states, { sessionId: session, track: flag("track"), sessions, now: io.now().getTime(), integrated });
+        const now = io.now().getTime();
+        const track = flag("track");
+        const leftover = !!sessions && recoverableTasks(view, states, sessions, now).some((t) => t.owner !== session && (!track || view.tasks.find((x2) => x2.id === t.taskId)?.track === track));
+        const multi = leftover || multiSession({ sessions, messages: optMessages(), sid: session, inTrackWorktree: inLinkedWorktree(io.cwd), now });
         const { unblock, ...rest } = r2;
-        return ok(JSON.stringify(unblock ? r2 : rest));
+        return ok(JSON.stringify({ ...unblock ? r2 : rest, multi }));
       }
       case "conflicts": {
         const session = flag("session");
@@ -16982,6 +16991,19 @@ critique-check: the critique was refused and set aside as ${rejected}`);
     if (e instanceof DesignError || e instanceof CritiqueError) return fail(e.message);
     if (e instanceof PlanError || e instanceof CacheError) return fail(e.message);
     return fail(`error: ${e.message}`);
+  }
+}
+function inLinkedWorktree(cwd) {
+  for (let dir = import_node_path9.default.resolve(cwd); ; dir = import_node_path9.default.dirname(dir)) {
+    const git = import_node_path9.default.join(dir, ".git");
+    if ((0, import_node_fs8.existsSync)(git)) {
+      try {
+        return (0, import_node_fs8.statSync)(git).isFile() && mainCheckoutFrom(dir, (0, import_node_fs8.readFileSync)(git, "utf8")) !== dir;
+      } catch {
+        return false;
+      }
+    }
+    if (import_node_path9.default.dirname(dir) === dir) return false;
   }
 }
 var CacheError = class extends Error {
