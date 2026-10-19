@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readExecution, executionFile, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, updateExecution, executionLock, LOCK_STALE_MS, createIfAbsent } from '../src/forge/execution.js';
+import {
+  readExecution, executionFile, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, updateExecution, executionLock, LOCK_STALE_MS, createIfAbsent,
+  writeAtomic,
+} from '../src/forge/execution.js';
 import { run } from '../src/forge/cli/run.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import { useTempDirs } from './helpers/tmp.js';
@@ -42,6 +45,39 @@ describe('execution store', () => {
   it('writes the public state of a task for lens', () => {
     writePublicTask(root, { task: 'T1', runId: 'r1', stage: 'review', status: 'running', agent: 'forge-review-correctness', round: 2, since: T, updatedAt: T, leaseUntil: T, by: 'main', mode: 'subagents' });
     expect(JSON.parse(readFileSync(executionTaskFile(root, 'T1'), 'utf8'))).toMatchObject({ task: 'T1', stage: 'review', round: 2 });
+  });
+});
+
+describe('writeAtomic (FW5c)', () => {
+  const failing = (code: string, times: number) => {
+    const calls: string[] = [];
+    const rename = (from: string, to: string) => {
+      calls.push(to);
+      if (calls.length <= times) throw Object.assign(new Error(`${code}: rename`), { code });
+      renameSync(from, to);
+    };
+    return { rename, calls };
+  };
+  it('tries a rename that Windows refuses for a moment (EPERM, EBUSY, EACCES) again, and lands the file', () => {
+    for (const code of ['EPERM', 'EBUSY', 'EACCES']) {
+      const file = path.join(root, '.forge', `${code}.json`);
+      const { rename, calls } = failing(code, 2);
+      writeAtomic(file, `{"code":"${code}"}\n`, rename);
+      expect(calls, code).toHaveLength(3);
+      expect(readFileSync(file, 'utf8')).toBe(`{"code":"${code}"}\n`);
+    }
+    expect(readdirSync(path.join(root, '.forge')).filter(n => n.endsWith('.tmp'))).toEqual([]);
+  });
+  it('throws when the rename keeps failing, or fails for another reason at once, and leaves no temporary file', () => {
+    const file = path.join(root, '.forge', 'x.json');
+    const always = failing('EBUSY', Infinity);
+    expect(() => writeAtomic(file, '{}\n', always.rename)).toThrow(/EBUSY/);
+    expect(always.calls.length).toBeGreaterThan(1);
+    const other = failing('ENOSPC', Infinity);
+    expect(() => writeAtomic(file, '{}\n', other.rename)).toThrow(/ENOSPC/);
+    expect(other.calls).toHaveLength(1);
+    expect(existsSync(file)).toBe(false);
+    expect(readdirSync(path.join(root, '.forge'))).toEqual([]);
   });
 });
 

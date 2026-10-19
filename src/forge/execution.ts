@@ -52,10 +52,28 @@ export function executionHolding(cwd: string, ref: { project: string | null; tas
 export const eventsSince = <E extends { ts: string }>(events: readonly E[], since: string | null): E[] =>
   since === null ? [...events] : events.filter(e => Date.parse(e.ts) >= Date.parse(since));
 
-function writeAtomic(file: string, text: string): void {
+// FW5c: on Windows an antivirus or another process holding the target refuses a rename for a moment.
+const RENAME_TRIES = 5;
+const RENAME_WAIT_MS = 20;
+const RENAME_TRANSIENT = new Set(['EPERM', 'EBUSY', 'EACCES']);
+
+/**
+ * Writes `file` whole: a temporary file renamed over it, so a reader never sees half of it. A rename refused with EPERM,
+ * EBUSY or EACCES is tried RENAME_TRIES times in all, RENAME_WAIT_MS apart, before it throws; any other error throws at
+ * once. The temporary file never stays. `rename`: the tests' stand-in for renameSync.
+ */
+export function writeAtomic(file: string, text: string, rename: (from: string, to: string) => void = renameSync): void {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  try { writeFileSync(tmp, text); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
+  try {
+    writeFileSync(tmp, text);
+    for (let attempt = 1; ; attempt++) {
+      try { rename(tmp, file); return; } catch (e) {
+        if (attempt >= RENAME_TRIES || !RENAME_TRANSIENT.has((e as NodeJS.ErrnoException).code ?? '')) throw e;
+        sleepSync(RENAME_WAIT_MS);
+      }
+    }
+  } finally { rmSync(tmp, { force: true }); }
 }
 
 /** I-15: private. updateExecution is the only caller, and the only writer of execution.json besides readExecution's
