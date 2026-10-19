@@ -178,6 +178,8 @@ describe('sp-specs and sp-plans', () => {
   it("sp-specs leaves out a spec a route handed off; sp-plans counts this branch's commits (K1-07)", () => {
     const io: Io = { cwd: project, now: () => new Date(NOW), env: { CLAUDE_CONFIG_DIR: cfg } };
     file('docs/superpowers/specs/s.md', '# S\n\n## A\n', 1);
+    // M10: listed before the route, so it is the route that leaves it out.
+    expect(JSON.parse(run(['sp-specs'], io).stdout).map((s: { path: string }) => s.path)).toEqual(['docs/superpowers/specs/s.md']);
     writeRoute(project, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'handed-off', ts: new Date(NOW).toISOString(), spec: 'docs/superpowers/specs/s.md', session: 'S1' });
     expect(JSON.parse(run(['sp-specs'], io).stdout)).toEqual([]);
     const git = (...a: string[]) => execFileSync('git', a, { cwd: project, stdio: 'ignore' });
@@ -186,8 +188,21 @@ describe('sp-specs and sp-plans', () => {
     file('docs/superpowers/plans/cart.md', '# Cart Totals Implementation Plan\n\n### Task 1: one\n\n- [ ] a\n\n### Task 2: two\n\n- [ ] b\n', 0);
     git('add', '-A');
     git('commit', '-q', '-m', 'Cart Totals: task 1 done');
+    // M10: after the first commit the plan is listed with that task done, so it is the second commit that leaves it out.
+    expect(JSON.parse(run(['sp-plans'], io).stdout)).toEqual([{ path: 'docs/superpowers/plans/cart.md', title: 'Cart Totals', tasks: 2, done: 1 }]);
     git('commit', '-q', '--allow-empty', '-m', 'Cart Totals: task 2 done');
     expect(JSON.parse(run(['sp-plans'], io).stdout)).toEqual([]);
+  });
+  it('sp-specs reads only the routes, never the commit subjects; the specs plans cite are read newest first (T7)', () => {
+    const calls: string[][] = [];
+    const io: Io = { cwd: project, now: () => new Date(NOW), env: { CLAUDE_CONFIG_DIR: cfg }, git: a => { calls.push(a); return null; } };
+    file('docs/superpowers/specs/s.md', '# S\n\n## A\n', 1);
+    expect(JSON.parse(run(['sp-specs'], io).stdout)).toHaveLength(1);
+    expect(calls.filter(a => a.includes('--format=%s'))).toEqual([]);
+    // Past 200 plans, the newest names count: a date-prefixed name sorts last.
+    for (let i = 0; i < 200; i++) file(`docs/superpowers/plans/2026-01-01-old-${String(i).padStart(3, '0')}.md`, '# Old Implementation Plan\n\n### Task 1: one\n\n- [x] a\n', 30);
+    file('docs/superpowers/plans/2026-10-12-new.md', '# New Implementation Plan\n\n**Spec:** `docs/superpowers/specs/s.md`\n\n### Task 1: one\n\n- [ ] a\n', 1);
+    expect(spSpecs(project, NOW)).toEqual([]);
   });
 });
 

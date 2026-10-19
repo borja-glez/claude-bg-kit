@@ -399,10 +399,14 @@ export function triageCore(io: Io, args: string[]): TriageCore {
   };
 }
 
+/** K1-07: the specs a route of this checkout handed off or finished. sp-specs reads only these (T7: no git log). */
+export const routedSpecs = (io: Io): string[] =>
+  listRoutes(mainCheckout(io.cwd)).flatMap(r => (r.spec && (r.stage === 'handed-off' || r.stage === 'done') ? [r.spec] : []));
+
 /**
- * K1-07: what sp-plans, sp-specs and route read besides docs/superpowers: the main checkout (its SDD ledger and forge's
- * sp-done record), the subjects of the commits of the last 14 days on this branch and on the main checkout's branch,
- * and the specs a route of this checkout handed off or finished.
+ * K1-07: what sp-plans and route read besides docs/superpowers: the main checkout (its SDD ledger and forge's sp-done
+ * record), the subjects of the commits of the last 14 days on this branch and on the main checkout's branch, and the
+ * specs a route of this checkout handed off or finished (routedSpecs).
  */
 export function spContext(io: Io, dir: string, now: number): { main: string; subjects: string[]; routed: string[] } {
   const main = mainCheckout(dir);
@@ -410,6 +414,5 @@ export function spContext(io: Io, dir: string, now: number): { main: string; sub
   const subjectsOf = (git: (args: string[]) => string | null) =>
     (git(['log', since, '-n', '500', '--format=%s', 'HEAD']) ?? '').split('\n').map(s => s.trim()).filter(Boolean);
   const subjects = [...new Set([...subjectsOf(io.git ?? defaultGit(dir)), ...(samePath(main, dir) ? [] : subjectsOf(defaultGit(main)))])];
-  const routed = listRoutes(mainCheckout(io.cwd)).flatMap(r => (r.spec && (r.stage === 'handed-off' || r.stage === 'done') ? [r.spec] : []));
-  return { main, subjects, routed };
+  return { main, subjects, routed: routedSpecs(io) };
 }

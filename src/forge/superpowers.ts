@@ -178,7 +178,9 @@ export function spLedgerDone(roots: string[], planAbs: string): number[] {
 }
 
 /** K1-07: the tasks of a plan its commits say are done, `<plan title>: task N done` (superpowers-plan.md writes it after
- *  each task); case and the spaces at the ends do not count. */
+ *  each task); case and the spaces at the ends do not count. The subject carries only the title, so two plans with one
+ *  title share these commits (T7): rare, since superpowers titles a plan after its feature, and it only changes what
+ *  sp-plans and route offer, never what `sp-plan tasks` or a run counts as done. */
 export function doneByCommits(subjects: readonly string[], title: string): number[] {
   const t = title.trim().toLowerCase();
   const out = new Set<number>();
@@ -289,11 +291,12 @@ const repoRelOf = (root: string, p: string): string => {
   return r.startsWith('..') ? s : r;
 };
 
-/** K1-07: the specs the plans of docs/superpowers/plans cite in their **Spec:** field, whatever their age (200 plans at most). */
+/** K1-07: the specs the plans of docs/superpowers/plans cite in their **Spec:** field, whatever their age (200 plans at
+ *  most: the last names, which superpowers' date prefix makes the newest; T7). */
 function planSpecs(root: string): string[] {
   const dir = path.join(root, 'docs', 'superpowers', 'plans');
   let names: string[] = [];
-  try { names = readdirSync(dir).filter(n => n.endsWith('.md')).slice(0, 200); } catch { return []; }
+  try { names = readdirSync(dir).filter(n => n.endsWith('.md')).sort().reverse().slice(0, 200); } catch { return []; }
   return names.flatMap(n => {
     try {
       const spec = parseSpPlan(readFileSync(path.join(dir, n), 'utf8')).plan.spec;
