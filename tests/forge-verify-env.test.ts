@@ -6,9 +6,15 @@ import { useTempDirs } from './helpers/tmp.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readEvents, type LedgerEvent } from '../src/forge/ledger.js';
 import { deriveStatus } from '../src/lib/forge-status.js';
-import { envDir, reserveEnv } from '../src/forge/verify-env.js';
+import { envDir, portFree, reserveEnv } from '../src/forge/verify-env.js';
 
 const tmp = useTempDirs();
+// A block of 12 consecutive free ports, found once; without one the suite skips (it never fails on a busy machine).
+const P = (() => {
+  for (let b = 47310; b < 47900; b += 20) if (Array.from({ length: 12 }, (_, k) => b + k).every(p => portFree(p))) return b;
+  console.warn('forge-verify-env: no free block of 12 ports in 47310-47899; the suite is skipped');
+  return null;
+})();
 let root: string;
 let now: Date;
 const io = (): Io => ({ cwd: root, now: () => now, env: {} });
@@ -20,10 +26,10 @@ beforeEach(() => {
   root = tmp('forge-venv-');
   now = new Date('2026-10-16T10:00:00.000Z');
   mkdirSync(path.join(root, '.forge'), { recursive: true });
-  config('47310-47319');
+  config(`${P}-${P! + 9}`);
 });
 
-describe('forge verify-env (K2-07)', () => {
+describe.skipIf(P === null)('forge verify-env (K2-07)', () => {
   it('two verifications get different ports and profiles; the same round asks again and keeps its own (Review Focus 2)', () => {
     const a = out(env('T1-1', '.forge/work/T1/reviews-1-1'));
     const b = out(env('T2-1', '.forge/work/T2/reviews-1-1'));
@@ -37,8 +43,8 @@ describe('forge verify-env (K2-07)', () => {
   });
   it('a port another program listens on is skipped', async () => {
     const srv = createServer();
-    await new Promise<void>(res => srv.listen(47310, '127.0.0.1', () => res()));
-    try { expect(out(env('T1-1', '.forge/work/T1/reviews-1-1')).port).toBe(47311); } finally { await new Promise<void>(res => srv.close(() => res())); }
+    await new Promise<void>(res => srv.listen(P!, '127.0.0.1', () => res()));
+    try { expect(out(env('T1-1', '.forge/work/T1/reviews-1-1')).port).toBe(P! + 1); } finally { await new Promise<void>(res => srv.close(() => res())); }
   });
   it('verify-cleanup frees the reservation and deletes the profile; one never freed lapses after 2 × verify.limits.minutes', () => {
     const a = out(env('T1-1', '.forge/work/T1/reviews-1-1'));
@@ -52,28 +58,73 @@ describe('forge verify-env (K2-07)', () => {
   it('a reservation file that does not read is none, and a full range exits 2 and names it (Review Focus 2)', () => {
     mkdirSync(envDir(root), { recursive: true });
     writeFileSync(path.join(envDir(root), 'junk.json'), '{oops');
-    config('47320-47320');
-    expect(out(env('T1-1', '.forge/work/T1/reviews-1-1')).port).toBe(47320);
+    config(`${P! + 10}-${P! + 10}`);
+    expect(out(env('T1-1', '.forge/work/T1/reviews-1-1')).port).toBe(P! + 10);
     const full = env('T2-1', '.forge/work/T2/reviews-1-1');
     expect(full.code).toBe(2);
-    expect(full.stderr).toContain('verify.ports (47320-47320)');
+    expect(full.stderr).toContain(`verify.ports (${P! + 10}-${P! + 10})`);
   });
   it('two reservations that pick the same port at once: the key that sorts first keeps it, the other takes the next (Review Focus 2)', () => {
     mkdirSync(envDir(root), { recursive: true });
     // While T1-1-1 probes 47310, another session reserves it for A-1-1.
     const free = (port: number) => {
-      if (port === 47310) {
-        writeFileSync(path.join(envDir(root), 'A-1-1.json'), JSON.stringify({ key: 'A-1-1', task: 'A-1', port: 47310, profileDir: 'p', evidence: 'e', dir: 'd', startedAt: now.toISOString() }));
+      if (port === P) {
+        writeFileSync(path.join(envDir(root), 'A-1-1.json'), JSON.stringify({ key: 'A-1-1', task: 'A-1', port: P, profileDir: 'p', evidence: 'e', dir: 'd', startedAt: now.toISOString() }));
       }
       return true;
     };
-    const r = reserveEnv({ main: root, key: 'T1-1-1', task: 'T1-1', dir: 'd', evidence: path.join(root, 'ev'), range: { from: 47310, to: 47319 }, now, ttlMs: 60_000, free });
-    expect(r?.port).toBe(47311);
+    const r = reserveEnv({ main: root, key: 'T1-1-1', task: 'T1-1', dir: 'd', evidence: path.join(root, 'ev'), range: { from: P!, to: P! + 9 }, now, ttlMs: 60_000, free });
+    expect(r?.port).toBe(P! + 1);
+  });
+  const reserve = (key: string, over: Partial<Parameters<typeof reserveEnv>[0]> = {}) =>
+    reserveEnv({ main: root, key, task: key, dir: `d-${key}`, evidence: path.join(root, `ev-${key}`), range: { from: P!, to: P! + 9 }, now, ttlMs: 60_000, free: () => true, ...over });
+  const lock = (port: number, key: string, at: Date) => {
+    mkdirSync(envDir(root), { recursive: true });
+    writeFileSync(path.join(envDir(root), `port-${port}.lock`), JSON.stringify({ key, startedAt: at.toISOString() }));
+  };
+  it('a smaller key that arrives second cannot take a port the other already locked, even before its reservation is written', () => {
+    // While Z-1-1 probes P, A-1-1 (the smaller key) claims it; A-1-1 has no reservation file yet, only the lock.
+    const free = (port: number) => { if (port === P) lock(P!, 'A-1-1', now); return true; };
+    expect(reserve('Z-1-1', { free })?.port).toBe(P! + 1);
+  });
+  it('a lock whose owner lapsed past the ttl is taken over, a fresh one is not', () => {
+    lock(P!, 'old', new Date(now.getTime() - 61_000));
+    lock(P! + 1, 'new', new Date(now.getTime() - 1_000));
+    expect(reserve('T1-1-1')?.port).toBe(P);
+    expect(reserve('T2-1-1')?.port).toBe(P! + 2);
+  });
+  it('flow folders of two tasks do not share a reservation, and a reservation for another folder is not handed back', () => {
+    const a = out(env('T1-1', '.forge/work/T1/flow'));
+    const b = out(env('T2-1', '.forge/work/T2/flow'));
+    expect(a.port).not.toBe(b.port);
+    expect(a.profileDir).not.toBe(b.profileDir);
+    const first = reserve('K-1-1');
+    const other = reserve('K-1-1', { evidence: path.join(root, 'elsewhere') });
+    expect(other?.evidence).toBe(path.join(root, 'elsewhere'));
+    expect(first?.evidence).not.toBe(other?.evidence);
+  });
+  it('a lapsed reservation is swept: its file, its lock and its profile folder', () => {
+    const a = reserve('S-1-1')!;
+    expect(existsSync(a.profileDir)).toBe(true);
+    reserve('S-2-1', { now: new Date(now.getTime() + 61_000) });
+    expect(existsSync(path.join(envDir(root), 'S-1-1.json'))).toBe(false);
+    expect(existsSync(a.profileDir)).toBe(false);
+    expect(existsSync(path.join(envDir(root), `port-${a.port}.lock`))).toBe(true); // retaken by S-2-1
+  });
+  it('probes at most 50 ports per call', () => {
+    let n = 0;
+    expect(reserve('M-1-1', { range: { from: P!, to: P! + 9999 }, free: () => { n++; return false; } })).toBeNull();
+    expect(n).toBe(50);
+  });
+  it('a free-port probe sees a server bound to ::1 as busy when IPv6 exists', async () => {
+    const srv = createServer();
+    const bound = await new Promise<boolean>(res => { srv.once('error', () => res(false)); srv.listen(P! + 11, '::1', () => res(true)); });
+    try { if (bound) expect(portFree(P! + 11)).toBe(false); } finally { if (bound) await new Promise<void>(res => srv.close(() => res())); }
   });
   it('logs a verify-env event the ledger reads, and the forge status of a planned verification stays as it was', () => {
     out(env('T1-1', '.forge/work/T1/reviews-1-1'));
     const e = readEvents(root).find(x => x.kind === 'verify-env')!;
-    expect(e).toMatchObject({ kind: 'verify-env', task: 'T1-1', port: 47310 });
+    expect(e).toMatchObject({ kind: 'verify-env', task: 'T1-1', port: P });
     const triage: LedgerEvent = { ts: '2026-10-16T09:00:00.000Z', kind: 'triage', task: 'T1', path: 'medium', reasons: ['x'] };
     const planned: LedgerEvent = { ts: '2026-10-16T09:01:00.000Z', kind: 'verify', task: 'T1-1', planned: true, surfaces: ['web'] };
     const s = deriveStatus(deriveStatus(null, triage), planned)!;
