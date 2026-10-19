@@ -18,6 +18,8 @@ const runRef = (name: string) => read(`plugins/forge/skills/run/references/${nam
 const workText = () => `${read('plugins/waypoint/skills/work/SKILL.md')}\n${read('plugins/waypoint/skills/work/references/multisession.md')}`;
 // J-12: 60 % of waypoint:work as wave 5c found it (35 073 bytes): the cap only goes down.
 const WORK_CAP = 21043;
+// J-12: 80 % of forge:run as wave 5c found it (22 479 bytes): the cap only goes down.
+const RUN_CAP = 17983;
 /** I-17: the floor of a dependency range (`^5.0.5`, `~5.0.5`, `5.0.5`) is `min` or later. */
 const floorAtLeast = (range: string | undefined, min: string): boolean => {
   const m = /^[\^~]?(\d+)\.(\d+)\.(\d+)$/.exec(range ?? '');
@@ -117,7 +119,8 @@ describe('plugin layout', () => {
   });
   it('forge run skill drives the Large path through waypoint', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
-    for (const w of ['--path large', 'report-<n>.txt', '"base"', 'references/large.md']) expect(md).toContain(w);
+    for (const w of ['report-<n>.txt', '"base"', 'references/large.md']) expect(md).toContain(w);
+    expect(runRef('task-steps')).toContain('--path large');
     expect(runRef('ephemeral')).toContain('review-perf');
     const large = runRef('large');
     for (const w of ['forge-planner', '/waypoint:design', '/waypoint:plan',
@@ -259,10 +262,11 @@ describe('plugin layout', () => {
   });
   it('skills print the lines the CLI hands over (campaign fixes)', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
-    for (const s of ['Print `announce` exactly as printed', 'When the triage\'s `gate` is `plan`', '`untracked`', 'git commit -m "forge: track .forge/.gitignore" -- .forge/.gitignore',
-      'FORGE verify-result --task <id>']) expect(run).toContain(s);
+    for (const s of ['Print `announce` exactly as printed', 'When the triage\'s `gate` is `plan`', '`untracked`', 'git commit -m "forge: track .forge/.gitignore" -- .forge/.gitignore']) {
+      expect(run).toContain(s);
+    }
     for (const s of ['its `diff` verbatim', '`ask.question` with exactly the three `ask.options`', '`missing` and `unknown` tools',
-      'allowed --expect <the surface\'s hash from verify-plan>', 'When `diffTruncated` is true']) expect(runRef('verify')).toContain(s);
+      'allowed --expect <the surface\'s hash from verify-plan>', 'When `diffTruncated` is true', 'FORGE verify-result --task <id>']) expect(runRef('verify')).toContain(s);
     expect(runRef('autonomy')).toContain('critique-dismiss');
     for (const s of ['**Print `announce` as it is, as a message of its own, before step 2**', 'Print its `say` lines as they are',
       '`run-deps`', '`main-deps`', '--retry-deps']) expect(runRef('execution')).toContain(s);
@@ -339,12 +343,14 @@ describe('plugin layout', () => {
   it('auto mode in the skills: launch questions, decisions by auto, the design loop and the gate', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     const summary = md.slice(md.indexOf('\n## Autonomy\n'), md.indexOf('\n## 1. Triage\n'));
-    for (const w of ['FORGE prefs', '/forge:run --auto', 'references/autonomy.md']) expect(summary).toContain(w);
+    for (const w of ['`begin`', '/forge:run --auto', 'references/autonomy.md']) expect(summary).toContain(w);
     const auto = runRef('autonomy');
     for (const w of ['FORGE prefs', '/forge:run --auto', 'FORGE triage --autonomy auto', 'FORGE swarm start --autonomy auto', 'FORGE authorize merge-on-finish --branch <rama>',
       '--merge-on-finish', '`design-apply`', '`design-approve`', '`plan-confirm`', '`mode`', 'waypoint design-gate', '/waypoint:design approve --auto',
       'forge/run-<project>']) expect(auto).toContain(w);
-    for (const w of ['FORGE route stage --stage handed-off', 'FORGE route stage --stage done']) expect(md).toContain(w);
+    for (const w of ['FORGE route stage --stage handed-off', 'FORGE route stage --stage done']) {
+      for (const r of ['large', 'superpowers-plan']) expect(runRef(r), `${r}: ${w}`).toContain(w);
+    }
     expect(runRef('large')).toContain('not in auto: there a spec is used only with `--from-spec`');
     expect(runRef('decisions')).toContain('"by": "<auto or unattended>"');
     expect(runRef('resuming')).toContain('keeps deciding alone');
@@ -381,7 +387,8 @@ describe('plugin layout', () => {
   });
   it('plan 2 leftovers in the texts: --from-spec triage and declined specs', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
-    for (const w of ['**From a spec.** With `--from-spec <f>`', 'The path is Large whatever `FORGE triage` prints']) expect(md).toContain(w);
+    expect(md).toContain('**From a spec.** With `--from-spec <f>`');
+    expect(runRef('large')).toContain('The path is Large whatever `FORGE triage` prints');
     expect(runRef('large')).toContain('FORGE sp-specs --decline <path>');
     expect(read('plugins/forge/README.md')).toContain('`/forge:run --from-spec <spec> [<task>]`');
     expect(read('plugins/forge/README.es.md')).toContain('`/forge:run --from-spec <spec> [<tarea>]`');
@@ -403,7 +410,7 @@ describe('plugin layout', () => {
     for (const w of ['new --from <spec>', 'waypoint design-import', '--round 0', 'source:', '`docs/superpowers/` is in `.gitignore`']) expect(design).toContain(w);
     const md = read('plugins/forge/skills/run/SKILL.md');
     for (const w of ['--from-spec <f>', '### Superpowers plan', '--superpowers-plan <f>', 'references/superpowers-plan.md',
-      'FORGE tdd', 'it starts `TDD: required`']) expect(md).toContain(w);
+      'FORGE begin', 'it starts `TDD: required`']) expect(md).toContain(w);
     for (const w of ['FORGE sp-specs', '/waypoint:design new --from']) expect(runRef('large')).toContain(w);
     const sp = runRef('superpowers-plan');
     for (const w of ['FORGE sp-plan tasks', 'FORGE triage --task <id> --superpowers-plan', 'FORGE brief --superpowers-plan', 'FORGE sp-plan check',
@@ -601,7 +608,7 @@ describe('plugin layout', () => {
   });
   it('the run skill wires verification in', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
-    for (const s of ['FORGE verify-plan', 'forge-verify', 'FORGE local set surfaces.', '--path', '`new`']) expect(md).toContain(s);
+    for (const s of ['FORGE verify-plan', 'forge-verify', '--path', '`new`']) expect(md).toContain(s);
     expect(md).toMatch(/explains how to check something[\s\S]*\.forge\/verify\/<name>\.md/);
     expect(md).toMatch(/[Rr]ead `references\/verify\.md` now and follow `## Before the review`/);
     expect(runRef('review-close')).toMatch(/[Rr]ead `references\/verify\.md` now and follow `## After the verdict`/);
@@ -2017,5 +2024,19 @@ describe('plugin layout', () => {
     expect(medium.split('\n').find(l => l.startsWith('6. '))).toContain('references/review-close.md');
     expect(steps.split('\n').find(l => l.startsWith('5. **verdict**'))).toContain('references/review-close.md');
     expect(steps.split('\n').find(l => l.startsWith('4. **verify**'))).toContain('FORGE verify-plan --task T-<n>');
+  });
+  it('forge:run starts a task with FORGE begin and leaves to its references what only one path uses (J-12)', () => {
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    expect(Buffer.byteLength(run, 'utf8'), 'at most 80 % of its size when wave 5c started').toBeLessThanOrEqual(RUN_CAP);
+    for (const w of ['FORGE begin --task <id> --locale <es|en>', '`foreign`', '`say`', '`tdd.line`', '`references/large.md`']) expect(run, w).toContain(w);
+    for (const w of ['git status --porcelain', 'FORGE tree snapshot', 'FORGE tdd', 'FORGE prefs', 'FORGE local set surfaces.', 'FORGE route stage']) expect(run, w).not.toContain(w);
+    expect(run.split('\n').find(l => l.startsWith('4. **Verification, only when the task asks for it**'))).toContain('`## Small` in `references/verify.md`');
+    const verify = runRef('verify');
+    for (const w of ['## Small', '**Permission.**', 'FORGE local set surfaces.<name> allowed', 'FORGE verify-plan --task <id> --path small --base <BASE> --asked', 'FORGE verify-result --task <id>']) {
+      expect(verify, w).toContain(w);
+    }
+    const large = runRef('large');
+    for (const w of ['### From a spec', '`.forge/work/<id>/task.txt`', 'FORGE route stage --stage handed-off --session <CSID>', 'FORGE route stage --stage done --session <CSID>']) expect(large, w).toContain(w);
+    for (const w of ['FORGE route stage --stage handed-off --session <CSID>', 'FORGE route stage --stage done --session <CSID>']) expect(runRef('superpowers-plan'), w).toContain(w);
   });
 });
