@@ -293,6 +293,14 @@ describe('forge review-prep', () => {
     const shop = JSON.parse(prep().stdout);
     expect(shop.spawn.map((s: { taskLine: string }) => s.taskLine)).toEqual(['forge-task: T1-1 @shop', 'forge-task: T1-1 @shop']);
   });
+
+  it('--report reviews even with red validators the base did not have: a review that fixes nothing (K2-17)', () => {
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(1)"\n');
+    const out = JSON.parse(prep('--report').stdout);
+    expect(out.validatorsRound).toBeUndefined();
+    expect(out.validators.ok).toBe(false);
+    expect(out.spawn.length).toBeGreaterThan(0);
+  });
 });
 
 describe('forge prep', () => {

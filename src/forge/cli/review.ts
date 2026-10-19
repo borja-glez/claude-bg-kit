@@ -208,6 +208,7 @@ function writeThreatModel(dir: string, config: ForgeConfig): string | null {
  * An express review (measure 7) does not validate: it prints validators {pending, cmd}, the validation to run in the
  * background, one correctness reviewer on Sonnet and delegated.
  * --sensitive (K4-06): security reviews whatever the diff touches; without it, only when the diff touches a sensitive zone.
+ * --report (K2-17): a review that fixes nothing; red validators never hold the reviewers back.
  */
 export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
@@ -351,7 +352,9 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   // C-08: validators red that BASE did not have go back to the implementer before anyone reviews: a validators round,
   // at most MAX_VALIDATOR_ROUNDS per review (counted since the brief's last verdict). It writes no verdict, so it never
   // counts against the cap; after them, the review is planned as before and the verdict is a fix by validators.
-  if (!ok) {
+  // K2-17: --report is a review that fixes nothing (forge:review): its red validators are part of the report, never a
+  // round of their own, so the reviewers are spawned all the same.
+  if (!ok && !args.includes('--report')) {
     const sinceVerdict = counted.slice(counted.map(e => e.kind === 'verdict' && isTask(e, task)).lastIndexOf(true) + 1);
     const k = sinceVerdict.filter(e => e.kind === 'phase' && isTask(e, id) && e.phase === 'fix' && e.validators === true && e.brief === Number(n)).length;
     if (k < MAX_VALIDATOR_ROUNDS) {

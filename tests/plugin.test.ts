@@ -322,20 +322,16 @@ describe('plugin layout', () => {
   it('forge review skill reviews a branch', () => {
     const md = read('plugins/forge/skills/review/SKILL.md');
     expect(md).toMatch(/^---\r?\nname: review\r?\n/);
-    for (const w of ['git merge-base HEAD', 'review-<branch>-<tag>', '--base-run', 'git worktree add --detach', 'diff-1.patch', 'FORGE triage', 'review-correctness',
-      'review-security', 'review-perf', 'FORGE verdict', '/forge:run']) expect(md).toContain(w);
+    for (const w of ['git merge-base HEAD', 'review-<branch>-<tag>', '--base-run', 'git worktree add --detach', 'FORGE triage', 'review-perf', 'FORGE review-prep', 'FORGE review-close', '/forge:run']) expect(md).toContain(w);
   });
   it('forge review skill spawns the reviewers of its triage with their effort and model; forge:run passes --delicate', () => {
     const md = read('plugins/forge/skills/review/SKILL.md');
-    const step4 = md.slice(md.indexOf('4. **Diff and zones.**'), md.indexOf('5. **Brief.**'));
+    const step4 = md.slice(md.indexOf('4. **Zones.**'), md.indexOf('5. **Brief.**'));
     const step6 = md.slice(md.indexOf('6. **Review.**'), md.indexOf('7. **Report.**'));
     for (const w of ['`review`', '`review-perf`', 'FORGE triage --task <id> --text-file .forge/work/<id>/task.txt --base <base>']) expect(step4).toContain(w);
     // The line step 4 writes into task.txt when the user asks about performance: triage's perf rule must read it as such.
     expect([...step4.matchAll(/«([^»]+)»/g)].map(m => m[1]).some(isPerfTask), 'a «…» line of step 4 is a perf task for FORGE triage').toBe(true);
-    for (const w of ["step-4 triage's `review.reviewers`", "the Agent tool's `effort`", "the Agent tool's `model` when the reviewer's is not null",
-      'each as subagent type `forge:<agent>`']) expect(step6).toContain(w);
-    expect(step6).not.toContain('agents from `FORGE agents`');
-    expect(step6).not.toContain('each as its `agent`');
+    for (const w of ["review-prep's `spawn`", "the Agent tool's `effort`", 'each as subagent type `forge:<agent>`', 'forge-task: <id>-1']) expect(step6).toContain(w);
     const run = read('plugins/forge/skills/run/SKILL.md');
     const medium2 = run.slice(run.indexOf('\n2. For each task, write'), run.indexOf('\n3. Do not validate'));
     expect(medium2).toContain('run Triage step 1 again with `--delicate`');
@@ -2118,5 +2114,13 @@ describe('plugin layout', () => {
     for (const a of ['forge-verify', 'forge-verify-heavy']) expect(read(`plugins/forge/agents/${a}.md`), a).toContain('--cwd <code checkout>');
     const manual = read('plugins/forge/skills/verify/SKILL.md');
     for (const w of ['FORGE verify-env --task manual-<date>', 'smoke']) expect(manual, w).toContain(w);
+  });
+
+  it('/forge:review prepares and closes with the CLI, offers verify and logs done (K2-17)', () => {
+    const md = read('plugins/forge/skills/review/SKILL.md');
+    for (const w of ['FORGE review-prep --task <id>-1 --path medium --base <base> --baseline', '--report', 'FORGE review-close --task <id>-1',
+      'FORGE verify-plan --task <id>-1 --path medium --base <base>', 'FORGE verify-env --task <id>-1', '"phase":"done"', '--sensitive']) expect(md, w).toContain(w);
+    expect(md).not.toContain('FORGE verdict');
+    expect(md).not.toContain('FORGE validate --all --path medium --base <base>');
   });
 });
