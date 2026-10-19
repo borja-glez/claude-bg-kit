@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.23.0](https://img.shields.io/badge/version-0.23.0-fab387?style=flat-square)
-![depends on waypoint ^0.30.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.30.0-cba6f7?style=flat-square)
+![version 0.24.0](https://img.shields.io/badge/version-0.24.0-fab387?style=flat-square)
+![depends on waypoint ^0.31.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.31.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -49,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.30.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permissions, in `.claude/settings.local.json` of the projects you trust (not in your `~/.claude/settings.json`, which every project reads): `"allow": ["Bash(node *forge.cjs*)"]` so forge runs without a prompt, and `"deny": ["Bash(*forge.cjs* hook *)"]`, which stops Claude from calling forge's hook commands by hand (for example `hook answer`, which records your answers) and does not touch the real hooks, because permission rules never apply to them. Optionally add `"ask": ["Bash(*forge.cjs* swarm merge*)", "Bash(*forge.cjs* local set*)"]`: the first asks you before every final merge, the second before Claude records a permission or your trust in the commands of `.forge/config.yaml`.
+forge depends on [waypoint](../waypoint/README.md) ^0.31.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permissions, in `.claude/settings.local.json` of the projects you trust (not in your `~/.claude/settings.json`, which every project reads): `"allow": ["Bash(node *forge.cjs*)"]` so forge runs without a prompt, and `"deny": ["Bash(*forge.cjs* hook *)"]`, which stops Claude from calling forge's hook commands by hand (for example `hook answer`, which records your answers) and does not touch the real hooks, because permission rules never apply to them. Optionally add `"ask": ["Bash(*forge.cjs* swarm merge*)", "Bash(*forge.cjs* local set*)"]`: the first asks you before every final merge, the second before Claude records a permission or your trust in the commands of `.forge/config.yaml`.
 
 ## Usage
 

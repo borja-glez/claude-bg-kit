@@ -13,6 +13,30 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.31.0 — 2026-10-19
+
+#### Added
+- `waypoint launch <plan> <track> --exec` starts the session's `claude --bg` itself, detached and in the worktree, with its output in `.waypoint/<project>/launch/<name>.log`; `/waypoint:launch` uses it and needs no `claude --bg` permission any more (A-22).
+- `waypoint doctor <plan> [--fix]` lists what older versions left under `.waypoint/<project>/` (`last-head`, files of `sync/` the plan no longer writes, caches of collections the roadmap does not have), and `--fix` deletes them; it reports what it could not delete (`failed`) and exits 1 (A-24).
+- `page --publish-info --assets`: the roadmap declares `assets` only when its caller asks for it; `/waypoint:plan assets` passes it, and forge asks for it when its screenshots are uploaded (A-19).
+- `page --publish-info` keeps `assets` when the listed `--page` says the published roadmap has them, so forge's routine syncs never change who can see it (A-19).
+- One plan-path rule (`PLAN_PATH`) shared by `launch` and forge (A-19).
+
+#### Changed
+- waypoint no longer reads `.forge/config.yaml` nor bundles forge's config schema (A-19, I-18).
+- `sync` deletes its earlier batches of `--out` (inside `.waypoint/<project>/`) before writing, and replaces a batch file that is a link instead of writing through it (A-24).
+- A listing with a document that does not read is used without it, and the CLI says `warning: skipped <dir>/<file> (unreadable)` on stderr; `next`, `conflicts` and `status` exit 1 when the `--states` they are given does not exist (A-06, I-14).
+- `session-id` gives only letters, digits, `_`, `.` and `-`, the ids forge accepts (A-18).
+- The design page embeds the last five versions; the earlier ones keep their date and note (A-24).
+- `/waypoint:work` may edit files without asking, and every waypoint skill allows the tools it names (A-22).
+- `/waypoint:launch` may commit the plan it asks for (A-22).
+- `--swarm` is still obsolete and its warning now says forge composes the launch (A-19).
+- The band's bundle carries no zod and is minified: `hooks/register.js` drops from about 433 KB to about 213 KB (I-13). The band marks a member forge launched for one task by its member file; `launchedBy` is no longer read. The band clips a task id like a title.
+
+#### Removed
+- `waypoint launch --task` exits 2: forge composes the launch of its run members (A-19).
+- `--launcher herdr` exits 2: herdr was removed; use bg (I-18).
+
 ### 0.30.0 — 2026-10-18
 
 #### Added
@@ -335,6 +359,21 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.24.0 — 2026-10-19
+
+#### Added
+- `swarm tick` (a `start` in sessions mode) and `swarm relaunch` print `launch`: the member's session as forge composes it (worktree, branch, name, the `/forge:member` prompt, `command` and `run`, with `swarm.member`'s effort and model); the coordinator runs `launch.run`. A `--plan` that cannot go into it exits 2 before anything is written (A-19).
+- `sp-plan check` of a superpowers task without checkboxes records it in `.forge/sp-done/<slug>.md`, which `sp-plan tasks`, the triage and the routing read; the output gains `recorded`. The record names the plan by its repository path (the same from any worktree), appends instead of rewriting, and a failed write fails the check (exit 2) (D-17).
+
+#### Changed
+- forge finds waypoint's CLI through `installed_plugins.json` before scanning the cache, so a higher version left by a downgrade is no longer picked (I-18).
+- A crash of a test run (a segfault, a core dump, V8 out of heap, a fatal error) beside a test the base already failed is no longer excused as a failure that was there; a crash line also counts as a failure line (handover from 1a).
+- `execution.json` is only written under its lock (`saveExecution` is private), and two real processes test it (I-15).
+- `swarm tick` reads the roadmap's listings with the shared tolerant reader (I-14).
+- The CLI is one module per command (`src/forge/cli/commands/`, `src/forge/cli/swarm/`), with the same commands, flags and outputs (I-12).
+- A `swarm.launcher: herdr` left in a config reads as `bg`, and the member's launch says so (I-18).
+- Depends on waypoint ^0.31.0.
 
 ### 0.23.0 — 2026-10-18
 
@@ -796,6 +835,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.13.6 — 2026-10-19
+
+#### Changed
+- Its bundle carries no zod and is minified (I-13). The band it shares with waypoint marks a member forge launched for one task by its member file, and reads the title of a plan without a ledger in linear time (carry from 4d). Nothing else lens shows changes.
 
 ### 0.13.5 — 2026-10-18
 
