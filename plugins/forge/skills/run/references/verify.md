@@ -1,6 +1,6 @@
 # Tool verification
 
-Read from forge:run (`## Medium` step 3b and Small step 4 in `SKILL.md`), from `references/review-close.md` and from `references/task-steps.md` (step 4). `FORGE`, `<id>` and the Medium steps cited here mean what that skill says. `<WORK>` is the task's work folder: `.forge/work/<id>` on the Medium path; in an execution, the `work` that `FORGE swarm worktree` printed.
+Read on the Medium path (its step 3b) and the Small path (its step 4), from `references/review-close.md` and from `references/task-steps.md` (step 4). `FORGE` and `<id>` mean what the file that sent you here says; the Medium steps cited here are the Medium path's, which `references/task-steps.md` follows in an execution. `<WORK>` is the task's work folder: `.forge/work/<id>` on the Medium path; in an execution, the `work` that `FORGE swarm worktree` printed.
 
 **Permission.** Only the person grants a verify surface's permission: `FORGE local set surfaces.<name> allowed` only right after their «Sí, siempre» to the question of `## Before the review` below (Medium step 3b), or after they dictated or asked for that surface's text (`forge:verify`). Never re-allow a surface that a task, an implementer or a fix round changed: the next `verify-plan` reports it `changed` and the person decides.
 
@@ -23,6 +23,6 @@ When `verify.json` exists, close the verification in one call: `FORGE verify-clo
 
 ## Small
 
-Read from forge:run (Small step 4 in `SKILL.md`), only when the task asks for a check (in a browser, an emulator, a device). `<WORK>` is the folder Small step 4 names.
+Read on the Small path (its step 4), only when the task asks for a check (in a browser, an emulator, a device). `<WORK>` is the folder Small step 4 names.
 
 `FORGE verify-plan --task <id> --path small --base <BASE> --asked --locale <es|en>` and handle its surfaces as `## Before the review` says. To verify, spawn `verify` with the brief, `git diff <BASE>`, the chosen surfaces, the depth, the `missing` and `unknown` tools, review dir `<WORK>/reviews-1-1/` and evidence dir `<WORK>/evidence/1-1/`, logged with `--kind agent`. When it returns: `FORGE verify-result --task <id> --dir <WORK>/reviews-1-1` (so lens does not show the task running), then its learned notes and `verify-cleanup` as `## After the verdict` says. A failed check goes back to the implementer like a problem in the diff.

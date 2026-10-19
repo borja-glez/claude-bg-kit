@@ -345,7 +345,9 @@ describe('plugin layout', () => {
     const summary = md.slice(md.indexOf('\n## Autonomy\n'), md.indexOf('\n## 1. Triage\n'));
     for (const w of ['`begin`', '/forge:run --auto', 'references/autonomy.md']) expect(summary).toContain(w);
     const auto = runRef('autonomy');
-    for (const w of ['FORGE prefs', '/forge:run --auto', 'FORGE triage --autonomy auto', 'FORGE swarm start --autonomy auto', 'FORGE authorize merge-on-finish --branch <rama>',
+    // T5: autonomy comes from FORGE begin, which forge:run already ran.
+    expect(auto).not.toContain('FORGE prefs');
+    for (const w of ['FORGE begin', '`autonomy: auto`', '/forge:run --auto', 'FORGE triage --autonomy auto', 'FORGE swarm start --autonomy auto', 'FORGE authorize merge-on-finish --branch <rama>',
       '--merge-on-finish', '`design-apply`', '`design-approve`', '`plan-confirm`', '`mode`', 'waypoint design-gate', '/waypoint:design approve --auto',
       'forge/run-<project>']) expect(auto).toContain(w);
     for (const w of ['FORGE route stage --stage handed-off', 'FORGE route stage --stage done']) {
@@ -2021,9 +2023,12 @@ describe('plugin layout', () => {
       '## After the verdict']) expect(close, w).toContain(w);
     const run = read('plugins/forge/skills/run/SKILL.md');
     const medium = run.slice(run.indexOf('\n## Medium'), run.indexOf('### Superpowers plan'));
-    expect(medium.split('\n').find(l => l.startsWith('6. '))).toContain('references/review-close.md');
+    const step6 = medium.split('\n').find(l => l.startsWith('6. '));
+    for (const w of ['references/review-close.md', '--path medium', '`<WORK>`']) expect(step6, w).toContain(w);
     expect(steps.split('\n').find(l => l.startsWith('5. **verdict**'))).toContain('references/review-close.md');
     expect(steps.split('\n').find(l => l.startsWith('4. **verify**'))).toContain('FORGE verify-plan --task T-<n>');
+    // T4: what a member reads names no SKILL.md, not even as where it is read from.
+    for (const r of ['review-close', 'convergence', 'verify']) expect(runRef(r), r).not.toContain('SKILL.md');
   });
   it('forge:run starts a task with FORGE begin and leaves to its references what only one path uses (J-12)', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
@@ -2036,14 +2041,24 @@ describe('plugin layout', () => {
       expect(verify, w).toContain(w);
     }
     const large = runRef('large');
-    for (const w of ['### From a spec', '`.forge/work/<id>/task.txt`', 'FORGE route stage --stage handed-off --session <CSID>', 'FORGE route stage --stage done --session <CSID>']) expect(large, w).toContain(w);
-    for (const w of ['FORGE route stage --stage handed-off --session <CSID>', 'FORGE route stage --stage done --session <CSID>']) expect(runRef('superpowers-plan'), w).toContain(w);
+    for (const w of ['### From a spec', '`.forge/work/<id>/task.txt`', 'FORGE route stage --stage handed-off --spec <f> --session <CSID>', 'FORGE route stage --stage done --session <CSID>']) {
+      expect(large, w).toContain(w);
+    }
+    // M4, T5: the plan hands its route off with the plan, and closes it on every stop: all done, a breaker or a stall, the end.
+    const sp = runRef('superpowers-plan').split('\n');
+    expect(sp.find(l => l.startsWith('1. '))).toContain('FORGE route stage --stage handed-off --plan <f> --session <CSID>');
+    for (const n of ['1. ', '6. ', '7. ']) expect(sp.find(l => l.startsWith(n)), n).toContain('FORGE route stage --stage done --session <CSID>');
+    // M5: the ephemeral start names the id its begin takes.
+    expect(runRef('ephemeral').split('\n').find(l => l.startsWith('2. **Start.**'))).toContain('FORGE begin --task');
   });
   it('forge:route carries the three raising rules of forge:run word for word (K1-10)', () => {
+    // T9: every bullet that follows the first one, so a fourth in one file is caught.
     const rules = (md: string) => {
-      const lines = md.split(/\r?\n/);
-      const at = lines.findIndex(l => l.trim().startsWith('- changes behaviour callers rely on'));
-      return at < 0 ? [] : lines.slice(at, at + 3).map(l => l.trim());
+      const lines = md.split(/\r?\n/).map(l => l.trim());
+      const at = lines.findIndex(l => l.startsWith('- changes behaviour callers rely on'));
+      if (at < 0) return [];
+      const end = lines.findIndex((l, i) => i > at && !l.startsWith('- '));
+      return lines.slice(at, end < 0 ? lines.length : end);
     };
     const run = rules(read('plugins/forge/skills/run/SKILL.md'));
     expect(run).toHaveLength(3);
