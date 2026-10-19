@@ -16,12 +16,12 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.32.0 — 2026-10-19
 
 #### Added
-- `next --messages <dir>` prints `multi`: true when another session of the listing is live, a message addressed to this session is open, a task an idle session left can be recovered by this one, or the session works in a track worktree (J-12).
+- `next` prints `multi` and reads `--messages <dir>`: `multi` is true when another session of the listing is live, a message addressed to this session is open, a task an idle session left can be recovered by this one (of its track, or of any track when it has none), or the session works in a track worktree (a linked worktree on a `track/` branch, its `gitdir` absolute or relative) (J-12).
 - A `[waypoint` message routes a lone session to its multi-session protocol; `next` treats a missing `--messages` folder as no messages (J-12).
 
 #### Changed
-- `/waypoint:work` loads only what a session working alone needs. The inbox, the recovery of idle sessions' tasks, overlaps and simultaneous claims, lost tasks, zone expansion, delegation, the phase close, the messages between sessions and `release` moved, word for word, to `skills/work/references/multisession.md`, which the skill reads when `next` prints `multi: true`. Its size on invoke went from ~13k to ~7.5k tokens (`claude plugin details`; `SKILL.md` 35 073 → 20 918 bytes, the reference is 15 688 bytes). The skill runs the CLI as `node "<WP>" …` (J-12).
-- `openTasksOf` keeps only plan-id state names (J-12).
+- `/waypoint:work` loads only what a session working alone needs. The inbox, the recovery of idle sessions' tasks, overlaps and simultaneous claims, lost tasks, zone expansion, delegation, the phase close, the messages between sessions and `release` moved to `skills/work/references/multisession.md`, only their links rewritten, except that a lost recovery race now lists `sessions` again and runs `next` again, and a session without a track recovers a task of any track. The skill reads it when the session works next to others (`next` prints `multi: true`, or a `[waypoint` message arrives) or for one of those steps (`release`, a claim that is not `solo`, a lost task, zone expansion, delegation). Its size on invoke went from ~13k to ~7.5k tokens (`claude plugin details`; `SKILL.md` 35 073 → 20 921 bytes, the reference is 15 961 bytes). The skill runs the CLI as `node "<WP>" …` (J-12).
+- A state file whose name breaks the plan's id rule no longer names a task left in progress, in `bind`'s exit 4 and in the `previous` line of `session-start`: they read the state cache as the band has since 0.31.0 (carry from 5b).
 
 ### 0.31.0 — 2026-10-19
 

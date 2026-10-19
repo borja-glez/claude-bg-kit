@@ -1,6 +1,6 @@
 # waypoint: working next to other sessions
 
-Read from waypoint:work when `next` prints `multi: true` (another live session in the sessions listing, an open message addressed to this session, a track worktree, or a task an idle session left), and for `release` (§7). `WP`, `DB`, `SEAT`, `SID`, `<plan>`, `<project>`, `NOW`, `EID`, `TV`, `SV`, `MAIN_REPO` and `IN_MAIN` mean what `SKILL.md` says: `WP` is the `waypoint.cjs` it resolved, run as `node "<WP>" <command>`. Section numbers §0 to §5 are those of `SKILL.md`; §6 and §7 are in this file.
+Read from waypoint:work when the session works next to others: `next` prints `multi: true` (another live session in the sessions listing, an open message addressed to this session, a track worktree, or a task an idle session left) or a `[waypoint` message arrives. Also read for the steps of a session alone that need it: `release` (§7), a claim that is not `solo` (the §2 part), a lost task, zone expansion and delegation (the §3 part). `WP`, `DB`, `SEAT`, `SID`, `<plan>`, `<project>`, `NOW`, `EID`, `TV`, `SV` and `MAIN_REPO` mean what `SKILL.md` says: `WP` is the `waypoint.cjs` it resolved, run as `node "<WP>" <command>`. Section numbers §0 to §5 are those of `SKILL.md`; §6 and §7 are in this file.
 
 Other sessions may be working on the same plan in parallel, each on its own track and git worktree. Everything below that mentions messages, overlaps or recovery is how you coordinate with them. Always identify sessions by `SID` (the id of their `sessions` document) in database fields.
 
