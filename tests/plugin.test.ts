@@ -2123,4 +2123,13 @@ describe('plugin layout', () => {
     expect(md).not.toContain('FORGE verdict');
     expect(md).not.toContain('FORGE validate --all --path medium --base <base>');
   });
+
+  it('the forge READMEs describe wave 5d: ports and profiles, the flow pass, the two levels of affects, defects (K2-07, K2-12, K2-13, K2-15)', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const w of ['verify.ports', 'verify.flow', '--isolated', '`verify-env', '`verify-spawn', '`verify-preflight', 'surfaces digest', '`defects`', 'smoke', 'undo.shas']) {
+        expect(md, `${f}: ${w}`).toContain(w);
+      }
+    }
+  });
 });
