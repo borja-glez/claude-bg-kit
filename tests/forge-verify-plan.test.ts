@@ -324,6 +324,6 @@ describe('verdict with verify.json and verify-cleanup', () => {
   });
   it('verify-cleanup with no pids.json does nothing', () => {
     mkdirSync(path.join(root, 'ev'));
-    expect(JSON.parse(run(['verify-cleanup', '--dir', 'ev'], io).stdout)).toEqual({ killed: [], gone: [], reused: [], unknown: [] });
+    expect(JSON.parse(run(['verify-cleanup', '--dir', 'ev'], io).stdout)).toEqual({ killed: [], gone: [], reused: [], unknown: [], skipped: [] });
   });
 });

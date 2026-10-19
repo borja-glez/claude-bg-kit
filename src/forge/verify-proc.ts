@@ -3,12 +3,13 @@
 // [{pid, startedAt, image}] in logs/<n>.pid.json, one file per spawn. verify-cleanup reads those and pids.json (the older
 // list of integers the agent wrote) and stops a pid only while it is still that process: the same image, started within
 // 2 s of the recorded time (a pid of the older list: started before pids.json was last written). A pid whose identity
-// cannot be read now is never stopped. On POSIX it sends SIGTERM to the group and the descendants and SIGKILL after 5 s
-// to what still shows its identity; on Windows, taskkill /T /F.
+// cannot be read now is never stopped, and a record in logs/ that verify-spawn did not write is never read for a pid. On
+// POSIX it sends SIGTERM to the group and the descendants and SIGKILL after 5 s to what still shows its identity; on
+// Windows, taskkill /T /F.
 import { execFileSync, spawn } from 'node:child_process';
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, utimesSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from 'node:fs';
 import path from 'node:path';
-import { pidAlive, sleepSync } from './pid.js';
+import { pidAlive, removeFileIf, sleepSync } from './pid.js';
 import { writeAtomic } from './execution.js';
 
 export interface PidEntry { pid: number; startedAt?: number; image?: string }
@@ -30,7 +31,8 @@ export interface ProcDeps {
   sleep: (ms: number) => void;
   now: () => number;
 }
-/** What verify-cleanup did with each recorded pid. `unknown`: alive, but its identity cannot be read now, so left alone. */
+/** What verify-cleanup did with each recorded pid. `unknown`: alive and left running, because its identity cannot be read
+ *  now or because stopping it failed; its record stays for the next pass. */
 export interface Cleanup { killed: number[]; gone: number[]; reused: number[]; unknown: number[] }
 
 /** How far the start a process shows may be from the recorded one: ps gives whole seconds. */
@@ -69,24 +71,34 @@ export function parsePowershell(out: string): ProcInfo | null {
   return Number.isFinite(t) && name ? { startedAt: t, image: name } : null;
 }
 
+/** One entry of a list of pids: an integer, or {pid, startedAt?, image?}; null for anything else. */
+function entryOf(x: unknown): PidEntry | null {
+  if (Number.isInteger(x) && (x as number) > 0) return { pid: x as number };
+  if (!x || typeof x !== 'object') return null;
+  const o = x as Record<string, unknown>;
+  if (!Number.isInteger(o.pid) || (o.pid as number) <= 0) return null;
+  return {
+    pid: o.pid as number,
+    ...(typeof o.startedAt === 'number' && Number.isFinite(o.startedAt) ? { startedAt: o.startedAt } : {}),
+    ...(typeof o.image === 'string' && o.image ? { image: o.image } : {}),
+  };
+}
+
 /** pids.json: a list of {pid, startedAt?, image?} or, as forge ≤ 0.25 had the agent write it, of integers. */
 export function parsePids(text: string | null): PidEntry[] {
   let raw: unknown;
   try { raw = JSON.parse(text ?? ''); } catch { return []; }
-  if (!Array.isArray(raw)) return [];
-  const out: PidEntry[] = [];
-  for (const x of raw) {
-    if (Number.isInteger(x) && (x as number) > 0) { out.push({ pid: x as number }); continue; }
-    if (!x || typeof x !== 'object') continue;
-    const o = x as Record<string, unknown>;
-    if (!Number.isInteger(o.pid) || (o.pid as number) <= 0) continue;
-    out.push({
-      pid: o.pid as number,
-      ...(typeof o.startedAt === 'number' && Number.isFinite(o.startedAt) ? { startedAt: o.startedAt } : {}),
-      ...(typeof o.image === 'string' && o.image ? { image: o.image } : {}),
-    });
-  }
-  return out;
+  return Array.isArray(raw) ? raw.map(entryOf).filter((e): e is PidEntry => e !== null) : [];
+}
+
+/** A record as verify-spawn writes it (logs/<n>.pid.json): a list whose every entry has its pid, its start and its image.
+ *  Null for any other file, or one that cannot be read: verify-cleanup leaves it alone (K2-20). */
+function readRecord(file: string): PidEntry[] | null {
+  let raw: unknown;
+  try { raw = JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
+  if (!Array.isArray(raw) || !raw.length) return null;
+  const list = raw.map(entryOf);
+  return list.every(e => e !== null && e.startedAt !== undefined && e.image !== undefined) ? list as PidEntry[] : null;
 }
 
 /** Whether `info` (the pid now) is still the process `e` recorded. A pid recorded without its start (the older list of
@@ -139,16 +151,20 @@ function descendants(pid: number, deps: ProcDeps, depth = 0): number[] {
  * Stops processes known to be the recorded ones (each pid with the identity it showed). Never a pid <= 1 or one of
  * `protect`, as a descendant or through a group they are in. POSIX: SIGTERM to the group each one leads (else to the pid)
  * and to every descendant, all read before any signal; after up to TERM_GRACE_MS, SIGKILL only to what is left and still
- * shows the identity it had before the SIGTERM. Windows: taskkill /T /F.
+ * shows the identity it had before the SIGTERM. Windows: taskkill /T /F, else SIGTERM; when neither worked, `gone` if it
+ * has ended meanwhile, else `failed`.
  */
-function stopProcs(known: Map<number, ProcInfo>, deps: ProcDeps, protect: number[]): { killed: number[]; gone: number[] } {
-  const killed: number[] = [], gone: number[] = [];
+function stopProcs(known: Map<number, ProcInfo>, deps: ProcDeps, protect: number[]): { killed: number[]; gone: number[]; failed: number[] } {
+  const killed: number[] = [], gone: number[] = [], failed: number[] = [];
   const safe = (p: number) => p > 1 && !protect.includes(p);
   const pids = [...known.keys()].filter(safe);
-  if (!pids.length) return { killed, gone };
+  if (!pids.length) return { killed, gone, failed };
   if (deps.platform === 'win32') {
-    for (const pid of pids) (deps.taskkill(pid) || deps.signal(pid, 'SIGTERM') ? killed : gone).push(pid);
-    return { killed, gone };
+    for (const pid of pids) {
+      if (deps.taskkill(pid) || deps.signal(pid, 'SIGTERM')) killed.push(pid);
+      else (deps.alive(pid) ? failed : gone).push(pid);
+    }
+    return { killed, gone, failed };
   }
   const tree = new Map(pids.map(pid => [pid, descendants(pid, deps).filter(safe)] as const));
   const ids = new Map<number, ProcInfo | null>(known);
@@ -172,71 +188,132 @@ function stopProcs(known: Map<number, ProcInfo>, deps: ProcDeps, protect: number
   for (const g of groups) if (left.includes(g)) deps.signal(-g, 'SIGKILL');
   for (const p of left) if (deps.alive(p)) deps.signal(p, 'SIGKILL');
   killed.push(...pids);
-  return { killed, gone };
+  return { killed, gone, failed };
+}
+
+type Verdict = keyof Cleanup;
+
+/**
+ * The verdict of each entry (same order), each judged against what holds its pid now: a pid <= 1, one of `protect` or one
+ * that is not alive is `gone`; one whose identity cannot be read now is `unknown`. Otherwise an entry the process matches
+ * is stopped with every other that matches (`killed`; `gone` or `unknown` when stopProcs could not stop it), and one it
+ * does not match is `reused`: two entries of one pid (an ended spawn whose pid a later one got) are judged apart.
+ */
+function judge(entries: PidEntry[], writtenAt: number | null, deps: ProcDeps, protect: number[]): Verdict[] {
+  const verdicts: Verdict[] = entries.map(() => 'unknown');
+  const byPid = new Map<number, number[]>();
+  entries.forEach((e, i) => byPid.set(e.pid, [...(byPid.get(e.pid) ?? []), i]));
+  const known = new Map<number, ProcInfo>();
+  const matched = new Map<number, number[]>();
+  for (const [pid, at] of byPid) {
+    if (pid <= 1 || protect.includes(pid) || !deps.alive(pid)) { for (const i of at) verdicts[i] = 'gone'; continue; }
+    const info = deps.procInfo(pid);
+    if (!info) continue;
+    const hit = at.filter(i => sameProcess(entries[i], info, writtenAt));
+    for (const i of at) if (!hit.includes(i)) verdicts[i] = 'reused';
+    if (hit.length) { known.set(pid, info); matched.set(pid, hit); }
+  }
+  const r = stopProcs(known, deps, protect);
+  for (const [pid, hit] of matched) {
+    const v: Verdict = r.killed.includes(pid) ? 'killed' : r.gone.includes(pid) ? 'gone' : 'unknown';
+    for (const i of hit) verdicts[i] = v;
+  }
+  return verdicts;
+}
+
+/** Each pid once, in the order it first comes: `killed` when an entry of it was stopped, else `unknown`, `gone`, `reused`. */
+function summary(entries: PidEntry[], verdicts: Verdict[]): Cleanup {
+  const out: Cleanup = { killed: [], gone: [], reused: [], unknown: [] };
+  const order: Verdict[] = ['killed', 'unknown', 'gone', 'reused'];
+  const seen = new Set<number>();
+  for (const e of entries) {
+    if (seen.has(e.pid)) continue;
+    seen.add(e.pid);
+    const mine = verdicts.filter((_, i) => entries[i].pid === e.pid);
+    out[order.find(v => mine.includes(v))!].push(e.pid);
+  }
+  return out;
 }
 
 /**
  * Stops each recorded process that is still the one recorded. A pid <= 1, this process or its parent is never touched,
  * and one already gone is `gone`; one that is now another process is `reused` and one whose identity cannot be read now
- * is `unknown`: both are left alone (K2-20.2). The rest stop as stopProcs says.
+ * is `unknown`: both are left alone (K2-20.2). The rest stop as stopProcs says; one it could not stop and still alive is
+ * `unknown` too.
  */
 export function cleanupProcs(entries: PidEntry[], writtenAt: number | null, deps: ProcDeps, protect: number[] = [process.pid, process.ppid]): Cleanup {
-  const out: Cleanup = { killed: [], gone: [], reused: [], unknown: [] };
-  const seen = new Set<number>();
-  const known = new Map<number, ProcInfo>();
-  for (const e of entries) {
-    if (seen.has(e.pid)) continue;
-    seen.add(e.pid);
-    if (e.pid <= 1 || protect.includes(e.pid) || !deps.alive(e.pid)) { out.gone.push(e.pid); continue; }
-    const info = deps.procInfo(e.pid);
-    if (!info) { out.unknown.push(e.pid); continue; }
-    if (!sameProcess(e, info, writtenAt)) { out.reused.push(e.pid); continue; }
-    known.set(e.pid, info);
-  }
-  const r = stopProcs(known, deps, protect);
-  out.killed.push(...r.killed);
-  out.gone.push(...r.gone);
-  return out;
+  return summary(entries, judge(entries, writtenAt, deps, protect));
 }
 
 /** The record verify-spawn keeps next to a log: `<n>.log` → `<n>.pid.json`. */
 const recordOf = (log: string) => log.replace(/\.log$/, '.pid.json');
 
+/** What verify-cleanup prints: the verdicts, and the records of logs/ it left alone because verify-spawn did not write
+ *  them as it does (or they cannot be read), relative to the evidence dir. */
+export type EvidenceCleanup = Cleanup & { skipped: string[] };
+
+const entryKey = (e: PidEntry) => `${e.pid}:${e.startedAt ?? ''}:${e.image ?? ''}`;
+
+/**
+ * Takes the judged entries out of pids.json, read again now: what the agent added meanwhile stays, and so does the date of
+ * its last write, which judges its integers. The date goes on the temporary file before the rename, so when it cannot be
+ * kept pids.json stays as it was; it is removed only while it still reads what was read.
+ */
+function dropOlder(file: string, judged: PidEntry[]): void {
+  if (!judged.length) return;
+  let text: string;
+  let mtime: number;
+  try { text = readFileSync(file, 'utf8'); mtime = statSync(file).mtimeMs; } catch { return; }
+  const left = new Map<string, number>();
+  for (const e of judged) left.set(entryKey(e), (left.get(entryKey(e)) ?? 0) + 1);
+  const now = parsePids(text);
+  const keep = now.filter(e => {
+    const n = left.get(entryKey(e)) ?? 0;
+    if (n) left.set(entryKey(e), n - 1);
+    return !n;
+  });
+  if (keep.length === now.length) return;
+  try {
+    if (!keep.length) { removeFileIf(file, text); return; }
+    const when = new Date(mtime);
+    writeAtomic(file, JSON.stringify(keep, null, 2) + '\n', (from, to) => { utimesSync(from, new Date(), when); renameSync(from, to); });
+  } catch { /* pids.json stays as it was: its entries are judged again on the next pass */ }
+}
+
 /**
  * verify-cleanup of an evidence dir: the processes of each spawn's record (logs/<n>.pid.json) and of pids.json, the older
- * list dated by its last write. What is stopped, gone or reused leaves the records (a record file goes when nothing of it
- * is left; pids.json keeps its date), so a second pass never looks again at a pid the system may have given to another
- * process. What is unknown stays for that pass.
+ * list dated by its last write. A record file goes once each of its entries is stopped, gone or reused, so a second pass
+ * never looks again at a pid the system may have given to another process; pids.json loses those entries (dropOlder).
+ * What is unknown stays for that pass. A record verify-spawn did not write is `skipped`: never read for a pid to stop,
+ * never changed.
  */
-export function stopEvidence(evidence: string, deps: ProcDeps): Cleanup {
+export function stopEvidence(evidence: string, deps: ProcDeps): EvidenceCleanup {
   const logs = path.join(evidence, 'logs');
   let names: string[] = [];
   try { names = readdirSync(logs).filter(f => /^\d+\.pid\.json$/.test(f)).sort((a, b) => parseInt(a, 10) - parseInt(b, 10)); } catch { names = []; }
-  const records = names.map(f => {
-    const file = path.join(logs, f);
-    let text: string | null = null;
-    try { text = readFileSync(file, 'utf8'); } catch { text = null; }
-    return { file, entries: parsePids(text) };
-  });
+  const records: { file: string; entries: PidEntry[] }[] = [];
+  const skipped: string[] = [];
+  for (const f of names) {
+    const entries = readRecord(path.join(logs, f));
+    if (entries) records.push({ file: path.join(logs, f), entries });
+    else skipped.push(`logs/${f}`);
+  }
   const legacy = path.join(evidence, 'pids.json');
   let text: string | null = null;
   let writtenAt: number | null = null;
   try { text = readFileSync(legacy, 'utf8'); writtenAt = statSync(legacy).mtimeMs; } catch { text = null; }
   const older = parsePids(text);
-  const r = cleanupProcs([...records.flatMap(x => x.entries), ...older], writtenAt, deps);
-  // Bookkeeping only: a record that could not be dropped is looked at again, by its identity, on the next pass.
-  const done = new Set([...r.killed, ...r.gone, ...r.reused]);
-  for (const x of records) if (x.entries.every(e => done.has(e.pid))) { try { rmSync(x.file, { force: true }); } catch { /* kept */ } }
-  const keep = older.filter(e => !done.has(e.pid));
-  try {
-    if (keep.length === older.length) return r;
-    if (!keep.length) rmSync(legacy, { force: true });
-    else {
-      writeAtomic(legacy, JSON.stringify(keep, null, 2) + '\n');
-      if (writtenAt !== null) utimesSync(legacy, new Date(), new Date(writtenAt));
-    }
-  } catch { /* kept */ }
-  return r;
+  const all = [...records.flatMap(x => x.entries), ...older];
+  const verdicts = judge(all, writtenAt, deps, [process.pid, process.ppid]);
+  // Bookkeeping only: a record that could not be dropped is judged again, by its identity, on the next pass.
+  let at = 0;
+  for (const x of records) {
+    const done = verdicts.slice(at, at + x.entries.length).every(v => v !== 'unknown');
+    at += x.entries.length;
+    if (done) { try { rmSync(x.file, { force: true }); } catch { /* kept */ } }
+  }
+  dropOlder(legacy, older.filter((_, k) => verdicts[at + k] !== 'unknown'));
+  return { ...summary(all, verdicts), skipped };
 }
 
 /** SPAWN_WRAPPER's quoting of one argument for cmd.exe and the program's own parsing: as it is when plain, else in double

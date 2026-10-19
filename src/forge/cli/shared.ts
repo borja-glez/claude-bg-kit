@@ -23,7 +23,7 @@ import { keepEvidence } from '../evidence-copy.js';
 import { eventsOf, isTask } from '../task-ref.js';
 import { detectValidators, globMatch } from '../validators.js';
 import { mcpInventory } from '../tools.js';
-import { defaultProcDeps, stopEvidence, type Cleanup, type ProcDeps } from '../verify-proc.js';
+import { defaultProcDeps, stopEvidence, type EvidenceCleanup, type ProcDeps } from '../verify-proc.js';
 import { readLocal, mainCheckout, readLearned, recordLearned, surfacePermissions, OBJECT_ID } from '../local.js';
 import { appendLearned, surfaceFile, permissionHash, hashMatches } from '../surfaces.js';
 import { claudeConfigDir, claudeJsonDir, locateSuperpowersFor, spLedgerDone, spSkillPath, SP_WINDOW_MS } from '../superpowers.js';
@@ -224,9 +224,14 @@ export function learnSurface(io: Io, dir: string, name: string, notes: string[],
   return { count: r.count };
 }
 
-/** `verify-cleanup` of an evidence dir: stops the processes its pids.json lists that are still the ones recorded (K2-03,
- *  K2-20). It deletes no file of the project. */
-export function cleanupEvidence(dir: string, deps: ProcDeps = defaultProcDeps()): Cleanup {
+/**
+ * `verify-cleanup` of an evidence dir (K2-03, K2-20): stops the processes recorded in its logs/<n>.pid.json (verify-spawn
+ * writes one per spawn) and its pids.json (the older list) that are still the ones recorded. It deletes a record once each
+ * of its entries is stopped, gone or reused, rewrites pids.json without those (keeping the date of its last write), keeps
+ * what is unknown, and leaves alone a record in logs/ verify-spawn did not write (`skipped`). It deletes no file of the
+ * project.
+ */
+export function cleanupEvidence(dir: string, deps: ProcDeps = defaultProcDeps()): EvidenceCleanup {
   return stopEvidence(dir, deps);
 }
 
