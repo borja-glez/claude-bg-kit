@@ -249,3 +249,43 @@ describe('decision add --session publishes the decision note (H-17)', () => {
     expect(open).not.toHaveProperty('resolvesRefused');
   });
 });
+
+describe('undo.shas: the exact commits a revert undoes (K2-19)', () => {
+  let io: Io;
+  let base: string, mine: string, theirs: string, other: string;
+  const g = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  const commit = (f: string) => { writeFileSync(path.join(root, f), f); g('add', f); g('commit', '-qm', f); return g('rev-parse', 'HEAD'); };
+  const add = (shas: unknown, cwd?: string) => {
+    writeFileSync(path.join(root, 'd.json'), JSON.stringify({ ...INPUT, point: 'design-apply', undo: { type: 'git-revert', base, head: theirs, shas, ...(cwd ? { cwd } : {}) } }));
+    return run(['decision', 'add', '--data-file', 'd.json'], io);
+  };
+  beforeEach(() => {
+    io = { cwd: root, now: () => new Date(at(0)), env: {} };
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.email', 'a@b.c');
+    g('config', 'user.name', 't');
+    g('config', 'core.autocrlf', 'false');
+    base = commit('a.txt');
+    mine = commit('b.txt');
+    // Another session's commit lands in the same range: the revert must not take it.
+    theirs = commit('c.txt');
+    g('checkout', '-q', '-b', 'side', base);
+    other = commit('d.txt');
+    g('checkout', '-q', 'main');
+  });
+  it('takes the shas of base..head, a short one included, and keeps them', () => {
+    expect(add([mine, theirs.slice(0, 8)]).code).toBe(0);
+    expect(JSON.parse(run(['decision', 'show', '1'], io).stdout).undo).toEqual({ type: 'git-revert', base, head: theirs, shas: [mine, theirs.slice(0, 8)] });
+  });
+  it('refuses a sha outside base..head, a repeated one or more than 50, and records nothing', () => {
+    const outside = add([other]);
+    expect(outside.code).toBe(2);
+    expect(outside.stderr).toContain(other);
+    expect(add([mine, mine]).code).toBe(2);
+    expect(add(Array.from({ length: 51 }, (_, i) => i.toString(16).padStart(7, '0'))).code).toBe(2);
+    expect(readEvents(root).filter(e => e.kind === 'decision')).toEqual([]);
+  });
+  it('refuses a cwd outside the main checkout', () => {
+    expect(add([mine], '..').code).toBe(2);
+  });
+});

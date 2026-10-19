@@ -2092,4 +2092,10 @@ describe('plugin layout', () => {
       for (const w of ['.forge/work/<id>/task.txt', 'FORGE route stage --stage handed-off --session ${CLAUDE_SESSION_ID}', '`forge:run`']) expect(line, `${opt}: ${w}`).toContain(w);
     }
   });
+  it('a git-revert undo names its exact commits in shas, in every skill that records or reverts one (K2-19)', () => {
+    expect(runRef('decisions')).toContain('"shas"');
+    for (const f of ['decisions/SKILL.md', 'run/references/autonomy.md', 'member/SKILL.md', 'infinite/SKILL.md']) {
+      expect(read(`plugins/forge/skills/${f}`), f).toContain('shas');
+    }
+  });
 });

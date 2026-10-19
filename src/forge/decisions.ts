@@ -10,7 +10,7 @@ import { sha256Hex } from '../lib/sha256.js';
 import type { Write } from '../lib/sync.js';
 import { attribute, baseOf, projectOf } from './task-ref.js';
 import {
-  BRANCH, DECISION_BY, DECISION_POINTS, LIMITS, PROJECT_ID, RUN_ID, SHA, TASK_ID, clean, decisionScope, nextDecisionsDoc,
+  BRANCH, DECISION_BY, DECISION_POINTS, LIMITS, PROJECT_ID, RUN_ID, SHA, TASK_ID, UNDO_SHAS_MAX, clean, decisionScope, nextDecisionsDoc,
   normalizeDecision, normalizeDecisionsDoc, weightOf, type Decision, type DecisionsDoc,
 } from '../lib/decisions.js';
 
@@ -21,7 +21,10 @@ const notDots = (s: string) => s !== '.' && s !== '..';
 const line = (max: number) => z.string().transform(s => clean(s, max)).pipe(z.string().min(1, 'must not be empty'));
 const ident = (re: RegExp) => z.string().regex(re).refine(notDots, 'invalid id');
 const Undo = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('git-revert'), base: z.string().regex(SHA), head: z.string().regex(SHA), cwd: line(500).optional() }).strict(),
+  z.object({
+    type: z.literal('git-revert'), base: z.string().regex(SHA), head: z.string().regex(SHA), cwd: line(500).optional(),
+    shas: z.array(z.string().regex(SHA)).min(1).max(UNDO_SHAS_MAX).refine(a => new Set(a).size === a.length, 'repeats a sha').optional(),
+  }).strict(),
   z.object({ type: z.literal('design-reopen'), project: ident(PROJECT_ID) }).strict(),
   z.object({ type: z.literal('plan-edit'), project: ident(PROJECT_ID), tasks: z.array(ident(TASK_ID)).min(1).max(50) }).strict(),
   z.object({ type: z.literal('branch-discard'), branch: z.string().regex(BRANCH).refine(s => !s.includes('..'), 'invalid branch') }).strict(),
@@ -212,4 +215,10 @@ export function decisionWrites(i: { event: LedgerEvent; session: string; eid: st
   };
   if (!i.resolves) return [note];
   return [note, { op: 'update', collection: 'notes', doc_id: i.resolves, data: { answer: text, answeredBy: author, answeredAt: d.ts, answeredByNote: i.eid } }];
+}
+
+/** K2-19: the shas of an undo that are not commits of the range (the full ids `git rev-list base..head` prints): a short
+ *  sha counts when exactly one of them starts with it. */
+export function shasOutside(shas: readonly string[], range: readonly string[]): string[] {
+  return shas.filter(s => range.filter(r => r.toLowerCase().startsWith(s.toLowerCase())).length !== 1);
 }

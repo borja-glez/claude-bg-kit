@@ -1,12 +1,13 @@
 import type { Command } from '../context.js';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { readExecution } from '../../execution.js';
 import { UsageError } from '../errors.js';
 import { mainCheckout } from '../../local.js';
-import { addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionNoteId, decisionWrites, NOTE_ID, DecisionInputError } from '../../decisions.js';
+import { addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionNoteId, decisionWrites, shasOutside, NOTE_ID, DecisionInputError } from '../../decisions.js';
+import { defaultGit } from '../exec.js';
 import { normalizeNote } from '../../../lib/notes.js';
-import { TASK_ID, decisionScope, scopeFileName } from '../../../lib/decisions.js';
+import { SHA, TASK_ID, decisionScope, scopeFileName } from '../../../lib/decisions.js';
 
 export const command: Command = (args, ctx) => {
   const { io, repoDir, flag, has, json, ts } = ctx;
@@ -39,6 +40,21 @@ export const command: Command = (args, ctx) => {
         const q = normalizeNote(JSON.parse(readFileSync(path.resolve(io.cwd, dbArg, 'notes', `${resolves}.json`), 'utf8')));
         if (q?.answer) resolvesRefused = `${resolves} is already answered${q.answeredBy ? ` by ${q.answeredBy}` : ''}: it is left as it is`;
       } catch { /* not listed: nothing to judge */ }
+    }
+    // K2-19: a revert names exactly the commits the decision made: each sha must be a commit of base..head.
+    const undo = (raw as { undo?: Record<string, unknown> }).undo;
+    if (undo && undo.type === 'git-revert' && Array.isArray(undo.shas) && typeof undo.base === 'string' && typeof undo.head === 'string'
+      && SHA.test(undo.base) && SHA.test(undo.head)) {
+      // The undo's cwd is relative to the main checkout and must stay inside it: git never runs anywhere else.
+      const at = typeof undo.cwd === 'string' && undo.cwd.trim() ? path.resolve(root, undo.cwd.trim()) : null;
+      const rel = at ? path.relative(root, at) : '';
+      if (at && (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel))) throw new UsageError('decision add: undo.cwd must be inside the main checkout');
+      const git = at && existsSync(at) ? defaultGit(at) : (io.git ?? defaultGit(repoDir));
+      const list = git(['rev-list', `${undo.base}..${undo.head}`]);
+      if (list === null) throw new UsageError(`decision add: undo: cannot list the commits of ${undo.base}..${undo.head}`);
+      const range = list.split('\n').map(s => s.trim()).filter(Boolean);
+      const outside = shasOutside(undo.shas.filter((s): s is string => typeof s === 'string'), range);
+      if (outside.length) throw new UsageError(`decision add: undo.shas: ${outside.join(', ')} not in ${undo.base}..${undo.head}`);
     }
     // An active execution names the run the decision belongs to (its scope), unless the data names one.
     const exec = readExecution(root);

@@ -23,9 +23,12 @@ export const PROJECT_ID = /^[A-Za-z0-9_.-]{1,64}$/;
 export const TASK_ID = /^[A-Za-z0-9_.:-]{1,120}$/;
 export const RUN_ID = /^[A-Za-z0-9_.-]{1,120}$/;
 export const BRANCH = /^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,199}$/;
+/** K2-19: at most this many commits in a git-revert's `shas`. */
+export const UNDO_SHAS_MAX = 50;
 
+// shas (K2-19): exactly the commits the decision made, each in base..head; a revert undoes those and nothing else.
 export type DecisionUndo =
-  | { type: 'git-revert'; base: string; head: string; cwd?: string }
+  | { type: 'git-revert'; base: string; head: string; cwd?: string; shas?: string[] }
   | { type: 'design-reopen'; project: string }
   | { type: 'plan-edit'; project: string; tasks: string[] }
   | { type: 'branch-discard'; branch: string }
@@ -68,7 +71,8 @@ export function normalizeUndo(x: unknown): DecisionUndo | null {
       const head = str(x.head) && SHA.test(x.head) ? x.head : null;
       if (!base || !head) return null;
       const cwd = text(x.cwd, 500);
-      return cwd ? { type: 'git-revert', base, head, cwd } : { type: 'git-revert', base, head };
+      const shas = Array.isArray(x.shas) ? [...new Set(x.shas.filter((s): s is string => str(s) && SHA.test(s)))].slice(0, UNDO_SHAS_MAX) : [];
+      return { type: 'git-revert', base, head, ...(cwd ? { cwd } : {}), ...(shas.length ? { shas } : {}) };
     }
     case 'design-reopen': {
       const project = ident(x.project, PROJECT_ID);

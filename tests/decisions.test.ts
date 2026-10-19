@@ -52,6 +52,11 @@ describe('normalizeUndo', () => {
       expect(normalizeUndo(bad)).toBeNull();
     }
   });
+  it('keeps the shas of a git-revert, once each and only commit ids (K2-19)', () => {
+    expect(normalizeUndo({ type: 'git-revert', base: 'abc1234', head: 'def5678', shas: ['aaa1111', 'aaa1111', 'nope', 3, 'bbb2222'] }))
+      .toEqual({ type: 'git-revert', base: 'abc1234', head: 'def5678', shas: ['aaa1111', 'bbb2222'] });
+    expect(normalizeUndo({ type: 'git-revert', base: 'abc1234', head: 'def5678', shas: [] })).toEqual({ type: 'git-revert', base: 'abc1234', head: 'def5678' });
+  });
 });
 
 describe('scope', () => {
