@@ -8,6 +8,17 @@ export const CONFIGS = [
   { name: 'no-hint', superpowers: true, hint: false },
 ];
 
+/** The files of the throwaway repository the prompts talk about. Six, not four: forge's triage calls a repository with
+ *  fewer than five files greenfield and sends every request to Large, which would hide the Trivial and Small prompts. */
+export const DEMO_SHOP = {
+  'package.json': JSON.stringify({ name: 'demo-shop', version: '1.0.0', type: 'module', scripts: { test: 'node --test' } }, null, 2) + '\n',
+  'src/cart.js': 'export const total = items => items.reduce((s, i) => s + i.price * i.qty, 0);\nexport const withTax = (items, rate) => Math.round(total(items) * (1 + rate));\n',
+  'src/index.js': "export { total, withTax } from './cart.js';\n",
+  'test/cart.test.js': "import test from 'node:test';\nimport assert from 'node:assert';\nimport { total } from '../src/cart.js';\ntest('total', () => assert.equal(total([{ price: 100, qty: 2 }]), 200));\n",
+  'README.md': '# demo-shop\n\nA small shop.\n',
+  '.gitignore': 'node_modules/\n',
+};
+
 /** The first skill a Skill tool_use loads, the plugins the init message lists, why the session stopped (the result
  *  message's subtype, e.g. `error_max_turns`) and what it cost (its `total_cost_usd`), from `claude -p` stream-json. */
 export function readStream(text) {

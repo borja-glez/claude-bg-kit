@@ -9,6 +9,7 @@ export interface Summary {
   config: string; routed: number; routable: number; rate: number; falseNegatives: number; falsePositives: number; others: number; cost: number | null;
 }
 export const CONFIGS: EvalConfig[];
+export const DEMO_SHOP: Record<string, string>;
 export function readStream(text: string): { firstSkill: string | null; plugins: string[] | null; stop: string | null; cost: number | null };
 export function claudeArgs(prompt: string, o: { settings: string; pluginDirs: string[] }): string[];
 export function settingsFor(installedKeys: string[]): { enabledPlugins: Record<string, boolean> };

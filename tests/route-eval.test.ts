@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { CONFIGS, claudeArgs, passes, projectSettingsFor, readStream, settingsFor, summarize, table, type EvalPrompt, type EvalResult } from '../scripts/route-eval/lib.mjs';
+import { CONFIGS, DEMO_SHOP, claudeArgs, passes, projectSettingsFor, readStream, settingsFor, summarize, table, type EvalPrompt, type EvalResult } from '../scripts/route-eval/lib.mjs';
 import { locateSuperpowers } from '../src/forge/superpowers.js';
+import { run, type Io } from '../src/forge/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
 
 const tmp = useTempDirs();
@@ -86,5 +87,38 @@ describe('route-eval', () => {
     expect(noHint).toHaveLength(16);
     expect(noHint.every(l => l.startsWith('FORGE_ROUTE_HINT=off claude '))).toBe(true);
     expect(dry('--config', 'nope').status).toBe(2);
+    expect(dry('--only', 'nope').status).toBe(2);
+    expect(dry('--only', 'm-es-1').stdout.trim().split(/\r?\n/)).toHaveLength(3);
+  });
+  it('a --dry-run creates nothing on disk: no work folder under the temp root', () => {
+    const temp = tmp('route-eval-tmproot-');
+    const env = { ...process.env, TMPDIR: temp, TMP: temp, TEMP: temp };
+    const r = spawnSync(process.execPath, ['scripts/route-eval/run.mjs', '--dry-run'], { encoding: 'utf8', timeout: 60000, env });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readdirSync(temp)).toEqual([]);
+  });
+  it("forge's own triage agrees with what each prompt expects in the demo shop: Medium and Large route, Trivial and Small step aside (K1-02)", () => {
+    const repo = tmp('route-eval-shop-');
+    const cfg = tmp('route-eval-shop-cfg-');
+    for (const [rel, text] of Object.entries(DEMO_SHOP)) {
+      mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+      writeFileSync(path.join(repo, rel), text);
+    }
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, stdio: 'ignore' });
+    git('init', '-q');
+    git('add', '.');
+    git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init');
+    const io: Io = { cwd: repo, now: () => new Date('2026-10-15T10:00:00.000Z'), env: { CLAUDE_CONFIG_DIR: cfg, CLAUDE_CODE_SESSION_ID: 'sess-0' } };
+    const prompts = JSON.parse(readFileSync(new URL('../scripts/route-eval/prompts.json', import.meta.url), 'utf8')) as EvalPrompt[];
+    const paths: Record<string, string> = {};
+    for (const p of prompts.filter(p => ['trivial', 'small', 'medium', 'large'].includes(p.size))) {
+      writeFileSync(path.join(repo, 'req.txt'), p.text + '\n');
+      paths[p.id] = JSON.parse(run(['route', '--task', 't1', '--text-file', 'req.txt'], io).stdout).probe.path;
+    }
+    const wrong = Object.entries(paths).filter(([id, got]) => {
+      const want = prompts.find(p => p.id === id)!.expected === 'route' ? ['medium', 'large'] : ['trivial', 'small'];
+      return !want.includes(got);
+    });
+    expect(wrong).toEqual([]);
   });
 });

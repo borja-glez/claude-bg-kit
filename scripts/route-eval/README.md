@@ -2,7 +2,7 @@
 
 Comprueba que una sesión nueva carga `forge:route` antes que cualquier otra skill cuando la petición es trabajo de código Medium o Large, y que no la carga para lo demás: una edición trivial o pequeña, una pregunta o un mensaje de otro agente. El objetivo es, en cada configuración, `forge:route` primero en al menos el 90 % de los prompts que lo esperan y en ninguno de los demás.
 
-`run.mjs` monta un repositorio Node pequeño en un directorio temporal (`demo-shop`: un carrito, un test y un README) y lanza cada prompt de `prompts.json` con `claude -p --output-format stream-json --max-turns 2`. Carga el forge y el waypoint de este checkout con `--plugin-dir` y desactiva, con `--settings`, las copias instaladas de forge, waypoint y lens. De cada sesión lee la primera skill que carga una llamada a `Skill`, los plugins del mensaje `init`, por qué paró (el `subtype` del mensaje `result`) y lo que costó (su `total_cost_usd`).
+`run.mjs` monta un repositorio Node pequeño en un directorio temporal (`demo-shop`: un carrito, su índice, un test, un README y los ajustes de npm y git, seis ficheros: con menos de cinco el triaje de forge lo da por vacío y manda todo a Large) y lanza cada prompt de `prompts.json` con `claude -p --output-format stream-json --max-turns 2`. Carga el forge y el waypoint de este checkout con `--plugin-dir` y desactiva, con `--settings`, las copias instaladas de forge, waypoint y lens. De cada sesión lee la primera skill que carga una llamada a `Skill`, los plugins del mensaje `init`, por qué paró (el `subtype` del mensaje `result`) y lo que costó (su `total_cost_usd`).
 
 ## Configuraciones
 
@@ -25,12 +25,13 @@ superpowers se desactiva en los ajustes del propio repositorio de prueba, y no e
 ```bash
 npm run build
 node scripts/route-eval/run.mjs --dry-run
-node scripts/route-eval/run.mjs [--only <id>] [--config with-superpowers|without-superpowers|no-hint]
+node scripts/route-eval/run.mjs [--only <id>] [--config with-superpowers|without-superpowers|no-hint] [--keep]
 ```
 
 - `--dry-run` imprime los comandos `claude` sin lanzarlos; los de `no-hint` empiezan por `FORGE_ROUTE_HINT=off`.
 - `--only <id>` lanza un solo prompt, en cada configuración.
-- `--config <nombre>` lanza una sola configuración.
+- `--config <nombre>` lanza una sola configuración. Un `--config` o un `--only` desconocido sale con código 2.
+- `--keep` conserva la carpeta temporal de la pasada (el repositorio `demo-shop` y los ajustes) para inspeccionarla; por defecto se borra al terminar. `--dry-run` no crea nada en disco: los comandos llevan `<work>` en lugar de esa carpeta.
 
 Imprime una línea por sesión con su coste, la tabla y `PASS` o `FAIL`, y termina con código 1 si no llega al objetivo. Una ejecución con `--only` de un prompt que no espera `forge:route` da siempre `FAIL`, porque no lleva ninguno que lo espere. Los resultados quedan en `scripts/route-eval/results/<fecha>.json` y `.md`, que git ignora.
 
