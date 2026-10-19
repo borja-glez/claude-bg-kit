@@ -2103,4 +2103,18 @@ describe('plugin layout', () => {
     const body = (f: string) => read(`plugins/forge/agents/${f}.md`).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
     expect(body('forge-verify-heavy')).toBe(body('forge-verify'));
   });
+  it('the verification references route what wave 5d added (K2-07, K2-08, K2-11, K2-12, K2-13, K2-15)', () => {
+    const v = runRef('verify');
+    for (const w of ['## Preflight', '## Flow pass', 'FORGE verify-env --task <id>-<n> --dir <WORK>/reviews-<n>-<round>', 'FORGE verify-preflight --plan <plan>',
+      'FORGE verify-preflight --skip <name>', '--unattended', '`note: true`', 'FORGE verify-plan --run', 'FORGE verify-close --flow <flow.dir>',
+      '--verify <flow.dir>/verify.json', '`defects.added`', '`notesSkipped`', '`header`', '`depth`']) expect(v, w).toContain(w);
+    const exec = runRef('execution');
+    for (const w of ['`## Preflight` in `references/verify.md`', 'FORGE surfaces digest --run <runId>', '`note: true`']) expect(exec, w).toContain(w);
+    for (const r of ['large', 'ephemeral', 'step']) expect(runRef(r), r).toContain('`## Flow pass` in `references/verify.md`');
+    expect(runRef('ephemeral')).toContain('FORGE surfaces digest --run <runId>');
+    for (const w of ['FORGE verify-env --task T-<n>', '--unattended']) expect(runRef('task-steps'), w).toContain(w);
+    expect(runRef('review-close')).toContain('FORGE verify-env');
+    const manual = read('plugins/forge/skills/verify/SKILL.md');
+    for (const w of ['FORGE verify-env --task manual-<date>', 'smoke']) expect(manual, w).toContain(w);
+  });
 });
