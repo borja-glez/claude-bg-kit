@@ -4,6 +4,7 @@ import { parseDismissed, pendingProposals, unionDismissed, type GateCritique } f
 import { changelogLite, critiqueLite, designMetaLite } from '../lib/design-lite.js';
 import { planLite } from '../lib/plan-lite.js';
 import { oneLine } from '../lib/one-line.js';
+import { isPlanId } from '../lib/ids.js';
 import { coordinatorGone, executionView, isVisibleRun } from '../lib/execution-view.js';
 import { isSafeId, normalizeLive, normalizePublicTask, parseExecution, type ExecutionState, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import type { MessageDoc, Plan, States } from '../lib/types.js';
@@ -115,10 +116,13 @@ export function seatsOf(f: Pick<BandFiles, 'session' | 'bindings' | 'seatSession
   return out;
 }
 
-/** Each seat's task claimed or in progress in the state cache (SID → its task), the first by id: openTasksOf on disk. */
+/**
+ * Each seat's task claimed or in progress in the state cache (SID → its task), the first by id: openTasksOf on disk. A
+ * state whose name is no plan id is no task (the band draws a notice's task as it is).
+ */
 export function openTasksFrom(states: States): Record<string, string> {
   const open = new Map<string, string>();
-  for (const id of Object.keys(states).sort()) {
+  for (const id of Object.keys(states).filter(isPlanId).sort()) {
     const s = states[id];
     if ((s?.status === 'claimed' || s?.status === 'in_progress') && typeof s.owner === 'string' && !open.has(s.owner)) open.set(s.owner, id);
   }
@@ -373,10 +377,10 @@ function recentDone(tasks: { id: string; estimate_min?: number }[], states: Stat
  */
 interface WorkSeat { sid: string; track: string | null; swarm: boolean; task: string | null; since: string | null; run: { coordinator: string; stage: string } | null }
 
-/** The track of seat `sid`, from its session.json (the checkout's, or the one of seats/<sid>/). */
+/** The track of seat `sid`, from its session.json (the checkout's, or the one of seats/<sid>/); one that is no plan id is none. */
 function seatTrack(seats: readonly BandSeat[], sid: string): string | null {
   const s = json<{ track?: unknown }>(seats.find(x => x.sid === sid)?.session) ?? {};
-  return typeof s.track === 'string' ? s.track : null;
+  return typeof s.track === 'string' && isPlanId(s.track) ? s.track : null;
 }
 
 function workModel(project: string, f: BandFiles, plan: Plan, states: States, seat: WorkSeat, now: number, viewer: BandViewer): BandModel {

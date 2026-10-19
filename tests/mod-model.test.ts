@@ -568,6 +568,24 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     expect(left).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'design', project: `a|b [2J${'x'.repeat(60)}` });
     expect(bandLine(left, Date.now())).toContain(`◌ diseño a medias: a|b [2J${'x'.repeat(32)}… · `);
   });
+  it("a seat's track that is no plan id is no track: the work band counts the whole plan", () => {
+    const c = (...codes: number[]) => String.fromCharCode(...codes);
+    const m = buildBandModel('demo-shop', { ...empty, ...ownerOf('backend'), plan, session: j({ sessionId: 'backend', track: `backend${c(0x202e)}${c(10)}x` }) });
+    expect(m).toMatchObject({ mode: 'work', sid: 'backend', track: null });
+    expect(bandLine(m, 0)).not.toContain(c(0x202e));
+    expect(bandLine(m, 0)).toMatch(/^● backend · /);
+  });
+  it('a state whose name is no plan id is no seat\'s open task: a notice names no task', () => {
+    const c = (...codes: number[]) => String.fromCharCode(...codes);
+    const dirty = `T002${c(0x202e)}${c(10)}rm`;
+    expect(openTasksFrom({ [dirty]: { status: 'in_progress', owner: 'backend' }, T003: { status: 'claimed', owner: 'backend' } } as never)).toEqual({ backend: 'T003' });
+    const m = buildBandModel('demo-shop', {
+      ...empty, plan, session: j({ sessionId: 'backend', track: 'backend' }), states: { [dirty]: j({ status: 'in_progress', owner: 'backend' }) },
+      bindings: { '.': bound('backend', 'A') }, sessionId: 'B',
+    });
+    expect(m).toMatchObject({ mode: 'notice', kind: 'other-live', subject: 'task', task: null, key: 'seat:backend' });
+    expect(JSON.stringify(m)).not.toContain(c(0x202e));
+  });
   it('a task id the CLI rejects never reaches the band: planLite leaves its task out (M1)', () => {
     const c = (...codes: number[]) => String.fromCharCode(...codes);
     const dirty = `T002${c(0x202e)}${c(0x0a)}rm`;
