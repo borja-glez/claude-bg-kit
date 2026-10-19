@@ -11628,7 +11628,7 @@ function findCycle(plan) {
 var import_node_crypto = require("node:crypto");
 
 // src/lib/waypoint-version.ts
-var WAYPOINT_VERSION = true ? "0.32.0" : "0.0.0";
+var WAYPOINT_VERSION = true ? "0.32.1" : "0.0.0";
 var VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})/;
 var partsOf = (v) => {
   const m = typeof v === "string" ? VERSION.exec(v) : null;
@@ -14743,6 +14743,13 @@ function normalizeTask2(x2, now) {
     ...typeof x2.sha === "string" && /^[0-9a-f]{7,40}$/i.test(x2.sha) ? { sha: x2.sha } : {}
   };
 }
+var SURFACE = /^[A-Za-z0-9_.:-]{1,64}$/;
+var surfaceList = (x2) => Array.isArray(x2) ? [...new Set(x2.filter((s) => typeof s === "string" && SURFACE.test(s) && s !== "." && s !== ".."))].slice(0, 100) : null;
+var flowOf = (x2) => {
+  if (!isObj3(x2) || typeof x2.sha !== "string" || !/^[0-9a-f]{7,64}$/i.test(x2.sha) || !iso3(x2.at)) return null;
+  const result = oneOf(["pass", "fail", "blocked"], x2.result);
+  return result ? { sha: x2.sha, at: x2.at, result } : null;
+};
 function normalizeExecution(x2, now) {
   if (!isObj3(x2)) return null;
   const mode = oneOf(["subagents", "sessions"], x2.mode);
@@ -14782,7 +14789,9 @@ function normalizeExecution(x2, now) {
     closedBy: iso3(x2.closedAt) ? oneOf(["merge", "close"], x2.closedBy) : null,
     ...typeof x2.planned === "number" && Number.isInteger(x2.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x2.planned)) } : {},
     ...x2.autonomy === "auto" ? { autonomy: "auto" } : {},
-    ...isLocale(x2.locale) ? { locale: x2.locale } : {}
+    ...isLocale(x2.locale) ? { locale: x2.locale } : {},
+    ...surfaceList(x2.verifySkip) ? { verifySkip: surfaceList(x2.verifySkip) } : {},
+    ...x2.flow !== void 0 ? { flow: flowOf(x2.flow) } : {}
   };
 }
 function parseExecution(text, now) {
