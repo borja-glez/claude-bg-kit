@@ -95,7 +95,10 @@ function runPlan(ctx: Ctx): Result {
   const fresh = unattended ? unattendedNotes({ cwd: io.cwd, ts, main, task: id, runId: e.runId, surfaces: plan.surfaces }) : new Set<string>();
   const opens = plan.eligible && plan.surfaces.some(s => s.permission === 'allowed') && (unattended || !waiting.length);
   let reason: string | undefined;
-  if (plan.surfaces.length && !opens) reason = unattended || !waiting.length ? 'no surface is allowed for an unattended pass' : `ask the person first: ${waiting.join(', ')}`;
+  if (plan.surfaces.length && !opens) {
+    reason = unattended ? 'no surface is allowed for an unattended pass'
+      : !waiting.length ? 'no surface is allowed for this pass' : `ask the person first: ${waiting.join(', ')}`;
+  }
   let flow: Record<string, unknown> | null = null;
   if (opens) {
     logSkipped(io.cwd, ts, id, plan.surfaces);

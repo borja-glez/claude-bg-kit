@@ -19,7 +19,7 @@ import type { PlanTask } from '../../../lib/types.js';
  * K2-08, once when an execution starts: `FORGE verify-preflight --plan <plan> [--locale es|en]` lists the surfaces whose
  * permission the person must give (ask, or changed since they gave it) that the plan's tasks may use, each with the
  * question verify-plan would ask and the tasks it serves. `FORGE verify-preflight --skip <name>` records «No, esta vez»
- * for the active execution: verify-plan skips that surface until the run ends. Only the coordinator writes
+ * for this checkout's execution, active or finished: verify-plan skips that surface until another run replaces it. Only the coordinator writes
  * execution.json, so --skip refuses to run from a task worktree.
  */
 export const command: Command = (args, ctx) => {
@@ -30,7 +30,8 @@ export const command: Command = (args, ctx) => {
     const name = flag('skip');
     if (!name || !NAME.test(name)) throw new UsageError('verify-preflight: --skip needs the name of a surface');
     const exec = readExecution(main);
-    if (!exec?.active) throw new UsageError('verify-preflight: --skip needs an active execution (outside one, «No, esta vez» records nothing)');
+    // Active, finished or an ephemeral run closed by its tick: the final flow pass is asked about after the run ended.
+    if (!exec) throw new UsageError('verify-preflight: --skip needs an execution in this checkout (outside one, «No, esta vez» records nothing)');
     const next = updateExecution(main, cur => {
       if (!cur || cur.runId !== exec.runId || (cur.verifySkip ?? []).includes(name)) return null;
       return { ...cur, verifySkip: [...(cur.verifySkip ?? []), name] };

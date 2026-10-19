@@ -202,6 +202,20 @@ describe('the flow pass (K2-13)', () => {
       expect(surface(vp('--unattended', '--since', since), 'cli')).toMatchObject({ note: false });
       expect(existsSync(path.join(root, '.forge', 'work')) ? folders() : []).toEqual([]);
     });
+    it('«No, esta vez» is recorded on a finished run, and the attended pass then ends with a reason that is not a question (C1, M4)', () => {
+      cli();
+      const since = g('rev-parse', 'HEAD^1');
+      expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'finished' });
+      expect(vp('--since', since).reason).toBe('ask the person first: cli');
+      const skip = run(['verify-preflight', '--skip', 'cli'], io);
+      expect(skip.code).toBe(0);
+      expect(JSON.parse(skip.stdout)).toMatchObject({ runId: RUN, skip: ['cli'] });
+      const out = vp('--since', since);
+      expect(out.flow).toBeNull();
+      expect(out.reason).toBe('no surface is allowed for this pass');
+      expect(surface(out, 'cli')).toMatchObject({ permission: 'skipped' });
+      expect(existsSync(path.join(root, '.forge', 'work')) ? folders() : []).toEqual([]);
+    });
   });
   it('an ephemeral run, already closed by the tick that finished it, still gets its pass (K2-13.4)', () => {
     seedExecution(root, execution({ kind: 'ephemeral', closedAt: AT, closedBy: 'merge' }));
