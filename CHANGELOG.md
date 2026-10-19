@@ -13,6 +13,16 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.32.0 — 2026-10-19
+
+#### Added
+- `next --messages <dir>` prints `multi`: true when another session of the listing is live, a message addressed to this session is open, a task an idle session left can be recovered by this one, or the session works in a track worktree (J-12).
+- A `[waypoint` message routes a lone session to its multi-session protocol; `next` treats a missing `--messages` folder as no messages (J-12).
+
+#### Changed
+- `/waypoint:work` loads only what a session working alone needs. The inbox, the recovery of idle sessions' tasks, overlaps and simultaneous claims, lost tasks, zone expansion, delegation, the phase close, the messages between sessions and `release` moved, word for word, to `skills/work/references/multisession.md`, which the skill reads when `next` prints `multi: true`. Its size on invoke went from ~13k to ~7.5k tokens (`claude plugin details`; `SKILL.md` 35 073 → 20 918 bytes, the reference is 15 688 bytes). The skill runs the CLI as `node "<WP>" …` (J-12).
+- `openTasksOf` keeps only plan-id state names (J-12).
+
 ### 0.31.0 — 2026-10-19
 
 #### Added
@@ -360,6 +370,22 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.25.0 — 2026-10-19
+
+#### Added
+- `begin --task id [--cwd d] [--locale es|en] [--autonomy auto|ask]`: the start of a task in one call. It prints the changes of the tree that are not forge's with the question to ask about them, takes the tree snapshot, and prints the TDD line, the resolved autonomy and workflow and an untracked `.forge/.gitignore`; it asks, commits and stashes nothing (J-12).
+- `route.hint: on|off` in `.forge/config.yaml`, and `FORGE_ROUTE_HINT=off`, turn off the one-line hint of `UserPromptSubmit`; a route half done is reminded anyway (K1-03).
+
+#### Changed
+- forge:run starts each task with `FORGE begin`. The close of a review round moved to `references/review-close.md`, which Medium and the task steps cite, so a run member never reads forge:run's `SKILL.md`. The Small verification, the surface permission rule, the start from a spec and the summary of auto mode moved to the references that hold each case. Its size on invoke went from ~7.8k to ~6.1k tokens (`SKILL.md` 22 479 → 17 727 bytes). A Large coordinator reads 95 836 bytes of skill text (`SKILL.md`, `large.md`, `execution.md`, `step.md`, `task-steps.md`, `review-close.md`, `verify.md`, `decisions.md`) (J-12).
+- The routing hint leaves out messages from agents (a prompt that opens with a harness or agent tag; a JSX-opening prompt keeps the hint), questions that are not a polite request, and prompts that open with an interrogative; it keeps polite requests («hola, ¿puedes…?», "can we…", «añade…, ¿vale?») (K1-03).
+- `forge route` recommends forge for a Large request (superpowers designs only to build a spec that exists, `--build-spec`), and the plan or spec the request names (K1-06, K1-07).
+- `sp-plans`, `sp-specs` and `forge route` no longer offer a plan done elsewhere (in the main checkout or a worktree, by forge's record or by its `<title>: task N done` commits), nor a spec a plan already cites or a route already handed off; records written from a worktree are read (K1-07).
+- forge:route carries the raising rules of forge:run and the Bounded hand-off: a brainstorming that writes no spec is handed over to forge:run with the agreed decisions as the task text (K1-06, K1-10).
+- `scripts/route-eval` runs three configurations (with superpowers, without it in the test repository's own settings, without the hint) over 16 prompts with what each expects, and reports false negatives and positives and the cost. `--dry-run` creates nothing, and a real run removes its work folder unless `--keep`. The demo shop has 6 files, so forge no longer triages it as greenfield, and every prompt's expectation is checked offline against forge's triage. The pass, and the manual one of the mixed modes, are ready and not run (K1-02, K1-06).
+- The long-line check covers every forge CLI file.
+- Depends on waypoint ^0.32.0.
 
 ### 0.24.0 — 2026-10-19
 
