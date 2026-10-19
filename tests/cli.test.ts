@@ -2589,6 +2589,39 @@ describe('page --publish-info and the sync line', () => {
     expect(en).toContain('shared publicly');
     expect(en).not.toContain('.forge/config.yaml');
   });
+  it('a published roadmap whose meta/page does not record assets is never stripped unattended: the republish is asked, neutrally (R6c)', () => {
+    const pub = (page: unknown, ...extra: string[]) => {
+      if (page !== null) writeFileSync(path.join(dir, 'page.json'), JSON.stringify(page));
+      const r = run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(), '--page', page === null ? 'none.json' : 'page.json', ...extra], io);
+      expect(r.code, r.stderr).toBe(0);
+      return JSON.parse(r.stdout);
+    };
+    const old = { version: '0.25.0', rules: 1 };
+    // A first publication has nothing to ask (its `say` speaks for it).
+    expect(pub(old)).toMatchObject({ capabilitiesChanged: false, ask: null });
+    setArtifact('https://claude.ai/artifact/r1');
+    // A page from before the record (0.26.0), or no meta/page listed at all: no flag says which, so it is asked, and the
+    // printed capabilities stay without assets (the answer decides).
+    const asks: string[] = [];
+    for (const page of [old, null]) {
+      const r = pub(page);
+      expect(r, JSON.stringify(page)).toMatchObject({ capabilities: caps, internal: false, say: null, capabilitiesChanged: true, write: { data: { assets: false } } });
+      expect(r.ask).toContain('/waypoint:plan assets');
+      asks.push(r.ask);
+      // The caller said which: --no-assets is what it asked for, --assets asks to make it internal.
+      expect(pub(page, '--no-assets'), JSON.stringify(page)).toMatchObject({ capabilitiesChanged: false, ask: null });
+    }
+    // Neither the line that makes it internal nor the one that makes it shareable again: its own, in the plan language.
+    const toPublic = pub({ assets: true }).ask;
+    expect(asks[0]).not.toBe(toPublic);
+    const p = path.join(dir, 'plan.yaml');
+    writeFileSync(p, readFileSync(p, 'utf8').replace('locale: es', 'locale: en'));
+    const en = pub(old).ask;
+    expect(en).toContain('/waypoint:plan assets');
+    expect(en).not.toBe(asks[0]);
+    // A known record without the store is no question (one with it keeps it: R6, above).
+    expect(pub({ assets: false })).toMatchObject({ capabilitiesChanged: false, ask: null, internal: false });
+  });
   it('--assets with --no-assets is exit 2 and builds nothing (R6b)', () => {
     const r = run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(), '--assets', '--no-assets'], io);
     expect(r.code).toBe(2);
@@ -2642,9 +2675,10 @@ describe('page --publish-info and the sync line', () => {
     const toPublic = pub(caps, { version: WP, rules: PAGE_RULES, assets: true });
     expect(toPublic.capabilitiesChanged).toBe(true);
     expect(toPublic.ask).toContain('compartirse públicamente');
-    // Unknown (a page from before this record, or none listed) counts as changed when the file declares assets.
+    // Unknown (a page from before this record, or none listed) counts as changed when the file declares assets; without
+    // them it is asked too (R6c, the next test).
     expect(pub(withAssets, { version: '0.25.0', rules: 1 }).capabilitiesChanged).toBe(true);
-    expect(pub(caps, { version: '0.25.0', rules: 1 })).toMatchObject({ capabilitiesChanged: false, ask: null });
+    expect(pub(caps, { version: '0.25.0', rules: 1 }).capabilitiesChanged).toBe(true);
     const none = JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(withAssets), '--page', 'none.json'], io).stdout);
     expect(none.capabilitiesChanged).toBe(true);
     // Unchanged.

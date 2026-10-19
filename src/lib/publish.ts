@@ -41,16 +41,27 @@ export const declaresAssets = (capabilities: unknown): boolean =>
 
 /**
  * Re-review I1: whether a republish with `assets` (true or false) changes who can see and share a roadmap whose listed
- * meta/page recorded `published` (undefined when unknown: no page, or one from before this record). A first publication
- * changes nothing here (`sharingNotice` speaks for it); an unknown record counts as changed when the file declares assets.
+ * meta/page recorded `published` (undefined when unknown: no page, or one from before this record), and the line to ask
+ * the person with. A first publication changes nothing here (`sharingNotice` speaks for it); an unknown record counts as
+ * changed when the file declares assets. Ruling R6c: without them it is asked too, with a line of its own, unless the
+ * caller said which it wants (`chosen`: --assets or --no-assets), so a store the roadmap may have is never dropped unattended.
  */
-export function sharingChanged(plan: Plan, assets: boolean, published: boolean | undefined): boolean {
-  if (!plan.artifacts.roadmap) return false;
-  return published === undefined ? assets : published !== assets;
+export function sharingChange(plan: Plan, assets: boolean, published: boolean | undefined, chosen: boolean): { capabilitiesChanged: boolean; ask: string | null } {
+  if (!plan.artifacts.roadmap) return { capabilitiesChanged: false, ask: null };
+  if (published === undefined ? assets : published !== assets) return { capabilitiesChanged: true, ask: sharingChangeAsk(plan, assets) };
+  if (published === undefined && !chosen) return { capabilitiesChanged: true, ask: unknownSharingAsk(plan) };
+  return { capabilitiesChanged: false, ask: null };
+}
+
+/** R6c: the line for a published roadmap whose meta/page does not say whether it keeps forge's screenshots. */
+function unknownSharingAsk(plan: Plan): string {
+  return isEs(plan.locale)
+    ? 'El roadmap publicado no registra si guarda las capturas de verificación de forge. Si sigues, se republica sin ellas: podrá compartirse públicamente y las capturas ya subidas dejarán de verse. Para conservarlas, deja el roadmap como está y ejecuta /waypoint:plan assets.'
+    : "The published roadmap does not record whether it keeps forge's verification screenshots. Going ahead republishes it without them: it can be shared publicly, and any screenshots already uploaded stop showing. To keep them, keep the roadmap as it is and run /waypoint:plan assets.";
 }
 
 /** Re-review I1: the line the plan skill asks the person with before a republish that changes the roadmap's sharing. */
-export function sharingChangeAsk(plan: Plan, assets: boolean): string {
+function sharingChangeAsk(plan: Plan, assets: boolean): string {
   if (assets) {
     return isEs(plan.locale)
       ? 'Al republicar, el roadmap pasa a guardar las capturas de verificación de forge: quedará interno de tu organización y su enlace público dejará de funcionar.'
