@@ -2706,6 +2706,7 @@ describe('forge begin (J-12)', () => {
     git('init', '-q', '-b', 'main');
     git('config', 'user.email', 't@t'); git('config', 'user.name', 't'); git('config', 'core.autocrlf', 'false');
     writeFileSync(path.join(root, 'a.txt'), 'a\n');
+    writeFileSync(path.join(root, 'b.txt'), 'b\n');
     git('add', '.'); git('commit', '-q', '-m', 'init');
   };
   const put = (rel: string, text: string) => {
@@ -2725,15 +2726,18 @@ describe('forge begin (J-12)', () => {
   it("lists the person's changes, never forge's, takes the snapshot and prints tdd and the preferences", () => {
     repo();
     writeFileSync(path.join(root, 'a.txt'), 'edited by hand\n');
+    // M10: a rename by hand is the new path only (Review Focus 3).
+    git('mv', 'b.txt', 'c.txt');
     put('.forge/work/cart/task.txt', 'add coupons to the cart\n');
     put('.forge/config.yaml', 'tdd: superpowers\n');
     put('.forge/verify/web.md', '# web\n');
     const r = run(['begin', '--task', 'cart', '--locale', 'es'], withTdd());
     expect(r.code, r.stderr).toBe(0);
     const out = JSON.parse(r.stdout);
-    expect([...out.foreign].sort()).toEqual(['.forge/config.yaml', '.forge/verify/web.md', 'a.txt']);
+    expect([...out.foreign].sort()).toEqual(['.forge/config.yaml', '.forge/verify/web.md', 'a.txt', 'c.txt']);
     expect(out.say).toContain('a.txt');
     expect(out.snapshot).toBe(true);
+    expect(out).not.toHaveProperty('snapshotError');
     expect(existsSync(path.join(root, '.forge', 'work', 'cart', 'tree-start.json'))).toBe(true);
     expect(out.tdd.mode).toBe('superpowers');
     expect(out.tdd.line).toMatch(/^TDD: required/);
@@ -2748,5 +2752,19 @@ describe('forge begin (J-12)', () => {
     for (const bad of [['begin'], ['begin', '--task', '../x'], ['begin', '--task', 'cart', '--locale', 'fr'], ['begin', '--task', 'cart', '--autonomy', 'maybe']]) {
       expect(run(bad, none).code, bad.join(' ')).toBe(2);
     }
+  });
+  it('says why there is no snapshot: snapshotError is the message of the tree snapshot it ran (T3)', () => {
+    repo();
+    // git answers everything but the work tree's top level, which tree snapshot needs.
+    const gitBut = (a: string[]) => {
+      if (a[0] === 'rev-parse') return null;
+      const r = spawnSync('git', a, { cwd: root, encoding: 'utf8' });
+      return r.status === 0 ? r.stdout : null;
+    };
+    const r = run(['begin', '--task', 'cart'], { ...io, git: gitBut, env: { CLAUDE_CONFIG_DIR: tmp('forge-begin-nosnap-') } });
+    expect(r.code, r.stderr).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out.snapshot).toBeNull();
+    expect(out.snapshotError).toContain('is not a git work tree');
   });
 });

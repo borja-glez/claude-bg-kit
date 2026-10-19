@@ -28,15 +28,18 @@ export const command: Command = (args, ctx) => {
   if (status === null) throw new UsageError(`begin: git status failed in ${repoDir}`);
   const { modified, untracked } = parseStatus(status);
   const foreign = foreignPaths([...modified, ...untracked]);
-  // The snapshot is tree snapshot's, through the CLI itself: the same file and the same rule.
-  const snapshot = run(['tree', 'snapshot', '--task', task], io).code === 0 ? true : null;
+  // The snapshot is tree snapshot's, through the CLI itself: the same file and the same rule. T3: without it, its message
+  // says why (tree check then lists every path, which is safe).
+  const snap = run(['tree', 'snapshot', '--task', task], io);
+  const snapshot = snap.code === 0 ? true : null;
+  const snapshotError = snapshot ? null : snap.stderr.trim() || `tree snapshot exited ${snap.code}`;
   const tdd = tddFor(io, repoDir);
   const prefs = resolvePrefs(isAutonomy(autonomy) ? { autonomy } : {}, readLocal(io.cwd), loadConfig(repoDir));
   // forge's .gitignore lives with its state, in the caller's checkout, as triage says.
   const stateGit = io.workdir === undefined ? git : defaultGit(io.cwd);
   const ignore = (stateGit(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore']) ?? '').trim();
   return json({
-    foreign, snapshot, tdd: { mode: tdd.tdd, line: tdd.line }, autonomy: prefs.autonomy, workflow: prefs.workflow,
+    foreign, snapshot, ...(snapshotError === null ? {} : { snapshotError }), tdd: { mode: tdd.tdd, line: tdd.line }, autonomy: prefs.autonomy, workflow: prefs.workflow,
     untracked: ignore ? ['.forge/.gitignore'] : [], say: foreign.length ? foreignSay(foreign, locale === 'es' ? 'es' : 'en') : null,
   });
 };
