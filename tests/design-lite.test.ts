@@ -8,6 +8,8 @@ import { changelogLite, critiqueLite, designMetaLite } from '../src/lib/design-l
 const DESIGN = readFileSync(new URL('./fixtures/design.md', import.meta.url), 'utf8');
 const START = 'start_prompt: /waypoint:work backend';
 const orNull = <T>(f: () => T): T | null => { try { return f(); } catch { return null; } };
+// The schema's defaults: the fixture without locale, pillars and start_prompt (and, as every variant, without status).
+const DEFAULTS = DESIGN.replace('locale: es\n', '').replace(/^pillars:\n(?: {2}.*\n)+/m, '').replace(`${START}\n`, '');
 
 describe('the readers of the design band, without zod (I-13)', () => {
   it('designMetaLite reads the front matter of a valid design as parseDesign does', () => {
@@ -16,8 +18,13 @@ describe('the readers of the design band, without zod (I-13)', () => {
       DESIGN.replace(START, `${START}\nstatus: approved\nartifact: https://claude.ai/artifact/d1`),
       DESIGN.replace(START, `${START}\nstatus: parked\nsource: docs/spec.md`),
       String.fromCharCode(0xfeff) + DESIGN,
+      DEFAULTS,
     ];
     for (const t of variants) expect(designMetaLite(t)).toEqual(parseDesign(t).meta);
+  });
+  it('designMetaLite fills in the defaults of the schema as parseDesign does', () => {
+    expect(DEFAULTS).not.toMatch(/^(?:locale|pillars|start_prompt|status):/m);
+    expect(designMetaLite(DEFAULTS)).toMatchObject({ locale: 'en', pillars: [], start_prompt: '/waypoint:work <track>', status: 'draft' });
   });
   it('designMetaLite is null without front matter, without a project or with a status the schema does not know', () => {
     expect(designMetaLite('no front matter')).toBeNull();

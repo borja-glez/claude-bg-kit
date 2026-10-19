@@ -381,6 +381,14 @@ describe('buildBandModel · design', () => {
     const parked = design.replace('start_prompt:', 'status: parked\nstart_prompt:');
     expect(buildBandModel('demo-shop', { ...f, ...designer, design: parked })).toEqual({ mode: 'none', locale: 'es', viewer: OWNER });
   });
+  it('a design that does not read draws nothing for its conversation, as a parse failure did: the plan\'s language, no role (I-13)', () => {
+    const f = { ...empty, ...designer, changelog };
+    expect(buildBandModel('demo-shop', { ...f, plan, design: 'no front matter' })).toEqual({ mode: 'none', locale: 'es', viewer: NO_VIEWER });
+    const frozen = design.replace('start_prompt:', 'status: frozen\nstart_prompt:');
+    expect(buildBandModel('demo-shop', { ...f, plan, design: frozen })).toEqual({ mode: 'none', locale: 'es', viewer: NO_VIEWER });
+    // Without a plan, nothing gives the language.
+    expect(buildBandModel('demo-shop', { ...f, design: frozen })).toEqual({ mode: 'none', viewer: NO_VIEWER });
+  });
 });
 
 describe('buildBandModel · automatic decisions', () => {
@@ -532,6 +540,23 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     const work = bandLine({ mode: 'work', project: 'p', locale: 'es', sid: 'main', track: null, roadmapUrl: null, current: { id: 'T002', title: dirty },
       trackDone: 0, trackTotal: 2, percent: 0, inbox: 0, escalation: false, phase: null, cells: 'ap', swarm: false, run: null, viewer: NO_VIEWER } as never, 0);
     expect(work).toBe('● main · T002 API de pedidos · tareas 0/2 · global 0 %');
+  });
+  it('a task id loses them too: planLite reads an id the CLI rejects, and the work band cleans it (I-13)', () => {
+    const c = (...codes: number[]) => String.fromCharCode(...codes);
+    const dirty = `T002${c(0x202e)}${c(0x0a)}rm`;
+    const files: BandFiles = {
+      ...empty, ...ownerOf('backend'), session: j({ sessionId: 'backend', track: 'backend' }),
+      plan: plan.replace('  - id: T002\n', `  - id: ${JSON.stringify(dirty)}\n`),
+      states: { [dirty]: j({ status: 'in_progress', owner: 'backend' }) },
+    };
+    const m = buildBandModel('demo-shop', files);
+    expect(m).toMatchObject({ mode: 'work', current: { id: dirty, title: 'API de pedidos' } });
+    expect(bandLine(m, 0)).toContain(' · T002 rm API de pedidos · ');
+    // A valid id shows whole, up to the 64 characters of the plan's id rule.
+    const long = 'x'.repeat(64);
+    const work = bandLine({ mode: 'work', project: 'p', locale: 'es', sid: 'main', track: null, roadmapUrl: null, current: { id: long, title: 'API' },
+      trackDone: 0, trackTotal: 2, percent: 0, inbox: 0, escalation: false, phase: null, cells: 'ap', swarm: false, run: null, viewer: NO_VIEWER } as never, 0);
+    expect(work).toBe(`● main · ${long} API · tareas 0/2 · global 0 %`);
   });
 });
 

@@ -10,6 +10,9 @@ export type { BandPart } from './band-fit.js';
 const TITLE_MAX = 40;
 // A slot's task id in the run line: loose task ids (`<slug>-<tag>`) run up to 45 characters.
 const SLOT_ID_MAX = 20;
+// The seat's task id in the work line: the plan's id rule allows 64 characters (src/lib/ids.ts), so a valid id shows
+// whole. I-13: the band reads the plan with planLite, which does not check ids, so the id is cleaned as a title is.
+const TASK_ID_MAX = 64;
 
 // As cleanText (src/lib/batches.ts): bidi controls reorder what a reader sees; they are built from their code points, so
 // none is written in this file. C0 and C1 controls become spaces.
@@ -125,8 +128,9 @@ function workParts(m: Extract<BandModel, { mode: 'work' }>, nowMs: number, t: Te
     : { key: 'progress', text: `● ${m.sid}`, prio: 5 }];
   if (m.swarm) parts.push({ key: 'swarm', text: t.run.toLowerCase(), prio: 8 });
   if (m.current) {
+    const id = clip(m.current.id, TASK_ID_MAX);
     const title = clip(m.current.title);
-    parts.push({ key: 'task', text: `${m.current.id} ${title}`, short: m.current.id, title, prio: 4 });
+    parts.push({ key: 'task', text: `${id} ${title}`, short: id, title, prio: 4 });
     const started = m.current.startedAt ? Date.parse(m.current.startedAt) : NaN;
     if (Number.isFinite(started) && nowMs >= started) {
       const min = Math.floor((nowMs - started) / 60000);

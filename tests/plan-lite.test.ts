@@ -36,10 +36,16 @@ tasks:
     design_ref: alcance
   - { id: T2, title: Dos, track: core, phase: p2, done_when: hecho, depends_on: [T1] }
 `;
+// The schema's defaults: FULL without locale, artifacts and versions (T2 already leaves out zones, p1 plan_status).
+const DEFAULTS = FULL.replace('locale: es\n', '').replace(/^artifacts:\n(?: {2}.*\n)+/m, '').replace(/^versions:\n(?: {2}.*\n)+/m, '');
 
 describe('planLite (I-13)', () => {
   it('reads a valid plan as parsePlan does: every field the band reads, and the rest', () => {
-    for (const text of [FIXTURE, FULL]) expect(planLite(text)).toEqual(parsePlan(text));
+    for (const text of [FIXTURE, FULL, DEFAULTS]) expect(planLite(text)).toEqual(parsePlan(text));
+  });
+  it('fills in the defaults of the schema as parsePlan does', () => {
+    expect(DEFAULTS).not.toMatch(/^(?:locale|artifacts|versions):/m);
+    expect(planLite(DEFAULTS)).toMatchObject({ locale: 'en', artifacts: {}, versions: [] });
   });
   it('an invalid plan the CLI rejects may still read: the band shows it, the CLI validates', () => {
     const bad = FULL.replace('done_when: hecho, depends_on', 'depends_on');
