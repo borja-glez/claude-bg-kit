@@ -218,8 +218,10 @@ export function planAffected(list: Validator[], files: string[], platform: NodeJ
   return { run, skipped, notes };
 }
 
-// The marks of a crash of the process (a segfault, a core dump, V8 out of heap, a fatal error), shared by FAILURE and RUNNER_ERROR.
+// The marks of a crash of the process (a segfault, a core dump, V8 out of heap, a fatal error), shared by FAILURE,
+// RUNNER_ERROR and failingTests' crash check. In FAILURE, `fatal error:` is redundant (`error` matches it already).
 const CRASH = 'segmentation fault|core dumped|javascript heap out of memory|fatal error:';
+const CRASH_RE = new RegExp(CRASH, 'i');
 const FAILURE = new RegExp(`(fail|error|✗|×|assert|panic|exception|${CRASH})`, 'i');
 export function failureLines(output: string): string[] {
   const lines = output.split(/\r?\n/).map(l => l.trimEnd()).filter(l => l.trim());
@@ -252,8 +254,8 @@ const TSC_ANY = /\berror TS\d+:/;
 
 /**
  * The names a run's output gives its failures, and whether they are all of them (known). Unknown: lint and build (a
- * bundler's own errors name nothing the patterns read), a tsc error without a location, a runner-level error, or more
- * than MAX_FAILING names (one left out could be new).
+ * bundler's own errors name nothing the patterns read), a tsc error without a location, a crash of the process (any
+ * kind), a runner-level error of a test kind, or more than MAX_FAILING names (one left out could be new).
  */
 export function failingTests(output: string, kind: string): { names: string[]; known: boolean } {
   if (kind === 'lint') return { names: [], known: false };
@@ -279,7 +281,10 @@ export function failingTests(output: string, kind: string): { names: string[]; k
     for (const l of lines) { const m = JEST.exec(l); if (m && !/^Console\b/.test(m[1])) add(m[1]); }
     for (const l of lines) for (const re of TEST_LINE) { const m = re.exec(l); if (m) { add(m[1]); break; } }
   }
-  const known = kind !== 'build' && found.size > 0 && !capped && !unread && !(TEST_KINDS.has(kind) && RUNNER_ERROR.test(lines.join('\n')));
+  // A crash makes the read unknown whatever the kind (a typecheck that ran out of heap beside the base's tsc error);
+  // the other runner-level errors only for the test kinds.
+  const text = lines.join('\n');
+  const known = kind !== 'build' && found.size > 0 && !capped && !unread && !CRASH_RE.test(text) && !(TEST_KINDS.has(kind) && RUNNER_ERROR.test(text));
   return { names: [...found], known };
 }
 

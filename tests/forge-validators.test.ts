@@ -344,6 +344,22 @@ describe('markPreexisting by test (D-06)', () => {
     expect(now[0]).toMatchObject({ failing: ['a > one'], failingKnown: false });
     expect(markPreexisting(now, base)[0].preexisting).toBeUndefined();
   });
+  it('a crash beside a tsc error the base already had is never excused either: the crash marks count for every kind', () => {
+    const located = "src/a.ts(3,5): error TS2322: Type 'string' is not assignable to type 'number'.\n";
+    const name = "src/a.ts: TS2322 Type 'string' is not assignable to type 'number'.";
+    const oom = 'FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\n';
+    expect(failingTests(located + oom, 'typecheck')).toEqual({ names: [name], known: false });
+    expect(failingTests(`${located}Segmentation fault (core dumped)\n`, 'typecheck').known).toBe(false);
+    expect(failingTests(located, 'typecheck').known).toBe(true);
+    expect(blocking(newFailure('typecheck', 'typecheck', located, located + oom))).toBe(true);
+  });
+  it('failureLines keeps a crash line, also as the last of more than 20 failure lines', () => {
+    expect(failureLines('ok\nSegmentation fault (core dumped)\n')).toEqual(['Segmentation fault (core dumped)']);
+    const hits = Array.from({ length: 25 }, (_, i) => ` FAIL  a.test.ts > case ${i}`);
+    const lines = failureLines([...hits, 'Aborted (core dumped)', 'done in 3s'].join('\n'));
+    expect(lines).toHaveLength(20);
+    expect(lines.at(-1)).toBe('Aborted (core dumped)');
+  });
 });
 
 describe('validators in parallel, retried only with a flaky history (C-12)', () => {
