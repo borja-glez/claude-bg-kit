@@ -26,7 +26,8 @@ import { mcpInventory } from '../tools.js';
 import { cleanupPids, killTarget } from '../verify.js';
 import { readLocal, mainCheckout, readLearned, recordLearned, surfacePermissions, OBJECT_ID } from '../local.js';
 import { appendLearned, surfaceFile, permissionHash, hashMatches } from '../surfaces.js';
-import { claudeConfigDir, claudeJsonDir, locateSuperpowersFor, spLedgerDone, spSkillPath } from '../superpowers.js';
+import { claudeConfigDir, claudeJsonDir, locateSuperpowersFor, spLedgerDone, spSkillPath, SP_WINDOW_MS } from '../superpowers.js';
+import { listRoutes } from '../route.js';
 import { markDone, parseSpPlan, SpPlanError } from '../../lib/sp-plan.js';
 import type { Io } from './run.js';
 import { defaultGit, repoReader } from './exec.js';
@@ -396,4 +397,19 @@ export function triageCore(io: Io, args: string[]): TriageCore {
     output: { ...result, catalog, new: fresh, implementer, announce: line, gate, ...auto, ...reviewed, review },
     locale: locale as AnnounceLocale,
   };
+}
+
+/**
+ * K1-07: what sp-plans, sp-specs and route read besides docs/superpowers: the main checkout (its SDD ledger and forge's
+ * sp-done record), the subjects of the commits of the last 14 days on this branch and on the main checkout's branch,
+ * and the specs a route of this checkout handed off or finished.
+ */
+export function spContext(io: Io, dir: string, now: number): { main: string; subjects: string[]; routed: string[] } {
+  const main = mainCheckout(dir);
+  const since = `--since=${new Date(now - SP_WINDOW_MS).toISOString()}`;
+  const subjectsOf = (git: (args: string[]) => string | null) =>
+    (git(['log', since, '-n', '500', '--format=%s', 'HEAD']) ?? '').split('\n').map(s => s.trim()).filter(Boolean);
+  const subjects = [...new Set([...subjectsOf(io.git ?? defaultGit(dir)), ...(samePath(main, dir) ? [] : subjectsOf(defaultGit(main)))])];
+  const routed = listRoutes(mainCheckout(io.cwd)).flatMap(r => (r.spec && (r.stage === 'handed-off' || r.stage === 'done') ? [r.spec] : []));
+  return { main, subjects, routed };
 }

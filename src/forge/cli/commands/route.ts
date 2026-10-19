@@ -17,7 +17,7 @@ import {
   ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute,
   type RouteDoc, type RouteOption, type RouteStage,
 } from '../../route.js';
-import { superpowersOf, committedAt, declinedSpecs, triageCore } from '../shared.js';
+import { superpowersOf, committedAt, declinedSpecs, spContext, triageCore } from '../shared.js';
 
 /**
  * K1-01: a probe leaves nothing behind. When .forge/ holds only work/<task>/task.txt (the request the skill wrote for
@@ -145,8 +145,10 @@ export const command: Command = (args, ctx) => {
   const prefs = resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir));
   const sp = superpowersOf(io, repoDir);
   const now = io.now().getTime();
-  const specs = sp.installed ? spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }) : [];
-  const plans = sp.installed ? spPlans(repoDir, now, { committedAt: committedAt(io, repoDir) }) : [];
+  // K1-07: plans done elsewhere and specs already planned or handed off are no longer offered.
+  const spc = sp.installed ? spContext(io, repoDir, now) : null;
+  const specs = spc ? spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)), routed: spc.routed }) : [];
+  const plans = spc ? spPlans(repoDir, now, { committedAt: committedAt(io, repoDir), main: spc.main, subjects: spc.subjects }) : [];
   const options = routeOptions({ path: p as PathName, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has('run-plan'), buildSpec: has('build-spec') });
   if (!probed) return json(options);
   // A raised --path only chooses here; forge:run triages again and records the path it follows.

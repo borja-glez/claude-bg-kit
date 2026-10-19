@@ -128,32 +128,39 @@ const isRecordOf = (text: string, rel: string) => text.split(/\r?\n/)[0].trim() 
  * The tasks of a superpowers plan recorded as complete under each root (the repository and its main checkout):
  * - superpowers' own executors: `<root>/.superpowers/sdd/<slug>[-…]/progress.md`, one workspace per plan;
  * - forge, for a task without checkboxes (D-17, sp-plan check): `<root>/.forge/sp-done/<slug>[-…].md`.
- * A workspace whose `plan-path` marker names another plan, or a ledger whose first line names another plan, is skipped.
- * forge's record counts only when its first line is exactly the header recordSpDone writes for this plan: the record of
- * `pkg/docs/…/foo.md` is never `docs/…/foo.md`'s (superpowers' own ledger may name its plan by an absolute path).
- * Fail-open: nothing readable means none.
+ * A ledger names the plan by its path in the repository (from the first root, which holds the plan) or from its own
+ * root: the main checkout's says docs/…/plan.md, not .claude/worktrees/x/docs/… (K1-07). A workspace whose `plan-path`
+ * marker names another plan, or a ledger whose first line names another plan, is skipped. forge's record counts only
+ * when its first line is exactly the header recordSpDone writes for this plan. Fail-open: nothing readable means none.
  */
 export function spLedgerDone(roots: string[], planAbs: string): number[] {
   const done = new Set<number>();
   const slug = path.basename(planAbs).replace(/\.md$/i, '');
   const mine = (name: string) => name === slug || name.startsWith(`${slug}-`);
   const list = (dir: string) => { try { return readdirSync(dir); } catch { return []; } };
+  const relOf = (root: string): string | null => {
+    const r = path.relative(root, planAbs).split(path.sep).join('/');
+    return !r || r.startsWith('..') || path.isAbsolute(r) ? null : r;
+  };
+  const repoRel = roots.length ? relOf(path.resolve(roots[0])) : null;
   for (const root of [...new Set(roots.map(r => path.resolve(r)))]) {
-    const rel = path.relative(root, planAbs).split(path.sep).join('/');
-    const inRoot = !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+    const rel = relOf(root);
+    const rels = [...new Set([repoRel, rel].filter((r): r is string => r !== null))];
     const base = path.join(root, '.superpowers', 'sdd');
-    for (const name of inRoot ? list(base).filter(mine) : []) {
+    for (const name of rels.length ? list(base).filter(mine) : []) {
       const dir = path.join(base, name);
       let marker: string | null = null;
       try { marker = readFileSync(path.join(dir, 'plan-path'), 'utf8').trim().replace(/\\/g, '/'); } catch { /* a workspace without a marker */ }
-      if (marker !== null && marker !== rel) continue;
-      try { for (const n of sddComplete(readFileSync(path.join(dir, 'progress.md'), 'utf8'), rel)) done.add(n); } catch { /* no ledger */ }
+      if (marker !== null && !rels.includes(marker)) continue;
+      try {
+        const text = readFileSync(path.join(dir, 'progress.md'), 'utf8');
+        for (const r of rels) for (const n of sddComplete(text, r)) done.add(n);
+      } catch { /* no ledger */ }
     }
     // forge's record names the plan by its path in its repository, the same from every worktree (see recordSpDone).
-    // Git is asked only when the root has a candidate record.
     const forge = path.join(root, '.forge', 'sp-done');
     const names = list(forge).filter(n => n.endsWith('.md') && mine(n.slice(0, -3)));
-    const forgeRel = names.length ? planRepoRel(planAbs, root) ?? (inRoot ? rel : null) : null;
+    const forgeRel = names.length ? planRepoRel(planAbs, root) ?? rel ?? repoRel : null;
     for (const name of forgeRel ? names : []) {
       try {
         const text = readFileSync(path.join(forge, name), 'utf8');
@@ -162,6 +169,19 @@ export function spLedgerDone(roots: string[], planAbs: string): number[] {
     }
   }
   return [...done].sort((a, b) => a - b);
+}
+
+/** K1-07: the tasks of a plan its commits say are done, `<plan title>: task N done` (superpowers-plan.md writes it after
+ *  each task); case and the spaces at the ends do not count. */
+export function doneByCommits(subjects: readonly string[], title: string): number[] {
+  const t = title.trim().toLowerCase();
+  const out = new Set<number>();
+  if (!t) return [];
+  for (const s of subjects) {
+    const m = /^(.*): task (\d{1,4}) done$/i.exec(s.trim());
+    if (m && m[1].trim().toLowerCase() === t) out.add(Number(m[2]));
+  }
+  return [...out].sort((a, b) => a - b);
 }
 
 // The top level and the real common git dir (the same for a repository and all its worktrees) of the checkout holding `at`.
@@ -247,10 +267,35 @@ function recentMarkdown(root: string, relDir: string, now: number, committedAt?:
 
 const titleOf = (file: string): string | null => { try { return specH1(readFileSync(file, 'utf8')); } catch { return null; } };
 
-/** The specs superpowers wrote in the last 14 days that no docs/waypoint/<project>/design.md names as its `source`, and
- *  that the user did not turn down. */
-export function spSpecs(root: string, now: number, opts: { committedAt?: CommittedAt; declined?: string[] } = {}): SpSpec[] {
-  const cited = new Set<string>();
+// A spec's path as a plan, a design or a route gives it, made a path in the repository: forward slashes, no ./, and an
+// absolute path inside root made relative.
+const repoRelOf = (root: string, p: string): string => {
+  const s = p.trim().replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!path.isAbsolute(s)) return s;
+  const r = path.relative(root, s).split(path.sep).join('/');
+  return r.startsWith('..') ? s : r;
+};
+
+/** K1-07: the specs the plans of docs/superpowers/plans cite in their **Spec:** field, whatever their age (200 plans at most). */
+function planSpecs(root: string): string[] {
+  const dir = path.join(root, 'docs', 'superpowers', 'plans');
+  let names: string[] = [];
+  try { names = readdirSync(dir).filter(n => n.endsWith('.md')).slice(0, 200); } catch { return []; }
+  return names.flatMap(n => {
+    try {
+      const spec = parseSpPlan(readFileSync(path.join(dir, n), 'utf8')).plan.spec;
+      return spec ? [repoRelOf(root, spec)] : [];
+    } catch { return []; }
+  });
+}
+
+/**
+ * The specs superpowers wrote in the last 14 days that are still to take: none a docs/waypoint/<project>/design.md names
+ * as its `source`, none a plan of docs/superpowers/plans cites in its **Spec:** and none a route handed off or finished
+ * (`routed`; K1-07), and none the user turned down.
+ */
+export function spSpecs(root: string, now: number, opts: { committedAt?: CommittedAt; declined?: string[]; routed?: readonly string[] } = {}): SpSpec[] {
+  const cited = new Set<string>([...planSpecs(root), ...(opts.routed ?? []).map(s => repoRelOf(root, s))]);
   let projects: string[] = [];
   try { projects = readdirSync(path.join(root, 'docs', 'waypoint')); } catch { /* no waypoint project */ }
   for (const p of projects) {
@@ -269,12 +314,20 @@ export function spSpecs(root: string, now: number, opts: { committedAt?: Committ
   return out;
 }
 
-/** The plans superpowers wrote in the last 14 days that still have a task to do; a file that is not a plan is skipped. */
-export function spPlans(root: string, now: number, opts: { committedAt?: CommittedAt } = {}): SpPlanEntry[] {
+/**
+ * The plans superpowers wrote in the last 14 days that still have a task to do; a file that is not a plan is skipped.
+ * A task is done by its boxes, by an SDD ledger or forge's record here or in the main checkout (`main`), or by a
+ * `<title>: task N done` commit among `subjects` (K1-07: the commits of this branch and the main checkout's).
+ */
+export function spPlans(root: string, now: number, opts: { committedAt?: CommittedAt; main?: string; subjects?: readonly string[] } = {}): SpPlanEntry[] {
   const out: SpPlanEntry[] = [];
   for (const f of recentMarkdown(root, 'docs/superpowers/plans', now, opts.committedAt)) {
     let plan;
-    try { plan = markDone(parseSpPlan(readFileSync(f.abs, 'utf8')), spLedgerDone([root], f.abs)); } catch { continue; }
+    try {
+      const parsed = parseSpPlan(readFileSync(f.abs, 'utf8'));
+      const ledger = spLedgerDone(opts.main ? [root, opts.main] : [root], f.abs);
+      plan = markDone(parsed, [...new Set([...ledger, ...doneByCommits(opts.subjects ?? [], parsed.plan.title)])]);
+    } catch { continue; }
     const done = plan.tasks.filter(t => t.done).length;
     if (done === plan.tasks.length) continue;
     out.push({ path: `docs/superpowers/plans/${f.name}`, title: plan.plan.title || f.name.replace(/\.md$/, ''), tasks: plan.tasks.length, done });

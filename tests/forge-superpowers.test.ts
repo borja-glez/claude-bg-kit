@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync, utimesSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { claudeConfigDir, locateSuperpowers, spPlans, spSkillPath, spSpecs } from '../src/forge/superpowers.js';
+import { claudeConfigDir, doneByCommits, locateSuperpowers, spPlans, spSkillPath, spSpecs } from '../src/forge/superpowers.js';
+import { writeRoute } from '../src/forge/route.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { tmpdir } from 'node:os';
@@ -131,6 +132,44 @@ describe('sp-specs and sp-plans', () => {
     expect(JSON.parse(run(['sp-path', 'nope'], io).stdout)).toBeNull();
     expect(run(['sp-path'], io).code).toBe(2);
     expect(JSON.parse(run(['sp-path', 'test-driven-development'], { ...io, env: { CLAUDE_CONFIG_DIR: path.join(cfg, 'none') } }).stdout)).toBeNull();
+  });
+  it("a plan done elsewhere is not pending: the main checkout's SDD ledger, forge's record there, or its commits (K1-07)", () => {
+    const plan = (title: string) => `# ${title} Implementation Plan\n\n### Task 1: one\n\n- [ ] a\n\n### Task 2: two\n\n- [ ] b\n`;
+    file('docs/superpowers/plans/main-ledger.md', plan('Main Ledger'), 1);
+    file('docs/superpowers/plans/sp-done.md', plan('Sp Done'), 2);
+    file('docs/superpowers/plans/commits.md', plan('Cart Totals'), 3);
+    file('docs/superpowers/plans/open.md', plan('Open'), 4);
+    const main = tmp('sp-main-');
+    const put = (rel: string, text: string) => { mk(path.dirname(path.join(main, rel))); writeFileSync(path.join(main, rel), text); };
+    // The main checkout names the plan by its path in the repository, not from where it is.
+    put('.superpowers/sdd/main-ledger/progress.md', '# SDD ledger — plan: docs/superpowers/plans/main-ledger.md\n\nTask 1: complete\nTask 2: complete\n');
+    put('.forge/sp-done/sp-done.md', '# SDD ledger — plan: docs/superpowers/plans/sp-done.md\nTask 1: complete (forge)\nTask 2: complete (forge)\n');
+    const subjects = ['Cart Totals: task 1 done', 'cart totals: task 2 done', 'Other: task 1 done'];
+    const paths = (o: Parameters<typeof spPlans>[2] = {}) => spPlans(project, NOW, o).map(p => p.path);
+    expect(paths()).toEqual(['main-ledger', 'sp-done', 'commits'].map(n => `docs/superpowers/plans/${n}.md`));
+    expect(paths({ main, subjects })).toEqual(['docs/superpowers/plans/open.md']);
+    expect(doneByCommits(subjects, 'Cart Totals')).toEqual([1, 2]);
+    expect(doneByCommits(['Cart Totals: task 3 done later', 'Cart: task 1 done'], 'Cart Totals')).toEqual([]);
+  });
+  it('a spec a plan cites, or a route handed off or finished, is no longer offered (K1-07)', () => {
+    for (const [n, d] of [['cited', 1], ['routed', 2], ['free', 3]] as const) file(`docs/superpowers/specs/${n}.md`, `# Spec ${n}\n\n## A\n`, d);
+    file('docs/superpowers/plans/old-plan.md', '# Old Implementation Plan\n\n**Spec:** `docs/superpowers/specs/cited.md`\n\n### Task 1: one\n\n- [x] a\n', 30);
+    expect(spSpecs(project, NOW).map(s => s.path)).toEqual(['docs/superpowers/specs/routed.md', 'docs/superpowers/specs/free.md']);
+    expect(spSpecs(project, NOW, { routed: ['./docs\\superpowers\\specs\\routed.md'] }).map(s => s.path)).toEqual(['docs/superpowers/specs/free.md']);
+  });
+  it("sp-specs leaves out a spec a route handed off; sp-plans counts this branch's commits (K1-07)", () => {
+    const io: Io = { cwd: project, now: () => new Date(NOW), env: { CLAUDE_CONFIG_DIR: cfg } };
+    file('docs/superpowers/specs/s.md', '# S\n\n## A\n', 1);
+    writeRoute(project, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'handed-off', ts: new Date(NOW).toISOString(), spec: 'docs/superpowers/specs/s.md', session: 'S1' });
+    expect(JSON.parse(run(['sp-specs'], io).stdout)).toEqual([]);
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: project, stdio: 'ignore' });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
+    file('docs/superpowers/plans/cart.md', '# Cart Totals Implementation Plan\n\n### Task 1: one\n\n- [ ] a\n\n### Task 2: two\n\n- [ ] b\n', 0);
+    git('add', '-A');
+    git('commit', '-q', '-m', 'Cart Totals: task 1 done');
+    git('commit', '-q', '--allow-empty', '-m', 'Cart Totals: task 2 done');
+    expect(JSON.parse(run(['sp-plans'], io).stdout)).toEqual([]);
   });
 });
 

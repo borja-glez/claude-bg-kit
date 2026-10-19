@@ -144,13 +144,14 @@ export function parseSpPlan(text: string): SpPlan {
 /**
  * The tasks superpowers' own executors (executing-plans, subagent-driven-development) recorded as complete in a
  * progress ledger: `Task N: complete …` lines, read only when the ledger's first line (`# SDD ledger — plan: <path>`)
- * names this plan, repo-relative or absolute. Those executors never tick the plan's boxes.
+ * names this plan: its repo-relative path, or an absolute path that ends with it (`pkg/docs/…/plan.md` is another
+ * plan's). Those executors never tick the plan's boxes.
  */
 export function sddComplete(ledger: string, planRel: string): number[] {
   const first = /^#\s*SDD ledger\s*[—–-]\s*plan:\s*(.+?)\s*$/m.exec(ledger.split(/\r?\n/)[0] ?? '');
   const rel = planRel.replace(/\\/g, '/').replace(/^\.\//, '');
   const named = first ? first[1].replace(/\\/g, '/').replace(/^\.\//, '') : null;
-  if (!named || !rel || (named !== rel && !named.endsWith(`/${rel}`))) return [];
+  if (!named || !rel || (named !== rel && !(/^(?:[A-Za-z]:)?\//.test(named) && named.endsWith(`/${rel}`)))) return [];
   const done = new Set<number>();
   for (const m of ledger.matchAll(/^Task (\d{1,4}): complete\b/gm)) done.add(Number(m[1]));
   return [...done].sort((a, b) => a - b);

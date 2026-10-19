@@ -71,6 +71,12 @@ describe("superpowers' own progress ledger", () => {
     expect(sddComplete(LEDGER, 'docs/superpowers/plans/other.md')).toEqual([]);
     expect(sddComplete('Task 2: complete\n', 'docs/superpowers/plans/cart.md')).toEqual([]);
   });
+  it('a ledger may name its plan by an absolute path, never by a relative one with a prefix (carry 5b-1)', () => {
+    const named = (p: string) => sddComplete(LEDGER.replace('plan: docs/superpowers/plans/cart.md', `plan: ${p}`), 'docs/superpowers/plans/cart.md');
+    expect(named('pkg/docs/superpowers/plans/cart.md')).toEqual([]);
+    expect(named('E:/repo/docs/superpowers/plans/cart.md')).toEqual([2]);
+    expect(named('/home/x/repo/docs/superpowers/plans/cart.md')).toEqual([2]);
+  });
   it('markDone sets those tasks done', () => {
     expect(markDone(parseSpPlan(PLAN), [3]).tasks.map(t => t.done)).toEqual([true, false, true]);
   });
