@@ -1,5 +1,6 @@
 import { build } from 'esbuild';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { bundleMod } from './scripts/mod-bundle.mjs';
 // G-13: the waypoint version the CLIs and the roadmap page are built as (src/lib/waypoint-version.ts reads it).
 const waypointVersion = JSON.parse(await readFile('plugins/waypoint/.claude-plugin/plugin.json', 'utf8')).version;
 const define = { __WAYPOINT_VERSION__: JSON.stringify(waypointVersion) };
@@ -71,20 +72,6 @@ const designHtml = (await readFile('src/design-page/template.html', 'utf8'))
 await writeFile('plugins/waypoint/assets/design.template.html', designHtml);
 console.log('built assets/design.template.html');
 
-// A mod bundle: 'claude-code' is the engine's own module, resolved at load. The engine reads register off the
-// module's source: it must be `export const register` at the top level. esbuild writes it as var, let or const
-// depending on its version.
-async function bundleMod(entry, outfile) {
-  const mod = await build({
-    entryPoints: [entry], bundle: true, format: 'esm', platform: 'neutral', mainFields: ['module', 'main'],
-    target: 'es2022', jsx: 'transform', jsxFactory: 'h', jsxFragment: 'Fragment', external: ['claude-code'], write: false,
-  });
-  const js = mod.outputFiles[0].text
-    .replace(/^(?:var|let|const) register = /m, 'export const register = ')
-    .replace(/^export \{\s*register\s*\};\s*$/m, '');
-  if (!/^export const register = /m.test(js) || /^export \{/m.test(js)) throw new Error(`${outfile}: unexpected bundle shape`);
-  await writeFile(outfile, js);
-}
 // The published state contracts must be self-contained: BandModel and PanelModel are copied out of their
 // sources. Each must stay a type of literals and primitives only (no imported names), which the check below
 // enforces.
@@ -96,9 +83,9 @@ async function modelType(file, name) {
   if (names) throw new Error(`${file}: ${name} must not reference other types (${names.join(', ')})`);
   return body;
 }
-await bundleMod('src/mod/register.tsx', 'plugins/waypoint/hooks/register.js');
+await writeFile('plugins/waypoint/hooks/register.js', await bundleMod('src/mod/register.tsx'));
 await mkdir('plugins/lens/hooks', { recursive: true });
-await bundleMod('src/lens/register.tsx', 'plugins/lens/hooks/register.js');
+await writeFile('plugins/lens/hooks/register.js', await bundleMod('src/lens/register.tsx'));
 // lens's surface module (terminal animations), bundled on its own: the engine loads it by the path a Client names.
 {
   const pulse = await build({
