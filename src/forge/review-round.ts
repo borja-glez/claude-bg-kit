@@ -135,11 +135,10 @@ export function reviewRound(input: RoundInput): RoundPlan {
  * K4-06: who reviews, with security decided by the real diff: it reviews when the diff touches a sensitive zone (high;
  * xhigh on auth or with the quality profile) or when it is `forced` (the person said the task is sensitive, or an earlier
  * round of the brief had security), and not otherwise, whatever the task's words were. The verdict flag --sensitive goes
- * with it. `forced` brings security even to a light review; a triaged security keeps the higher of its effort and the
+ * with it. A light review gets it by the same rules (SEC-LIGHT); a triaged security keeps the higher of its effort and the
  * diff's. No other reviewer, nor its effort, changes.
  */
 export function withSecurity(review: TriageReview, zones: Zone[], forced: boolean, profile: Profile): TriageReview {
-  if (review.light && !forced) return review;
   const want = forced || zones.length > 0;
   const has = review.reviewers.some(r => r.role === 'review-security');
   const effort: ReviewEffort = profile === 'quality' || zones.includes('auth') ? 'xhigh' : 'high';

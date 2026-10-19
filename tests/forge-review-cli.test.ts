@@ -1751,6 +1751,47 @@ describe('security by the zones of the real diff (K4-06)', () => {
     expect(roles(prepOnly())).toEqual(['review-correctness']);
     expect(roles(prepOnly('--sensitive'))).toEqual(['review-correctness', 'review-security']);
   });
+  it('a modified top-level auth/señal.ts (a non-ASCII path, unquoted) is the only change and brings security in', () => {
+    mkdirSync(path.join(wt, 'auth'), { recursive: true });
+    commit('auth/señal.ts', 'export const a = 1;\n');
+    base = git('rev-parse', 'HEAD');
+    commit('auth/señal.ts', 'export const a = 2;\n');
+    expect(roles(prepOnly())).toContain('review-security');
+  });
+  it('reviewers get the patch with git\'s rename detection, while the zones come from the names without it', () => {
+    commit('src/auth/token.ts', 'export const ttl = 60;\n'.repeat(20));
+    base = git('rev-parse', 'HEAD');
+    mkdirSync(path.join(wt, 'src', 'ui'), { recursive: true });
+    git('mv', 'src/auth/token.ts', 'src/ui/token.ts');
+    git('commit', '-q', '-m', 'move the token');
+    expect(roles(prepOnly())).toContain('review-security');
+    expect(readFileSync(path.join(work(), 'diff-1.patch'), 'utf8')).toContain('rename from src/auth/token.ts');
+  });
+  describe('after a redo the reverted attempt no longer keeps security on', () => {
+    const verdict = (k: number, action: string, ts: string) =>
+      appendEvent(root, { ts, kind: 'verdict', task: 'T1-1', dir: `.forge/work/T1/reviews-1-${k}`, action, score: 0.6, signature: `x${k}` });
+    const round = (k: number) => {
+      const out = prepOnly();
+      writeFileSync(path.join(work(), `reviews-1-${k}`, 'correctness.json'), JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] }));
+      return roles(out);
+    };
+    it('round 4 of fix, redo, fix has security only if its own attempt brought it', () => {
+      commit('src/ui/session.ts', 'export const check = (t: string) => jwt.decode(t);\n');
+      expect(round(1)).toEqual(['review-correctness', 'review-security']);
+      writeFileSync(path.join(work(), 'reviews-1-1', 'security.json'), JSON.stringify({ verdict: 'fail', confidence: 0.8, findings: [{ severity: 'critical', file: 'src/ui/session.ts', line: 1, problem: 'p' }] }));
+      verdict(1, 'fix', '2026-10-14T10:05:00.000Z');
+      commit('src/ui/session.ts', 'export const check = (t: string) => JSON.parse(atob(t));\n');
+      expect(round(2)).toEqual(['review-correctness', 'review-security']);
+      verdict(2, 'redo', '2026-10-14T10:06:00.000Z');
+      commit('src/ui/session.ts', 'export const check = (t: string) => atob(t);\n');
+      expect(round(3)).toEqual(['review-correctness']);
+      writeFileSync(path.join(work(), 'reviews-1-3', 'correctness.json'), JSON.stringify({ verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'src/ui/session.ts', line: 1, problem: 'p' }] }));
+      verdict(3, 'fix', '2026-10-14T10:07:00.000Z');
+      commit('src/ui/session.ts', 'export const check = (t: string) => atob(t).trim();\n');
+      expect(roles(prepOnly())).toEqual(['review-correctness']);
+      expect(roles(prepOnly('--sensitive'))).toEqual(['review-correctness', 'review-security']);
+    });
+  });
   describe('a fix round keeps the security reviewer that already reviewed the brief', () => {
     const failRound1 = () => {
       const r1 = path.join(work(), 'reviews-1-1');

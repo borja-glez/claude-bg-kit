@@ -180,9 +180,10 @@ describe('withSecurity (K4-06)', () => {
     expect(roles(withSecurity(medium, ['auth'], false, 'balanced'))[1]).toEqual(['review-security', 'xhigh']);
     expect(roles(withSecurity(medium, ['data'], false, 'balanced'))[1]).toEqual(['review-security', 'high']);
   });
-  it('a light review gets security only when forced', () => {
+  it('a light review gets security when forced or when its diff touches a zone', () => {
     const light: TriageReview = { ...plain, light: true };
-    expect(withSecurity(light, ['auth'], false, 'balanced')).toBe(light);
+    expect(withSecurity(light, [], false, 'balanced')).toBe(light);
+    expect(withSecurity(light, ['auth'], false, 'balanced').reviewers.map(x => [x.role, x.effort])).toEqual([['review-correctness', 'high'], ['review-security', 'xhigh']]);
     expect(withSecurity(light, [], true, 'balanced').reviewers.map(x => x.role)).toEqual(['review-correctness', 'review-security']);
   });
 });

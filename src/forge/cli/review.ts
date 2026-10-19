@@ -70,10 +70,10 @@ export function triageReview(events: LedgerEvent[], base: string, profile: Profi
   return { light: r.light === true, reviewers, flags: Array.isArray(r.flags) ? r.flags.filter((f): f is string => typeof f === 'string') : [] };
 }
 
-/** K4-06: whether a round of the brief before `round` had security (spawned or carried) or was flagged --sensitive. */
-function hadSecurity(dir: string, n: string, round: number): boolean {
+/** K4-06: whether a round of the brief from `from` up to `round` had security (spawned or carried) or was flagged --sensitive. */
+function hadSecurity(dir: string, n: string, from: number, round: number): boolean {
   const roles = (x: unknown): unknown[] => (Array.isArray(x) ? x.map(e => (e as { role?: unknown } | null)?.role) : []);
-  for (let k = 1; k < round; k++) {
+  for (let k = from; k < round; k++) {
     const roundDir = path.join(dir, `reviews-${n}-${k}`);
     const plan = readJson(path.join(roundDir, 'review-plan.json')) as { spawn?: unknown; carried?: unknown; flags?: unknown } | undefined;
     if (plan && (roles(plan.spawn).includes('review-security') || roles(plan.carried).includes('review-security')
@@ -243,9 +243,12 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const head = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
   if (!head) throw new UsageError('review-prep: cannot read HEAD');
   const diffGit = ['-c', 'core.quotePath=false', 'diff', '--no-renames'];
-  const diff = deps.git([...diffGit, `${baseSha}..HEAD`]);
+  // The reviewers read git's own patch (renames detected); the zones are read without rename detection, so a file moved
+  // out of a zone still names that zone, from its old path and its removed lines.
+  const diff = deps.git(['diff', `${baseSha}..HEAD`]);
+  const zoneDiff = deps.git([...diffGit, `${baseSha}..HEAD`]);
   const names = deps.git([...diffGit, '--name-only', `${baseSha}..HEAD`]);
-  if (diff === null || names === null) throw new UsageError(`review-prep: cannot diff ${baseSha}..HEAD`);
+  if (diff === null || zoneDiff === null || names === null) throw new UsageError(`review-prep: cannot diff ${baseSha}..HEAD`);
   const touched = names.split('\n').map(s => s.trim()).filter(Boolean);
 
   const dir = path.resolve(deps.cwd, dirArg);
@@ -297,7 +300,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     // Without the commit the previous round reviewed, or when git cannot diff from it, the whole diff stands in for the fix.
     const diffFrom = (from: string) => {
       const changedNames = deps.git([...diffGit, '--name-only', `${from}..HEAD`]);
-      const patch = changedNames === null ? null : deps.git([...diffGit, `${from}..HEAD`]);
+      const patch = changedNames === null ? null : deps.git(['diff', `${from}..HEAD`]);
       return changedNames === null || patch === null ? null : { names: changedNames, patch };
     };
     const fix = (prevHead ? diffFrom(prevHead) : null) ?? diffFrom(baseSha);
@@ -310,8 +313,11 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   // K4-06: security follows the zones the real diff touches (its paths and the zone words of its added and removed lines),
   // whatever the task's words were. It is forced by --sensitive (the person's word) and, from round 2 and not after a redo,
   // by an earlier round of this brief having had it: a fix that rewrites the zone word away does not silence a reviewer.
-  const forced = args.includes('--sensitive') || (round >= 2 && !redo && hadSecurity(dir, n, round));
-  const review = withSecurity(triaged, diffZones(touched, diff), forced, config.profile);
+  // The reverted attempt's rounds (up to the last redo verdict) do not count.
+  const lastRedo = counted.filter(e => e.kind === 'verdict' && isTask(e, task) && e.action === 'redo').at(-1);
+  const redoRound = Number(/reviews-\d+-(\d+)/.exec(String(lastRedo?.dir ?? ''))?.[1] ?? 0);
+  const forced = args.includes('--sensitive') || (round >= 2 && !redo && hadSecurity(dir, n, redoRound + 1, round));
+  const review = withSecurity(triaged, diffZones(touched, zoneDiff), forced, config.profile);
 
   // Measure 7 (§4.9): an express review when the previous review asked for a fix with green validators and left one or
   // two important findings with file and line, none from security, a regression or out of the model; never after a redo,
