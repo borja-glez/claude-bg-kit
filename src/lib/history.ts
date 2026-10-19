@@ -5,16 +5,23 @@ import { ROUND_MAX } from './critique.js';
 export const ENTRY_KINDS = ['draft', 'round', 'apply', 'rewrite', 'interview', 'approve', 'amend', 'reopen'] as const;
 export type EntryKind = (typeof ENTRY_KINDS)[number];
 
-const EntrySchema = z.object({
-  version: z.number(),
-  date: z.string(),
-  note: z.string(),
-  words: z.number(),
-  round: z.number(),
-});
+// I-13: the schema is built on first use, inside a function, so a module that imports only what needs no zod (the
+// band's mod: ENTRY_KINDS, normalizeApplied, normalizeResolved, entryKind) leaves zod out of its bundle.
+function historySchemas() {
+  const EntrySchema = z.object({
+    version: z.number(),
+    date: z.string(),
+    note: z.string(),
+    words: z.number(),
+    round: z.number(),
+  });
+  return { EntrySchema };
+}
+let historyBuilt: ReturnType<typeof historySchemas> | undefined;
+const schemas = () => (historyBuilt ??= historySchemas());
 /** One proposal of one round. */
 export interface RoundItem { round: number; n: number }
-export type ChangelogEntry = z.infer<typeof EntrySchema> & {
+export type ChangelogEntry = z.infer<ReturnType<typeof historySchemas>['EntrySchema']> & {
   /** A-04: round → the proposal numbers this entry applied, sorted and without duplicates. */
   applied?: Record<number, number[]>;
   /** A-04: the rewrite of this entry folded in the proposals of its round. */
@@ -105,7 +112,7 @@ export function parseChangelog(text: string | null): ChangelogEntry[] {
   try { raw = JSON.parse(text); } catch { throw new Error('changelog.json is not valid JSON'); }
   if (!Array.isArray(raw)) throw new Error('changelog.json must be a JSON array');
   return raw.map((e, i) => {
-    const r = EntrySchema.safeParse(e);
+    const r = schemas().EntrySchema.safeParse(e);
     if (!r.success) {
       const why = r.error.issues.map(x => `${x.path.join('.') || '(root)'}: ${x.message}`).join('; ');
       throw new Error(`changelog.json entry ${i} is invalid: ${why}`);

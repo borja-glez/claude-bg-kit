@@ -16,24 +16,31 @@ export const SEVERITIES = ['critical', 'major', 'minor'] as const;
 export const VERDICTS = ['ready', 'changes'] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
-const ProposalSchema = z.object({
-  n: z.number().int().positive(),
-  category: z.enum(CATEGORIES),
-  severity: z.enum(SEVERITIES),
-  section: z.string().min(1),
-  problem: z.string().min(1),
-  change: z.string().min(1),
-});
-const CritiqueSchema = z.object({
-  round: z.number().int().positive(),
-  version: z.number().int().positive(),
-  scope: z.enum(['full', 'changed']),
-  // K3-04: optional, so the critiques written before it still read; parseCritique fills it in.
-  verdict: z.enum(VERDICTS).optional(),
-  proposals: z.array(ProposalSchema),
-});
-export type Proposal = z.infer<typeof ProposalSchema>;
-export type Critique = z.infer<typeof CritiqueSchema>;
+// I-13: the schemas are built on first use, inside a function, so a module that imports only what needs no zod (the
+// band's mod: CATEGORIES, SEVERITIES, VERDICTS, verdictOf, ROUND_MAX) leaves zod out of its bundle.
+function critiqueSchemas() {
+  const ProposalSchema = z.object({
+    n: z.number().int().positive(),
+    category: z.enum(CATEGORIES),
+    severity: z.enum(SEVERITIES),
+    section: z.string().min(1),
+    problem: z.string().min(1),
+    change: z.string().min(1),
+  });
+  const CritiqueSchema = z.object({
+    round: z.number().int().positive(),
+    version: z.number().int().positive(),
+    scope: z.enum(['full', 'changed']),
+    // K3-04: optional, so the critiques written before it still read; parseCritique fills it in.
+    verdict: z.enum(VERDICTS).optional(),
+    proposals: z.array(ProposalSchema),
+  });
+  return { ProposalSchema, CritiqueSchema };
+}
+let critiqueBuilt: ReturnType<typeof critiqueSchemas> | undefined;
+const schemas = () => (critiqueBuilt ??= critiqueSchemas());
+export type Proposal = z.infer<ReturnType<typeof critiqueSchemas>['ProposalSchema']>;
+export type Critique = z.infer<ReturnType<typeof critiqueSchemas>['CritiqueSchema']>;
 export type Severity = Proposal['severity'];
 
 export class CritiqueError extends Error {
@@ -52,7 +59,7 @@ export function verdictOf(c: { proposals: { severity: Severity }[] }): Verdict {
 export function parseCritique(text: string): Critique {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch { throw new CritiqueError(['critique is not valid JSON']); }
-  const r = CritiqueSchema.safeParse(raw);
+  const r = schemas().CritiqueSchema.safeParse(raw);
   const issues = r.success ? [] : r.error.issues.map(i => `${i.path.join('.') || '(root)'}: ${i.message}`);
   const props = (raw as { proposals?: { n?: unknown }[] })?.proposals;
   if (Array.isArray(props)) {

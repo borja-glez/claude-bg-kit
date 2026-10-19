@@ -5,43 +5,51 @@ import { PLAN_ID_RE as SEG, isPlanId, realDate } from './ids.js';
 
 /** The plan's rule for task, track and phase ids (src/lib/ids.ts, free of yaml and zod for the page). */
 export { isPlanId };
-const id = z.string()
-  .regex(SEG, 'invalid id (allowed: letters, digits, _ - .; max 64)')
-  .refine(s => s !== '.' && s !== '..', 'invalid id');
 
-const TaskSchema = z.object({
-  id,
-  title: z.string().min(1),
-  track: id,
-  phase: id,
-  category: z.string().optional(),
-  includes: z.string().optional(),
-  done_when: z.string().min(1),
-  verification: z.string().optional(),
-  depends_on: z.array(id).default([]),
-  zones: z.array(z.string().min(1)).default([]),
-  estimate_min: z.number().positive().optional(),
-  delicate: z.boolean().optional(),
-  // G-25, K3-08: the section of the design the task comes from (a heading's slug, or _intro).
-  design_ref: z.string().regex(/^[a-z0-9-]{1,80}$|^_intro$/, 'design_ref must be a section slug of the design').optional(),
-});
+// I-13: the schemas are built on first use, inside a function, so a module that imports only what needs no zod (isPlanId,
+// checkReferences: the band's mod, through execution-state.ts) leaves zod out of its bundle (zod has no side effects).
+function planSchemas() {
+  const id = z.string()
+    .regex(SEG, 'invalid id (allowed: letters, digits, _ - .; max 64)')
+    .refine(s => s !== '.' && s !== '..', 'invalid id');
 
-const PlanSchema = z.object({
-  project: id,
-  locale: z.string().min(1).default('en'),
-  version: z.string().min(1),
-  design_version: z.number().int().positive().optional(),
-  artifacts: z.object({ roadmap: z.string().url().optional(), design: z.string().url().optional() }).default({}),
-  versions: z.array(z.object({ id, phases: z.array(id), target: z.string().refine(realDate, 'target must be a date (YYYY-MM-DD)').optional() })).default([]),
-  tracks: z.array(z.object({ id, name: z.string().min(1), color: z.enum(TRACK_COLORS) })).min(1),
-  phases: z.array(z.object({
+  const TaskSchema = z.object({
     id,
-    name: z.string().min(1),
-    plan_status: z.enum(['committed', 'provisional']).default('committed'),
-    goal: z.string().max(300).optional(),
-  })).min(1),
-  tasks: z.array(TaskSchema).min(1),
-});
+    title: z.string().min(1),
+    track: id,
+    phase: id,
+    category: z.string().optional(),
+    includes: z.string().optional(),
+    done_when: z.string().min(1),
+    verification: z.string().optional(),
+    depends_on: z.array(id).default([]),
+    zones: z.array(z.string().min(1)).default([]),
+    estimate_min: z.number().positive().optional(),
+    delicate: z.boolean().optional(),
+    // G-25, K3-08: the section of the design the task comes from (a heading's slug, or _intro).
+    design_ref: z.string().regex(/^[a-z0-9-]{1,80}$|^_intro$/, 'design_ref must be a section slug of the design').optional(),
+  });
+
+  const PlanSchema = z.object({
+    project: id,
+    locale: z.string().min(1).default('en'),
+    version: z.string().min(1),
+    design_version: z.number().int().positive().optional(),
+    artifacts: z.object({ roadmap: z.string().url().optional(), design: z.string().url().optional() }).default({}),
+    versions: z.array(z.object({ id, phases: z.array(id), target: z.string().refine(realDate, 'target must be a date (YYYY-MM-DD)').optional() })).default([]),
+    tracks: z.array(z.object({ id, name: z.string().min(1), color: z.enum(TRACK_COLORS) })).min(1),
+    phases: z.array(z.object({
+      id,
+      name: z.string().min(1),
+      plan_status: z.enum(['committed', 'provisional']).default('committed'),
+      goal: z.string().max(300).optional(),
+    })).min(1),
+    tasks: z.array(TaskSchema).min(1),
+  });
+  return { TaskSchema, PlanSchema };
+}
+let planBuilt: ReturnType<typeof planSchemas> | undefined;
+const schemas = () => (planBuilt ??= planSchemas());
 
 export class PlanError extends Error {
   constructor(public issues: string[]) {
@@ -53,7 +61,7 @@ export class PlanError extends Error {
 export function parsePlan(text: string): Plan {
   let raw: unknown;
   try { raw = parse(text); } catch (e) { throw new PlanError([`YAML: ${(e as Error).message}`]); }
-  const r = PlanSchema.safeParse(raw);
+  const r = schemas().PlanSchema.safeParse(raw);
   if (!r.success) throw new PlanError(r.error.issues.map(i => `${i.path.join('.') || '(root)'}: ${i.message}`));
   const plan = r.data as Plan;
   const issues = checkReferences(plan);

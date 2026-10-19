@@ -2,20 +2,29 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 
 const ID = /^[A-Za-z0-9_.-]{1,64}$/;
+/** The statuses of a design (2a added parked); designMetaLite reads the same list. */
+export const DESIGN_STATUSES = ['draft', 'approved', 'parked'] as const;
 
-const MetaSchema = z.object({
-  title: z.string().min(1),
-  project: z.string().regex(ID, 'invalid id (allowed: letters, digits, _ . -; max 64)').refine(s => s !== '.' && s !== '..', 'invalid id'),
-  locale: z.string().min(1).default('en'),
-  summary: z.string().min(1),
-  pillars: z.array(z.object({ title: z.string().min(1), text: z.string().min(1) })).max(8).default([]),
-  start_prompt: z.string().min(1).default('/waypoint:work <track>'),
-  status: z.enum(['draft', 'approved', 'parked']).default('draft'),
-  artifact: z.string().url().optional(),
-  source: z.string().min(1).max(300).optional(),
-});
+// I-13: the schema is built on first use, inside a function, so a module that imports only what needs no zod (the
+// band's mod: DESIGN_STATUSES, frontMatterOf, designBody, changedSections) leaves zod out of its bundle.
+function designSchemas() {
+  const MetaSchema = z.object({
+    title: z.string().min(1),
+    project: z.string().regex(ID, 'invalid id (allowed: letters, digits, _ . -; max 64)').refine(s => s !== '.' && s !== '..', 'invalid id'),
+    locale: z.string().min(1).default('en'),
+    summary: z.string().min(1),
+    pillars: z.array(z.object({ title: z.string().min(1), text: z.string().min(1) })).max(8).default([]),
+    start_prompt: z.string().min(1).default('/waypoint:work <track>'),
+    status: z.enum(DESIGN_STATUSES).default('draft'),
+    artifact: z.string().url().optional(),
+    source: z.string().min(1).max(300).optional(),
+  });
+  return { MetaSchema };
+}
+let designBuilt: ReturnType<typeof designSchemas> | undefined;
+const schemas = () => (designBuilt ??= designSchemas());
 
-export type DesignMeta = z.infer<typeof MetaSchema>;
+export type DesignMeta = z.infer<ReturnType<typeof designSchemas>['MetaSchema']>;
 export interface Section { level: 2 | 3; heading: string; slug: string; text: string }
 export interface Design { meta: DesignMeta; body: string; sections: Section[]; words: number }
 
@@ -30,12 +39,17 @@ const FM = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?([\s\S]*)$/;
 // A byte order mark some editors put first, from its code point so the source never holds the invisible character.
 const BOM = String.fromCharCode(0xfeff);
 
+/** The front matter of design.md and its body (groups 1 and 2), past a byte order mark; null without one. */
+export function frontMatterOf(text: string): RegExpExecArray | null {
+  return FM.exec(text.startsWith(BOM) ? text.slice(1) : text);
+}
+
 export function parseDesign(text: string): Design {
-  const m = FM.exec(text.startsWith(BOM) ? text.slice(1) : text);
+  const m = frontMatterOf(text);
   if (!m) throw new DesignError(['missing front matter block (--- ... ---) at the top of design.md']);
   let raw: unknown;
   try { raw = parse(m[1] ?? ''); } catch (e) { throw new DesignError([`YAML: ${(e as Error).message}`]); }
-  const r = MetaSchema.safeParse(raw ?? {});
+  const r = schemas().MetaSchema.safeParse(raw ?? {});
   if (!r.success) throw new DesignError(r.error.issues.map(i => `${i.path.join('.') || '(root)'}: ${i.message}`));
   const body = m[2];
   return { meta: r.data, body, sections: sectionsOf(body), words: wordCount(body) };

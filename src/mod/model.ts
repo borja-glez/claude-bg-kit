@@ -1,10 +1,8 @@
 import { computeMetrics } from '../lib/metrics.js';
 import { escalationCandidates, inboxFor } from '../lib/coordination.js';
-import { parseCritique } from '../lib/critique.js';
 import { parseDismissed, pendingProposals, unionDismissed, type GateCritique } from '../lib/design-gate.js';
-import { parseDesign } from '../lib/design.js';
-import { parseChangelog } from '../lib/history.js';
-import { parsePlan } from '../lib/plan.js';
+import { changelogLite, critiqueLite, designMetaLite } from '../lib/design-lite.js';
+import { planLite } from '../lib/plan-lite.js';
 import { coordinatorGone, executionView, isVisibleRun } from '../lib/execution-view.js';
 import { isSafeId, normalizeLive, normalizePublicTask, parseExecution, type ExecutionState, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import type { MessageDoc, Plan, States } from '../lib/types.js';
@@ -212,8 +210,7 @@ export function executionViewer(f: BandFiles): BandViewer {
 export function buildBandModel(project: string, f: BandFiles): BandModel {
   const now = f.now ?? Date.now();
   try {
-    let plan: Plan | null = null;
-    try { if (f.plan !== undefined) plan = parsePlan(f.plan); } catch { plan = null; }
+    const plan = f.plan !== undefined ? planLite(f.plan) : null;
     const exec = projectExecution(project, f, now);
     const seats = seatsOf(f, now);
     const sessionId = isSafeId(f.sessionId) ? f.sessionId : null;
@@ -301,7 +298,7 @@ function noticeModel(project: string, f: BandFiles, plan: Plan | null, v: Viewer
 
 /** Whether the project's design is a draft: a parked or an approved one is not taken up. */
 function isDraft(f: BandFiles): boolean {
-  try { return f.design !== undefined && parseDesign(f.design).meta.status === 'draft'; } catch { return false; }
+  return f.design !== undefined && designMetaLite(f.design)?.status === 'draft';
 }
 
 // forge's automatic decisions of the last day (.forge/decisions.json), on any band that draws.
@@ -313,8 +310,8 @@ function withAuto(m: BandModel, f: BandFiles, now: number): BandModel {
 
 // The project's language from its plan, else its design, for a band that draws nothing.
 function knownLocale(f: BandFiles): string | undefined {
-  try { if (f.plan !== undefined) return parsePlan(f.plan).locale; } catch { /* try the design */ }
-  try { if (f.design !== undefined) return parseDesign(f.design).meta.locale; } catch { /* none */ }
+  if (f.plan !== undefined) { const p = planLite(f.plan); if (p) return p.locale; }
+  if (f.design !== undefined) { const meta = designMetaLite(f.design); if (meta) return meta.locale; }
   return undefined;
 }
 
@@ -416,31 +413,29 @@ function runModel(project: string, f: BandFiles, exec: ExecutionState, plan: Pla
 }
 
 function designModel(project: string, f: BandFiles, viewer: BandViewer): BandModel {
-  const d = parseDesign(f.design!);
-  if (d.meta.status !== 'draft') return noneBand(d.meta.locale, viewer);
-  let changelog: ReturnType<typeof parseChangelog> = [];
-  try { changelog = parseChangelog(f.changelog ?? null); } catch { changelog = []; }
+  const meta = designMetaLite(f.design!);
+  if (!meta) return noneBand(knownLocale(f));
+  if (meta.status !== 'draft') return noneBand(meta.locale, viewer);
+  const changelog = changelogLite(f.changelog ?? null) ?? [];
   const critiques = Object.entries(f.critiques)
     .map(([name, text]) => ({ n: Number(/^critique-r(\d+)\.json$/.exec(name)?.[1] ?? NaN), text }))
     .filter(c => Number.isFinite(c.n))
     .sort((a, b) => b.n - a.n);
-  const valid: GateCritique[] = critiques.map(c => {
-    try { return { round: c.n, critique: parseCritique(c.text) }; } catch { return { round: c.n, critique: null }; }
-  });
+  const valid: GateCritique[] = critiques.map(c => ({ round: c.n, critique: critiqueLite(c.text) }));
   // The highest round with a valid critique; invalid ones are skipped.
   const top = valid.find(c => c.critique !== null);
   const latest = top?.critique ?? null;
   // Carry 8: the dismissals of both places, merged as the CLI's readDismissedOf merges them.
   const pending = pendingProposals(changelog, valid, unionDismissed(parseDismissed(f.dismissedLegacy), parseDismissed(f.dismissed)));
   return {
-    mode: 'design', project, locale: d.meta.locale,
+    mode: 'design', project, locale: meta.locale,
     version: changelog.at(-1)?.version ?? 0,
     round: top?.round ?? 0,
     proposals: latest?.proposals.length ?? 0,
     critical: latest?.proposals.filter(p => p.severity === 'critical').length ?? 0,
     pending: pending.length,
     pendingCritical: pending.filter(p => p.severity === 'critical').length,
-    designUrl: d.meta.artifact ?? null,
+    designUrl: meta.artifact ?? null,
     viewer,
   };
 }
