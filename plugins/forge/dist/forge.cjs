@@ -16811,6 +16811,15 @@ var ROUTE_STAGES = ["designing", "planning", "handed-off", "done"];
 var ROUTE_REMINDER_MS = 24 * 36e5;
 var fold = (s2) => s2.normalize("NFD").replace(new RegExp("\\p{M}+", "gu"), "").normalize("NFC").toLowerCase();
 var NAMED_FILE = /[^\s"'`<>()[\]{},;|*]*/y;
+var DATE_PREFIX = /^\d{4}-\d{2}-\d{2}-/;
+var WORD_CHAR = /[\p{L}\p{N}]/u;
+function holdsWhole(t, n) {
+  for (let at2 = t.indexOf(n); at2 >= 0; at2 = t.indexOf(n, at2 + 1)) {
+    if (!WORD_CHAR.test(t[at2 - 1] ?? "") && !WORD_CHAR.test(t[at2 + n.length] ?? "")) return true;
+  }
+  return false;
+}
+var needsPools = (o) => o.runPlan || o.buildSpec || o.text.replace(/\\/g, "/").toLowerCase().includes("docs/superpowers/");
 function namedOrFirst(entries, text3, others = []) {
   const t = fold(text3).replace(/\\/g, "/");
   const fileOf = (p) => fold(p).split("/").pop() ?? "";
@@ -16827,17 +16836,20 @@ function namedOrFirst(entries, text3, others = []) {
     }
   }
   if (named.size) return entries.find((e) => named.has(fileOf(e.path)) || named.has(stemOf(e.path)));
-  const longest = (e) => {
+  const longest = (e, offered) => {
     const stem = stemOf(e.path);
-    return [fold(e.path), fileOf(e.path), stem, stem.replace(/^\d{4}-\d{2}-\d{2}-/, ""), fold(e.title ?? "")].filter((n) => n.length >= 6 && t.includes(n)).reduce((m, n) => Math.max(m, n.length), 0);
+    const exact = [fold(e.path), fileOf(e.path), ...DATE_PREFIX.test(stem) ? [stem] : []];
+    const loose = [stem.replace(DATE_PREFIX, ""), fold(e.title ?? "")];
+    const held2 = [...exact, ...loose].filter((n) => n.length >= 6 && t.includes(n) && (offered || exact.includes(n) || /[\s_-]/.test(n.trim()) && holdsWhole(t, n)));
+    return held2.reduce((m, n) => Math.max(m, n.length), 0);
   };
   let best = { entry: void 0, length: 0 };
   for (const e of entries) {
-    const n = longest(e);
+    const n = longest(e, true);
     if (n > best.length) best = { entry: e, length: n };
   }
   for (const o of others) {
-    const n = longest(o);
+    const n = longest(o, false);
     if (n > best.length) best = { entry: void 0, length: n };
   }
   return best.length ? best.entry : entries[0];
@@ -16857,9 +16869,11 @@ function routeOptions(i) {
   const plan = namedOrFirst(i.pools?.plans.pending ?? i.plans, i.text ?? "", i.pools?.plans.others);
   const spec = namedOrFirst(i.pools?.specs.pending ?? i.specs, i.text ?? "", i.pools?.specs.others);
   let recommended;
-  if (i.runPlan && plan) recommended = { option: "superpowers-plan", why: "an unfinished superpowers plan to carry out: forge executes and reviews each task", plan: plan.path };
-  else if (i.buildSpec && spec) recommended = { option: "superpowers-design", why: "a recent superpowers spec not imported yet: forge builds from it", spec: spec.path };
-  else if (i.path === "large" && i.prefs.autonomy === "auto") recommended = { option: "forge", why: "large, in auto mode: forge designs, critiques and approves it without asking" };
+  if (i.runPlan && plan) {
+    recommended = { option: "superpowers-plan", why: `the unfinished superpowers plan ${plan.path} to carry out: forge executes and reviews each task`, plan: plan.path };
+  } else if (i.buildSpec && spec) {
+    recommended = { option: "superpowers-design", why: `the recent superpowers spec ${spec.path}, not imported yet: forge builds from it`, spec: spec.path };
+  } else if (i.path === "large" && i.prefs.autonomy === "auto") recommended = { option: "forge", why: "large, in auto mode: forge designs, critiques and approves it without asking" };
   else if (i.path === "large") recommended = { option: "forge", why: "large: forge designs it with waypoint, critiques, plans and builds" };
   else recommended = { option: "forge", why: "forge triages, implements and reviews it" };
   return { ...base, options: ["forge", "superpowers", "superpowers-design", "superpowers-plan"], recommended };
@@ -24976,10 +24990,6 @@ var command18 = (args, ctx) => {
   const prefs = resolvePrefs({ ...wf ? { workflow: wf } : {}, ...au ? { autonomy: au } : {} }, readLocal(io.cwd), loadConfig(repoDir));
   const sp = superpowersOf(io, repoDir);
   const now = io.now().getTime();
-  const spc = sp.installed ? spContext(io, repoDir, now) : null;
-  const empty = () => ({ pending: [], others: [] });
-  const specPool2 = spc ? spSpecPool(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)), routed: spc.routed }) : empty();
-  const planPool2 = spc ? spPlanPool(repoDir, now, { committedAt: committedAt(io, repoDir), main: spc.main, subjects: spc.subjects }) : empty();
   const text3 = textFile !== void 0 ? (() => {
     try {
       return (0, import_node_fs56.readFileSync)(import_node_path53.default.resolve(io.cwd, textFile), "utf8");
@@ -24987,6 +24997,12 @@ var command18 = (args, ctx) => {
       return "";
     }
   })() : "";
+  const spc = sp.installed ? spContext(io, repoDir, now) : null;
+  const wide = needsPools({ runPlan: has("run-plan"), buildSpec: has("build-spec"), text: text3 });
+  const specOpts = spc ? { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)), routed: spc.routed } : null;
+  const planOpts = spc ? { committedAt: committedAt(io, repoDir), main: spc.main, subjects: spc.subjects } : null;
+  const specPool2 = !specOpts ? { pending: [], others: [] } : wide ? spSpecPool(repoDir, now, specOpts) : { pending: spSpecs(repoDir, now, specOpts), others: [] };
+  const planPool2 = !planOpts ? { pending: [], others: [] } : wide ? spPlanPool(repoDir, now, planOpts) : { pending: spPlans(repoDir, now, planOpts), others: [] };
   const options = routeOptions({
     path: p,
     prefs,
