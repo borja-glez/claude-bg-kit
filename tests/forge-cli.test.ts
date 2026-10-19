@@ -1528,6 +1528,40 @@ describe('forge waypoint-cli', () => {
     // Without the file the cache scan still finds the highest version, as before.
     expect(at({ CLAUDE_CONFIG_DIR: path.join(base, 'no-config') })).toBe(path.join(base, 'waypoint', '0.99.0', 'dist', 'waypoint.cjs'));
   });
+  it('falls back to the cache scan when the installPath installed_plugins.json gives no longer exists', () => {
+    const base = tmp('forge-wp-');
+    const script = path.join(base, 'forge', '0.2.0', 'dist', 'forge.cjs');
+    touch(script);
+    touch(path.join(base, 'waypoint', '0.9.1', 'dist', 'waypoint.cjs'));
+    const cfg = path.join(base, 'cfg');
+    mkdirSync(path.join(cfg, 'plugins'), { recursive: true });
+    writeFileSync(path.join(cfg, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+      'waypoint@bg-kit': [{ scope: 'user', installPath: path.join(base, 'waypoint', '0.50.0'), version: '0.50.0' }],
+    } }));
+    const r = run(['waypoint-cli'], { cwd: base, now: () => new Date(), env: { CLAUDE_CONFIG_DIR: cfg }, scriptPath: script });
+    expect(r.stdout.trim()).toBe(path.join(base, 'waypoint', '0.9.1', 'dist', 'waypoint.cjs'));
+  });
+  it("prefers the waypoint of forge's own marketplace to a higher version from another one, then the highest (M7)", () => {
+    const base = tmp('forge-wp-');
+    const wp = (m: string, v: string) => path.join(base, m, 'waypoint', v);
+    const cli = (m: string, v: string) => path.join(wp(m, v), 'dist', 'waypoint.cjs');
+    for (const [m, v] of [['bg-kit', '0.30.0'], ['local-dev', '0.99.0'], ['other', '0.40.0']]) touch(cli(m, v));
+    const cfg = path.join(base, 'cfg');
+    mkdirSync(path.join(cfg, 'plugins'), { recursive: true });
+    const installed = (plugins: Record<string, string>) => writeFileSync(path.join(cfg, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2,
+      plugins: Object.fromEntries(Object.entries(plugins).map(([key, at]) => [key, [{ scope: 'user', installPath: at, version: path.basename(at) }]])) }));
+    const at = (script: string) => { touch(script); return run(['waypoint-cli'], { cwd: base, now: () => new Date(), env: { CLAUDE_CONFIG_DIR: cfg }, scriptPath: script }).stdout.trim(); };
+    // The cache layout names forge's marketplace: <marketplace>/forge/<version>.
+    installed({ 'waypoint@bg-kit': wp('bg-kit', '0.30.0'), 'waypoint@local-dev': wp('local-dev', '0.99.0') });
+    expect(at(path.join(base, 'bg-kit', 'forge', '0.2.0', 'dist', 'forge.cjs'))).toBe(cli('bg-kit', '0.30.0'));
+    // forge's own entry names it too, forge@<m> → waypoint@<m>, wherever forge runs from.
+    const own = path.join(base, 'elsewhere', '0.2.0');
+    installed({ 'forge@other': own, 'waypoint@other': wp('other', '0.40.0'), 'waypoint@local-dev': wp('local-dev', '0.99.0') });
+    expect(at(path.join(own, 'dist', 'forge.cjs'))).toBe(cli('other', '0.40.0'));
+    // Without an entry of forge's marketplace, the highest version.
+    installed({ 'waypoint@other': wp('other', '0.40.0'), 'waypoint@local-dev': wp('local-dev', '0.99.0') });
+    expect(at(path.join(base, 'bg-kit', 'forge', '0.2.0', 'dist', 'forge.cjs'))).toBe(cli('local-dev', '0.99.0'));
+  });
   describe('proposals', () => {
     const prop = { category: 'quality', risk: 'low', title: 'Cut dead code', rationale: 'r', evidence: 'e', pillar: 'quality', source: 'scout', path: 'src/util/dead.ts' };
     const DIG = (id: string) => proposalDigest(id, prop as unknown as ProposalDoc);

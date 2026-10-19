@@ -39,17 +39,19 @@ const samePath = (a: string, b: string): boolean => {
   const y = path.resolve(b);
   return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
 };
-// "6.4.1" > "6.4.0" > "unknown" (a hash or a word counts as 0).
 const versionKey = (v: string) => v.split(/[.+-]/).map(n => (/^\d+$/.test(n) ? Number(n) : 0));
-function newer(a: string, b: string): boolean {
+/** The one version order of forge's plugin lookups, as a sort comparator (negative when a is older): "6.4.1" > "6.4.0" >
+ *  "unknown" (a hash or a word counts as 0). */
+export function compareVersions(a: string, b: string): number {
   const x = versionKey(a);
   const y = versionKey(b);
   for (let i = 0; i < Math.max(x.length, y.length); i++) {
     const d = (x[i] ?? 0) - (y[i] ?? 0);
-    if (d) return d > 0;
+    if (d) return d;
   }
-  return false;
+  return 0;
 }
+const newer = (a: string, b: string): boolean => compareVersions(a, b) > 0;
 
 /** The enabledPlugins maps of the settings files, most specific first: the project's local, the project's, the user's. */
 function enabledMaps(configDir: string, projectDir: string): Record<string, unknown>[] {
