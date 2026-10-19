@@ -27,7 +27,8 @@ type Ruling = { kind: 'fix' | 'out-of-model' | 'review' } | { kind: 'defer'; ids
 /** `after`: writes the step makes only as its last act, once every command ran (see reviewersBack). `iso` and
  *  `agentLease` are read from io.now() when they are used (M7): a step can wait for a slot and validate for minutes. */
 interface Ctx {
-  io: Io; deps: StepDeps; planArg: string; db: string; runBranch: string; locale: 'es' | 'en'; iso: () => string; agentLease: () => string; rulings: Map<string, Ruling>; actions: StepAction[]; after: (() => void)[];
+  io: Io; deps: StepDeps; planArg: string; db: string; runBranch: string; locale: 'es' | 'en'; iso: () => string; agentLease: () => string;
+  rulings: Map<string, Ruling>; actions: StepAction[]; after: (() => void)[];
   /** D-08: the project of the plan execution. */
   project: string;
   /** Carry 3: the execution's id, recorded in validators-head-<n>.json so another run's is never read as its own. */
@@ -198,7 +199,10 @@ function renewLease(io: Io, e: ExecutionState, task: string, t: ExecTask, now: D
   const mine = prev && prev.runId === e.runId ? prev : null;
   const want = now.getTime() + LEASE_MINUTES * 60000;
   const leaseUntil = mine && Date.parse(mine.leaseUntil) > want ? mine.leaseUntil : new Date(want).toISOString();
-  const base: PublicTask = mine ?? { task, runId: e.runId, stage: t.stage, status: t.status, agent: t.agent, round: t.round, since: t.stageSince, updatedAt: now.toISOString(), leaseUntil, by: e.coordinator, mode: 'subagents' };
+  const base: PublicTask = mine ?? {
+    task, runId: e.runId, stage: t.stage, status: t.status, agent: t.agent, round: t.round, since: t.stageSince, updatedAt: now.toISOString(),
+    leaseUntil, by: e.coordinator, mode: 'subagents',
+  };
   writePublicTask(io.cwd, { ...base, leaseUntil, updatedAt: now.toISOString() });
 }
 
@@ -373,7 +377,9 @@ function pendingVerify(c: Ctx, taskN: string, roundDir: string): Json | null {
   const m = readJson(path.join(roundDir, 'verify-pending.json'));
   if (!isObject(m) || typeof m.at !== 'string') return null;
   const at = m.at;
-  const skipped = new Set(ledgerOf(c, taskN).filter(e => e.kind === 'verify-skip' && isTask(e, taskN) && typeof e.ts === 'string' && e.ts >= at && typeof e.surface === 'string').map(e => String(e.surface)));
+  const skipped = new Set(ledgerOf(c, taskN)
+    .filter(e => e.kind === 'verify-skip' && isTask(e, taskN) && typeof e.ts === 'string' && e.ts >= at && typeof e.surface === 'string')
+    .map(e => String(e.surface)));
   const surfaces = (Array.isArray(m.surfaces) ? m.surfaces : []).filter((s): s is Json => isObject(s) && typeof s.name === 'string' && !skipped.has(s.name));
   if (!surfaces.length) return null;
   const { at: _at, task: _task, ...rest } = m;
@@ -731,7 +737,11 @@ function stepOnce(c: Ctx, e0: ExecutionState, returned: Set<string>, versions: V
     else if (t.stage === 'implement' || t.stage === 'validate') { ruled.add(task); implementerBack(c, task, t, returned.has(task)); }
     else if (t.stage === 'review') { ruled.add(task); reviewersBack(c, task, t, returned.has(task)); }
   }
-  for (const [task, r] of c.rulings) if (!ruled.has(task)) c.actions.push(stepError(task, `--ruling ${task}:${r.kind}: ${task} is not a task of this execution back from its implementer or its reviewers`));
+  for (const [task, r] of c.rulings) {
+    if (!ruled.has(task)) {
+      c.actions.push(stepError(task, `--ruling ${task}:${r.kind}: ${task} is not a task of this execution back from its implementer or its reviewers`));
+    }
+  }
   for (const [task, t] of Object.entries(e0.tasks)) if (t.status === 'integrated') integratedAgain(c, task, t);
   // 3. The tick. Its warnings (listing documents it skipped, I-14) go on to the step's stderr, never into its JSON.
   let warnings = '';

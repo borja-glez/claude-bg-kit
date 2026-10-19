@@ -33,8 +33,9 @@ describe('one module per forge command (I-12)', () => {
     expect(statSync(path.join(cli, 'run.ts')).size).toBeLessThan(15 * 1024);
   });
   it('no line of the split modules is over 200 characters, but a usage string', () => {
-    const files = [...['run.ts', 'context.ts', 'exec.ts', 'shared.ts'].map(f => path.join(cli, f)), ...walk(path.join(cli, 'commands')),
-      path.join(cli, 'swarm.ts'), ...walk(path.join(cli, 'swarm'))];
+    const top = readdirSync(cli).filter(f => f.endsWith('.ts')).map(f => path.join(cli, f));
+    expect(top.length).toBeGreaterThan(8);
+    const files = [...top, ...walk(path.join(cli, 'commands')), ...walk(path.join(cli, 'swarm'))];
     expect(longLines(files)).toEqual([]);
   });
   it('every subcommand of the swarm usage has its module in src/forge/cli/swarm/ and is a key of SUBCOMMANDS', () => {

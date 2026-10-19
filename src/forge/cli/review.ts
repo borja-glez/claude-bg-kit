@@ -5,13 +5,22 @@ import { isSafeId, type ExecutionState } from '../../lib/execution-state.js';
 import { UsageError } from './errors.js';
 import { appendEvent, appendPhase, ledgerRoot, readEvents, type LedgerEvent } from '../ledger.js';
 import { loadConfig, agentFor, ConfigError, type Profile, type ForgeConfig } from '../config.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, failingLabel, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
+import {
+  detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, failingLabel,
+  type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult,
+} from '../validators.js';
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
-import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding } from '../verdict.js';
+import {
+  parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative,
+  type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding,
+} from '../verdict.js';
 import { roundDecision } from '../round.js';
 import { eventsOf, isTask, ofTask, readWorkDir, resolveProject, taskLine } from '../task-ref.js';
 import { keepEvidence } from '../evidence-copy.js';
-import { parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, carriedOutOfModel, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex } from '../findings-index.js';
+import {
+  parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, carriedOutOfModel, openIds, closedFor, previousFindings,
+  asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex,
+} from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
 import { takeBrief } from '../shadow.js';
 import { renderThreatModel } from '../threat-model.js';
@@ -123,7 +132,8 @@ function setAsideEarlier(dir: string, n: string, id: string, events: readonly Le
   for (const k of rounds) { move(`reviews-${n}-${k}`); move(`evidence/${n}-${k}`); for (const f of roundFiles(k)) move(f); }
   for (const f of briefFiles) move(f);
   if (failed.length) {
-    throw new UsageError(`prep: ${failed.map(f => shown(cwd, f)).join(', ')} could not be moved aside to ${shown(cwd, aside)} (an earlier run's review of this brief): close what holds it and run prep again`);
+    throw new UsageError(`prep: ${failed.map(f => shown(cwd, f)).join(', ')} could not be moved aside to ${shown(cwd, aside)} `
+      + "(an earlier run's review of this brief): close what holds it and run prep again");
   }
   return moved.length ? { aside, moved } : null;
 }
@@ -149,7 +159,8 @@ function validateList(deps: ReviewDeps, config: ForgeConfig, list: Validator[], 
   const results = runWithCache(list,
     // C-03: with --out, the validators wait for a slot (swarm.validateJobs); a list the cache answered whole does not.
     misses => (misses.length ? (deps.slot ?? noSlot) : noSlot)(() => restoringGenerated(deps, config.generated, () => runValidators(misses, deps.exec, config.validatorTimeoutSec, opts), restored)),
-    { main: mainCheckout(deps.cwd), git: use ? cacheGit(deps.git) : deps.git, dir: use ? checkoutPrefix(deps.git) : null, repo: deps.repo, generated: config.generated, read: use, write: use, now: deps.now });
+    { main: mainCheckout(deps.cwd), git: use ? cacheGit(deps.git) : deps.git, dir: use ? checkoutPrefix(deps.git) : null, repo: deps.repo,
+      generated: config.generated, read: use, write: use, now: deps.now });
   return { results, durationMs: Date.now() - t0 };
 }
 
@@ -328,7 +339,8 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
       rmSync(path.join(roundDir, 'review-plan.json'), { force: true });
       const fixOut: Record<string, unknown> = {
         round, reviews: reviewsCount,
-        validators: { ok, failing: blockers.map(r => r.validator), preexisting: results.filter(r => r.ok !== true && r.preexisting === true).map(r => r.validator), file: rel(deps.cwd, validatorsFile) },
+        validators: { ok, failing: blockers.map(r => r.validator),
+          preexisting: results.filter(r => r.ok !== true && r.preexisting === true).map(r => r.validator), file: rel(deps.cwd, validatorsFile) },
         spawn: [], validatorsRound: { k: k + 1, max: MAX_VALIDATOR_ROUNDS, findings: rel(deps.cwd, roundFile) },
         cached: cachedNames(results), durationMs: validation.durationMs, ...(restored.length ? { restored } : {}),
       };
@@ -411,7 +423,10 @@ function sayValidatorsRound(reviews: { n: number; max: number }, k: number, fail
 }
 
 /** A spawn entry as review-prep prints it and review-plan.json keeps it. */
-const spawnOut = (s: SpawnEntry, line: string) => ({ agent: s.agent, model: s.model, effort: s.effort, mode: s.mode, ...(s.twin ? { twin: true } : {}), ...(s.express ? { express: true } : {}), role: s.role, inputs: s.inputs, taskLine: line });
+const spawnOut = (s: SpawnEntry, line: string) => ({
+  agent: s.agent, model: s.model, effort: s.effort, mode: s.mode, ...(s.twin ? { twin: true } : {}), ...(s.express ? { express: true } : {}),
+  role: s.role, inputs: s.inputs, taskLine: line,
+});
 
 /** A carried reviewer's previous file, copied into this review with "carried": true: as written when it is plain JSON,
  *  else as parsed; a reviewer delegated to an express review has no file there, so it gets the result the index gave it
@@ -485,7 +500,8 @@ function expressPrep(c: ExpressCtx): Result | null {
 function sayExpress(reviews: { n: number; max: number }, plan: RoundPlan, locale: 'es' | 'en'): string {
   const carried = plan.carried.map(c => c.name).join(', ');
   return locale === 'es'
-    ? `Revisión ${reviews.n} de ${reviews.max}, exprés: correctness (sonnet, medium) comprueba los hallazgos abiertos mientras los validadores corren en segundo plano${carried ? `; se arrastran ${carried}` : ''}.`
+    ? `Revisión ${reviews.n} de ${reviews.max}, exprés: correctness (sonnet, medium) comprueba los hallazgos abiertos `
+      + `mientras los validadores corren en segundo plano${carried ? `; se arrastran ${carried}` : ''}.`
     : `Review ${reviews.n} of ${reviews.max}, express: correctness (sonnet, medium) checks the open findings while the validators run in the background${carried ? `; carried: ${carried}` : ''}.`;
 }
 
@@ -582,7 +598,9 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     }
   }
   const roundDir = path.join(dir, `reviews-${n}-${round}`);
-  const plan = readJson(path.join(roundDir, 'review-plan.json')) as { spawn?: unknown; carried?: unknown; flags?: unknown; base?: unknown; express?: unknown; delegated?: unknown; validatorsPending?: unknown } | undefined;
+  const plan = readJson(path.join(roundDir, 'review-plan.json')) as {
+    spawn?: unknown; carried?: unknown; flags?: unknown; base?: unknown; express?: unknown; delegated?: unknown; validatorsPending?: unknown;
+  } | undefined;
   if (!round || !plan || typeof plan !== 'object') throw new UsageError(`review-close: no review-plan.json for ${task} in ${dirArg}: run FORGE review-prep first`);
 
   const names = (list: unknown, keep: (x: Record<string, unknown>) => boolean) => (Array.isArray(list) ? list as Record<string, unknown>[] : [])
@@ -661,7 +679,8 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     for (const [name, list] of [['out-of-model', outOfModelArg], ['defer', deferArg]] as const) {
       const unknown = list.filter(x => !known.includes(x));
       if (unknown.length) {
-        throw new UsageError(`review-close: --${name} ${unknown.join(',')}: no finding of this review, nor one the previous review left open, has that id; nothing was written (ids: ${known.join(', ') || 'none'})`);
+        throw new UsageError(`review-close: --${name} ${unknown.join(',')}: no finding of this review, nor one the previous review left open, `
+          + `has that id; nothing was written (ids: ${known.join(', ') || 'none'})`);
       }
     }
     const kept = overridesOf(path.join(roundDir, 'overrides.json'));
@@ -802,7 +821,8 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer, reviews: reviewsCount, ...(express ? { express: true } : {}),
     findings, deferred, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null, handover, revert,
     invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
-    incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name), round, reasons: result.reasons, ...(twins.shadow.length ? { shadow: twins.shadow } : {}), ...(twins.shadowSkipped.length ? { shadowSkipped: twins.shadowSkipped } : {}),
+    incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name), round, reasons: result.reasons,
+    ...(twins.shadow.length ? { shadow: twins.shadow } : {}), ...(twins.shadowSkipped.length ? { shadowSkipped: twins.shadowSkipped } : {}),
     ...(twins.shadowPending.length ? { shadowPending: twins.shadowPending } : {}),
   });
 }
@@ -814,7 +834,9 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
  * and the baseline is still the worktree's, so a caller that wants it on BASE passes --no-baseline and takes it where
  * BASE's tree is), records what already fails on it into `<dir>/baseline-<n>.json` (as
  * `validate --all --path <p> --base-run --task <id>-<n>` does; `<dir>` defaults to the task's work folder, `.forge/work/<project>/<id>` for a plan task), logs the phase
- * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing, cached, durationMs, validate, threatModel}` (the baseline comes from the tree cache when BASE's tree was validated: C6, I-06; never with --no-cache).
+ * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints
+ * `{base, baseline, failing, cached, durationMs, validate, threatModel}` (the baseline comes from the tree cache when BASE's tree was
+ * validated: C6, I-06; never with --no-cache).
  * validate is the command the implementer runs (J-11). --no-baseline records BASE and the phase without validating (baseline: null; J-13).
  * It also writes <dir>/threat-model.md from the config's threatModel and prints threatModel, its path or null (K4-02).
  * Carry 3: in an execution that holds the task, the review rounds an earlier run left for this brief in `<dir>` go aside
@@ -897,7 +919,10 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const ts = deps.now().toISOString();
   appendEvent(deps.cwd, validateEvent(ts, task, results, durationMs, scope.mode, { baseline: true }));
   appendEvent(deps.cwd, { ts, kind: 'phase', task: id, phase, brief: Number(n), base, ...started });
-  return json({ base, ...started, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results), durationMs, validate, threatModel, ...(restored.length ? { restored } : {}), ...earlier });
+  return json({
+    base, ...started, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results),
+    durationMs, validate, threatModel, ...(restored.length ? { restored } : {}), ...earlier,
+  });
 }
 
 /** `review-prep`, `review-close`, `prep` and `shadow` (cli/shadow.ts). */
