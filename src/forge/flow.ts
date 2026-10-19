@@ -2,7 +2,11 @@
 // coordinator's main checkout): what a pass plans and when a phase asks for one live here too.
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { loadConfig, verifyFlow, type FlowMode } from './config.js';
+import { readExecution } from './execution.js';
+import { parsePlan } from '../lib/plan.js';
 import type { ExecutionState } from '../lib/execution-state.js';
+import type { PlanTask } from '../lib/types.js';
 
 export const flowDirName = (runId: string, n: number): string => `flow-${runId}-${n}`;
 
@@ -80,4 +84,28 @@ export function readFlow(dir: string): FlowDoc | null {
       && typeof o.head === 'string' && typeof o.at === 'string';
     return ok ? o as FlowDoc : null;
   } catch { return null; }
+}
+
+/** The phase of `task` when every task of that phase is finished; null otherwise. */
+export function closedPhase(tasks: Pick<PlanTask, 'id' | 'phase'>[], task: string, finished: (id: string) => boolean): string | null {
+  const phase = tasks.find(t => t.id === task)?.phase;
+  return phase && tasks.filter(t => t.phase === phase).every(t => finished(t.id)) ? phase : null;
+}
+
+/**
+ * K2-13, verify.flow `phase`: the phase whose last task this integration finished (every task of it integrated in the run,
+ * or done on the roadmap: `<db>/state/<T>.json`), so the coordinator runs a flow pass; null otherwise, or when the config
+ * or the plan does not read.
+ */
+export function phaseToVerify(root: string, planFile: string, db: string, task: string): string | null {
+  let mode: FlowMode;
+  try { mode = verifyFlow(loadConfig(root)); } catch { return null; }
+  if (mode !== 'phase') return null;
+  let tasks: PlanTask[];
+  try { tasks = parsePlan(readFileSync(path.resolve(root, planFile), 'utf8')).tasks; } catch { return null; }
+  const e = readExecution(root);
+  const done = (id: string): boolean => {
+    try { return (JSON.parse(readFileSync(path.resolve(root, db, 'state', `${id}.json`), 'utf8')) as { status?: unknown } | null)?.status === 'done'; } catch { return false; }
+  };
+  return closedPhase(tasks, task, id => e?.tasks[id]?.status === 'integrated' || done(id));
 }

@@ -106,6 +106,9 @@ function runSummary(main: string, e: ExecutionState, now: Date): RunSummaryDoc {
     }
   }
   const final = finalVerdictOf(events, e);
+  // K2-13: the run's last flow pass, as verify-close --flow logged it.
+  const pass = events.filter(x => x.kind === 'verify-flow' && x.runId === e.runId).at(-1);
+  const flowResult = pass && (pass.result === 'pass' || pass.result === 'fail' || pass.result === 'blocked') ? pass.result : null;
   const n = (v: unknown) => (int(v, 0, 999) ? v : 0);
   return {
     v: 1, runId: e.runId, kind: e.kind, mode: e.mode, parallel: e.parallel, branch: cleanText(e.branch, 200), target: cleanText(e.base, 200), coordinator: e.coordinator,
@@ -115,6 +118,7 @@ function runSummary(main: string, e: ExecutionState, now: Date): RunSummaryDoc {
       ? { action: final.action, critical: n(final.critical), important: n(final.important), minor: n(final.minor) } : null,
     decisions: listDecisions(main, { run: e.runId, auto: true }).length,
     deferred: tasks.reduce((s, t) => s + (t.deferred ?? 0), 0),
+    ...(pass && flowResult ? { flow: { result: flowResult, at: pass.ts } } : {}),
   };
 }
 

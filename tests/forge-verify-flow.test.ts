@@ -7,7 +7,7 @@ import { seedExecution } from './helpers/execution.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readEvents } from '../src/forge/ledger.js';
 import { readExecution } from '../src/forge/execution.js';
-import { flowSince } from '../src/forge/flow.js';
+import { closedPhase, flowSince, phaseToVerify } from '../src/forge/flow.js';
 import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
 
 const tmp = useTempDirs();
@@ -160,5 +160,23 @@ describe('the flow pass (K2-13)', () => {
   it('an ephemeral run, already closed by the tick that finished it, still gets its pass (K2-13.4)', () => {
     seedExecution(root, execution({ kind: 'ephemeral', closedAt: AT, closedBy: 'merge' }));
     expect(vp().flow).not.toBeNull();
+  });
+});
+
+describe('the phase a flow pass verifies (K2-13, verify.flow phase)', () => {
+  it('closedPhase: the phase once every task of it is finished, else null', () => {
+    const tasks = [{ id: 'T1', phase: 'p1' }, { id: 'T2', phase: 'p1' }, { id: 'T3', phase: 'p2' }];
+    expect(closedPhase(tasks, 'T1', id => id === 'T1')).toBeNull();
+    expect(closedPhase(tasks, 'T2', id => id !== 'T3')).toBe('p1');
+    expect(closedPhase(tasks, 'T9', () => true)).toBeNull();
+  });
+  it('phaseToVerify reads verify.flow, the plan, the run and the roadmap cache', () => {
+    const plan = 'docs/waypoint/shop/plan.yaml', db = '.waypoint/shop/dbcache';
+    expect(phaseToVerify(root, plan, db, 'T2')).toBeNull();
+    put('.forge/config.yaml', 'verify:\n  flow: phase\n');
+    expect(phaseToVerify(root, plan, db, 'T2')).toBe('p1');
+    expect(phaseToVerify(root, plan, db, 'T3')).toBeNull();
+    put(`${db}/state/T3.json`, JSON.stringify({ status: 'done' }));
+    expect(phaseToVerify(root, plan, db, 'T3')).toBe('p2');
   });
 });

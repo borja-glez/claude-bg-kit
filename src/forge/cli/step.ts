@@ -4,6 +4,7 @@ import { UsageError } from './errors.js';
 import type { Io } from './run.js';
 import { checkPlanProject, commitInfo, integratedPublish } from './swarm.js';
 import { readExecution, executionTaskFile, runWorktree, taskBase, writePublicTask } from '../execution.js';
+import { phaseToVerify } from '../flow.js';
 import { takeStepLock } from '../jobs.js';
 import { appendEvent, readEvents, withEventContext, type LedgerEvent } from '../ledger.js';
 import { eventsOf, isTask, readWorkDir, taskLine, workRel } from '../task-ref.js';
@@ -571,12 +572,14 @@ function closeVerify(c: Ctx, task: string, t: ExecTask, n: number, round: number
   return { result, learned, cleanup, evidence, commit, proposals, defects, say };
 }
 
-/** The integrate the tick emitted (one at most; none while a merge is in flight): its result is the action's type. */
+/** The integrate the tick emitted (one at most; none while a merge is in flight): its result is the action's type. With
+ *  verify.flow phase, an integration that finished the last task of its phase carries `flow: {phase}` (K2-13). */
 function integrateTask(c: Ctx, task: string): void {
   const r = call(c, task, ['swarm', 'integrate', task, '--locale', c.locale]);
   if (!r) return;
   const { result, ...rest } = r;
-  c.actions.push({ ...rest, type: String(result), task });
+  const phase = result === 'integrated' ? phaseToVerify(c.io.cwd, c.planArg, c.db, task) : null;
+  c.actions.push({ ...rest, type: String(result), task, ...(phase ? { flow: { phase } } : {}) });
 }
 
 /**

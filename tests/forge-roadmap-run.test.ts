@@ -143,6 +143,17 @@ describe('FORGE roadmap-run (G-07, G-04)', () => {
     expect(got).toEqual(['tasks[4] · dropped', 'tasks[5] · dropped']);
     for (const bad of [null, { ...doc, v: 2 }, { ...doc, runId: 'a b' }, { ...doc, kind: 'x' }, { ...doc, endedAt: 'later' }]) expect(normalizeRunSummary(bad)).toBeNull();
   });
+  it("carries the run's last flow pass, and the page's normalizer keeps it (K2-13)", () => {
+    seedExecution(root, execution());
+    appendEvent(root, { ts: ROADMAP_AT(150), kind: 'verify-flow', runId: RUN, result: 'fail', passed: 1, total: 2, dir: `.forge/work/flow-${RUN}-1` });
+    const doc = JSON.parse(readFileSync(out(run(['roadmap-run', '--run', RUN], io)).write.file_path, 'utf8'));
+    expect(doc.flow).toEqual({ result: 'fail', at: ROADMAP_AT(150) });
+    const got: string[] = [];
+    expect(normalizeRunSummary(doc, f => { got.push(f); })).toEqual(doc);
+    expect(got).toEqual([]);
+    expect(normalizeRunSummary({ ...doc, flow: { result: 'maybe' } }, f => { got.push(f); })).not.toHaveProperty('flow');
+    expect(got).toEqual(['flow']);
+  });
 });
 
 describe('roadmap-run: the final wave\'s carry 3', () => {

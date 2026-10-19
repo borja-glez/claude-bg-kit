@@ -20,6 +20,8 @@ export interface RunSummaryDoc {
   loose: boolean;                                               // its tasks are not the plan's
   finalReview: { action: 'accept' | 'fix' | 'redo'; critical: number; important: number; minor: number } | null;
   decisions: number; deferred: number;
+  /** K2-13: the run's last flow pass (verify-flow), when it had one. */
+  flow?: { result: 'pass' | 'fail' | 'blocked'; at: string };
 }
 
 const KINDS = ['plan', 'ephemeral', 'single'] as const;
@@ -73,12 +75,19 @@ export function normalizeRunSummary(x: unknown, report?: DocReport): RunSummaryD
       finalReview = { action: f.action, critical: f.critical, important: f.important, minor: f.minor };
     } else report?.('finalReview', 'dropped', kindOf(f));
   }
+  let flow: RunSummaryDoc['flow'];
+  if (x.flow !== undefined && x.flow !== null) {
+    const fl = x.flow;
+    if (isObj(fl) && (fl.result === 'pass' || fl.result === 'fail' || fl.result === 'blocked') && iso(fl.at)) flow = { result: fl.result, at: fl.at };
+    else report?.('flow', 'dropped', kindOf(fl));
+  }
   return {
     v: 1, runId: x.runId, kind: x.kind as RunSummaryDoc['kind'], mode: x.mode as RunSummaryDoc['mode'], parallel: x.parallel,
     branch, target, coordinator,
     startedAt: x.startedAt, endedAt: x.endedAt, stopReason: (x.stopReason ?? null) as RunSummaryDoc['stopReason'],
     closedBy: (x.closedBy ?? null) as RunSummaryDoc['closedBy'], merged: x.merged, tasks, loose: x.loose, finalReview,
     decisions: x.decisions, deferred: x.deferred,
+    ...(flow ? { flow } : {}),
   };
 }
 
