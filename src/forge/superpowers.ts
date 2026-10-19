@@ -3,13 +3,14 @@
 // forge has not taken yet. Reads only; never touches superpowers' cache.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseDesign } from '../lib/design.js';
 import { specH1 } from '../lib/design-import.js';
 import { markDone, parseSpPlan, sddComplete } from '../lib/sp-plan.js';
 import { forgeDir } from './ledger.js';
+import { createIfAbsent } from './execution.js';
 
 export interface Superpowers { installed: boolean; version: string | null; installPath: string | null }
 export interface SpSpec { path: string; title: string; modified: string }
@@ -186,8 +187,8 @@ function planRepoRel(planAbs: string, root: string): string | null {
  * whose first line is `# SDD ledger — plan: <path>`, which sddComplete and spLedgerDone read. <root> is the main
  * checkout; <path> is the plan's path in its own git worktree (the same from every worktree), or from root when the
  * plan is in no repository. When that file is another plan's, it goes to <slug>-<8 hex of the sha1 of the path>.md.
- * Several processes may record at once: a new file is created exclusively and a record is appended, never rewritten,
- * so none is lost (a torn last line is ignored by the reader and repaired by the next append). True when the task is
+ * Several processes may record at once: a new file is created whole (createIfAbsent) and a record is appended, never
+ * rewritten, so none is lost (a torn last line is ignored by the reader and repaired by the next append). True when the task is
  * recorded (now or before); false when the plan is outside root. A write that fails throws.
  */
 export function recordSpDone(root: string, planAbs: string, n: number): boolean {
@@ -207,13 +208,14 @@ export function recordSpDone(root: string, planAbs: string, n: number): boolean 
   forgeDir(root);
   mkdirSync(dir, { recursive: true });
   if (text === null) {
-    try { writeFileSync(file, `${header}\n${line}`, { flag: 'wx' }); return true; } catch (e) {
-      // Another process created it first: read it once more and append to it. A file that still cannot be read (a
-      // directory, a permission error) or is another plan's is not ours to write: the error stands.
-      text = (e as NodeJS.ErrnoException).code === 'EEXIST' ? read(file) : null;
-      if (text === null || !isRecordOf(text, rel)) throw e;
-      if (sddComplete(text, rel).includes(n)) return true;
-    }
+    // The first record is created whole (a temporary file linked into place, which fails when the name exists), so a
+    // recorder or a reader at the same moment never sees it empty.
+    if (createIfAbsent(file, `${header}\n${line}`)) return true;
+    // Another process created it first: read it once more and append to it. A file that still cannot be read (a
+    // directory, a permission error) or is another plan's is not ours to write.
+    text = read(file);
+    if (text === null || !isRecordOf(text, rel)) throw new Error(`${path.basename(file)} is in the way: it is not a record of this plan that can be read`);
+    if (sddComplete(text, rel).includes(n)) return true;
   }
   appendFileSync(file, `${text.endsWith('\n') ? '' : '\n'}${line}`);
   return true;
