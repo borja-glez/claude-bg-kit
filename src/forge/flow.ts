@@ -31,6 +31,11 @@ export function flowSince(
   e: Pick<ExecutionState, 'flow' | 'tasks'> & { startedAt?: string }, git: (args: string[]) => string | null,
 ): string | null {
   if (e.flow?.sha) return e.flow.sha;
+  return runStart(e, git);
+}
+
+/** The run's start, ignoring its flow passes: the first parent of its first integration on HEAD (the rule flowSince ends with). */
+export function runStart(e: Pick<ExecutionState, 'tasks'> & { startedAt?: string }, git: (args: string[]) => string | null): string | null {
   const recorded = Object.values(e.tasks).map(t => t.sha).filter((s): s is string => typeof s === 'string' && s.length > 0);
   if (recorded.length) {
     for (const line of (git(['log', '--merges', '--reverse', '--format=%H %P', 'HEAD']) ?? '').split('\n')) {

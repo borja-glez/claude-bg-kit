@@ -97,6 +97,22 @@ describe('the flow pass (K2-13)', () => {
     expect(readExecution(root)!.flow).toMatchObject({ sha: flow.head, result: 'fail' });
     expect(vp()).toMatchObject({ eligible: false, flow: null, reason: 'nothing integrated since the last flow pass' });
   });
+  it("--whole-run diffs from the run's start whatever the last pass covered, and excludes --since (I2)", () => {
+    const first = vp().flow;
+    writeFileSync(path.join(root, first.dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'fail',
+      checks: [{ id: 1, surface: 'web', name: 'checkout', main: true, ok: false, expected: 'paid', observed: '500' }] }));
+    expect(run(['verify-close', '--flow', first.dir, '--locale', 'en'], io).code).toBe(0);
+    integrate('T3', 'src/ui/More.tsx');
+    const next = vp();
+    expect(next.flow).toMatchObject({ n: 2, since: first.head });
+    const whole = vp('--whole-run');
+    expect(whole.flow).toMatchObject({ n: 3, since: base });
+    expect(readFileSync(path.join(root, whole.flow.diff), 'utf8')).toContain('src/ui/Cart.tsx');
+    expect(readFileSync(path.join(root, whole.flow.brief), 'utf8')).toContain('- T1: Cart badge');
+    const both = run(['verify-plan', '--run', '--whole-run', '--since', base], io);
+    expect(both.code).toBe(2);
+    expect(both.stderr).toContain('--since and --whole-run');
+  });
   it("flowSince: the last pass, else the commit before the first integration of one of the run's tasks, else none", () => {
     expect(flowSince({ tasks: execution().tasks }, gitFn)).toBe(base);
     expect(flowSince({ tasks: execution().tasks, flow: { sha: 'abc1234', at: AT, result: 'pass' } }, gitFn)).toBe('abc1234');

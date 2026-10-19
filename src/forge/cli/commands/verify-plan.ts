@@ -14,7 +14,7 @@ import { readSurfaces, detectDrafts, surfaceFile } from '../../surfaces.js';
 import { defaultGit, repoReader } from '../exec.js';
 import { mcpOf, surfaceQuestion } from '../shared.js';
 import { loadConfig, verifyFlow } from '../../config.js';
-import { flowBrief, flowDirName, flowDirs, flowSince, integratedSince } from '../../flow.js';
+import { flowBrief, flowDirName, flowDirs, flowSince, integratedSince, runStart } from '../../flow.js';
 import { parsePlan } from '../../../lib/plan.js';
 import type { PlanTask } from '../../../lib/types.js';
 
@@ -49,7 +49,7 @@ function planTasksOf(main: string, project: string): PlanTask[] {
 }
 
 /**
- * K2-13: `FORGE verify-plan --run [--since <sha>] [--cwd <the run's checkout>] [--locale es|en]`: the surfaces of a run's
+ * K2-13: `FORGE verify-plan --run [--since <sha> | --whole-run] [--cwd <the run's checkout>] [--locale es|en]`: the surfaces of a run's
  * integrated result, from the diff since the last flow pass (else since the commit before its first integration) to HEAD
  * of --cwd, every one at depth flow. None with verify.flow off, before any integration, or with nothing new since the
  * last pass. With an eligible surface it opens the pass's folder .forge/work/flow-<runId>-<n>/ (flow.json, brief.md with
@@ -69,7 +69,9 @@ function runPlan(ctx: Ctx): Result {
   const sinceArg = flag('since');
   if (has('since') && (!sinceArg || !/^[0-9a-f]{7,64}$/i.test(sinceArg))) throw new UsageError('verify-plan --run: --since takes a commit id');
   const git = io.git ?? defaultGit(repoDir);
-  const since = sinceArg ?? flowSince(e, git);
+  // --whole-run: the whole run again (the final review's pass), whatever earlier passes covered or skipped.
+  if (has('whole-run') && has('since')) throw new UsageError('verify-plan --run: --since and --whole-run exclude each other');
+  const since = sinceArg ?? (has('whole-run') ? runStart(e, git) : flowSince(e, git));
   if (!since) return none('nothing integrated yet');
   const head = (git(['rev-parse', 'HEAD']) ?? '').trim();
   const names = git(['diff', '--name-only', `${since}..HEAD`]);
