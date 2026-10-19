@@ -18,6 +18,31 @@ import { flowBrief, flowDirName, flowDirs, flowSince, integratedSince } from '..
 import { parsePlan } from '../../../lib/plan.js';
 import type { PlanTask } from '../../../lib/types.js';
 
+const needsPerson = (s: PlanSurface) => s.permission === 'ask' || s.permission === 'changed';
+
+/** K2-08: a surface the person skipped for this run logs its verify-skip, under `task` (a task id, or a flow pass id). */
+function logSkipped(cwd: string, ts: () => string, task: string, surfaces: PlanSurface[]): void {
+  for (const s of surfaces.filter(x => x.permission === 'skipped')) {
+    appendEvent(cwd, { ts: ts(), kind: 'verify-skip', task, surface: s.name, reason: 'not this time, for this run' });
+  }
+}
+
+/**
+ * K2-08, with nobody to ask: each surface that needs the person logs its verify-skip, and the names that get their
+ * question note now are returned. One note per surface and run: a member never writes execution.json, so the first
+ * caller to create <main>/.forge/execution/asked/<runId>/<surface>.json leaves the note; the folder goes with the run.
+ */
+function unattendedNotes(a: { cwd: string; ts: () => string; main: string; task: string; runId: string | null; surfaces: PlanSurface[] }): Set<string> {
+  const needs = a.surfaces.filter(needsPerson);
+  for (const s of needs) appendEvent(a.cwd, { ts: a.ts(), kind: 'verify-skip', task: a.task, surface: s.name, reason: `unattended: permission ${s.permission}` });
+  if (!a.runId || !needs.length) return new Set(needs.map(s => s.name));
+  const fresh = new Set<string>();
+  for (const s of needs) {
+    if (createIfAbsent(path.join(a.main, '.forge', 'execution', 'asked', a.runId, `${s.name}.json`), JSON.stringify({ task: a.task, at: a.ts() }) + '\n')) fresh.add(s.name);
+  }
+  return fresh;
+}
+
 /** The tasks of docs/waypoint/<project>/plan.yaml of the main checkout; none when it does not read. */
 function planTasksOf(main: string, project: string): PlanTask[] {
   try { return parsePlan(readFileSync(path.join(main, 'docs', 'waypoint', project, 'plan.yaml'), 'utf8')).tasks; } catch { return []; }
@@ -59,12 +84,21 @@ function runPlan(ctx: Ctx): Result {
     path: 'large', asked: false, changed, surfaces, drafts: [], local, skip: e.verifySkip ?? [],
     tools: s => (s.tools.length ? toolGaps(s.tools, { onPath, inventory: inventory ??= mcpOf(io, repoDir) }) : { missing: [], unknown: [] }),
   });
+  // The id the next pass would get: one more than the highest pass number (a folder deleted by hand frees no number).
+  const last = flowDirs(io.cwd, e.runId).at(-1);
+  const n = last ? Number(/-(\d+)$/.exec(path.basename(last))![1]) + 1 : 1;
+  const id = flowDirName(e.runId, n);
+  // With nobody to ask, what needs the person is skipped (verify-skip, one note per surface and run); attended, the
+  // pass waits until nobody is: every `verify-plan --run` that opened a folder would leave an orphan pass per answer.
+  const unattended = has('unattended');
+  const waiting = plan.surfaces.filter(needsPerson).map(s => s.name);
+  const fresh = unattended ? unattendedNotes({ cwd: io.cwd, ts, main, task: id, runId: e.runId, surfaces: plan.surfaces }) : new Set<string>();
+  const opens = plan.eligible && plan.surfaces.some(s => s.permission === 'allowed') && (unattended || !waiting.length);
+  let reason: string | undefined;
+  if (plan.surfaces.length && !opens) reason = unattended || !waiting.length ? 'no surface is allowed for an unattended pass' : `ask the person first: ${waiting.join(', ')}`;
   let flow: Record<string, unknown> | null = null;
-  if (plan.eligible) {
-    // One more than the highest pass number (a folder deleted by hand frees no number), in a folder that must be new.
-    const last = flowDirs(io.cwd, e.runId).at(-1);
-    const n = last ? Number(/-(\d+)$/.exec(path.basename(last))![1]) + 1 : 1;
-    const id = flowDirName(e.runId, n);
+  if (opens) {
+    logSkipped(io.cwd, ts, id, plan.surfaces);
     const dir = path.join(io.cwd, '.forge', 'work', id);
     mkdirSync(path.join(io.cwd, '.forge', 'work'), { recursive: true });
     mkdirSync(dir);
@@ -83,7 +117,8 @@ function runPlan(ctx: Ctx): Result {
   // A pass checks the flows of every task it covers: every surface at depth flow.
   const listedSurfaces = plan.surfaces.map(ps => surfaceQuestion({ ...ps, depth: 'flow' }, surfaces.find(s => s.name === ps.name)!,
     local.surfaces[ps.name], git, repoDir, io.cwd, es));
-  return json({ ...plan, surfaces: listedSurfaces, flow });
+  const noted = listedSurfaces.map((s, i) => (unattended && needsPerson(plan.surfaces[i]) ? { ...s, note: fresh.has(plan.surfaces[i].name) } : s));
+  return json({ ...plan, ...(reason ? { reason } : {}), surfaces: noted, flow });
 }
 
 /**
@@ -127,22 +162,8 @@ export const command: Command = (args, ctx) => {
   // K2-08: a skipped surface logs only its verify-skip. With nobody to ask (--unattended), a surface that needs the
   // person is not verified (its verify-skip is logged here) and its question note is asked for once per run (note).
   const unattended = has('unattended');
-  const needs = plan.surfaces.filter(s => s.permission === 'ask' || s.permission === 'changed');
-  for (const s of plan.surfaces.filter(x => x.permission === 'skipped')) {
-    appendEvent(io.cwd, { ts: ts(), kind: 'verify-skip', task, surface: s.name, reason: 'not this time, for this run' });
-  }
-  const fresh = new Set(unattended ? needs.map(s => s.name) : []);
-  if (unattended) {
-    for (const s of needs) appendEvent(io.cwd, { ts: ts(), kind: 'verify-skip', task, surface: s.name, reason: `unattended: permission ${s.permission}` });
-    // K2-08: one question note per surface and run. A member never writes execution.json: the first caller to create
-    // <main>/.forge/execution/asked/<runId>/<surface>.json leaves the note; the folder goes with the run.
-    if (running && needs.length) {
-      fresh.clear();
-      for (const s of needs) {
-        if (createIfAbsent(path.join(main, '.forge', 'execution', 'asked', running.runId, `${s.name}.json`), JSON.stringify({ task, at: ts() }) + '\n')) fresh.add(s.name);
-      }
-    }
-  }
+  logSkipped(io.cwd, ts, task, plan.surfaces);
+  const fresh = unattended ? unattendedNotes({ cwd: io.cwd, ts, main, task, runId: running?.runId ?? null, surfaces: plan.surfaces }) : new Set<string>();
   if (roundDir && roundOf) {
     // verify-pending.json: the surfaces it can verify (allowed now) and what a verify agent needs to be spawned
     // again. A surface the coordinator decides not to verify is logged as a verify-skip; with none, no marker.
@@ -159,7 +180,7 @@ export const command: Command = (args, ctx) => {
       }, null, 2) + '\n');
     } else rmSync(pending, { force: true });
   }
-  const note = (ps: PlanSurface) => (unattended && (ps.permission === 'ask' || ps.permission === 'changed') ? { note: fresh.has(ps.name) } : {});
+  const note = (ps: PlanSurface) => (unattended && needsPerson(ps) ? { note: fresh.has(ps.name) } : {});
   return json({ ...plan, surfaces: plan.surfaces.map(ps => ({
     ...surfaceQuestion(ps, surfaces.find(s => s.name === ps.name)!, local.surfaces[ps.name], git, repoDir, io.cwd, es), ...note(ps),
   })) });

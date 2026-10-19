@@ -19,7 +19,7 @@ Rules:
 - Stay within the limits: at most `checks` checks and `shots` screenshots in total, and `minutes` of wall time.
 
 Steps:
-1. Read the surfaces and start what they need in the background, each one with `FORGE verify-spawn --dir <evidence dir> -- <the command and its arguments>`, adding `--cwd <code checkout>` before the `--`. Run the surface's own commands (builds, `git check-ignore`) in that checkout too.
+1. Read the surfaces and start what they need in the background, each one with `FORGE verify-spawn --dir <evidence dir> -- <the command and its arguments>`, adding `--cwd <code checkout>` before the `--`. Run the surface's own commands (builds, `git check-ignore`) in that checkout too, with `git -C`/`--cwd` or a subshell; never `cd` this session: the review and evidence dirs are relative to where you started.
    - It starts the command detached, keeps its output in `<evidence dir>/logs/<n>.log` and records the process with its identity in `<evidence dir>/logs/<n>.pid.json`. It prints `{started, pid, log, running}`. Never write those records or a `pids.json` yourself.
    - It passes its own environment on, so set the `env` variables you got on the call itself, for example in a POSIX shell (Bash) `PORT=<port> FORGE_VERIFY_PORT=<port> <FORGE> verify-spawn --cwd <code checkout> --dir <evidence dir> -- <command>`. When the surface starts the app another way (a flag such as `--port <port>`), use `port` there.
    - `started: false` (with `code` and `logTail`) means it ended at once with an error: what it was for is a check with `env: true`.

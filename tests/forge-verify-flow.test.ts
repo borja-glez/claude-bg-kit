@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { useTempDirs } from './helpers/tmp.js';
@@ -156,6 +156,50 @@ describe('the flow pass (K2-13)', () => {
     const out = vp();
     expect(out.flow.n).toBe(4);
     expect(readFileSync(path.join(work, `flow-${RUN}-3`, 'flow.json'), 'utf8')).toBe('{"keep":3}');
+  });
+  describe('a surface that needs the person', () => {
+    const cli = () => put('.forge/verify/cli.md', '---\naffects: ["bin/**"]\n---\n# CLI\n');
+    const folders = () => readdirSync(path.join(root, '.forge', 'work')).filter(n => n.startsWith('flow-'));
+    const surface = (out: { surfaces: { name: string }[] }, name: string) => out.surfaces.find(s => s.name === name) as Record<string, unknown>;
+    it('attended, the pass opens only once nobody is waiting for an answer, and no folder is left before', () => {
+      cli();
+      const out = vp();
+      expect(out.flow).toBeNull();
+      expect(out.reason).toBe('ask the person first: cli');
+      expect(surface(out, 'cli')).toMatchObject({ permission: 'ask' });
+      expect(existsSync(path.join(root, '.forge', 'work')) ? folders() : []).toEqual([]);
+      expect(run(['local', 'set', 'surfaces.cli', 'allowed'], io).code).toBe(0);
+      expect(vp().flow).toMatchObject({ id: `flow-${RUN}-1`, n: 1 });
+      expect(folders()).toEqual([`flow-${RUN}-1`]);
+    });
+    it('unattended, the pass opens with what is allowed, the rest logs its verify-skip with the pass id, and its note is asked once', () => {
+      cli();
+      const out = vp('--unattended');
+      expect(out.flow).toMatchObject({ id: `flow-${RUN}-1` });
+      expect(surface(out, 'cli')).toMatchObject({ permission: 'ask', note: true });
+      expect(surface(out, 'web')).not.toHaveProperty('note');
+      expect(readEvents(root).filter(e => e.kind === 'verify-skip').map(e => [e.task, e.surface])).toEqual([[`flow-${RUN}-1`, 'cli']]);
+      writeFileSync(path.join(root, out.flow.dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'pass', checks: [] }));
+      expect(run(['verify-close', '--flow', out.flow.dir], io).code).toBe(0);
+      integrate('T3', 'src/ui/More.tsx');
+      put('bin/more.js', 'more\n');
+      g('add', '-A');
+      g('commit', '-qm', 'T3: bin');
+      const again = vp('--unattended');
+      expect(again.flow).toMatchObject({ id: `flow-${RUN}-2` });
+      expect(surface(again, 'cli')).toMatchObject({ note: false });
+    });
+    it('unattended with only a surface that needs the person: no pass, and the note is asked once', () => {
+      cli();
+      const since = g('rev-parse', 'HEAD^1');
+      const out = vp('--unattended', '--since', since);
+      expect(out.flow).toBeNull();
+      expect(out.reason).toBe('no surface is allowed for an unattended pass');
+      expect(out.surfaces.map((s: { name: string }) => s.name)).toEqual(['cli']);
+      expect(surface(out, 'cli')).toMatchObject({ note: true });
+      expect(surface(vp('--unattended', '--since', since), 'cli')).toMatchObject({ note: false });
+      expect(existsSync(path.join(root, '.forge', 'work')) ? folders() : []).toEqual([]);
+    });
   });
   it('an ephemeral run, already closed by the tick that finished it, still gets its pass (K2-13.4)', () => {
     seedExecution(root, execution({ kind: 'ephemeral', closedAt: AT, closedBy: 'merge' }));

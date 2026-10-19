@@ -16,7 +16,7 @@ A coordinator in mode `sessions` (forge:run, `references/execution.md` step 4 `s
 
   | Situation | Safe path |
   |---|---|
-  | A verify surface not allowed, or changed | Not verified in that step: `verify-skip` logged, plus the question note. |
+  | A verify surface not allowed, or changed | Not verified in that step: `verify-skip` logged; the question note only on `note: true`. |
   | A conflict that repeats | Escalated; the task stays blocked or in conflict. |
   | A proposal outside the policy | Left pending for the user. |
 
