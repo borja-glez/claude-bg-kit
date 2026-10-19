@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { inForgeWorktree, looksLikeCoding, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
+import { hintOn, inForgeWorktree, looksLikeCoding, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
+import { parseConfig } from '../src/forge/config.js';
 import { listRoutes, readRoute, writeRoute } from '../src/forge/route.js';
 import { writeMember } from '../src/forge/members.js';
 import { saveRun, startRun } from '../src/forge/run.js';
@@ -317,5 +318,37 @@ describe('route-prompt reads every forge task of the session (K1-12 with C5)', (
     expect(context(prompt('S3'))?.additionalContext).toBe(ROUTE_HINT);
     put(status('T001', 'S1', at(30), at(10)));
     expect(context(prompt('S1'))?.additionalContext).toBe(ROUTE_HINT);
+  });
+});
+
+describe('the hint of route-prompt (K1-03)', () => {
+  it('leaves out agent messages, questions and interrogatives, never a polite request or a user story (Review Focus 4)', () => {
+    for (const p of ['¿Por qué falla el test del carrito al añadir un cupón caducado?', 'How does the cart work when a coupon is added twice?',
+      '<teammate-message teammate_id="reviewer">fix the rounding of the cart total in src/cart.js</teammate-message>',
+      'Qué pasa si añado un cupón al carrito dos veces seguidas', 'Why does adding a coupon to the cart change the total twice',
+      'The cart adds the coupon twice, should we fix it?']) expect(looksLikeCoding(p), p).toBe(false);
+    for (const p of ['¿Puedes añadir un cupón de descuento al carrito de la tienda?', 'Can you add coupon support to the cart with validation?',
+      'Como usuario, quiero que el carrito acepte cupones: añade la validación del código', 'Añade un descuento por cupón al carrito de la tienda']) {
+      expect(looksLikeCoding(p), p).toBe(true);
+    }
+  });
+  it('route.hint: off and FORGE_ROUTE_HINT=off turn the hint off, never the reminder of a route half done', () => {
+    const root = tmp('forge-hint-');
+    const io = (env: Record<string, string> = {}): Io => ({
+      cwd: root, now: () => NOW, env, stdin: JSON.stringify({ session_id: 'S1', prompt: 'Add coupon support to the cart with validation' }),
+    });
+    const said = (i: Io) => {
+      const r = run(['hook', 'route-prompt'], i);
+      return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext as string : '';
+    };
+    expect(hintOn({}, parseConfig(null))).toBe(true);
+    expect(said(io())).toBe(ROUTE_HINT);
+    expect(said(io({ FORGE_ROUTE_HINT: 'off' }))).toBe('');
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'route:\n  hint: off\n');
+    expect(said(io())).toBe('');
+    writeRoute(root, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'S1' });
+    expect(said(io())).toContain('hand off with forge:run --from-spec');
+    expect(said(io({ FORGE_ROUTE_HINT: 'off' }))).toContain('hand off with forge:run --from-spec');
   });
 });

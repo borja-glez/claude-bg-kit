@@ -151,6 +151,16 @@ describe('forge config', () => {
     expect(configValue(parseConfig(null), 'nope')).toBeUndefined();
     expect(configValue(parseConfig(null), 'evidence.x')).toBeUndefined();
   });
+
+  it('route.hint: on or off (true and false too), none by default; anything else is a config error (K1-03, Review Focus 4)', () => {
+    expect(parseConfig(null).route).toBeUndefined();
+    expect(parseConfig('route:\n  hint: off\n').route).toEqual({ hint: 'off' });
+    expect(parseConfig('route:\n  hint: false\n').route).toEqual({ hint: 'off' });
+    expect(parseConfig('route:\n  hint: true\n').route).toEqual({ hint: 'on' });
+    expect(parseConfig('route: {}\n').route).toEqual({ hint: 'on' });
+    expect(() => parseConfig('route:\n  hint: maybe\n')).toThrow(ConfigError);
+    expect(() => parseConfig('route:\n  other: 1\n')).toThrow(ConfigError);
+  });
 });
 
 describe('forge config get', () => {

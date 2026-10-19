@@ -3,7 +3,7 @@
 // open (any error prints nothing), stay silent where forge already drives the session or the user chose superpowers
 // (or off) in local.yaml, and run no git beyond mainCheckout.
 import path from 'node:path';
-import { loadConfig } from './config.js';
+import { loadConfig, type ForgeConfig } from './config.js';
 import { readExecution } from './execution.js';
 import { readStatuses } from './ledger.js';
 import { mainCheckout, readLocal } from './local.js';
@@ -42,10 +42,25 @@ const VERBS = [
 const VERB = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${VERBS.join('|')})(?![\\p{L}\\p{N}_])`, 'iu');
 const METHOD = /(?<![\p{L}\p{N}_])(?:forge|superpowers)(?![\p{L}\p{N}_])/iu;
 
-/** A prompt worth the routing hint: not a slash command, six words or more, a coding verb, and no method named. */
+// K1-03: what is not a request to change code. A message from an agent or the harness (it opens with a tag), a question
+// (¿…, …?) that is not a polite request, and a prompt that opens with an interrogative. «Como» without its accent opens a
+// request («Como usuario, quiero…»), so the Spanish interrogatives need theirs.
+const TAGGED = /^<[a-z]/i;
+const POLITE = /^¿?\s*(?:puedes|podrías|podrias|puede|podría|podria|can you|could you|would you|will you)(?![\p{L}\p{N}_])/iu;
+const INTERROGATIVE = /^¿?\s*(?:qué|cómo|por qué|what|how|why)(?![\p{L}\p{N}_])/iu;
+
+/** A prompt worth the routing hint: not a slash command nor a tagged message, not a question (a polite request still
+ *  counts) nor an interrogative, six words or more, a coding verb, and no method named. */
 export function looksLikeCoding(prompt: string): boolean {
   const p = prompt.trim();
-  return !!p && !p.startsWith('/') && p.split(/\s+/).length >= 6 && VERB.test(p) && !METHOD.test(p);
+  if (!p || p.startsWith('/') || TAGGED.test(p)) return false;
+  if (!POLITE.test(p) && (INTERROGATIVE.test(p) || p.startsWith('¿') || p.endsWith('?'))) return false;
+  return p.split(/\s+/).length >= 6 && VERB.test(p) && !METHOD.test(p);
+}
+
+/** K1-03: route-prompt's hint, unless FORGE_ROUTE_HINT=off (route-eval) or `route.hint: off` in .forge/config.yaml. */
+export function hintOn(env: Record<string, string | undefined>, config: ForgeConfig): boolean {
+  return env.FORGE_ROUTE_HINT !== 'off' && config.route?.hint !== 'off';
 }
 
 /** A route changed in the last 24 hours (and not in the future). */
@@ -144,7 +159,9 @@ export function hookRoute(io: Io, which: 'session' | 'prompt'): string {
     const reminder = routeReminder(own, now);
     // A session that routed its request recently gets no hint on its follow-up prompts until the route is done.
     if (!reminder && own && own.stage !== 'done' && fresh(own, now)) return '';
-    const text = reminder ?? (typeof o.prompt === 'string' && looksLikeCoding(o.prompt) ? ROUTE_HINT : null);
+    // K1-03: the hint can be turned off; a route half done is reminded anyway.
+    const hint = typeof o.prompt === 'string' && hintOn(io.env ?? process.env, loadConfig(io.cwd)) && looksLikeCoding(o.prompt) ? ROUTE_HINT : null;
+    const text = reminder ?? hint;
     return text ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } }) : '';
   } catch { return ''; }
 }

@@ -43,6 +43,8 @@ export interface ForgeConfig {
   review: ReviewConfig;
   tdd: 'off' | 'superpowers';
   workflow?: Workflow; autonomy?: Autonomy;
+  /** K1-03: route-prompt's one-line hint; without it, on. */
+  route?: { hint: 'on' | 'off' };
   /** Globs of tracked build output: forge puts those files back after its validator runs in any checkout. */
   generated: string[];
 }
@@ -89,6 +91,10 @@ const Schema = z.object({
   tdd: z.enum(['off', 'superpowers']).default('off'),
   workflow: z.enum(WORKFLOWS).optional(),
   autonomy: z.enum(AUTONOMIES).optional(),
+  route: z.object({
+    // `on` and `off` are strings in YAML 1.2; `true` and `false` mean the same.
+    hint: z.union([z.enum(['on', 'off']), z.boolean()]).transform(v => (v === true ? 'on' : v === false ? 'off' : v)).default('on'),
+  }).strict().optional(),
   generated: z.array(z.string().min(1).max(200)).max(50).default([]),
   threatModel: z.object({
     protects: z.array(z.string().min(1).max(200)).min(1).max(10),
