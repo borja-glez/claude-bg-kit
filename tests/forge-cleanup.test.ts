@@ -59,6 +59,8 @@ beforeEach(() => {
   writeFileSync(forge('live', 'h1.json'), JSON.stringify({ sessionId: 'h1', role: 'coordinator', runId: 'r1', task: null, event: 'Stop', ts: at, agents: [], ended: false }));
   writeFileSync(forge('execution', 'baseline', 'old.json'), '[]');
   writeFileSync(forge('execution', 'baseline', 'fresh.json'), '[]');
+  // M2: the question notes of unattended runs, one folder per run.
+  for (const id of ['r1', 'r2']) { mkdirSync(forge('execution', 'asked', id), { recursive: true }); writeFileSync(forge('execution', 'asked', id, 'web.json'), '{}'); }
   const eightDays = new Date(NOW.getTime() - 8 * 86400_000);
   utimesSync(forge('execution', 'baseline', 'old.json'), eightDays, eightDays);
   // An unreadable marker this old is a leftover, not one being written (mergeInFlight).
@@ -93,7 +95,9 @@ describe('forge swarm cleanup (D-03, D-18)', () => {
     expect(g(root, 'branch', '--format=%(refname:short)').split('\n').sort()).toEqual(['feature/x', 'main', 'task/T2', 'task/T3', 'track/ui']);
     // The evidence of T1 reached the main checkout before its worktree went (K2-04).
     expect(readFileSync(forge('work', 'shop', 'T1', 'evidence', '1-1', '01.png'), 'utf8')).toBe('png');
-    for (const f of ['execution/T1.json', 'members/ui.json', 'live/h1.json', 'execution/baseline/old.json', 'work/shop/T1/diff-1.patch']) expect(existsSync(forge(f)), f).toBe(false);
+    for (const f of ['execution/T1.json', 'members/ui.json', 'live/h1.json', 'execution/baseline/old.json', 'work/shop/T1/diff-1.patch', 'execution/asked/r1', 'execution/asked/r2']) {
+      expect(existsSync(forge(f)), f).toBe(false);
+    }
     for (const f of ['execution/merging.json', 'execution/baseline/fresh.json', 'work/shop/T1/brief-1.md', 'execution.json']) expect(existsSync(forge(f)), f).toBe(true);
     expect(calls.flat().filter(a => a === '-D' || a === '--force' || a === '-f' || a === 'reset')).toEqual([]);
   });
@@ -108,6 +112,9 @@ describe('forge swarm cleanup (D-03, D-18)', () => {
     swarmCommand(['cleanup'], io, spyDeps([]));
     expect(existsSync(forge('members', 'ui.json'))).toBe(true);
     expect(existsSync(forge('execution', 'T1.json'))).toBe(true);
+    // The kept run's question notes stay, another run's go with the run.
+    expect(existsSync(forge('execution', 'asked', 'r1', 'web.json'))).toBe(true);
+    expect(existsSync(forge('execution', 'asked', 'r2'))).toBe(false);
   });
   it("reads forge's own worktrees and branches only", () => {
     const porcelain = ['worktree /r', 'HEAD a', 'branch refs/heads/main', '', 'worktree /r/.claude/worktrees/task-T1', 'HEAD b', 'branch refs/heads/task/T1', '',

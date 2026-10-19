@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync, rmSync, rmdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { samePath } from '../lib/worktree.js';
-import { LIVE_MAX_AGE_HOURS, normalizeLive, normalizePublicTask } from '../lib/execution-state.js';
+import { LIVE_MAX_AGE_HOURS, isSafeId, normalizeLive, normalizePublicTask } from '../lib/execution-state.js';
 import { normalizeMember } from '../lib/member-doc.js';
 
 export interface ForgeWorktree { path: string; name: string; branch: string | null }
@@ -67,7 +67,7 @@ function jsonDocs(dir: string): { file: string; doc: unknown }[] {
 
 /**
  * The state of the executions other than `keep` (null: none is kept): .forge/execution/<T>.json, .forge/members/*.json and
- * .forge/live/*.json of another runId. With `stale`, also live signals that ended or are older than LIVE_MAX_AGE_HOURS,
+ * .forge/live/*.json of another runId, and the question notes of its unattended runs (.forge/execution/asked/<runId>/). With `stale`, also live signals that ended or are older than LIVE_MAX_AGE_HOURS,
  * and .forge/execution/baseline/ files older than 7 days (the folder goes when it empties). A file that does not read as
  * its kind (merging.json, a corrupt one) stays. With `dryRun` nothing is removed.
  */
@@ -88,6 +88,17 @@ export function pruneRunState(main: string, keep: string | null, opts: { now: nu
     const t = Date.parse(d.ts);
     const stale = opts.stale && (d.ended || !Number.isFinite(t) || opts.now - t > LIVE_MAX_AGE_HOURS * 3600_000);
     if (d.runId !== keep || stale) drop(file);
+  }
+  // The question notes an unattended run left (.forge/execution/asked/<runId>/<surface>.json) go with the run.
+  const asked = path.join(forge, 'execution', 'asked');
+  let runs: string[] = [];
+  try { runs = readdirSync(asked).slice(0, MAX_FILES); } catch { runs = []; }
+  for (const id of runs.filter(n => isSafeId(n) && n !== keep)) {
+    const dir = path.join(asked, id);
+    let files: string[] = [];
+    try { files = readdirSync(dir).slice(0, MAX_FILES); } catch { continue; }
+    for (const n of files) drop(path.join(dir, n));
+    if (!opts.dryRun) { try { rmdirSync(dir); } catch { /* not a folder, or not empty */ } }
   }
   if (opts.stale) {
     const base = path.join(forge, 'execution', 'baseline');

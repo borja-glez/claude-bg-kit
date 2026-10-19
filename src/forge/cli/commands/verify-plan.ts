@@ -30,7 +30,7 @@ function logSkipped(cwd: string, ts: () => string, task: string, surfaces: PlanS
 /**
  * K2-08, with nobody to ask: each surface that needs the person logs its verify-skip, and the names that get their
  * question note now are returned. One note per surface and run: a member never writes execution.json, so the first
- * caller to create <main>/.forge/execution/asked/<runId>/<surface>.json leaves the note; the folder goes with the run.
+ * caller to create <main>/.forge/execution/asked/<runId>/<surface>.json leaves the note; the folder goes when another run starts or `swarm cleanup` runs (pruneRunState).
  */
 function unattendedNotes(a: { cwd: string; ts: () => string; main: string; task: string; runId: string | null; surfaces: PlanSurface[] }): Set<string> {
   const needs = a.surfaces.filter(needsPerson);
