@@ -3,6 +3,7 @@ import path from 'node:path';
 import { UsageError } from './errors.js';
 import type { Io } from './run.js';
 import { checkPlanProject, commitInfo, integratedPublish } from './swarm.js';
+import { pendingVerify } from './shared.js';
 import { readExecution, executionTaskFile, runWorktree, taskBase, writePublicTask } from '../execution.js';
 import { phaseToVerify } from '../flow.js';
 import { takeStepLock } from '../jobs.js';
@@ -368,31 +369,13 @@ function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void
   c.actions.push({ type: 'spawnReviewers', task, round: r, path: tri.path ?? null, base: at, spawn, ...(rp.carried ? { carried: rp.carried } : {}), ...say });
 }
 
-/**
- * I2: the verify agent a round waits for, as an entry like a reviewer's (its file is verify.json): verify-plan --dir
- * wrote verify-pending.json there when it chose surfaces, with what a respawned verify agent needs. A surface the
- * coordinator then chose not to verify is logged as a verify-skip of <T>-<n> (references/verify.md). Null without the
- * marker, or once every surface it names was skipped.
- */
-function pendingVerify(c: Ctx, taskN: string, roundDir: string): Json | null {
-  const m = readJson(path.join(roundDir, 'verify-pending.json'));
-  if (!isObject(m) || typeof m.at !== 'string') return null;
-  const at = m.at;
-  const skipped = new Set(ledgerOf(c, taskN)
-    .filter(e => e.kind === 'verify-skip' && isTask(e, taskN) && typeof e.ts === 'string' && e.ts >= at && typeof e.surface === 'string')
-    .map(e => String(e.surface)));
-  const surfaces = (Array.isArray(m.surfaces) ? m.surfaces : []).filter((s): s is Json => isObject(s) && typeof s.name === 'string' && !skipped.has(s.name));
-  if (!surfaces.length) return null;
-  const { at: _at, task: _task, ...rest } = m;
-  return { role: 'verify', ...rest, surfaces };
-}
-
 /** Round `round` of brief `n` in the task's work folder `work` (workOf, relative to the main checkout). */
 function roundOf(c: Ctx, task: string, work: string, n: number, round: number): Round {
   const abs = path.join(c.io.cwd, work);
   const roundDir = path.join(abs, `reviews-${n}-${round}`);
   const plan = readJson(path.join(roundDir, 'review-plan.json'));
-  const verify = pendingVerify(c, `${task}-${n}`, roundDir);
+  // I2: the verify agent the round waits for while verify-pending.json names a surface nobody skipped (pendingVerify).
+  const verify = pendingVerify(roundDir, ledgerOf(c, `${task}-${n}`), `${task}-${n}`) ?? null;
   const entries = [...(isObject(plan) && Array.isArray(plan.spawn) ? plan.spawn as Json[] : []).filter(s => s.twin !== true), ...(verify ? [verify] : [])];
   const respawnedFile = path.join(roundDir, 'respawned.json');
   return { work, abs, roundDir, plan: isObject(plan) ? plan : null, entries, respawnedFile, respawned: readRespawned(respawnedFile) };

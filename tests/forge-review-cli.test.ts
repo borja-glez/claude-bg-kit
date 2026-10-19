@@ -1281,6 +1281,23 @@ describe('forge review-close', () => {
     expect(index(3)).toEqual([['F1', 'A', 'open'], ['F2', 'B', 'closed']]);
   });
 
+  it('with verify-env.json, the round stops waiting for verify.json once a verify-skip names every surface verify-pending.json lists (M1)', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    writeFileSync(path.join(r1(), 'verify-env.json'), JSON.stringify({ task: 'T1-1', port: 41000, profileDir: 'p', startedAt: '2026-10-14T09:59:00.000Z' }));
+    writeFileSync(path.join(r1(), 'verify-pending.json'), JSON.stringify({ task: 'T1-1', at: '2026-10-14T09:59:00.000Z', surfaces: [{ name: 'web' }] }));
+    const verdict = () => run(['verdict', '--task', 'T1-1', '--dir', '.forge/work/T1/reviews-1-1'], { ...io, env: {} });
+    expect(close().code).toBe(3);
+    expect(verdict().code).toBe(3);
+    writeFileSync(path.join(root, 'skip.json'), JSON.stringify({ surface: 'web', reason: 'not worth it' }));
+    expect(run(['log', '--kind', 'verify-skip', '--task', 'T1-1', '--data-file', 'skip.json'], io).code).toBe(0);
+    const r = close();
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ action: 'accept' });
+    expect(verdict().code).toBe(0);
+  });
+
   it('prints the minor findings too, for a report that lists them (K2-17)', () => {
     prep();
     write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [{ severity: 'minor', file: 'a.txt', line: 1, problem: 'naming' }] });

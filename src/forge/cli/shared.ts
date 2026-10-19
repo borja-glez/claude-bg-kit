@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { appendEvent, readEvents } from '../ledger.js';
+import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
 import { readRunText, stopFile, type RunState, type StopContext } from '../run.js';
 import { readExecution } from '../execution.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
@@ -290,6 +290,31 @@ export function learnSurface(io: Io, dir: string, name: string, notes: string[],
  */
 export function cleanupEvidence(dir: string, cwd: string, deps: ProcDeps = defaultProcDeps()): EvidenceCleanup & { released: number[] } {
   return { ...stopEvidence(dir, deps), released: releaseEnv(mainCheckout(cwd), dir) };
+}
+
+/**
+ * I2: the verify agent a review round waits for, as an entry like a reviewer's (its file is verify.json): verify-plan --dir
+ * wrote verify-pending.json in the round dir when it chose surfaces, with what a respawned verify agent needs. A surface
+ * the coordinator then chose not to verify is logged as a verify-skip of <T>-<n> (references/verify.md). Undefined without
+ * a usable marker; null once every surface it names was skipped. `events`: the brief's, of its project.
+ */
+export function pendingVerify(roundDir: string, events: readonly LedgerEvent[], taskN: string): Record<string, unknown> | null | undefined {
+  let m: unknown;
+  try { m = JSON.parse(readFileSync(path.join(roundDir, 'verify-pending.json'), 'utf8')); } catch { return undefined; }
+  if (!m || typeof m !== 'object' || Array.isArray(m) || typeof (m as { at?: unknown }).at !== 'string') return undefined;
+  const { at, task: _task, ...rest } = m as Record<string, unknown> & { at: string };
+  const skipped = new Set(events
+    .filter(e => e.kind === 'verify-skip' && isTask(e, taskN) && typeof e.ts === 'string' && e.ts >= at && typeof e.surface === 'string')
+    .map(e => String(e.surface)));
+  const surfaces = (Array.isArray(rest.surfaces) ? rest.surfaces : [])
+    .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object' && typeof (s as { name?: unknown }).name === 'string' && !skipped.has((s as { name: string }).name));
+  return surfaces.length ? { role: 'verify', ...rest, surfaces } : null;
+}
+
+/** K2-09, M1: whether review-close or verdict waits for the round's verify.json: verify-env.json says a verify agent was
+ *  spawned, and the round's verify-pending.json, when there is one, still names a surface no verify-skip took since. */
+export function verifyAwaited(roundDir: string, events: readonly LedgerEvent[], taskN: string): boolean {
+  return existsSync(path.join(roundDir, 'verify-env.json')) && !existsSync(path.join(roundDir, 'verify.json')) && pendingVerify(roundDir, events, taskN) !== null;
 }
 
 /** What a triage computes (K1-01): everything `forge triage` prints, before anything is written. */

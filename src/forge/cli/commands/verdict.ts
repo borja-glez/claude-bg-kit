@@ -6,7 +6,7 @@ import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, typ
 import { UsageError } from '../errors.js';
 import { eventsOf, isTask, resolveProject } from '../../task-ref.js';
 import { blocking } from '../../validators.js';
-import { logVerifyResult } from '../shared.js';
+import { logVerifyResult, verifyAwaited } from '../shared.js';
 
 export const command: Command = (args, ctx) => {
   const { io, flag, has, json, ts } = ctx;
@@ -19,13 +19,17 @@ export const command: Command = (args, ctx) => {
     const file = path.join(dir, `${name}.json`);
     if (existsSync(file)) reviews[name] = parseReview(readFileSync(file, 'utf8'));
   }
+  // D-08: this task's events of its project (--project, the folder --dir names, or the ledger's).
+  const ledger = readEvents(io.cwd);
+  const mine = eventsOf(ledger, { project: resolveProject({ flag: flag('project'), dir: dirArg, task, events: ledger }), task });
   // K2-13: --verify <file> takes the verify.json of a flow pass into the final review; the pass records its own
   // result (verify-close --flow), so no verify event is logged for it here. K2-09: the verdict waits (exit 3) for a
-  // verify.json it was given, or for one a verify-env.json next to it says an agent is writing.
+  // verify.json it was given, or for one a verify-env.json next to it says an agent is writing (M1: while the dir's
+  // verify-pending.json, when there is one, names a surface no verify-skip took since: verifyAwaited).
   const verifyArg = flag('verify');
   if (has('verify') && !verifyArg) throw new UsageError('verdict: --verify needs the path of a verify.json');
   const verifyPath = verifyArg ? path.resolve(io.cwd, verifyArg) : path.join(dir, 'verify.json');
-  if (!existsSync(verifyPath) && (verifyArg || existsSync(path.join(path.dirname(verifyPath), 'verify-env.json')))) {
+  if (!existsSync(verifyPath) && (verifyArg || verifyAwaited(dir, mine, task))) {
     return json({ missing: [path.relative(io.cwd, verifyPath).split(path.sep).join('/')] }, 3);
   }
   const verifyFile = existsSync(verifyPath) ? parseVerifyFile(readFileSync(verifyPath, 'utf8')) : undefined;
@@ -43,9 +47,7 @@ export const command: Command = (args, ctx) => {
     failing = arr.filter(r => r && typeof r === 'object' && blocking(r)).map(r => ({ validator: String(r.validator ?? ''), failures: Array.isArray(r.failures) ? r.failures.map(String) : [] }));
     preexisting = arr.filter(r => r && typeof r === 'object' && r.ok !== true && r.preexisting === true).map(r => String(r.validator ?? ''));
   } else {
-    // D-08: the last validation of this task of its project (--project, the folder --dir names, or the ledger's).
-    const ledger = readEvents(io.cwd);
-    const mine = eventsOf(ledger, { project: resolveProject({ flag: flag('project'), dir: dirArg, task, events: ledger }), task });
+    // D-08: the last validation of this task of its project.
     const lastValidate = [...mine].reverse().find(e => e.kind === 'validate' && isTask(e, task) && e.baseline !== true);
     recorded = lastValidate !== undefined;
     validatorsOk = lastValidate?.ok === true;

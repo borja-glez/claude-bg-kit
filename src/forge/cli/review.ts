@@ -26,6 +26,7 @@ import { takeBrief } from '../shadow.js';
 import { renderThreatModel } from '../threat-model.js';
 import { collectTwins, shadowCommand } from './shadow.js';
 import { restoringRegenerated } from './swarm.js';
+import { verifyAwaited } from './shared.js';
 import { mainCheckout } from '../local.js';
 import { loadTrustedConfig } from '../trust.js';
 import { eventsSince, executionHolding } from '../execution.js';
@@ -658,9 +659,14 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
       throw new UsageError(`review-close: the validation of ${task} gave no results (${error}); ${rel(deps.cwd, validatorsPath)} was removed: run its validators command again`);
     }
   }
+  // D-08: only this task's events of its project (ids repeat between plans): --project, else the folder --dir names,
+  // else the ledger's attribution.
+  const before = readEvents(deps.cwd);
+  const project = resolveProject({ flag: flag('project'), dir: dirArg, task: id, events: before });
   // K2-09: verify-env.json in the round dir means a verify agent was spawned (FORGE verify-env): it is a reviewer like the
-  // others, and the round waits for its verify.json.
-  if (existsSync(path.join(roundDir, 'verify-env.json')) && !existsSync(path.join(roundDir, 'verify.json'))) missing.push(path.join(roundDir, 'verify.json'));
+  // others, and the round waits for its verify.json. M1: unless the round's verify-pending.json lists only surfaces the
+  // coordinator logged a verify-skip for since (verifyAwaited), as swarm step stops waiting then.
+  if (verifyAwaited(roundDir, eventsOf(before, { project, task }), task)) missing.push(path.join(roundDir, 'verify.json'));
   if (missing.length) return json({ missing: missing.map(f => rel(deps.cwd, f)) }, 3);
 
   const reviews: Partial<Record<ReviewerName, Review>> = {};
@@ -701,10 +707,6 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   // open, closed or paired with), while it still counts as review n and the last one still accepts at the cap. The
   // previous verdict is the brief's last one logged on another review dir (a re-close of this one does not count).
   const roundRel = rel(deps.cwd, roundDir);
-  // D-08: only this task's events of its project (ids repeat between plans): --project, else the folder --dir names,
-  // else the ledger's attribution.
-  const before = readEvents(deps.cwd);
-  const project = resolveProject({ flag: flag('project'), dir: dirArg, task: id, events: before });
   const fresh = round >= 2 && eventsOf(before, { project, task: id }).filter(e => e.kind === 'verdict' && isTask(e, task) && e.dir !== roundRel).at(-1)?.action === 'redo';
   const withIds = assignIds(index, round, reviews, { express, fresh });
   const open = fresh ? {} : openIds(index, round);
