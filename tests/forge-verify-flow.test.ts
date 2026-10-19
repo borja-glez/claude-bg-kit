@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { useTempDirs } from './helpers/tmp.js';
@@ -107,6 +107,8 @@ describe('the flow pass (K2-13)', () => {
     const tasks = { T1: execution().tasks.T1, T2: { ...execution().tasks.T2, sha: t2 } };
     expect(flowSince({ tasks }, gitFn)).toBe(g('rev-parse', `${t2}^1`));
     expect(flowSince({ tasks }, gitFn)).not.toBe(base);
+    // A recorded sha that is not in the history falls back to the scan.
+    expect(flowSince({ tasks: { T1: { ...tasks.T1, sha: 'deadbeef' }, T2: execution().tasks.T2 } }, gitFn)).toBe(base);
     // A short recorded sha matches too.
     expect(flowSince({ tasks: { T2: { ...tasks.T2, sha: t2.slice(0, 9) } } }, gitFn)).toBe(g('rev-parse', `${t2}^1`));
   });
@@ -141,6 +143,19 @@ describe('the flow pass (K2-13)', () => {
     expect(run(['verify-close', '--flow', path.join(root, flow.dir)], { ...io, cwd: wt }).code).toBe(2);
     expect(readEvents(root).some(e => e.kind === 'verify-flow')).toBe(false);
     expect(readExecution(root)!.flow).toBeUndefined();
+  });
+  it('a pass number is the highest one plus one: a folder deleted by hand frees none, and a folder is never reused', () => {
+    const { flow: first } = vp();
+    const work = path.join(root, '.forge', 'work');
+    for (const n of [2, 3]) {
+      mkdirSync(path.join(work, `flow-${RUN}-${n}`));
+      writeFileSync(path.join(work, `flow-${RUN}-${n}`, 'flow.json'), `{"keep":${n}}`);
+    }
+    expect(first.n).toBe(1);
+    rmSync(path.join(work, `flow-${RUN}-2`), { recursive: true });
+    const out = vp();
+    expect(out.flow.n).toBe(4);
+    expect(readFileSync(path.join(work, `flow-${RUN}-3`, 'flow.json'), 'utf8')).toBe('{"keep":3}');
   });
   it('an ephemeral run, already closed by the tick that finished it, still gets its pass (K2-13.4)', () => {
     seedExecution(root, execution({ kind: 'ephemeral', closedAt: AT, closedBy: 'merge' }));

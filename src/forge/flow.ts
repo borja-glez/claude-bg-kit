@@ -33,7 +33,7 @@ export function flowSince(
       const [sha, parent] = line.trim().split(' ');
       if (sha && parent && recorded.some(r => sha === r || (r.length >= 7 && sha.startsWith(r)))) return parent;
     }
-    return null;
+    // None of them is in HEAD's history (a rewritten one, for example): fall back to the scan.
   }
   const ids = new Set(Object.keys(e.tasks));
   const args = ['log', '--merges', '--reverse', '--format=%H %P%x09%s'];

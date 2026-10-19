@@ -61,10 +61,13 @@ function runPlan(ctx: Ctx): Result {
   });
   let flow: Record<string, unknown> | null = null;
   if (plan.eligible) {
-    const n = flowDirs(io.cwd, e.runId).length + 1;
+    // One more than the highest pass number (a folder deleted by hand frees no number), in a folder that must be new.
+    const last = flowDirs(io.cwd, e.runId).at(-1);
+    const n = last ? Number(/-(\d+)$/.exec(path.basename(last))![1]) + 1 : 1;
     const id = flowDirName(e.runId, n);
     const dir = path.join(io.cwd, '.forge', 'work', id);
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(path.join(io.cwd, '.forge', 'work'), { recursive: true });
+    mkdirSync(dir);
     const planTasks = e.kind === 'plan' ? planTasksOf(main, e.project) : [];
     const listed = integratedSince(e, git, since).map(t => {
       const p = planTasks.find(x => x.id === t);
