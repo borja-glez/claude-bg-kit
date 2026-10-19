@@ -298,8 +298,16 @@ describe('forge review-prep', () => {
     writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(1)"\n');
     const out = JSON.parse(prep('--report').stdout);
     expect(out.validatorsRound).toBeUndefined();
-    expect(out.validators.ok).toBe(false);
+    expect(out.validators).toMatchObject({ ok: false, failing: ['check'] });
     expect(out.spawn.length).toBeGreaterThan(0);
+  });
+
+  it('--report composes with --sensitive: the reviewers are spawned, security among them, and the red validator is listed (K2-17)', () => {
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(1)"\n');
+    const out = JSON.parse(prep('--report', '--sensitive').stdout);
+    expect(out.validatorsRound).toBeUndefined();
+    expect(out.validators).toMatchObject({ ok: false, failing: ['check'] });
+    expect(out.spawn.map((s: { agent: string }) => s.agent)).toContain('forge-review-security');
   });
 });
 
