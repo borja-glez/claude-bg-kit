@@ -190,6 +190,24 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
     expect(readdirSync(dir).filter(f => /^no-boxes-[0-9a-f]{8}\.md$/.test(f))).toHaveLength(1);
     expect(done()).toEqual([true]);
   });
+  it("the record of a plan whose path ends with this plan's path is not this plan's either (Review Focus 4)", () => {
+    const A = 'docs/superpowers/plans/foo.md';
+    const B = 'pkg/docs/superpowers/plans/foo.md';
+    for (const p of [A, B]) {
+      mkdirSync(path.dirname(path.join(root, p)), { recursive: true });
+      writeFileSync(path.join(root, p), '# Foo\n\n### Task 1: a\n\nDo a.\n');
+    }
+    const done = (p: string) => JSON.parse(run(['sp-plan', 'tasks', p], io).stdout).tasks.map((t: { done: boolean }) => t.done);
+    const dir = path.join(root, '.forge', 'sp-done');
+    expect(JSON.parse(run(['sp-plan', 'check', B, '--task', '1'], io).stdout).recorded).toBe(true);
+    expect(readFileSync(path.join(dir, 'foo.md'), 'utf8')).toBe(`# SDD ledger — plan: ${B}\nTask 1: complete (forge)\n`);
+    expect(done(B)).toEqual([true]);
+    expect(done(A)).toEqual([false]);
+    // A's own record goes beside it, and only it counts for A.
+    expect(JSON.parse(run(['sp-plan', 'check', A, '--task', '1'], io).stdout).recorded).toBe(true);
+    expect(readdirSync(dir).filter(f => /^foo-[0-9a-f]{8}\.md$/.test(f))).toHaveLength(1);
+    expect(done(A)).toEqual([true]);
+  });
   it('records several tasks of one plan one after the other, appending to the same ledger', () => {
     const P = 'docs/superpowers/plans/no-boxes.md';
     writeFileSync(path.join(root, P), '# No Boxes\n\n### Task 1: a\n\nDo a.\n\n### Task 2: b\n\nDo b.\n');

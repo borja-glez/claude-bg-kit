@@ -116,11 +116,17 @@ export function spSkillPath(sp: Superpowers, skill: string): string | null {
   return existsSync(f) ? f : null;
 }
 
+/** D-17: the first line of forge's record of the plan at `rel`; a record is that plan's only when it starts with it. */
+const recordHeader = (rel: string) => `# SDD ledger — plan: ${rel}`;
+const isRecordOf = (text: string, rel: string) => text.split(/\r?\n/)[0].trim() === recordHeader(rel);
+
 /**
  * The tasks of a superpowers plan recorded as complete under each root (the repository and its main checkout):
  * - superpowers' own executors: `<root>/.superpowers/sdd/<slug>[-…]/progress.md`, one workspace per plan;
  * - forge, for a task without checkboxes (D-17, sp-plan check): `<root>/.forge/sp-done/<slug>[-…].md`.
  * A workspace whose `plan-path` marker names another plan, or a ledger whose first line names another plan, is skipped.
+ * forge's record counts only when its first line is exactly the header recordSpDone writes for this plan: the record of
+ * `pkg/docs/…/foo.md` is never `docs/…/foo.md`'s (superpowers' own ledger may name its plan by an absolute path).
  * Fail-open: nothing readable means none.
  */
 export function spLedgerDone(roots: string[], planAbs: string): number[] {
@@ -145,7 +151,10 @@ export function spLedgerDone(roots: string[], planAbs: string): number[] {
     const names = list(forge).filter(n => n.endsWith('.md') && mine(n.slice(0, -3)));
     const forgeRel = names.length ? planRepoRel(planAbs, root) ?? (inRoot ? rel : null) : null;
     for (const name of forgeRel ? names : []) {
-      try { for (const n of sddComplete(readFileSync(path.join(forge, name), 'utf8'), forgeRel!)) done.add(n); } catch { /* unreadable */ }
+      try {
+        const text = readFileSync(path.join(forge, name), 'utf8');
+        if (isRecordOf(text, forgeRel!)) for (const n of sddComplete(text, forgeRel!)) done.add(n);
+      } catch { /* unreadable */ }
     }
   }
   return [...done].sort((a, b) => a - b);
@@ -184,11 +193,11 @@ export function recordSpDone(root: string, planAbs: string, n: number): boolean 
   const rel = planRepoRel(planAbs, root) ?? path.relative(root, planAbs).split(path.sep).join('/');
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
   const slug = path.basename(planAbs).replace(/\.md$/i, '');
-  const header = `# SDD ledger — plan: ${rel}`;
+  const header = recordHeader(rel);
   const dir = path.join(root, '.forge', 'sp-done');
   const read = (f: string) => { try { return readFileSync(f, 'utf8'); } catch { return null; } };
   const file = [path.join(dir, `${slug}.md`), path.join(dir, `${slug}-${createHash('sha1').update(rel).digest('hex').slice(0, 8)}.md`)]
-    .find(f => { const t = read(f); return t === null || t.split(/\r?\n/)[0].trim() === header; });
+    .find(f => { const t = read(f); return t === null || isRecordOf(t, rel); });
   if (!file) return false;
   let text = read(file);
   if (text !== null && sddComplete(text, rel).includes(n)) return true;
@@ -199,7 +208,7 @@ export function recordSpDone(root: string, planAbs: string, n: number): boolean 
       // Another process created it first: read it once more and append to it. A file that still cannot be read (a
       // directory, a permission error) or is another plan's is not ours to write: the error stands.
       text = (e as NodeJS.ErrnoException).code === 'EEXIST' ? read(file) : null;
-      if (text === null || text.split(/\r?\n/)[0].trim() !== header) throw e;
+      if (text === null || !isRecordOf(text, rel)) throw e;
       if (sddComplete(text, rel).includes(n)) return true;
     }
   }
