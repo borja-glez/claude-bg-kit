@@ -137,10 +137,12 @@ describe('the flow pass (K2-13)', () => {
   it("verify-close --flow is the coordinator's: from a forge task worktree it exits 2 and records nothing", () => {
     const { flow } = vp();
     writeFileSync(path.join(root, flow.dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'pass', checks: [] }));
+    // M9: a real task worktree, which ledgerRoot maps to this checkout (on a branch integrate() never names).
     const wt = path.join(root, '.claude', 'worktrees', 'task-T1-1');
-    mkdirSync(wt, { recursive: true });
-    writeFileSync(path.join(wt, '.git'), `gitdir: ${path.join(root, '.git', 'worktrees', 'task-T1-1')}\n`);
-    expect(run(['verify-close', '--flow', path.join(root, flow.dir)], { ...io, cwd: wt }).code).toBe(2);
+    g('worktree', 'add', '-q', wt, '-b', 'wt/task-T1-1');
+    const r = run(['verify-close', '--flow', path.join(root, flow.dir)], { ...io, cwd: wt });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain("--flow is the coordinator's");
     expect(readEvents(root).some(e => e.kind === 'verify-flow')).toBe(false);
     expect(readExecution(root)!.flow).toBeUndefined();
   });

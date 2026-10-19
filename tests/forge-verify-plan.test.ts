@@ -404,11 +404,13 @@ describe('permission questions once per run (K2-08)', () => {
   });
   it("--skip is the coordinator's: from a forge task worktree it exits 2 and records nothing (R1)", () => {
     seedExecution(root, exec());
-    // The smallest worktree ledgerRoot recognises: <main>/.claude/worktrees/task-*, its .git file pointing into the main .git.
+    // M9: a real task worktree, which ledgerRoot and mainCheckout both map to this checkout (without the guard, the skip
+    // would be recorded in its execution.json).
     const wt = path.join(root, '.claude', 'worktrees', 'task-T1-1');
-    mkdirSync(wt, { recursive: true });
-    writeFileSync(path.join(wt, '.git'), `gitdir: ${path.join(root, '.git', 'worktrees', 'task-T1-1')}\n`);
-    expect(run(['verify-preflight', '--skip', 'web'], { ...io, cwd: wt }).code).toBe(2);
+    g('worktree', 'add', '-q', wt, '-b', 'task/T1-1');
+    const r = run(['verify-preflight', '--skip', 'web'], { ...io, cwd: wt });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain("--skip is the coordinator's");
     expect(readExecution(root)!.verifySkip).toBeUndefined();
   });
   it('unattended, each task logs its verify-skip and the question note is asked for once per surface and run', () => {
