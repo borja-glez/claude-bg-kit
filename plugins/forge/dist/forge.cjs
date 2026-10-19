@@ -1091,16 +1091,16 @@ var require_foldFlowLines = __commonJS({
         onFold();
       let res = text3.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
-        const fold = folds[i2];
+        const fold2 = folds[i2];
         const end2 = folds[i2 + 1] || text3.length;
-        if (fold === 0)
+        if (fold2 === 0)
           res = `
 ${indent}${text3.slice(0, end2)}`;
         else {
-          if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text3[fold]}\\`;
+          if (mode === FOLD_QUOTED && escapedFolds[fold2])
+            res += `${text3[fold2]}\\`;
           res += `
-${indent}${text3.slice(fold + 1, end2)}`;
+${indent}${text3.slice(fold2 + 1, end2)}`;
         }
       }
       return res;
@@ -4739,8 +4739,8 @@ var require_resolve_flow_scalar = __commonJS({
         if (ch === "\r" && source[i + 1] === "\n")
           continue;
         if (ch === "\n") {
-          const { fold, offset } = foldNewline(source, i);
-          res += fold;
+          const { fold: fold2, offset } = foldNewline(source, i);
+          res += fold2;
           i = offset;
         } else if (ch === "\\") {
           let next = source[++i];
@@ -4780,19 +4780,19 @@ var require_resolve_flow_scalar = __commonJS({
       return res;
     }
     function foldNewline(source, offset) {
-      let fold = "";
+      let fold2 = "";
       let ch = source[offset + 1];
       while (ch === " " || ch === "	" || ch === "\n" || ch === "\r") {
         if (ch === "\r" && source[offset + 2] !== "\n")
           break;
         if (ch === "\n")
-          fold += "\n";
+          fold2 += "\n";
         offset += 1;
         ch = source[offset + 1];
       }
-      if (!fold)
-        fold = " ";
-      return { fold, offset };
+      if (!fold2)
+        fold2 = " ";
+      return { fold: fold2, offset };
     }
     var escapeCodes = {
       "0": "\0",
@@ -13765,12 +13765,23 @@ function executionHolding(cwd2, ref) {
   return (e.kind === "plan" ? e.project === ref.project : ref.project === null) ? e : null;
 }
 var eventsSince = (events, since) => since === null ? [...events] : events.filter((e) => Date.parse(e.ts) >= Date.parse(since));
-function writeAtomic(file, text3) {
+var RENAME_TRIES = 5;
+var RENAME_WAIT_MS = 20;
+var RENAME_TRANSIENT = /* @__PURE__ */ new Set(["EPERM", "EBUSY", "EACCES"]);
+function writeAtomic(file, text3, rename = import_node_fs11.renameSync) {
   (0, import_node_fs11.mkdirSync)(import_node_path11.default.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     (0, import_node_fs11.writeFileSync)(tmp, text3);
-    (0, import_node_fs11.renameSync)(tmp, file);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        rename(tmp, file);
+        return;
+      } catch (e) {
+        if (attempt >= RENAME_TRIES || !RENAME_TRANSIENT.has(e.code ?? "")) throw e;
+        sleepSync(RENAME_WAIT_MS);
+      }
+    }
   } finally {
     (0, import_node_fs11.rmSync)(tmp, { force: true });
   }
@@ -16368,6 +16379,15 @@ function recentMarkdown(root, relDir, now, committedAt2) {
   }
   return out.sort((a, b) => b.time - a.time);
 }
+function olderMarkdown(root, relDir, seen) {
+  let names2;
+  try {
+    names2 = (0, import_node_fs19.readdirSync)(import_node_path19.default.join(root, relDir));
+  } catch {
+    return [];
+  }
+  return names2.filter((n) => n.endsWith(".md") && !seen.has(n)).map((n) => ({ path: `${relDir}/${n}` }));
+}
 var titleOf = (file) => {
   try {
     return specH1((0, import_node_fs19.readFileSync)(file, "utf8"));
@@ -16385,7 +16405,7 @@ function planSpecs(root) {
   const dir = import_node_path19.default.join(root, "docs", "superpowers", "plans");
   let names2 = [];
   try {
-    names2 = (0, import_node_fs19.readdirSync)(dir).filter((n) => n.endsWith(".md")).slice(0, 200);
+    names2 = (0, import_node_fs19.readdirSync)(dir).filter((n) => n.endsWith(".md")).sort().reverse().slice(0, 200);
   } catch {
     return [];
   }
@@ -16399,6 +16419,13 @@ function planSpecs(root) {
   });
 }
 function spSpecs(root, now, opts = {}) {
+  return specPool(root, now, opts, SP_MAX).pending;
+}
+function spSpecPool(root, now, opts = {}) {
+  return specPool(root, now, opts, Infinity);
+}
+function specPool(root, now, opts, max) {
+  const all = max === Infinity;
   const cited = /* @__PURE__ */ new Set([...planSpecs(root), ...(opts.routed ?? []).map((s2) => repoRelOf(root, s2))]);
   let projects = [];
   try {
@@ -16412,32 +16439,52 @@ function spSpecs(root, now, opts = {}) {
     } catch {
     }
   }
-  const out = [];
-  for (const f of recentMarkdown(root, "docs/superpowers/specs", now, opts.committedAt)) {
+  const pool = { pending: [], others: [] };
+  const recent = recentMarkdown(root, "docs/superpowers/specs", now, opts.committedAt);
+  for (const f of recent) {
+    if (pool.pending.length >= max) break;
     const rel3 = `docs/superpowers/specs/${f.name}`;
-    if (cited.has(rel3) || opts.declined?.includes(rel3)) continue;
-    out.push({ path: rel3, title: titleOf(f.abs) ?? f.name.replace(/\.md$/, ""), modified: new Date(f.time).toISOString() });
-    if (out.length === SP_MAX) break;
+    const taken = cited.has(rel3) || !!opts.declined?.includes(rel3);
+    if (taken && !all) continue;
+    const title = titleOf(f.abs) ?? f.name.replace(/\.md$/, "");
+    if (taken) pool.others.push({ path: rel3, title });
+    else pool.pending.push({ path: rel3, title, modified: new Date(f.time).toISOString() });
   }
-  return out;
+  if (all) pool.others.push(...olderMarkdown(root, "docs/superpowers/specs", new Set(recent.map((f) => f.name))));
+  return pool;
 }
 function spPlans(root, now, opts = {}) {
-  const out = [];
-  for (const f of recentMarkdown(root, "docs/superpowers/plans", now, opts.committedAt)) {
+  return planPool(root, now, opts, SP_MAX).pending;
+}
+function spPlanPool(root, now, opts = {}) {
+  return planPool(root, now, opts, Infinity);
+}
+function planPool(root, now, opts, max) {
+  const all = max === Infinity;
+  const pool = { pending: [], others: [] };
+  const recent = recentMarkdown(root, "docs/superpowers/plans", now, opts.committedAt);
+  for (const f of recent) {
+    if (pool.pending.length >= max) break;
+    const rel3 = `docs/superpowers/plans/${f.name}`;
     let plan;
     try {
       const parsed = parseSpPlan((0, import_node_fs19.readFileSync)(f.abs, "utf8"));
       const ledger = spLedgerDone(opts.main ? [root, opts.main] : [root], f.abs);
       plan = markDone(parsed, [.../* @__PURE__ */ new Set([...ledger, ...doneByCommits(opts.subjects ?? [], parsed.plan.title)])]);
     } catch {
+      if (all) pool.others.push({ path: rel3 });
       continue;
     }
     const done = plan.tasks.filter((t) => t.done).length;
-    if (done === plan.tasks.length) continue;
-    out.push({ path: `docs/superpowers/plans/${f.name}`, title: plan.plan.title || f.name.replace(/\.md$/, ""), tasks: plan.tasks.length, done });
-    if (out.length === SP_MAX) break;
+    const title = plan.plan.title || f.name.replace(/\.md$/, "");
+    if (done === plan.tasks.length) {
+      if (all) pool.others.push({ path: rel3, title });
+      continue;
+    }
+    pool.pending.push({ path: rel3, title, tasks: plan.tasks.length, done });
   }
-  return out;
+  if (all) pool.others.push(...olderMarkdown(root, "docs/superpowers/plans", new Set(recent.map((f) => f.name))));
+  return pool;
 }
 
 // src/forge/tools.ts
@@ -16762,14 +16809,38 @@ function normalizeDecisionsDoc(x) {
 var ROUTE_OPTIONS = ["forge", "superpowers", "superpowers-design", "superpowers-plan", "none"];
 var ROUTE_STAGES = ["designing", "planning", "handed-off", "done"];
 var ROUTE_REMINDER_MS = 24 * 36e5;
-function namedOrFirst(entries, text3) {
-  const t = text3.toLowerCase().replace(/\\/g, "/");
-  const names2 = (e) => {
-    const file = e.path.split("/").pop() ?? e.path;
-    const stem = file.replace(/\.md$/i, "");
-    return [e.path, file, stem, stem.replace(/^\d{4}-\d{2}-\d{2}-/, ""), e.title].map((s2) => s2.toLowerCase()).filter((s2) => s2.length >= 6);
+var fold = (s2) => s2.normalize("NFD").replace(new RegExp("\\p{M}+", "gu"), "").normalize("NFC").toLowerCase();
+var NAMED_FILE = /[^\s"'`<>()[\]{},;|*]*/y;
+function namedOrFirst(entries, text3, others = []) {
+  const t = fold(text3).replace(/\\/g, "/");
+  const fileOf = (p) => fold(p).split("/").pop() ?? "";
+  const stemOf = (p) => fileOf(p).replace(/\.md$/, "");
+  const named = /* @__PURE__ */ new Set();
+  for (const dir of new Set([...entries, ...others].map((e) => fold(e.path).split("/").slice(0, -1).join("/")).filter(Boolean))) {
+    for (let at2 = t.indexOf(`${dir}/`); at2 >= 0; ) {
+      NAMED_FILE.lastIndex = at2 + dir.length + 1;
+      const file = NAMED_FILE.exec(t)?.[0] ?? "";
+      let end = file.length;
+      while (end > 0 && ".:!?".includes(file[end - 1])) end--;
+      if (end) named.add(file.slice(0, end));
+      at2 = t.indexOf(`${dir}/`, at2 + dir.length + 1 + file.length);
+    }
+  }
+  if (named.size) return entries.find((e) => named.has(fileOf(e.path)) || named.has(stemOf(e.path)));
+  const longest = (e) => {
+    const stem = stemOf(e.path);
+    return [fold(e.path), fileOf(e.path), stem, stem.replace(/^\d{4}-\d{2}-\d{2}-/, ""), fold(e.title ?? "")].filter((n) => n.length >= 6 && t.includes(n)).reduce((m, n) => Math.max(m, n.length), 0);
   };
-  return entries.find((e) => names2(e).some((n) => t.includes(n))) ?? entries[0];
+  let best = { entry: void 0, length: 0 };
+  for (const e of entries) {
+    const n = longest(e);
+    if (n > best.length) best = { entry: e, length: n };
+  }
+  for (const o of others) {
+    const n = longest(o);
+    if (n > best.length) best = { entry: void 0, length: n };
+  }
+  return best.length ? best.entry : entries[0];
 }
 function routeOptions(i) {
   const base = {
@@ -16783,8 +16854,8 @@ function routeOptions(i) {
   if (!i.superpowers.installed) {
     return { ...base, options: ["forge", "none"], recommended: { option: "forge", why: "superpowers is not installed: forge triages, implements and reviews it" } };
   }
-  const plan = namedOrFirst(i.plans, i.text ?? "");
-  const spec = namedOrFirst(i.specs, i.text ?? "");
+  const plan = namedOrFirst(i.pools?.plans.pending ?? i.plans, i.text ?? "", i.pools?.plans.others);
+  const spec = namedOrFirst(i.pools?.specs.pending ?? i.specs, i.text ?? "", i.pools?.specs.others);
   let recommended;
   if (i.runPlan && plan) recommended = { option: "superpowers-plan", why: "an unfinished superpowers plan to carry out: forge executes and reviews each task", plan: plan.path };
   else if (i.buildSpec && spec) recommended = { option: "superpowers-design", why: "a recent superpowers spec not imported yet: forge builds from it", spec: spec.path };
@@ -17254,13 +17325,13 @@ function triageCore(io, args) {
     locale
   };
 }
+var routedSpecs = (io) => listRoutes(mainCheckout(io.cwd)).flatMap((r2) => r2.spec && (r2.stage === "handed-off" || r2.stage === "done") ? [r2.spec] : []);
 function spContext(io, dir, now) {
   const main = mainCheckout(dir);
   const since = `--since=${new Date(now - SP_WINDOW_MS).toISOString()}`;
   const subjectsOf = (git2) => (git2(["log", since, "-n", "500", "--format=%s", "HEAD"]) ?? "").split("\n").map((s2) => s2.trim()).filter(Boolean);
   const subjects = [.../* @__PURE__ */ new Set([...subjectsOf(io.git ?? defaultGit(dir)), ...samePath(main, dir) ? [] : subjectsOf(defaultGit(main))])];
-  const routed = listRoutes(mainCheckout(io.cwd)).flatMap((r2) => r2.spec && (r2.stage === "handed-off" || r2.stage === "done") ? [r2.spec] : []);
-  return { main, subjects, routed };
+  return { main, subjects, routed: routedSpecs(io) };
 }
 
 // src/forge/cli/commands/brief.ts
@@ -18381,7 +18452,7 @@ var VERBS = [
 ];
 var VERB = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${VERBS.join("|")})(?![\\p{L}\\p{N}_])`, "iu");
 var METHOD2 = /(?<![\p{L}\p{N}_])(?:forge|superpowers)(?![\p{L}\p{N}_])/iu;
-var TAGGED = /^<(?:teammate-message|task-notification|system-reminder|command-|local-command-|user-prompt-submit-hook)/i;
+var TAGGED = /^<(?:teammate-message|agent-message|task-notification|system-reminder|command-|local-command-|user-prompt-submit-hook)/i;
 var POLITE = /^(?:(?:hola|oye|hi|hello|please|por favor)[,\s]+){0,3}¿?\s*(?:me\s+)?(?:puedes|podrías|podrias|puede|podría|podria|podéis|podeis|podemos|can you|could you|would you|will you|can we|could we)(?![\p{L}\p{N}_])/iu;
 var INTERROGATIVE = /^¿?\s*(?:qué|cómo|por qué|what|how|why)(?![\p{L}\p{N}_])/iu;
 var IMPERATIVE = new RegExp(`^(?:${VERBS.join("|")})(?![\\p{L}\\p{N}_])`, "iu");
@@ -18447,7 +18518,8 @@ function hookRoute(io, which) {
     const sid = typeof o.session_id === "string" && o.session_id ? o.session_id : null;
     if (inForgeWorktree(io.cwd)) return "";
     const main = mainCheckout(io.cwd);
-    const workflow = resolvePrefs({}, readLocal(io.cwd), loadConfig(io.cwd)).workflow;
+    const config = loadConfig(io.cwd);
+    const workflow = resolvePrefs({}, readLocal(io.cwd), config).workflow;
     if (workflow === "superpowers" || workflow === "off" || forgeDrives(io, main, sid)) return "";
     if (which === "session") {
       const sp = locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: main });
@@ -18459,7 +18531,7 @@ ${carried}` : "") } });
     const own = readRoute(main, sid);
     const reminder = routeReminder(own, now);
     if (!reminder && own && own.stage !== "done" && fresh(own, now)) return "";
-    const text3 = reminder ?? (typeof o.prompt === "string" && looksLikeCoding(o.prompt) && hintOn(io.env ?? process.env, loadConfig(io.cwd)) ? ROUTE_HINT : null);
+    const text3 = reminder ?? (typeof o.prompt === "string" && looksLikeCoding(o.prompt) && hintOn(io.env ?? process.env, config) ? ROUTE_HINT : null);
     return text3 ? JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: text3 } }) : "";
   } catch {
     return "";
@@ -18810,7 +18882,9 @@ var command13 = (args, ctx) => {
   if (status === null) throw new UsageError(`begin: git status failed in ${repoDir}`);
   const { modified, untracked: untracked2 } = parseStatus(status);
   const foreign = foreignPaths([...modified, ...untracked2]);
-  const snapshot = run2(["tree", "snapshot", "--task", task], io).code === 0 ? true : null;
+  const snap = run2(["tree", "snapshot", "--task", task], io);
+  const snapshot = snap.code === 0 ? true : null;
+  const snapshotError = snapshot ? null : snap.stderr.trim() || `tree snapshot exited ${snap.code}`;
   const tdd = tddFor(io, repoDir);
   const prefs = resolvePrefs(isAutonomy(autonomy) ? { autonomy } : {}, readLocal(io.cwd), loadConfig(repoDir));
   const stateGit = io.workdir === void 0 ? git2 : defaultGit(io.cwd);
@@ -18818,6 +18892,7 @@ var command13 = (args, ctx) => {
   return json4({
     foreign,
     snapshot,
+    ...snapshotError === null ? {} : { snapshotError },
     tdd: { mode: tdd.tdd, line: tdd.line },
     autonomy: prefs.autonomy,
     workflow: prefs.workflow,
@@ -24902,8 +24977,9 @@ var command18 = (args, ctx) => {
   const sp = superpowersOf(io, repoDir);
   const now = io.now().getTime();
   const spc = sp.installed ? spContext(io, repoDir, now) : null;
-  const specs = spc ? spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)), routed: spc.routed }) : [];
-  const plans = spc ? spPlans(repoDir, now, { committedAt: committedAt(io, repoDir), main: spc.main, subjects: spc.subjects }) : [];
+  const empty = () => ({ pending: [], others: [] });
+  const specPool2 = spc ? spSpecPool(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)), routed: spc.routed }) : empty();
+  const planPool2 = spc ? spPlanPool(repoDir, now, { committedAt: committedAt(io, repoDir), main: spc.main, subjects: spc.subjects }) : empty();
   const text3 = textFile !== void 0 ? (() => {
     try {
       return (0, import_node_fs56.readFileSync)(import_node_path53.default.resolve(io.cwd, textFile), "utf8");
@@ -24915,8 +24991,9 @@ var command18 = (args, ctx) => {
     path: p,
     prefs,
     superpowers: { installed: sp.installed, version: sp.version },
-    specs,
-    plans,
+    specs: specPool2.pending.slice(0, SP_MAX),
+    plans: planPool2.pending.slice(0, SP_MAX),
+    pools: { specs: specPool2, plans: planPool2 },
     runPlan: has("run-plan"),
     buildSpec: has("build-spec"),
     text: text3
@@ -25014,8 +25091,7 @@ var command23 = (args, ctx) => {
     return json4({ declined: rel3 });
   }
   const now = io.now().getTime();
-  const { routed } = spContext(io, repoDir, now);
-  return json4(spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)), routed }));
+  return json4(spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)), routed: routedSpecs(io) }));
 };
 
 // src/forge/cli/commands/stats.ts
