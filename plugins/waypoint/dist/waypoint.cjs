@@ -14749,7 +14749,7 @@ var flowOf = (x2) => {
   if (!isObj3(x2) || typeof x2.sha !== "string" || !/^[0-9a-f]{7,64}$/i.test(x2.sha) || !iso3(x2.at)) return null;
   const result = oneOf(["pass", "fail", "blocked"], x2.result);
   const since = typeof x2.since === "string" && /^[0-9a-f]{7,64}$/i.test(x2.since) ? x2.since : null;
-  return result ? { sha: x2.sha, at: x2.at, result, ...since ? { since } : {} } : null;
+  return result ? { sha: x2.sha, at: x2.at, result, ...since ? { since } : {}, ...x2.whole === true ? { whole: true } : {} } : null;
 };
 function normalizeExecution(x2, now) {
   if (!isObj3(x2)) return null;

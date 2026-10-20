@@ -11648,7 +11648,7 @@ var flowOf = (x) => {
   if (!isObj(x) || typeof x.sha !== "string" || !/^[0-9a-f]{7,64}$/i.test(x.sha) || !iso(x.at)) return null;
   const result = oneOf(["pass", "fail", "blocked"], x.result);
   const since = typeof x.since === "string" && /^[0-9a-f]{7,64}$/i.test(x.since) ? x.since : null;
-  return result ? { sha: x.sha, at: x.at, result, ...since ? { since } : {} } : null;
+  return result ? { sha: x.sha, at: x.at, result, ...since ? { since } : {}, ...x.whole === true ? { whole: true } : {} } : null;
 };
 function normalizeExecution(x, now) {
   if (!isObj(x)) return null;
@@ -12701,7 +12701,12 @@ var INSTRUCTION = [
   /^\s*(?:always|never)\s+(?!\w*[^s\W]s\b)\w+/i,
   new RegExp(`^\\s*(?:run|execute)\\s+(?:${DET}|${COMMAND})\\b`, "i"),
   new RegExp(`${AT_START}skip\\s+(?:${DET}|verification|checks?)\\b`, "i"),
-  new RegExp(`${AT_START_ES}(?:ignora|no compruebes|ejecuta|debes)\\b`, "i"),
+  new RegExp(`${AT_START_ES}(?:ignora|ejecuta)\\b`, "i"),
+  // Second person: an order, never a statement about the app, so anywhere.
+  /\b(?:debes|no compruebes)\b/i,
+  // A path or a file name after run/execute, and a permission to skip or ignore.
+  /^\s*(?:run|execute)\s+(?:\.{0,2}\/|\S+\.(?:sh|bash|js|mjs|ts|py|exe|bat|cmd|ps1)\b)/i,
+  /\b(?:can|may|should|safe to|fine to|ok to|okay to)\s+(?:skip|ignore|disregard)\b/i,
   new RegExp(`^\\s*(?:siempre|nunca)\\s+(?!(?:${SEEN_ES})(?:\\s|$))\\w+`, "i")
 ];
 var SECRET = [
@@ -27594,7 +27599,8 @@ var command35 = (args, ctx) => {
       if (!logged || logged.result !== v.result) {
         appendEvent(io.cwd, { ts: ts(), kind: "verify-flow", runId: pass.runId, result: v.result, passed, total, dir: relDir });
       }
-      updateExecution(mainCheckout(io.cwd), (cur) => cur && cur.runId === pass.runId ? { ...cur, flow: { sha: pass.head, at: ts(), result: v.result, since: pass.since } } : null);
+      const recorded = { sha: pass.head, at: ts(), result: v.result, since: pass.since, ...pass.whole ? { whole: true } : {} };
+      updateExecution(mainCheckout(io.cwd), (cur) => cur && cur.runId === pass.runId ? { ...cur, flow: recorded } : null);
     } else {
       const last = eventsOf(ledger, { project: resolveProject({ flag: flag("project"), dir: dirArg, task, events: ledger }), task }).filter((e) => e.kind === "verify" && isTask(e, task) && typeof e.result === "string").at(-1);
       if (!last || last.result !== v.result || last.passed !== passed || last.total !== total || last.evidence !== evField) logVerifyResult(io.cwd, ts(), task, dir, v);
@@ -27792,6 +27798,7 @@ function runPlan(ctx) {
   const since = sinceArg ?? (has("whole-run") ? runStart(e, git2) : flowSince(e, git2));
   if (!since) return none("nothing integrated yet");
   const head2 = (git2(["rev-parse", "HEAD"]) ?? "").trim();
+  if (has("whole-run") && e.flow?.whole && e.flow.result !== "blocked" && head2 && e.flow.sha === head2) return none("the whole run was already verified at this commit");
   const names2 = git2(["diff", "--name-only", `${since}..HEAD`]);
   if (!head2 || names2 === null) throw new UsageError(`verify-plan --run: cannot diff ${since}..HEAD`);
   const changed = names2.split("\n").map((s2) => s2.trim()).filter(Boolean);
@@ -27834,7 +27841,7 @@ function runPlan(ctx) {
     });
     (0, import_node_fs71.writeFileSync)(import_node_path68.default.join(dir, "brief.md"), flowBrief(e.runId, n, listed));
     (0, import_node_fs71.writeFileSync)(import_node_path68.default.join(dir, "diff.patch"), git2(["diff", `${since}..HEAD`]) ?? "");
-    const doc = { runId: e.runId, n, id, since, head: head2, at: ts() };
+    const doc = { runId: e.runId, n, id, since, head: head2, at: ts(), ...has("whole-run") ? { whole: true } : {} };
     (0, import_node_fs71.writeFileSync)(import_node_path68.default.join(dir, "flow.json"), JSON.stringify(doc, null, 2) + "\n");
     const rel3 = (f) => import_node_path68.default.relative(io.cwd, f).split(import_node_path68.default.sep).join("/");
     flow = { ...doc, dir: rel3(dir), brief: rel3(import_node_path68.default.join(dir, "brief.md")), diff: rel3(import_node_path68.default.join(dir, "diff.patch")), evidence: rel3(import_node_path68.default.join(dir, "evidence")) };
