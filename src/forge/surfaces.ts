@@ -65,7 +65,12 @@ const INSTRUCTION = [
   // «Always shows…» is a statement (a verb in -s); «Always use…» is an order.
   /^\s*(?:always|never)\s+(?!\w*[^s\W]s\b)\w+/i,
   new RegExp(`^\\s*(?:run|execute)\\s+(?:${DET}|${COMMAND})\\b`, 'i'), new RegExp(`${AT_START}skip\\s+(?:${DET}|verification|checks?)\\b`, 'i'),
-  new RegExp(`${AT_START_ES}(?:ignora|no compruebes|ejecuta|debes)\\b`, 'i'),
+  new RegExp(`${AT_START_ES}(?:ignora|ejecuta)\\b`, 'i'),
+  // Second person: an order, never a statement about the app, so anywhere.
+  /\b(?:debes|no compruebes)\b/i,
+  // A path or a file name after run/execute, and a permission to skip or ignore.
+  /^\s*(?:run|execute)\s+(?:\.{0,2}\/|\S+\.(?:sh|bash|js|mjs|ts|py|exe|bat|cmd|ps1)\b)/i,
+  /\b(?:can|may|should|safe to|fine to|ok to|okay to)\s+(?:skip|ignore|disregard)\b/i,
   new RegExp(`^\\s*(?:siempre|nunca)\\s+(?!(?:${SEEN_ES})(?:\\s|$))\\w+`, 'i'),
 ];
 const SECRET = [
