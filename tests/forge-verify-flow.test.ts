@@ -109,6 +109,14 @@ describe('the flow pass (K2-13)', () => {
     expect(whole.flow).toMatchObject({ n: 3, since: base });
     expect(readFileSync(path.join(root, whole.flow.diff), 'utf8')).toContain('src/ui/Cart.tsx');
     expect(readFileSync(path.join(root, whole.flow.brief), 'utf8')).toContain('- T1: Cart badge');
+    // M-2: a whole-run pass that closed at this commit is not run twice; a plain pass or another commit still is.
+    expect(whole.flow.whole).toBe(true);
+    writeFileSync(path.join(root, whole.flow.dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'pass', checks: [] }));
+    expect(run(['verify-close', '--flow', whole.flow.dir, '--locale', 'en'], io).code).toBe(0);
+    expect(readExecution(root)!.flow).toMatchObject({ sha: whole.flow.head, whole: true });
+    expect(vp('--whole-run')).toMatchObject({ flow: null, reason: 'the whole run was already verified at this commit' });
+    integrate('T4', 'src/ui/Other.tsx');
+    expect(vp('--whole-run').flow).toMatchObject({ n: 4, whole: true });
     const both = run(['verify-plan', '--run', '--whole-run', '--since', base], io);
     expect(both.code).toBe(2);
     expect(both.stderr).toContain('--since and --whole-run');

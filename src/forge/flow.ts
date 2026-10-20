@@ -81,7 +81,7 @@ export function flowBrief(runId: string, n: number, tasks: { id: string; title: 
 }
 
 /** A pass's flow.json, written by verify-plan --run. */
-export interface FlowDoc { runId: string; n: number; id: string; since: string; head: string; at: string }
+export interface FlowDoc { runId: string; n: number; id: string; since: string; head: string; at: string; whole?: boolean }
 
 /** The flow.json of a pass's folder, or null when there is none or it is not one. */
 export function readFlow(dir: string): FlowDoc | null {

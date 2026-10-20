@@ -74,6 +74,8 @@ function runPlan(ctx: Ctx): Result {
   const since = sinceArg ?? (has('whole-run') ? runStart(e, git) : flowSince(e, git));
   if (!since) return none('nothing integrated yet');
   const head = (git(['rev-parse', 'HEAD']) ?? '').trim();
+  // A whole-run pass that closed (not blocked) at this very commit is not repeated, e.g. by a second entry into the finish.
+  if (has('whole-run') && e.flow?.whole && e.flow.result !== 'blocked' && head && e.flow.sha === head) return none('the whole run was already verified at this commit');
   const names = git(['diff', '--name-only', `${since}..HEAD`]);
   if (!head || names === null) throw new UsageError(`verify-plan --run: cannot diff ${since}..HEAD`);
   const changed = names.split('\n').map(s => s.trim()).filter(Boolean);
@@ -114,7 +116,7 @@ function runPlan(ctx: Ctx): Result {
     });
     writeFileSync(path.join(dir, 'brief.md'), flowBrief(e.runId, n, listed));
     writeFileSync(path.join(dir, 'diff.patch'), git(['diff', `${since}..HEAD`]) ?? '');
-    const doc = { runId: e.runId, n, id, since, head, at: ts() };
+    const doc = { runId: e.runId, n, id, since, head, at: ts(), ...(has('whole-run') ? { whole: true } : {}) };
     writeFileSync(path.join(dir, 'flow.json'), JSON.stringify(doc, null, 2) + '\n');
     const rel = (f: string) => path.relative(io.cwd, f).split(path.sep).join('/');
     flow = { ...doc, dir: rel(dir), brief: rel(path.join(dir, 'brief.md')), diff: rel(path.join(dir, 'diff.patch')), evidence: rel(path.join(dir, 'evidence')) };
