@@ -497,7 +497,8 @@ function follow(c: Ctx, task: string, t: ExecTask, n: number, round: number, r: 
     if (deferred) writeJson(path.join(c.io.cwd, deferred), out.deferred);
     if (!call(c, task, ['swarm', 'task', task, '--stage', 'verdict', '--status', 'accepted', '--no-agent'])) return;
     answered();
-    c.actions.push({ type: 'accepted', task, score: out.score ?? null, deferred: deferred && slash(deferred), ...v });
+    const envUnverified = envUnverifiedOf(out.deferred);
+    c.actions.push({ type: 'accepted', task, score: out.score ?? null, deferred: deferred && slash(deferred), ...(envUnverified ? { envUnverified } : {}), ...v });
     return;
   }
   if (next === 'resume' || next === 'fresh-stronger' || next === 'redo') {
@@ -652,6 +653,13 @@ const SAY: Record<string, [string, string]> = {
   stalled: ['la ejecución se detuvo: {x}', 'the execution stalled: {x}'],
 };
 
+/** H1: the ids review-close deferred as env-unverified, for the accepted action; undefined when none. */
+export function envUnverifiedOf(deferred: unknown): string[] | undefined {
+  const ids = (Array.isArray(deferred) ? deferred : []).filter(isObject)
+    .filter(f => f.residual === 'env-unverified' && typeof f.id === 'string').map(f => f.id as string);
+  return ids.length ? ids : undefined;
+}
+
 /** One line for the person: what this step did, task by task, or that it waits. */
 export function stepSay(actions: StepAction[], wait: number | null, locale: 'es' | 'en'): string {
   const i = locale === 'es' ? 0 : 1;
@@ -659,7 +667,9 @@ export function stepSay(actions: StepAction[], wait: number | null, locale: 'es'
     const s = SAY[a.type];
     if (!s) return [];
     const x = a.type === 'spawnImplementer' ? a.agent : a.type === 'error' ? a.command : a.type === 'block' || a.type === 'stalled' ? a.reason : '';
-    return [s[i].replace('{t}', String(a.task ?? 'swarm step')).replace('{x}', String(x ?? ''))];
+    const env = a.type === 'accepted' && Array.isArray(a.envUnverified) && a.envUnverified.length
+      ? ` (${a.envUnverified.join(', ')} ${locale === 'es' ? 'sin volver a comprobar: entorno' : 'not checked again: environment'})` : '';
+    return [s[i].replace('{t}', String(a.task ?? 'swarm step')).replace('{x}', String(x ?? '')) + env];
   });
   const head = locale === 'es' ? 'Paso' : 'Step';
   if (parts.length) return `${head}: ${parts.join('; ')}.`;

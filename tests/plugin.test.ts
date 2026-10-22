@@ -2140,4 +2140,6 @@ describe('plugin layout', () => {
       }
     }
   });
+
+  it('convergence names the env-unverified residual (H1)', () => expect(runRef('convergence')).toContain('`env-unverified`'));
 });

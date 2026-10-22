@@ -18,7 +18,7 @@ import { roundDecision } from '../round.js';
 import { eventsOf, isTask, ofTask, readWorkDir, resolveProject, taskLine } from '../task-ref.js';
 import { keepEvidence } from '../evidence-copy.js';
 import {
-  parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, carriedOutOfModel, openIds, closedFor, envHeld, previousFindings,
+  parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, envUnverified, carriedOutOfModel, openIds, closedFor, envHeld, previousFindings,
   asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex,
 } from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
@@ -764,6 +764,13 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   if (carriedResidual.length) {
     result.deferred.push(...carriedResidual);
     result.reasons.push(`${carriedResidual.length} residual finding(s) of earlier reviews still open (${[...new Set(carriedResidual.map(f => f.residual))].join(', ')})`);
+  }
+  // H1: when verify abstained, the findings it left open were not checked again: the accept lists them as env-unverified
+  // (the index above keeps them open, because verify did not answer).
+  const unverified = result.action === 'accept' && !fresh ? envUnverified(index, round, withIds, result) : [];
+  if (unverified.length) {
+    result.deferred.push(...unverified);
+    result.reasons.push(`verify abstained: ${unverified.map(f => f.id).join(', ')} not checked again (env-unverified)`);
   }
   if (!Array.isArray(rows)) result.reasons.push('no validation recorded');
   if (preexisting.length) result.reasons.push(`already failing on the base commit, not counted: ${preexisting.join(', ')}`);

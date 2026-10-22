@@ -6,7 +6,7 @@ import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { readExecution } from '../src/forge/execution.js';
 import * as ledger from '../src/forge/ledger.js';
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
-import { publishOf, swarmStep, stepSay } from '../src/forge/cli/step.js';
+import { publishOf, swarmStep, stepSay, envUnverifiedOf } from '../src/forge/cli/step.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
@@ -317,6 +317,15 @@ describe('forge swarm step (D-12)', () => {
         if (!runWide) expect(said, `${type} (${locale})`).toContain('T9');
       }
     }
+  });
+  it('an accepted task with findings verify could not check again says so (H1)', () => {
+    expect(stepSay([{ type: 'accepted', task: 'T1', envUnverified: ['F1', 'F3'] }], null, 'en')).toBe('Step: T1 accepted (F1, F3 not checked again: environment).');
+    expect(stepSay([{ type: 'accepted', task: 'T1', envUnverified: ['F1'] }], null, 'es')).toBe('Paso: T1 aceptada (F1 sin volver a comprobar: entorno).');
+    expect(stepSay([{ type: 'accepted', task: 'T1' }], null, 'en')).toBe('Step: T1 accepted.');
+  });
+  it('envUnverifiedOf takes the ids review-close deferred as env-unverified (H1)', () => {
+    expect(envUnverifiedOf([{ id: 'F1', residual: 'env-unverified' }, { id: 'F2', residual: 'hardening' }])).toEqual(['F1']);
+    expect(envUnverifiedOf([])).toBeUndefined();
   });
   it("passes the tick's warnings on to its own stderr, its JSON as it was (M5)", () => {
     writeFileSync(path.join(root, 'db', 'state', 'T9.json'), '{oops');

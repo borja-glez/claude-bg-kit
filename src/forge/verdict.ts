@@ -8,7 +8,7 @@ export type ReviewerName = 'correctness' | 'security' | 'perf' | 'verify';
 export type Origin = 'previous' | 'fix' | 'untouched';
 const ORIGINS = ['previous', 'fix', 'untouched'] as const;
 /** Why a critical or important finding does not block (C-04, §4.7): the CLI sets it. */
-export type Residual = 'untouched' | 'hardening' | 'late-round' | 'cap' | 'docs' | 'out-of-model' | 'architecture';
+export type Residual = 'untouched' | 'hardening' | 'late-round' | 'cap' | 'docs' | 'out-of-model' | 'architecture' | 'env-unverified';
 export interface Finding {
   severity: 'critical' | 'important' | 'minor'; file?: string; line?: number; problem: string; fix?: string; origin?: Origin;
   /** The finding's stable id within its brief (F1, F2…): a delta reviewer copies it; the CLI assigns it (J-06). */

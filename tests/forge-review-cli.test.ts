@@ -1251,17 +1251,18 @@ describe('forge review-close', () => {
     expect(out).toMatchObject({ action: 'accept', invalid: [] });
   });
 
+  const next = (k: number) => { writeFileSync(path.join(wt, 'a.txt'), `one\ntwo\n${k}\n`); git('commit', '-q', '-am', `fix ${k}`); prep(); };
+  const verify = (dir: string, checks: Record<string, unknown>[]) => {
+    write(dir, 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    if (dir === r1()) write(dir, 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(dir, 'verify', { surfaces: ['web'], result: 'fail', checks: checks.map((c, i) => ({ id: i + 1, surface: 'web', expected: 'x', ...c })) });
+  };
+  const index = (k: number) => JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8')).rounds[k - 1].findings
+    .map((f: { id: string; check?: string; status: string }) => [f.id, f.check, f.status]);
+
   it('a check that fails only for the environment leaves its open finding open, and its next real failure blocks as the same id (I2)', () => {
     noExpress();
     const r3 = path.join(work(), 'reviews-1-3');
-    const next = (k: number) => { writeFileSync(path.join(wt, 'a.txt'), `one\ntwo\n${k}\n`); git('commit', '-q', '-am', `fix ${k}`); prep(); };
-    const verify = (dir: string, checks: Record<string, unknown>[]) => {
-      write(dir, 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
-      if (dir === r1()) write(dir, 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
-      write(dir, 'verify', { surfaces: ['web'], result: 'fail', checks: checks.map((c, i) => ({ id: i + 1, surface: 'web', expected: 'x', ...c })) });
-    };
-    const index = (k: number) => JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8')).rounds[k - 1].findings
-      .map((f: { id: string; check?: string; status: string }) => [f.id, f.check, f.status]);
     // Review 1: check A of the main flow fails for real: F1.
     prep();
     verify(r1(), [{ name: 'A', main: true, ok: false, observed: 'y' }]);
@@ -1281,6 +1282,20 @@ describe('forge review-close', () => {
     expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-3.json'), 'utf8')).findings.map((f: { id: string; severity: string }) => [f.id, f.severity]))
       .toEqual([['F1', 'critical']]);
     expect(index(3)).toEqual([['F1', 'A', 'open'], ['F2', 'B', 'closed']]);
+  });
+
+  it('a round where verify could only fail by the environment accepts with its open finding in deferred as env-unverified, still open in the index (H1)', () => {
+    noExpress();
+    prep();
+    verify(r1(), [{ name: 'A', main: true, ok: false, observed: 'y' }]);
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    next(2);
+    verify(r2(), [{ name: 'A', main: true, ok: false, env: true, observed: 'port busy' }]);
+    const two = JSON.parse(close().stdout);
+    expect(two.action).toBe('accept');
+    expect(two.deferred).toEqual([expect.objectContaining({ id: 'F1', residual: 'env-unverified', check: 'A', file: 'verify/web' })]);
+    expect(two.reasons).toContain('verify abstained: F1 not checked again (env-unverified)');
+    expect(index(2)).toEqual([['F1', 'A', 'open']]);
   });
 
   it('with verify-env.json, the round stops waiting for verify.json once a verify-skip names every surface verify-pending.json lists (M1)', () => {

@@ -19,7 +19,7 @@ const REVIEWERS: readonly ReviewerName[] = ['correctness', 'security', 'perf', '
 const STATUSES: readonly IndexStatus[] = ['open', 'closed', 'residual', 'minor'];
 const SEVERITIES: readonly Finding['severity'][] = ['critical', 'important', 'minor'];
 const ORIGINS: readonly Origin[] = ['previous', 'fix', 'untouched'];
-const RESIDUALS: readonly Residual[] = ['untouched', 'hardening', 'late-round', 'cap', 'docs', 'out-of-model', 'architecture'];
+const RESIDUALS: readonly Residual[] = ['untouched', 'hardening', 'late-round', 'cap', 'docs', 'out-of-model', 'architecture', 'env-unverified'];
 /** The residuals that go to the implementer with the blocking findings, and so to the next delta reviewer. */
 const SENT: readonly Residual[] = ['untouched', 'docs', 'late-round'];
 
@@ -214,11 +214,24 @@ export function envHeld(index: FindingsIndex, round: number, reviews: Partial<Re
  *  `residual` (§4.7: on an accept every residual goes to deferred and the final report). */
 export function carriedResiduals(index: FindingsIndex, round: number, verdict: Judged): Finding[] {
   const seen = judgedIds(verdict);
-  return (previousOf(index, round)?.findings ?? []).filter(f => unsent(f) && !seen.has(f.id)).map(f => ({
-    id: f.id, reviewer: f.reviewer, severity: f.severity, ...(f.file ? { file: f.file } : {}), ...(f.line !== undefined ? { line: f.line } : {}),
-    problem: f.problem, ...(f.fix ? { fix: f.fix } : {}), ...(f.origin ? { origin: f.origin } : {}), ...(f.regression ? { regression: true } : {}),
-    ...(f.residual ? { residual: f.residual } : {}),
-  }));
+  return (previousOf(index, round)?.findings ?? []).filter(f => unsent(f) && !seen.has(f.id)).map(findingOf);
+}
+
+/** An index entry as a verdict Finding: what carriedResiduals and envUnverified hand to deferred. */
+const findingOf = (f: IndexedFinding): Finding => ({
+  id: f.id, reviewer: f.reviewer, severity: f.severity, ...(f.file ? { file: f.file } : {}), ...(f.line !== undefined ? { line: f.line } : {}),
+  problem: f.problem, ...(f.fix ? { fix: f.fix } : {}), ...(f.origin ? { origin: f.origin } : {}), ...(f.regression ? { regression: true } : {}),
+  ...(f.residual ? { residual: f.residual } : {}),
+});
+
+/** H1: when verify abstained in this review (blocked, or its checks failed only for the environment), the verify findings
+ *  the previous review left open (not `unsent`: carriedResiduals lists those) that this verdict does not name: nobody
+ *  checked them again. An accept lists them in its deferred as `env-unverified`; the index keeps them open. */
+export function envUnverified(index: FindingsIndex, round: number, reviews: Partial<Record<ReviewerName, Review>>, verdict: Judged): Finding[] {
+  if (reviews.verify?.abstained !== true) return [];
+  const seen = judgedIds(verdict);
+  return (previousOf(index, round)?.findings ?? []).filter(f => f.reviewer === 'verify' && isOpen(f) && !unsent(f) && !seen.has(f.id))
+    .map(f => ({ ...findingOf(f), ...(f.check ? { check: f.check } : {}), residual: 'env-unverified' as const }));
 }
 
 /** M1: the findings ruled out of the threat model in earlier reviews that this verdict does not name: recordRound carries
