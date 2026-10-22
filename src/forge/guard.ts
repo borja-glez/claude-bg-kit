@@ -80,7 +80,7 @@ export function isInside(p: string, dir: string): boolean {
 }
 
 // node or node.exe, its flags, the path of forge.cjs bare or quoted, and the arguments up to the end of that command.
-const FORGE_CALL = /\bnode(?:\.exe)?\s+(?:-\S+\s+)*(?:"[^"\n]*forge\.cjs"|'[^'\n]*forge\.cjs'|[^\s"'`;|&<>]*forge\.cjs)(?=[\s"'`;|&<>]|$)([^\n;|&]*)/gi;
+const FORGE_CALL = /\bnode(?:\.exe)?["']?\s+(?:-\S+\s+)*(?:"[^"\n]*forge\.cjs"|'[^'\n]*forge\.cjs'|[^\s"'`;|&<>]*forge\.cjs)(?=[\s"'`;|&<>]|$)([^\n;|&]*)/gi;
 
 /** The arguments of each `node … forge.cjs` call of a command line, trimmed. */
 export function forgeCalls(command: string): string[] {

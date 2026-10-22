@@ -2166,6 +2166,8 @@ describe('forge waypoint-cli', () => {
         const none = toTask();
         expect(none.code).toBe(2);
         expect(none.stderr).toContain("no mark of the roadmap's owner");
+        expect(none.stderr).toContain(`/forge:decide ${a} confirm`);
+        expect(none.stderr).not.toContain('<id>');
         writeFileSync(page, JSON.stringify({ rules: 1 }) + '\n');
         const old = toTask();
         expect(old.code).toBe(2);

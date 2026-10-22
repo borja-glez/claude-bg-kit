@@ -419,8 +419,8 @@ function postCommit(io: Io, input: HookInput): string {
         // I1: a line whose sha is not a sha never reaches git (`--output=<file>` would be an option); it stays as it is.
         if (!s || !SHA.test(s) || checked >= MAX_COMMITS) return [l];
         checked++;
-        if (git(['merge-base', '--is-ancestor', '--end-of-options', s, at.head]) !== null) return [l];
-        const subject = replays.length ? git(['log', '-1', '--format=%s', '--end-of-options', s])?.trim() : undefined; // fail-open: no subject, the line goes
+        if (git(['merge-base', '--is-ancestor', s, at.head]) !== null) return [l];
+        const subject = replays.length ? git(['log', '-1', '--format=%s', s])?.trim() : undefined; // fail-open: no subject, the line goes
         const k = subject ? replays.findIndex(r => r.subject === subject && git(['merge-base', '--is-ancestor', r.sha, at.head]) !== null) : -1;
         if (k < 0) return [];
         const [r] = replays.splice(k, 1);

@@ -2155,7 +2155,17 @@ describe('plugin layout', () => {
     const work = read('plugins/waypoint/skills/work/SKILL.md');
     const line = work.slice(work.indexOf('**Intermediate commits.**'), work.indexOf('After each commit that is not the task'));
     for (const w of ['`commit`', '`commit (amend)`', '`commit (initial)`', '`commit (merge)`', '`revert`', '`cherry-pick`', 'rebase']) expect(line, w).toContain(w);
-    for (const w of ['in any of its worktrees', '`rebase --continue`', '`am`,']) expect(line, w).not.toContain(w);
+    for (const w of ['in any of its worktrees', '`rebase --continue`', '`am`,', "plus a rebase's replays"]) expect(line, w).not.toContain(w);
+  });
+  it('the READMEs say what a second seat records and which characters end a forge call (6a N2, N3)', () => {
+    for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
+      const line = read(f).split('\n').find(l => l.includes('main-2'))!;
+      for (const w of ['`rebase --continue`', '`am`']) expect(line, `${f}: ${w}`).not.toContain(w);
+    }
+    for (const [f, head] of [['plugins/forge/README.md', '**False positives.**'], ['plugins/forge/README.es.md', '**Falsos positivos.**']]) {
+      const line = read(f).split('\n').find(l => l.includes(head))!;
+      for (const w of ['`;`', '`|`', '`&`']) expect(line, `${f}: ${w}`).toContain(w);
+    }
   });
 
   it('the Small path closes with verify-close, the flow pass is closed before the verdicts, and a session without a track continues in the worktree of its branch (H2, H3, H6)', () => {

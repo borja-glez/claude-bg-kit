@@ -95,3 +95,10 @@ describe('work folders in the skills of forge (D-08)', () => {
     expect('`<WORK>` = a task\'s folder; then `mkdir -p .forge/work/T`.'.replace(WORK_DEFINITION, '')).toMatch(/\.forge\/work\/T(?=[/\s`])/);
   });
 });
+
+describe('git compatibility (6a N1)', () => {
+  it('no git call of src/ needs git 2.24: no --end-of-options', () => {
+    const hits = files(path.join(ROOT, 'src')).filter(f => readFileSync(f, 'utf8').includes('--end-of-options')).map(f => path.relative(ROOT, f));
+    expect(hits).toEqual([]);
+  });
+});

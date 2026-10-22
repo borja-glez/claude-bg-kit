@@ -407,7 +407,7 @@ It also denies a Bash or PowerShell call that runs `hook answer` or `local set c
 **Limits.** The guard is a pattern guard, not a sandbox. Know where it does not reach:
 - **Bypasses.** Quoting that breaks the words: a closing quote right after the word (`bash -c "node …forge.cjs hook answer"`) or a quoted word (`hook "answer"`); a quoted forge path is denied. Also node flags that take a value, scripts and indirection, and the `nodejs` binary name.
 - **Path names it cannot see.** Names only the disk resolves: 8.3 short names, links or junctions, and volume aliases such as `\\?\Volume{GUID}` or `\\localhost\C$`.
-- **False positives.** Any text that mentions such a call and has a space, an end of line, `<`, `>`, `(`, `)` or a backtick right after the words is denied, for example a commit message or an `echo`. Only a quote right after the words passes.
+- **False positives.** Any text that mentions such a call is denied when the words are followed by a space or tab, an end of line, `;`, `|`, `&`, `<`, `>`, `(`, `)` or a backtick, for example a commit message or an `echo`; anything else right after them (a quote, `,`, `.`, `:`) passes.
 - **Answers.** If a setting ran AskUserQuestion without showing its dialog, `answers` written by the model could reach `tool_response`, and the authorizations of the merge question share this. The authorizations do not compare the question's header and options.
 - **Project directory.** When `CLAUDE_PROJECT_DIR` points outside the session's repository, the auth and trust rules use that directory and can miss. This fails open, as does any internal error of the hook.
 

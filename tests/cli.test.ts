@@ -1689,6 +1689,16 @@ describe('classic hooks', () => {
       expect(lh.session).toBe('A');
       expect(Object.values(lh.heads)).toEqual([git('rev-parse', 'HEAD')]);
     });
+    it('a new base keeps the reflog stat last-head.json stored (6a N5)', () => {
+      setup(); gitInit(); bindAs('A');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      const lh = JSON.parse(readFileSync(wp('last-head.json'), 'utf8'));
+      const top = Object.keys(lh.heads)[0];
+      writeFileSync(wp('last-head.json'), JSON.stringify({ ...lh, logs: { [top]: { size: 1, mtimeMs: 2 } } }));
+      commitFile('a.txt');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      expect(JSON.parse(readFileSync(wp('last-head.json'), 'utf8')).logs[top]).toEqual({ size: 1, mtimeMs: 2 });
+    });
     it('resolves the project from CLAUDE_PROJECT_DIR, then the input cwd, then the process cwd', () => {
       setup();
       const elsewhere = tmp('wp-else-');

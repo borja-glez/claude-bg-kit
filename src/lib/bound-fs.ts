@@ -316,6 +316,6 @@ export function recordBase(seatDir: string, session: string, cwd: string): void 
   const pos = mine?.reflog?.[at.top];
   // H2: a file from before the reflog position also gets one now, so the next commit reads from here.
   if (heads[at.top] !== at.head || (newest && !pos)) {
-    writeLastHead(seatDir, { session, heads: { ...heads, [at.top]: at.head }, recorded: mine?.recorded, reflog: { ...mine?.reflog, ...(newest ? { [at.top]: { at: newest.at, sha: newest.sha } } : {}) } });
+    writeLastHead(seatDir, { session, heads: { ...heads, [at.top]: at.head }, recorded: mine?.recorded, logs: mine?.logs, reflog: { ...mine?.reflog, ...(newest ? { [at.top]: { at: newest.at, sha: newest.sha } } : {}) } });
   }
 }

@@ -100,8 +100,14 @@ describe('the trust rules of the guard (D9)', () => {
       ['(node /p/forge.cjs hook answer)', 'hook-answer'],
       ['x=$(node /p/forge.cjs hook answer)', 'hook-answer'],
       ['`node /p/forge.cjs hook answer`', 'hook-answer'],
+      ['& "node.exe" "C:\\x\\forge.cjs" hook answer', 'hook-answer', 'PowerShell'],
+      ['& "C:\\Program Files\\nodejs\\node.exe" "C:\\x\\forge.cjs" local set commands allowed', 'local-set-commands', 'PowerShell'],
     ];
     for (const [command, id, tool] of cases) expect(ruleOf(sh(command, tool)), command).toBe(id);
+  });
+  it('a forge call ends at a separator and passes after any other character (6a N3)', () => {
+    expect(ruleOf(sh('echo node /p/forge.cjs hook answer; true'))).toBe('hook-answer');
+    expect(sh('echo node /p/forge.cjs hook answer, done')).toEqual({ decision: 'allow' });
   });
   it('lets through every other forge call and any text that only mentions them (Review Focus 1)', () => {
     for (const command of ['node /p/dist/forge.cjs local set surfaces.web allowed --expect h --cwd wt', 'node /p/dist/forge.cjs local get commands',
