@@ -425,6 +425,8 @@ describe('validators in parallel, retried only with a flaky history (C-12)', () 
     expect(runOptions(cfg('flaky'), [], now).retry(t)).toBe(false);
     expect(runOptions(cfg('never'), [], now, undefined, base).retry(t)).toBe(false);
     expect(runOptions(cfg('always'), [], now, undefined, base).retry(b)).toBe(true);
+    // A test validator the base already failed is not retried: the failure is not new.
+    expect(runOptions(cfg('flaky'), [], now, undefined, baselineFailing([{ validator: 'test', ok: false }])).retry(t)).toBe(false);
   });
 });
 

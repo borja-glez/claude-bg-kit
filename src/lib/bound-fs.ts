@@ -5,7 +5,7 @@
 // M6: the pid rule (pidAlive, and through it boundLive, settleBinding, leftSeatOf and secondSeatOf) is Node-only. The
 // band reads the raw bindings and cannot apply it: a binding whose process died stays live there until its lease ends
 // (5 minutes), while the hooks, which settle what they read, already see it ended.
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { bindingLive, BOUND_MAX_BYTES, BOUND_REREAD_MS, CACHE_DOCS_MAX, MAX_PROJECTS, MAX_SEATS, parseBound, SESSION_MAX_BYTES, type BoundDoc } from './bound.js';
@@ -175,7 +175,9 @@ export function leftSeatOf(seats: readonly Seat[], open: Readonly<Record<string,
  * last-head.json: the base post-commit compares HEAD with, per conversation and worktree (A-17), and per worktree the
  * newest commit of each of this seat's recordings (C2: what another seat on the same worktree must not take).
  */
-export interface LastHead { session: string; heads: Record<string, string>; recorded?: Record<string, string[]>; reflog?: Record<string, ReflogPos> }
+export interface LastHead { session: string; heads: Record<string, string>; recorded?: Record<string, string[]>; reflog?: Record<string, ReflogPos>; logs?: Record<string, LogStat> }
+/** M3: size and mtime of `<git dir>/logs/HEAD` when the hook last read the reflog; unchanged, the reflog holds nothing new. */
+export interface LogStat { size: number; mtimeMs: number }
 /** One line of the reflog of HEAD: `at` in unix seconds, `action` the subject before its first ': ' ('commit (amend)', 'merge side', 'pull'). */
 export interface ReflogEntry { at: number; sha: string; action: string; subject?: string }
 /** Where post-commit left off in the reflog of a worktree: its newest entry then. */
@@ -189,13 +191,27 @@ export const REFLOG_SCAN = 200;
 /** At most this many recordings are remembered per worktree, for this many worktrees. */
 const RECORDED_MAX = 20;
 const RECORDED_TOPS = 10;
-/** The top level (resolved) and HEAD of the worktree `cwd`; null outside a repository or before its first commit. */
-export function headOf(cwd: string): { top: string; head: string } | null {
+/** The top level (resolved), the git dir of that worktree (where its HEAD reflog lives) and HEAD of the worktree `cwd`; null outside a repository or before its first commit. */
+export function headOf(cwd: string): { top: string; gitDir: string; head: string } | null {
   try {
-    const [top, head] = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    const [top, gitDir, head] = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel', '--absolute-git-dir', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
       .split(/\r?\n/).map(l => l.trim());
-    return top && head && SHA.test(head) ? { top: path.resolve(top), head } : null;
+    return top && gitDir && head && SHA.test(head) ? { top: path.resolve(top), gitDir: path.resolve(gitDir), head } : null;
   } catch { return null; }
+}
+/** M3: size and mtime of the HEAD reflog file in `gitDir`; null when it cannot be read. */
+export function logStatOf(gitDir: string): LogStat | null {
+  try {
+    const st = statSync(path.join(gitDir, 'logs', 'HEAD'));
+    return { size: st.size, mtimeMs: st.mtimeMs };
+  } catch { return null; /* fail-open: no stat, the reflog is read */ }
+}
+/** I3/M1: a rebase (or an `am`) is stopped in the worktree of `top`: git keeps its state in rebase-merge or rebase-apply. */
+export function rebaseInProgress(top: string): boolean {
+  try {
+    const out = execFileSync('git', ['-C', top, 'rev-parse', '--git-path', 'rebase-merge', '--git-path', 'rebase-apply'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.split(/\r?\n/).map(l => l.trim()).filter(Boolean).some(p => existsSync(path.resolve(top, p)));
+  } catch { return false; /* fail-open: the lines are rewritten as before */ }
 }
 /** The reflog of HEAD in the worktree `top`, newest first (at most `max`); [] when git fails. */
 export function readReflog(top: string, max = REFLOG_SCAN): ReflogEntry[] {
@@ -214,7 +230,7 @@ export function readReflog(top: string, max = REFLOG_SCAN): ReflogEntry[] {
   }
   return out;
 }
-const REPLAY_ACTION = /^(rebase|pull --rebase)\b.*\((pick|reword|edit|squash|fixup)\)$/;
+const REPLAY_ACTION = /^(rebase|pull --rebase)\b.*\((pick|reword|edit|squash|fixup|continue)\)$/;
 /** I3: the commits a rebase (or `pull --rebase`) replayed after the position `pos`: [{ subject of the commit it copied, its new sha }],
  *  oldest first. The reflog subject of such an entry is the copied commit's own subject. */
 export function replaysSince(entries: readonly ReflogEntry[], pos: ReflogPos | null): { subject: string; sha: string }[] {
@@ -255,7 +271,7 @@ export function readLastHead(seatDir: string): LastHead | null {
   const text = readText(lastHeadFile(seatDir), 64 * 1024);
   if (text === null) return null;
   try {
-    const o = JSON.parse(text) as { session?: unknown; heads?: unknown; recorded?: unknown; reflog?: unknown } | null;
+    const o = JSON.parse(text) as { session?: unknown; heads?: unknown; recorded?: unknown; reflog?: unknown; logs?: unknown } | null;
     if (!o || !isSafeId(o.session) || !o.heads || typeof o.heads !== 'object' || Array.isArray(o.heads)) return null;
     const heads: Record<string, string> = {};
     for (const [k, v] of Object.entries(o.heads as Record<string, unknown>).slice(-HEADS_MAX)) if (typeof v === 'string' && SHA.test(v)) heads[k] = v;
@@ -272,13 +288,21 @@ export function readLastHead(seatDir: string): LastHead | null {
         if (p && Number.isInteger(p.at) && (p.at as number) >= 0 && typeof p.sha === 'string' && SHA.test(p.sha)) reflog[k] = { at: p.at as number, sha: p.sha };
       }
     }
-    return { session: o.session, heads, recorded, reflog };
+    const logs: Record<string, LogStat> = {};
+    if (o.logs && typeof o.logs === 'object' && !Array.isArray(o.logs)) {
+      for (const [k, v] of Object.entries(o.logs as Record<string, unknown>).slice(-HEADS_MAX)) {
+        const s = v as { size?: unknown; mtimeMs?: unknown } | null;
+        if (s && typeof s.size === 'number' && typeof s.mtimeMs === 'number') logs[k] = { size: s.size, mtimeMs: s.mtimeMs };
+      }
+    }
+    return { session: o.session, heads, recorded, reflog, logs };
   } catch { return null; }
 }
 export function writeLastHead(seatDir: string, doc: LastHead): void {
   const recorded = Object.fromEntries(Object.entries(doc.recorded ?? {}).filter(([, v]) => v.length).slice(-RECORDED_TOPS).map(([k, v]) => [k, v.slice(-RECORDED_MAX)]));
   const reflog = Object.fromEntries(Object.entries(doc.reflog ?? {}).slice(-HEADS_MAX));
-  const out = { session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)), ...(Object.keys(recorded).length ? { recorded } : {}), ...(Object.keys(reflog).length ? { reflog } : {}) };
+  const logs = Object.fromEntries(Object.entries(doc.logs ?? {}).slice(-HEADS_MAX));
+  const out = { session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)), ...(Object.keys(recorded).length ? { recorded } : {}), ...(Object.keys(reflog).length ? { reflog } : {}), ...(Object.keys(logs).length ? { logs } : {}) };
   writeAtomic(lastHeadFile(seatDir), `${JSON.stringify(out)}\n`);
 }
 /** HEAD of the worktree `cwd` becomes the base of `session` there; another conversation's file starts over. */

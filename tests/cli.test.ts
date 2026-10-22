@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync, readdirSync, symlinkSync, lstatSync } from 'node:fs';
+import { writeFileSync, appendFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync, readdirSync, symlinkSync, lstatSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -1819,6 +1819,73 @@ describe('classic hooks', () => {
       commit('A', 'git rebase up');
       expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([t1, t2]);
       expect(pendingLines().map(l => JSON.parse(l).sha)).not.toContain(upstream);
+    });
+    it('a pending line whose sha is an option never reaches git: nothing is written and the line stays (I1)', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      const side = path.join(tmp('wp-side-'), 'side');
+      git('worktree', 'add', '-q', '-b', 'up', side);
+      git('checkout', '-q', '-b', 'feat');
+      commitFile('t1.txt');
+      commit('A');
+      const out = path.join(tmp('wp-out-'), 'pwned.txt');
+      const evil = JSON.stringify({ task: 'T002', sha: `--output=${out}` });
+      appendFileSync(wp('pending-commits.jsonl'), `${evil}\n`);
+      writeFileSync(path.join(side, 'm.txt'), 'm');
+      gitAt(side, 'add', 'm.txt');
+      gitAt(side, 'commit', '-q', '-m', 'on main');
+      git('rebase', '-q', 'up');
+      const t1 = git('rev-parse', 'HEAD');
+      commit('A', 'git rebase up');
+      expect(existsSync(out)).toBe(false);
+      expect(pendingLines()[0]).toContain(t1);
+      expect(pendingLines()).toContain(evil);
+    });
+    it('a rebase stopped on a conflict drops nothing, and once continued the task\'s lines are under their new shas (M1)', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      const side = path.join(tmp('wp-side-'), 'side');
+      git('worktree', 'add', '-q', '-b', 'up', side);
+      git('checkout', '-q', '-b', 'feat');
+      commitFile('c1.txt');
+      commit('A');
+      writeFileSync(path.join(dir, 'shared.txt'), 'task');
+      git('add', 'shared.txt'); git('commit', '-q', '-m', 'task c2');
+      commit('A');
+      commitFile('c3.txt');
+      commit('A');
+      const before = pendingLines();
+      expect(before).toHaveLength(3);
+      writeFileSync(path.join(side, 'shared.txt'), 'main');
+      gitAt(side, 'add', 'shared.txt');
+      gitAt(side, 'commit', '-q', '-m', 'main change');
+      expect(() => execFileSync('git', ['rebase', 'up'], { cwd: dir, stdio: 'pipe' })).toThrow();
+      commit('A', 'git rebase up');
+      expect(pendingLines()).toHaveLength(3);
+      writeFileSync(path.join(dir, 'shared.txt'), 'resolved');
+      git('add', 'shared.txt');
+      const editor = process.env.GIT_EDITOR;
+      process.env.GIT_EDITOR = 'true';
+      try { execFileSync('git', ['rebase', '--continue'], { cwd: dir, stdio: 'pipe' }); } finally { if (editor === undefined) delete process.env.GIT_EDITOR; else process.env.GIT_EDITOR = editor; }
+      commit('A', 'git rebase --continue');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual(git('rev-list', '--max-count=3', '--reverse', 'HEAD').split('\n'));
+    });
+    it('a command that moves nothing does not read the reflog again; one that moves it does (M3)', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      commit('A', 'git status');
+      const trace = path.join(tmp('wp-trace-'), 'trace.txt');
+      const readsOf = (command: string) => {
+        writeFileSync(trace, '');
+        process.env.GIT_TRACE = trace;
+        try { commit('A', command); } finally { delete process.env.GIT_TRACE; }
+        return (readFileSync(trace, 'utf8').match(/log -g/g) ?? []).length;
+      };
+      expect(readsOf('git status')).toBe(0);
+      const sha = commitFile('a.txt');
+      expect(readsOf('git commit -m a')).toBe(1);
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([sha]);
+      expect(readsOf('git status')).toBe(0);
     });
     it('a recorded commit that is amended loses its old line and gains the new one (H4)', () => {
       setup(); gitInit(); bindAs('A'); ownTask('T002');

@@ -311,7 +311,8 @@ export const command: Command = (args, ctx) => {
       }
       if (standing === 'no-rule') {
         throw new UsageError(`proposals to-task: ${id} has no mark of the roadmap's owner: a mark in approvals/ that no decision of this checkout backs `
-          + "counts only on a roadmap with the owner's rule");
+          + "counts only on a roadmap with the owner's rule: approve it in this checkout (/forge:decide <id> confirm), "
+          + 'or publish the roadmap with /waypoint:plan');
       }
       // A mark is spent once: a proposal that already became a task (the ledger, which a pull never touches, or the plan)
       // is not turned into another by a copy that lost its taskId.

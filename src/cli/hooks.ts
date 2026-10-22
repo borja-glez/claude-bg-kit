@@ -18,7 +18,7 @@ import { forgeRoleOf } from '../lib/forge-activity.js';
 import { newestMemberFiles, normalizeMember, type MemberDoc } from '../lib/member-doc.js';
 import { endReasonOf, MAX_PROJECTS, parseBound, type BoundDoc } from '../lib/bound.js';
 import { bindingLive, describeViewer, type Viewer } from '../lib/viewer-role.js';
-import { boundFile, claudeBindings, COMMIT_ACTIONS, commitsSince, headOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readReflog, readSeats, recordBase, replaysSince, settleBinding, taskSinceOf, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
+import { boundFile, claudeBindings, COMMIT_ACTIONS, commitsSince, headOf, logStatOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readReflog, readSeats, rebaseInProgress, recordBase, replaysSince, settleBinding, taskSinceOf, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
 import { pickProject, type ProjectEntry } from '../lib/project-pick.js';
 import { readDocs } from '../lib/read-docs.js';
 import { normalizeMessage } from '../page/normalize.js';
@@ -361,7 +361,12 @@ function postCommit(io: Io, input: HookInput): string {
   const heads = mine?.heads ?? {};
   const recorded = mine?.recorded ?? {};
   const last = heads[at.top];
-  const reflog = readReflog(at.top);
+  // M3: the reflog is read only when it could hold something new: HEAD moved, there is no position yet, or the reflog file
+  // changed (size or mtime) since this hook read it. A `git status` costs the one rev-parse and a stat. An older last-head.json has no stat: it counts as changed.
+  const stat = logStatOf(at.gitDir);
+  const storedStat = mine?.logs?.[at.top];
+  const statKept = !!stat && storedStat?.size === stat.size && storedStat.mtimeMs === stat.mtimeMs;
+  const reflog = last === at.head && mine?.reflog?.[at.top] && statKept ? [] : readReflog(at.top);
   const top = reflog[0] ?? null;
   // The position this hook left off at (H4). A last-head.json from before the position existed (H2) has a base and no position:
   // the newest entry at that base is where the hook left off; the claim cuts only a worktree with no base at all.
@@ -370,10 +375,11 @@ function postCommit(io: Io, input: HookInput): string {
   let newest: string | null = null;
   const save = () => {
     const stored = mine?.reflog?.[at.top];
-    if (last === at.head && !newest && (!top || (stored?.at === top.at && stored.sha === top.sha))) return;
+    if (last === at.head && !newest && (statKept || !stat) && (!top || (stored?.at === top.at && stored.sha === top.sha))) return;
     writeLastHead(own.seat.dir, {
       session: sid, heads: { ...heads, [at.top]: at.head }, reflog: { ...mine?.reflog, ...(top ? { [at.top]: { at: top.at, sha: top.sha } } : {}) },
       recorded: newest ? { ...recorded, [at.top]: [...(recorded[at.top] ?? []), newest] } : recorded,
+      logs: { ...mine?.logs, ...(stat ? { [at.top]: stat } : {}) },
     });
   };
   const task = ctx.viewer.task;
@@ -400,17 +406,21 @@ function postCommit(io: Io, input: HookInput): string {
   shas = shas.slice(0, MAX_COMMITS).filter(s => git(['merge-base', '--is-ancestor', s, at.head]) !== null);
   if (last && last !== at.head) {
     // An amend, a rebase or a reset: the old base is no longer under HEAD, nor are the commits it replaced.
+    // M1: a rebase stopped on a conflict has replayed only part of the task's commits: nothing is dropped, and the position and the base
+    // stay where they were, so the pass that runs after `rebase --continue` remaps every line.
     if (git(['merge-base', '--is-ancestor', last, at.head]) === null) {
+      if (rebaseInProgress(at.top)) return '';
       const all = lines(file);
       let checked = 0;
       // I3: a commit a rebase replayed keeps its line under the new sha; the replay is told by the subject it copied.
       const replays = replaysSince(reflog, pos);
       const kept = all.flatMap(l => {
         const s = field(l, 'sha');
-        if (!s || checked >= MAX_COMMITS) return [l];
+        // I1: a line whose sha is not a sha never reaches git (`--output=<file>` would be an option); it stays as it is.
+        if (!s || !SHA.test(s) || checked >= MAX_COMMITS) return [l];
         checked++;
-        if (git(['merge-base', '--is-ancestor', s, at.head]) !== null) return [l];
-        const subject = replays.length ? git(['log', '-1', '--format=%s', s])?.trim() : undefined; // fail-open: no subject, the line goes
+        if (git(['merge-base', '--is-ancestor', '--end-of-options', s, at.head]) !== null) return [l];
+        const subject = replays.length ? git(['log', '-1', '--format=%s', '--end-of-options', s])?.trim() : undefined; // fail-open: no subject, the line goes
         const k = subject ? replays.findIndex(r => r.subject === subject && git(['merge-base', '--is-ancestor', r.sha, at.head]) !== null) : -1;
         if (k < 0) return [];
         const [r] = replays.splice(k, 1);

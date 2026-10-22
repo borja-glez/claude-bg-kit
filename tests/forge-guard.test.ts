@@ -7,6 +7,7 @@ import {
   TRUST_RULES, evaluateGuard, forgeCalls, guardOutput, guardPath, parseGuardInput, targetPath, type GuardCtx, type GuardRule, type GuardVerdict,
 } from '../src/forge/guard.js';
 import { run } from '../src/forge/cli/run.js';
+import { guardCtx } from '../src/forge/cli/commands/hook.js';
 import { useTempDirs } from './helpers/tmp.js';
 
 const tmp = useTempDirs();
@@ -151,6 +152,11 @@ describe('forge hook guard (D9)', () => {
     git(root, 'worktree', 'add', '-q', '-b', 'w', wt);
     expect(denied(guard(pre('Edit', { file_path: path.join(root, '.forge', 'execution', 'auth', 'm.json'), old_string: 'a', new_string: 'b' }, wt), wt)).permissionDecision).toBe('deny');
     expect(denied(guard(pre('Write', { file_path: path.join(root, '.git', 'forge', 'trust.json'), content: '' }, wt), wt)).permissionDecision).toBe('deny');
+  });
+  it('guardCtx answers main and gitCommonDir through lazy getters, so a call that meets no protected name starts no git process (H4)', () => {
+    const io = { cwd: root, now: () => new Date('2026-10-22T10:00:00.000Z'), env: {}, stdin: '' } as unknown as Parameters<typeof guardCtx>[0];
+    const ctx = guardCtx(io, { tool_name: 'Bash', tool_input: { command: 'ls' } });
+    for (const key of ['main', 'gitCommonDir'] as const) expect(typeof Object.getOwnPropertyDescriptor(ctx, key)?.get, key).toBe('function');
   });
   it('denies a Bash call to hook answer and lets local set surfaces through', () => {
     expect(denied(guard(pre('Bash', { command: 'node /p/dist/forge.cjs hook answer < a.json', description: 'x' }))).permissionDecisionReason).toContain("Only the person's answer");
