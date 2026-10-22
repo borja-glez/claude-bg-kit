@@ -396,7 +396,7 @@ export const register: Register = on => {
         if (n.subject === 'run') {
           return [
             { key: 'view', label: t.view, short: t.short.view, hotkey: 'v', press: submit('/waypoint:status') },
-            { key: 'resume', label: t.resume, short: t.short.resume, hotkey: 'e', press: submit('/forge:run --resume') },
+            ...(n.coordinatorOpen ? [] : [{ key: 'resume', label: t.resume, short: t.short.resume, hotkey: 'e', press: submit('/forge:run --resume') }]),
             n.stopReason
               ? { key: 'close', label: t.close, short: t.short.close, hotkey: 'c', press: submit('/forge:stop') }
               : { key: 'close', label: t.close, short: t.short.close, hotkey: 'c', confirm: true, press: confirmed('close', 'c', '/forge:stop', n.runId) },

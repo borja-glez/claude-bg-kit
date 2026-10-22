@@ -467,6 +467,17 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     // Its coordinator still sees the run band.
     expect(buildBandModel('demo-shop', { ...f(stalled), sessionId: 's1' }).mode).toBe('run');
   });
+  it("a stopped run whose coordinator's conversation is still open says so instead of offering [Resume] (H5)", () => {
+    const f = (over: object, extra: Partial<BandFiles> = {}): BandFiles => ({ ...empty, plan, sessionId: 'B', execution: EXEC(over), ...extra });
+    const stalled = { active: false, stopReason: 'stalled', stallReason: 'x', lastStepAt: ago(60) };
+    const open = { coordinatorBindings: { 'demo-shop/.': bound('main', 's1', { via: 'forge-run' }) } };
+    const live = (o: object) => j({ sessionId: 's1', role: 'coordinator', runId: 'r1', task: null, ts: ago(1), agents: [], ...o });
+    expect(buildBandModel('demo-shop', f(stalled, open))).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'run', stopReason: 'stalled', coordinatorOpen: true });
+    expect(buildBandModel('demo-shop', f(stalled, { coordinatorLive: live({ event: 'Stop', ended: false }) }))).toMatchObject({ coordinatorOpen: true });
+    // Its own ended signal wins over a binding that still reads live (coordinator.liveness decides); an hour of silence is no conversation.
+    expect(buildBandModel('demo-shop', f(stalled, { ...open, coordinatorLive: live({ event: 'SessionEnd', ended: true }) }))).not.toHaveProperty('coordinatorOpen');
+    expect(buildBandModel('demo-shop', f(stalled))).not.toHaveProperty('coordinatorOpen');
+  });
   it('an active run whose coordinator went silent (no step nor signal for 12 minutes, no agent running) has no coordinator (M4)', () => {
     const f = (over: object, extra: Partial<BandFiles> = {}): BandFiles => ({ ...empty, plan, sessionId: 'B', execution: EXEC(over), ...extra });
     // Killed three days ago without a SessionEnd: the offer to close it, which only fills /forge:stop (stopReason null).
@@ -527,6 +538,9 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
       .toBe(`◌ diseño a medias: a|b ${'x'.repeat(35)}… · hace 3 min`);
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', since: '2026-10-13T12:00:00.000Z' })).toBe('◌ ejecución parada: 3/12 integradas · hace 2 d');
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: null }, 'en')).toBe('◌ execution without a coordinator: 3/12 integrated · 3 min ago');
+    const openRun = { kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', coordinatorOpen: true };
+    expect(n(openRun)).toBe('◌ ejecución parada, abierta en otra conversación: 3/12 integradas · hace 3 min');
+    expect(n(openRun, 'en')).toBe('◌ execution stopped, open in another conversation: 3/12 integrated · 3 min ago');
   });
   it('oneLine drops the control and bidi characters, and clip only cuts by width (M1)', () => {
     const c = (...codes: number[]) => String.fromCharCode(...codes);

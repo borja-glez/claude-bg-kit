@@ -5,7 +5,7 @@ import { changelogLite, critiqueLite, designMetaLite } from '../lib/design-lite.
 import { planLite } from '../lib/plan-lite.js';
 import { oneLine } from '../lib/one-line.js';
 import { isPlanId } from '../lib/ids.js';
-import { coordinatorGone, executionView, isVisibleRun } from '../lib/execution-view.js';
+import { coordinatorGone, coordinatorLiveness, executionView, isVisibleRun } from '../lib/execution-view.js';
 import { isSafeId, normalizeLive, normalizePublicTask, parseExecution, type ExecutionState, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import type { MessageDoc, Plan, States } from '../lib/types.js';
 import { decisionsSummary } from '../lib/decisions.js';
@@ -64,7 +64,7 @@ export type BandModel = (
   // joinable, on a notice about a run: whether forge takes members in it (an active plan run; an ephemeral one never).
   | { mode: 'notice'; project: string; locale: string; kind: 'other-live' | 'previous'; subject: 'task' | 'run' | 'design';
       seat: string | null; task: string | null; title: string | null; since: string | null; runId: string | null;
-      integrated?: number; total?: number; stopReason?: string | null; joinable?: boolean; roadmapUrl: string | null; key: string }
+      integrated?: number; total?: number; stopReason?: string | null; joinable?: boolean; coordinatorOpen?: boolean; roadmapUrl: string | null; key: string }
 ) & { viewer: { role: 'owner' | 'other-live' | 'previous' | 'none'; coordinator: boolean; runId: string | null } };
 
 /** C3: the role of the conversation that looks, as every band publishes it. */
@@ -188,8 +188,13 @@ function viewerOf(v: Viewer, exec: ExecutionState | null, now: number): BandView
  * them; the bindings raw, since the band cannot check a pid (M6).
  */
 function runInput(exec: ExecutionState | null, f: BandFiles, now: number): Pick<ViewerInput, 'execution' | 'members' | 'coordinatorEnded'> {
+  const { signal, bindings } = coordinatorSignals(f, now);
+  return { execution: exec, members: exec ? membersOf(f, exec.runId) : [], coordinatorEnded: coordinatorGone(exec, signal, now, { bindings }) };
+}
+/** The coordinator's own signal and bindings, as the hooks read them: what coordinatorGone and coordinatorLiveness judge. */
+function coordinatorSignals(f: BandFiles, now: number): { signal: LiveDoc | null; bindings: BoundDoc[] } {
   const bindings = Object.values(f.coordinatorBindings ?? {}).flatMap(text => { const b = parseBound(text, now); return b ? [b] : []; });
-  return { execution: exec, members: exec ? membersOf(f, exec.runId) : [], coordinatorEnded: coordinatorGone(exec, normalizeLive(json(f.coordinatorLive)), now, { bindings }) };
+  return { signal: normalizeLive(json(f.coordinatorLive)), bindings };
 }
 /** The role from the execution alone, with no binding: there is no waypoint project whose seats could be held. */
 function forgeViewer(exec: ExecutionState | null, f: BandFiles, now: number): BandViewer {
@@ -313,8 +318,12 @@ function noticeModel(project: string, f: BandFiles, plan: Plan | null, v: Viewer
     const view = executionView({ exec, tasks: publicTasks(f), live: lives(f), now, role: kind });
     if (!view) return null;
     // Only an active plan run takes members: `forge swarm join` refuses an ephemeral one.
+    // H5: a stopped run whose coordinator's conversation is still open (judged as swarm status and /forge:run --resume do,
+    // as if the run were active) is not taken up from here.
+    const { signal, bindings } = coordinatorSignals(f, now);
+    const open = kind === 'previous' && coordinatorLiveness({ ...exec, active: true }, signal, now, { bindings }) !== 'stopped';
     return { ...base, subject: 'run', seat: null, task: null, title: null, runId: exec.runId, integrated: view.integrated, total: view.total,
-      stopReason: exec.active ? null : exec.stopReason, joinable: exec.active && exec.kind === 'plan', key: `run:${exec.runId}` };
+      stopReason: exec.active ? null : exec.stopReason, joinable: exec.active && exec.kind === 'plan', ...(open ? { coordinatorOpen: true } : {}), key: `run:${exec.runId}` };
   }
   const b = v.binding;
   if (!b) return null;

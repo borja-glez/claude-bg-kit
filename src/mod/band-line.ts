@@ -58,6 +58,7 @@ export const TEXT = {
     noticeOtherRun: 'ejecución de forge en curso, la coordina otra sesión',
     noticePrevTask: 'quedó a medias:', noticePrevDesign: 'diseño a medias:',
     noticeRunStopped: 'ejecución parada:', noticeRunOrphan: 'ejecución sin coordinadora:',
+    noticeRunOpen: 'ejecución parada, abierta en otra conversación:', openElsewhere: 'en otra conversación',
     stage: { brief: 'brief', implement: 'implementar', validate: 'validar', verify: 'verificar', review: 'revisar', verdict: 'veredicto', integrate: 'integrar', execution: 'ejecución' },
   },
   en: {
@@ -89,6 +90,7 @@ export const TEXT = {
     noticeOtherRun: 'forge execution running, coordinated by another session',
     noticePrevTask: 'left in progress:', noticePrevDesign: 'design left in progress:',
     noticeRunStopped: 'execution stopped:', noticeRunOrphan: 'execution without a coordinator:',
+    noticeRunOpen: 'execution stopped, open in another conversation:', openElsewhere: 'open elsewhere',
     stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', execution: 'execution' },
   },
 } as const;
@@ -208,8 +210,10 @@ function noticeParts(m: NoticeBand, nowMs: number, t: Texts): BandPart[] {
     return m.task ? [lead, { key: 'task', text: m.task, prio: 4, hue: dim, glue: ' ' }, ...agoPart] : [lead, ...agoPart];
   }
   if (m.subject === 'run') {
+    const lead = m.coordinatorOpen ? { text: t.noticeRunOpen, short: t.openElsewhere }
+      : m.stopReason ? { text: t.noticeRunStopped, short: t.stoppedSfx } : { text: t.noticeRunOrphan, short: t.noCoordinator };
     return [
-      { key: 'notice', text: `◌ ${m.stopReason ? t.noticeRunStopped : t.noticeRunOrphan}`, short: `◌ ${m.stopReason ? t.stoppedSfx : t.noCoordinator}`, prio: 2, hue: dim },
+      { key: 'notice', text: `◌ ${lead.text}`, short: `◌ ${lead.short}`, prio: 2, hue: dim },
       { key: 'count', text: `${count} ${t.integratedN}`, short: count, prio: 5, hue: dim, glue: ' ' },
       ...agoPart,
     ];
