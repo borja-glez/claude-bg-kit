@@ -9,12 +9,17 @@
 // This module is the contract: pure (it reads and writes no file), run by FORGE hook guard. Plan 6b-1 adds its own rules
 // to it, so GuardInput, GuardVerdict, GuardCtx, GuardRule, TRUST_RULES and evaluateGuard keep their names.
 import path from 'node:path';
+import type { AutonomousCtx } from './autonomous.js';
+import type { Dialect } from './shell-words.js';
 
-/** The fields of Claude Code's PreToolUse input the guard reads. */
-export interface GuardInput { tool_name: string; tool_input: Record<string, unknown>; session_id?: string; cwd?: string }
+/**
+ * The fields of Claude Code's PreToolUse input the guard reads. `dialect`: the shell of the command, set only by a caller
+ * that runs evaluateGuard itself (forge's own commands); without it Bash reads as bash and PowerShell as powershell.
+ */
+export interface GuardInput { tool_name: string; tool_input: Record<string, unknown>; session_id?: string; cwd?: string; dialect?: Dialect }
 export type GuardVerdict = { decision: 'allow' } | { decision: 'deny'; rule: string; reason: string };
-/** Where the rules look: the main checkout, the git common dir (null outside git) and the autonomous run (null in 6a). */
-export interface GuardCtx { main: string; gitCommonDir: string | null; autonomous: null | { runId: string; worktree: string } }
+/** Where the rules look: the main checkout, the git common dir (null outside git) and the autonomous run (null when attended). */
+export interface GuardCtx { main: string; gitCommonDir: string | null; autonomous: AutonomousCtx | null }
 /** A rule: null when it does not apply to the call. */
 export interface GuardRule { id: string; check(input: GuardInput, ctx: GuardCtx): GuardVerdict | null }
 
