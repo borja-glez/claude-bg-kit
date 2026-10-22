@@ -269,17 +269,19 @@ export function logVerifyResult(cwd: string, at: string, task: string, dir: stri
  * `surfaces learn` of one surface (K2-06, K2-11): appends to `<dir>/.forge/verify/<name>.md` (the code checked: the
  * worktree of --cwd) the notes filterNotes keeps, under its Learned/Aprendido heading, and, when the surface is allowed as
  * it is now, records them in the main checkout, so they never ask for its permission again. `added`: how many it
- * appended; `count`: the notes the section holds. A missing file or a symlink is a reason, not a write.
+ * appended; `count`: the notes the section holds; `keep`: the notes that passed the filter. A missing file or a symlink is a
+ * reason, not a write. With `write` false it filters the same and writes nothing (D4: /forge:review does not touch the branch).
  */
-export function learnSurface(io: Io, dir: string, name: string, notes: string[], heading: string, task: string | null = null):
-  { count: number; added: number; skipped: { note: string; why: NoteSkip }[] } | { reason: string } {
+export function learnSurface(io: Io, dir: string, name: string, notes: string[], heading: string, task: string | null = null, write = true):
+  { count: number; added: number; keep: string[]; skipped: { note: string; why: NoteSkip }[] } | { reason: string } {
   const file = path.join(dir, surfaceFile(name));
   if (!existsSync(file)) return { reason: `${surfaceFile(name)} does not exist` };
   if (lstatSync(file).isSymbolicLink()) return { reason: `${surfaceFile(name)} is a symlink` };
   const before = readFileSync(file, 'utf8');
   const have = learnedNotes(before);
   const { keep, skipped } = filterNotes(notes, have, task);
-  if (!keep.length) return { count: have.length, added: 0, skipped };
+  if (!keep.length) return { count: have.length, added: 0, keep: [], skipped };
+  if (!write) return { count: have.length + keep.length, added: keep.length, keep, skipped };
   // Only a surface allowed as it is now records what it appends (and local.yaml is never touched), so learning on a
   // changed or never allowed surface cannot make it allowed: its new lines are just more unknown text.
   const cur = surfacePermissions(io.cwd)[name];
@@ -288,7 +290,7 @@ export function learnSurface(io: Io, dir: string, name: string, notes: string[],
   const r = appendLearned(before, at.slice(0, 10), keep, heading, LEARNED_GUARD[heading === 'Aprendido' ? 'Aprendido' : 'Learned']);
   writeFileSync(file, r.text);
   if (allowed) recordLearned(io.cwd, name, r.added, at);
-  return { count: r.count, added: keep.length, skipped };
+  return { count: r.count, added: keep.length, keep, skipped };
 }
 
 /**

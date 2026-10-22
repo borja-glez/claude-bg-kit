@@ -68,17 +68,20 @@ export const command: Command = (args, ctx) => {
     // 2. The learned notes of each surface, into the code checked (--cwd), as `surfaces learn` adds them.
     const notes = new Map<string, string[]>();
     for (const l of v.learned) notes.set(l.surface, [...(notes.get(l.surface) ?? []), l.note]);
-    const learned: Record<string, number> = {};
+    // D4: --no-learn writes no surface; `learned` then lists, by surface, the notes it would have added, and nothing is committed.
+    const learn = !has('no-learn');
+    const learned: Record<string, number | string[]> = {};
     const skipped: { surface: string; reason: string }[] = [];
     const commit: string[] = [];
     const notesSkipped: { surface: string; note: string; why: NoteSkip }[] = [];
     for (const [name, list] of notes) {
       if (!NAME.test(name)) { skipped.push({ surface: name.slice(0, 80), reason: 'not a surface name' }); continue; }
-      const r = learnSurface(io, repoDir, name, list, es ? 'Aprendido' : 'Learned', task);
+      const r = learnSurface(io, repoDir, name, list, es ? 'Aprendido' : 'Learned', task, learn);
       if ('reason' in r) { skipped.push({ surface: name, reason: r.reason }); continue; }
       // K2-11: the notes the filter dropped are named; a surface that gained none is neither learned nor committed.
       notesSkipped.push(...r.skipped.map(s => ({ surface: name, ...s })));
       if (!r.added) continue;
+      if (!learn) { learned[name] = r.keep; continue; }
       learned[name] = r.count;
       commit.push(surfaceFile(name));
     }
@@ -163,11 +166,12 @@ export const command: Command = (args, ctx) => {
     const defectsText = defects.added.length
       ? (es ? `; ${defects.added.length} defecto(s) propuesto(s)` : `; ${defects.added.length} defect(s) proposed`) : '';
     const big = shots.filter(s => s.oversize).length;
-    const learnedText = Object.entries(learned).map(([n, k]) => `${n} (${k})`).join(', ');
+    const learnedText = Object.entries(learned).map(([n, k]) => `${n} (${Array.isArray(k) ? k.length : k})`).join(', ');
+    const learnedEs = learn ? 'aprendido en' : 'notas sin escribir en', learnedEn = learn ? 'learned in' : 'notes not written for';
     const say = es
-      ? `Verificación ${v.result}: ${passed}/${total} comprobaciones${learnedText ? `; aprendido en ${learnedText}` : ''}`
+      ? `Verificación ${v.result}: ${passed}/${total} comprobaciones${learnedText ? `; ${learnedEs} ${learnedText}` : ''}`
         + `${shots.length ? `; ${shots.length} captura(s)${big ? ` (${big} de más de 2 MB)` : ''}` : ''}${defectsText}.`
-      : `Verification ${v.result}: ${passed}/${total} checks${learnedText ? `; learned in ${learnedText}` : ''}`
+      : `Verification ${v.result}: ${passed}/${total} checks${learnedText ? `; ${learnedEn} ${learnedText}` : ''}`
         + `${shots.length ? `; ${shots.length} screenshot(s)${big ? ` (${big} over 2 MB)` : ''}` : ''}${defectsText}.`;
     return json({
       task, result: v.result, passed, total, learned, ...(skipped.length ? { skipped } : {}),

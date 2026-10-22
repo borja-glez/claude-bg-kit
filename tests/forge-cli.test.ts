@@ -2684,6 +2684,20 @@ describe('forge stats (C-09)', () => {
     expect(out.learned).toEqual({});
     expect(readFileSync(path.join(root, '.forge', 'verify', 'web.md'), 'utf8')).toBe('# Web\n');
   });
+  it('verify-close --no-learn writes no surface and prints the notes it would have added (D4)', () => {
+    mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\n');
+    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'pass', checks: [],
+      learned: [{ surface: 'web', note: 'the dev server takes 5 s to start' }, { surface: 'web', note: 'T1 needed the cart seeded' }] }));
+    const args = ['verify-close', '--task', 'T1-1', '--dir', '.forge/work/T1/reviews-1-1', '--evidence', '.forge/work/T1/evidence/1-1', '--no-learn', '--locale', 'en'];
+    const out = JSON.parse(run(args, { ...io, env: {} }).stdout);
+    expect(out).toMatchObject({ learned: { web: ['the dev server takes 5 s to start'] }, commit: [],
+      notesSkipped: [{ surface: 'web', note: 'T1 needed the cart seeded', why: 'names-the-task' }] });
+    expect(out.say).toContain('notes not written for web (1)');
+    expect(readFileSync(path.join(root, '.forge', 'verify', 'web.md'), 'utf8')).toBe('# Web\n');
+  });
   it('verify-close reports an instruction and a secret as skipped, and writes neither', () => {
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\n');

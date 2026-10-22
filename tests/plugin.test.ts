@@ -2124,7 +2124,8 @@ describe('plugin layout', () => {
   it('/forge:review prepares and closes with the CLI, offers verify and logs done (K2-17)', () => {
     const md = read('plugins/forge/skills/review/SKILL.md');
     for (const w of ['FORGE review-prep --task <id>-1 --path medium --base <base> --baseline', '--report', 'FORGE review-close --task <id>-1',
-      'FORGE verify-plan --task <id>-1 --path medium --base <base>', 'FORGE verify-env --task <id>-1', '"phase":"done"', '--sensitive']) expect(md, w).toContain(w);
+      'FORGE verify-plan --task <id>-1 --path medium --base <base>', 'FORGE verify-env --task <id>-1', '"phase":"done"', '--sensitive',
+      '--no-learn', 'FORGE surfaces learn --name <surface> --notes-file <file>']) expect(md, w).toContain(w);
     expect(md).not.toContain('FORGE verdict');
     expect(md).not.toContain('FORGE validate --all --path medium --base <base>');
   });
