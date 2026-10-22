@@ -17,7 +17,7 @@ import { isRunBranch, isSafeId } from '../lib/execution-state.js';
 import { samePath, worktreeDirs } from '../lib/worktree.js';
 import { hookRoot, mainCheckout } from './local.js';
 import { sleepSync } from './pid.js';
-import { answerTrust, TRUST_QUESTION_END, type TrustAsk } from './trust.js';
+import { answerTrust, TRUST_QUESTION_END, type AskedQuestion } from './trust.js';
 
 export type AuthKind = 'merge' | 'merge-on-finish';
 export interface AuthOption { label: string; description: string }
@@ -394,21 +394,12 @@ export function useAuth(root: string, r: AuthRecord, at: string, runId?: string)
   writeAuth(root, { ...r, usedAt: at, ...(r.runId === null && runId ? { runId } : {}) });
 }
 
-type Asked = Pick<TrustAsk, 'question' | 'options'>;
-const optionOf = (o: unknown): AuthOption | null =>
-  (isObject(o) && typeof o.label === 'string' && typeof o.description === 'string' ? { label: o.label, description: o.description } : null);
-
-/** The questions of an AskUserQuestion call, as asked: each one's text and its options (none when one is malformed). */
-function askedOf(toolInput: unknown): Asked[] {
+/** The questions of an AskUserQuestion call, as asked: each one's text, header, options and multiSelect as they came. */
+function askedOf(toolInput: unknown): AskedQuestion[] {
   const qs = isObject(toolInput) ? toolInput.questions : null;
   if (!Array.isArray(qs)) return [];
-  const out: Asked[] = [];
-  for (const q of qs.slice(0, MAX_QUESTIONS)) {
-    if (!isObject(q) || typeof q.question !== 'string') continue;
-    const options = Array.isArray(q.options) ? q.options.map(optionOf) : [];
-    out.push({ question: q.question, options: options.every((o): o is AuthOption => o !== null) ? options : [] });
-  }
-  return out;
+  return qs.slice(0, MAX_QUESTIONS).filter(isObject).filter(q => typeof q.question === 'string')
+    .map(q => ({ question: q.question as string, header: q.header, options: q.options, multiSelect: q.multiSelect }));
 }
 
 /** The records of `dir` that wait for an answer to one of the questions `asked`, each with the text it was read as. A
@@ -539,15 +530,17 @@ export function hookAnswer(io: { cwd: string; stdin?: string; env?: Record<strin
     const by = isSafeId(o.session_id) ? o.session_id : null;
     const now = io.now();
     const at = now.toISOString();
-    for (const { rec: r, text } of pending) {
-      const a = submitted.answers.get(r.question);
-      if (typeof a !== 'string' || aheadOf(r, now.getTime())) continue;
-      const note = submitted.notes.get(r.question);
-      const answer = a !== r.yes ? 'no' : note ? 'other' : 'yes';
-      // A write re-checks the record first: one another hook answered before it keeps that answer.
-      writeAuthIn(dir, { ...r, answeredAt: at, answer, answeredBy: by, ...(note ? { note } : {}) }, text);
-    }
+    try {
+      for (const { rec: r, text } of pending) {
+        const a = submitted.answers.get(r.question);
+        if (typeof a !== 'string' || aheadOf(r, now.getTime())) continue;
+        const note = submitted.notes.get(r.question);
+        const answer = a !== r.yes ? 'no' : note ? 'other' : 'yes';
+        // A write re-checks the record first: one another hook answered before it keeps that answer.
+        writeAuthIn(dir, { ...r, answeredAt: at, answer, answeredBy: by, ...(note ? { note } : {}) }, text);
+      }
+    } catch { /* fail-open: an authorization that cannot be written stays unanswered; the trust question below still is */ }
     if (trusting) answerTrust(trustDirs(root, o.cwd), asked, submitted, at);
-  } catch { /* fail-open: a hook never breaks the session (the authorizations and the trust alike) */ }
+  } catch { /* fail-open: a hook never breaks the session */ }
   return '';
 }

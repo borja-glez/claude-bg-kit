@@ -1929,8 +1929,8 @@ describe('plugin layout', () => {
     }
     // D9: forge's hook records the person's answer; the model never runs local set commands. H3: when the hook could not,
     // the person does, typed after `!` in their own prompt (a shell line of theirs, no call of the model's).
-    expect(trust).toContain('`! FORGE local set commands allowed --expect <trust.hash> --cwd <trust.cwd>`');
-    expect(trust.replace('`! FORGE local set commands allowed', '')).not.toContain('FORGE local set commands allowed');
+    expect(trust).toContain('`! FORGE local set commands allowed --expect <trust.hash> --cwd "<trust.cwd>"`');
+    expect(trust).not.toMatch(/(?<!`! )FORGE local set commands (allowed|denied)/);
     const run = read('plugins/forge/skills/run/SKILL.md');
     expect(run).toContain('`references/trust.md`');
     expect(Buffer.byteLength(run, 'utf8')).toBeLessThanOrEqual(22528);

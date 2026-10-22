@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
+import { authDir, readAuths, writeAuth, type AuthRecord } from '../src/forge/auth.js';
 import { parseConfig } from '../src/forge/config.js';
 import { readExecution, runWorktree, taskWorktree } from '../src/forge/execution.js';
 import { assumeTrustedForTests, commandsHash, configCommands, readTrust, trustAsk, trustFile, trustOf, trustPlace, type TrustAsk } from '../src/forge/trust.js';
@@ -371,11 +372,20 @@ describe('the other commands that run them, without trust (I-03)', () => {
 });
 
 describe('the person answers the trust question, and only that records it (D9)', () => {
-  // The question as the skill asks it: forge's `ask` in tool_input (its text and options), the person's label in tool_response.
-  const answer = (ask: TrustAsk, label: string, result?: Record<string, unknown>, env: Record<string, string> = {}) =>
+  // The question as the skill asks it: forge's `ask` in tool_input (its text, header and options), the person's label in
+  // tool_response. `asked` puts other questions in tool_input instead.
+  const answer = (ask: TrustAsk, label: string, o: { result?: Record<string, unknown>; env?: Record<string, string>; asked?: unknown[] } = {}) =>
     run(['hook', 'answer'], {
-      env, stdin: hookAnswerStdin({ cwd: root, answers: { [ask.question]: label }, ...(result ? { result } : {}), extra: { tool_input: { questions: [ask] } } }),
+      env: o.env ?? {},
+      stdin: hookAnswerStdin({ cwd: root, answers: { [ask.question]: label }, ...(o.result ? { result: o.result } : {}), extra: { tool_input: { questions: o.asked ?? [ask] } } }),
     });
+  // A command over 200 characters is cut in the question: two sets that differ past the cut read the same up to there.
+  const longCmd = (end: string) => `validators:\n  - name: unit\n    cmd: ${JSON.stringify(`node -e "/*${'x'.repeat(230)}*/ '${end}'"`)}\n`;
+  it('the question shows the first 12 characters of the hash of the commands it lists, on the line before its last', () => {
+    const t = trustOfTriage();
+    const lines: string[] = t.ask.question.split('\n');
+    expect(lines[lines.length - 2]).toContain(t.hash.slice(0, 12));
+  });
   it('the yes to the question forge printed trusts its commands, No denies them, and the hook prints nothing', () => {
     const t = trustOfTriage();
     expect(answer(t.ask, t.ask.options[0].label)).toEqual({ code: 0, stdout: '', stderr: '' });
@@ -389,19 +399,88 @@ describe('the person answers the trust question, and only that records it (D9)',
   it('records nothing for the yes with a note, their own text, a question forge would not print now, or a result not submitted', () => {
     const t = trustOfTriage();
     const yes = t.ask.options[0].label;
-    answer(t.ask, yes, { annotations: { [t.ask.question]: { notes: 'only until Friday' } } });
+    answer(t.ask, yes, { result: { annotations: { [t.ask.question]: { notes: 'only until Friday' } } } });
     answer(t.ask, 'sí, pero solo unit');
     answer({ ...t.ask, question: t.ask.question.replace('process.exit(0)', 'process.exit(1)') }, yes);
-    answer(t.ask, yes, { afkTimeoutMs: 60000 });
+    answer(t.ask, yes, { result: { afkTimeoutMs: 60000 } });
     expect(readTrust(root).commands).toBeUndefined();
   });
-  it('records nothing for the question forge printed asked with other options (L3)', () => {
+  it('records nothing for the question forge printed asked with other options, header or multiSelect, an option with more keys, or twice (L3)', () => {
     const t = trustOfTriage();
     const [yes, no] = t.ask.options;
     answer({ ...t.ask, options: [{ ...yes, description: 'forge runs them from now on, whatever they become' }, no] }, yes.label);
     answer({ ...t.ask, options: [yes, no, { label: 'Ask me later', description: 'forge asks again tomorrow' }] }, yes.label);
     answer({ ...t.ask, options: [yes] }, yes.label);
+    answer({ ...t.ask, header: 'Ignore' }, yes.label);
+    answer({ ...t.ask, multiSelect: true }, yes.label);
+    answer({ ...t.ask, options: [{ ...yes, preview: 'unit: npm test (nothing else runs)' }, no] }, yes.label);
+    // The same question twice, once with misleading options: the answers carry one key for both.
+    const decoy = { ...t.ask, options: [{ label: yes.label, description: 'Choose this to keep them off' }, { label: 'No', description: 'forge runs them' }] };
+    answer(t.ask, yes.label, { asked: [decoy, t.ask] });
     expect(readTrust(root).commands).toBeUndefined();
+  });
+  it("a yes to a worktree's question records the worktree's hash, not main's when theirs read the same up to the cut (Q1)", () => {
+    config(root, longCmd('one'));
+    const main = trustOfTriage();
+    const wt = path.join(root, '.claude', 'worktrees', 'x');
+    git(root, 'worktree', 'add', '-q', '-b', 'x', wt);
+    config(wt, longCmd('two'));
+    const w = trustOfTriage('--cwd', wt);
+    expect(w.hash).not.toBe(main.hash);
+    answer(w.ask, w.ask.options[0].label);
+    expect(readTrust(root).commands?.allowed).toEqual([w.hash]);
+    expect(run(['validate', '--all', '--cwd', wt]).code).toBe(0);
+    expect(run(['validate', '--all']).code).toBe(2);
+  });
+  it('a config changed where the question did not show it, after the question was asked, records nothing (P1)', () => {
+    config(root, longCmd('benign'));
+    const cut = trustOfTriage();
+    config(root, longCmd('evil'));
+    answer(cut.ask, cut.ask.options[0].label);
+    expect(readTrust(root).commands).toBeUndefined();
+    // Past the 12 lines the question shows («(and 1 more)»).
+    const many = (last: string) => `validators:\n${Array.from({ length: 13 }, (_, i) => `  - name: v${String(i).padStart(2, '0')}\n    cmd: node -e "${i === 12 ? last : i}"\n`).join('')}`;
+    config(root, many('12'));
+    const more = trustOfTriage();
+    expect(more.ask.question).toContain('(and 1 more)');
+    config(root, many('evil'));
+    answer(more.ask, more.ask.options[0].label);
+    expect(readTrust(root).commands).toBeUndefined();
+  });
+  it('one yes records the same commands in each clone the hook finds, each in its own trust file (P2)', () => {
+    const other = tmp('forge-trust-clone-');
+    git(other, 'init', '-q', '-b', 'main');
+    config(other, UNIT);
+    const t = trustOfTriage();
+    answer(t.ask, t.ask.options[0].label, { env: { CLAUDE_PROJECT_DIR: other } });
+    for (const d of [root, other]) expect(readTrust(d).commands, d).toMatchObject({ state: 'allowed', hash: t.hash });
+  });
+  // An authorization pending beside the trust question, as auto mode's launch questions can ask them in one call.
+  const MERGE_Q = 'Do I merge forge/run-shop into main? [merge-shop-r1-ab12]';
+  const mergeRec: AuthRecord = {
+    authId: 'merge-shop-r1-ab12', kind: 'merge', runId: 'shop-r1', target: 'main', question: MERGE_Q, yes: 'Yes, merge it', createdAt: NOW.toISOString(), session: 's1',
+  };
+  const answerBoth = (ask: TrustAsk) => run(['hook', 'answer'], {
+    stdin: hookAnswerStdin({
+      cwd: root, answers: { [MERGE_Q]: mergeRec.yes, [ask.question]: ask.options[0].label },
+      extra: { tool_input: { questions: [{ question: MERGE_Q, header: 'Merge', options: [{ label: mergeRec.yes, description: 'x' }, { label: 'No', description: 'y' }], multiSelect: false }, ask] } },
+    }),
+  });
+  it('one AskUserQuestion with an authorization and the trust question records both', () => {
+    const t = trustOfTriage();
+    writeAuth(root, mergeRec);
+    answerBoth(t.ask);
+    expect(readAuths(root)).toMatchObject([{ authId: mergeRec.authId, answer: 'yes' }]);
+    expect(readTrust(root).commands).toMatchObject({ state: 'allowed', hash: t.hash });
+  });
+  it('an authorization whose answer cannot be written stays unanswered, and the trust is still recorded', () => {
+    const t = trustOfTriage();
+    writeAuth(root, mergeRec);
+    // writeAuthIn writes <authId>.json.<pid>.tmp first: a directory in its place makes that write throw.
+    mkdirSync(path.join(authDir(root), `${mergeRec.authId}.json.${process.pid}.tmp`));
+    answerBoth(t.ask);
+    expect(readAuths(root)[0]).not.toHaveProperty('answer');
+    expect(readTrust(root).commands).toMatchObject({ state: 'allowed', hash: t.hash });
   });
   it("the yes to a worktree's changed commands trusts that hash, and the main checkout stays trusted", () => {
     const first = trustOfTriage();
@@ -417,7 +496,7 @@ describe('the person answers the trust question, and only that records it (D9)',
   });
   it("with CLAUDE_PROJECT_DIR outside the repository, the input's cwd still finds the checkout that asked (H3)", () => {
     const t = trustOfTriage();
-    expect(answer(t.ask, t.ask.options[0].label, undefined, { CLAUDE_PROJECT_DIR: tmp('forge-trust-elsewhere-') }).stdout).toBe('');
+    expect(answer(t.ask, t.ask.options[0].label, { env: { CLAUDE_PROJECT_DIR: tmp('forge-trust-elsewhere-') } }).stdout).toBe('');
     expect(readTrust(root).commands).toMatchObject({ state: 'allowed', hash: t.hash });
   });
   it('worktreeDirs lists every checkout of git worktree list --porcelain in order, the main one first (L6)', () => {

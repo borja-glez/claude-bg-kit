@@ -34,6 +34,8 @@ export const TRUST_QUESTION_END = { es: '¿Confías en ellos?', en: 'Do you trus
 const MAX_KEPT = 20;
 const MAX_LINES = 12;
 const MAX_SHOWN = 200;
+/** The characters of the hash the question shows: it ties the question to the set of commands it was asked about. */
+const HASH_SHOWN = 12;
 const HASH = /^[0-9a-f]{64}$/;
 
 let assumeTrusted = false;
@@ -108,7 +110,8 @@ function shown(cmd: string): { text: string; cut: boolean } {
 
 /** The question for the person: every command of the set they are asked to trust, what changed since the set they last
  *  allowed first (before → after); and whether they trust them, the yes first. When the question cannot show every
- *  command whole, it says where to read them. */
+ *  command whole, it says where to read them. Its line before the last shows the start of the set's hash: two sets that
+ *  read the same up to a cut never ask the same question, so an answer is to the set that was shown (answerTrust). */
 export function trustAsk(t: Trust, es: boolean): TrustAsk {
   let cut = false;
   const show = (cmd: string | null) => { if (cmd === null) return '—'; const s = shown(cmd); cut ||= s.cut; return s.text; };
@@ -124,8 +127,9 @@ export function trustAsk(t: Trust, es: boolean): TrustAsk {
   const partial = cut || more.length
     ? [es ? 'Aquí no se ven enteros todos los comandos: léelos en .forge/config.yaml antes de responder.' : 'Not every command is shown whole here: read them in .forge/config.yaml before you answer.']
     : [];
+  const hash = t.hash ? [`${es ? 'Hash de estos comandos' : 'Hash of these commands'}: ${t.hash.slice(0, HASH_SHOWN)}`] : [];
   return {
-    question: [head, ...lines.slice(0, MAX_LINES), ...more, ...partial, TRUST_QUESTION_END[es ? 'es' : 'en']].join('\n'),
+    question: [head, ...lines.slice(0, MAX_LINES), ...more, ...partial, ...hash, TRUST_QUESTION_END[es ? 'es' : 'en']].join('\n'),
     header: es ? 'Comandos' : 'Commands',
     options: es
       ? [{ label: TRUST_YES.es, description: 'forge los ejecuta mientras no cambien' }, { label: 'No', description: 'forge solo ejecuta los validadores que detecta por su cuenta' }]
@@ -268,17 +272,31 @@ export function recordTrust(prev: CommandsTrust | undefined, state: 'allowed' | 
   return { state, hash, list, at, allowed: state === 'allowed' ? [...allowed, hash].slice(-MAX_KEPT) : allowed };
 }
 
-type AskOption = TrustAsk['options'][number];
-const sameOptions = (a: readonly AskOption[], b: readonly AskOption[]) =>
-  a.length === b.length && a.every((o, i) => o.label === b[i].label && o.description === b[i].description);
+/** A question of an AskUserQuestion call as its tool_input carries it (answerTrust compares it whole with forge's). */
+export interface AskedQuestion { question: string; header?: unknown; options?: unknown; multiSelect?: unknown }
+
+/** `q` asks `ask` as forge printed it (L3): the same header, single choice, and the same options in order, each a label
+ *  and a description and nothing more (no `preview` beside them). */
+function asPrinted(q: AskedQuestion, ask: TrustAsk): boolean {
+  const options = q.options;
+  return q.header === ask.header && (q.multiSelect ?? false) === ask.multiSelect && Array.isArray(options) && options.length === ask.options.length
+    && ask.options.every((want, i) => {
+      const o: unknown = options[i];
+      return !!o && typeof o === 'object' && Object.keys(o).length === 2
+        && (o as { label?: unknown }).label === want.label && (o as { description?: unknown }).description === want.description;
+    });
+}
 
 /**
  * D9: the person's answer to the trust question, from an AskUserQuestion (forge's hook answer). For each checkout of
- * `dirs` whose commands are not trusted (`ask` or `changed`), the question forge prints now, in either locale: asked word
- * for word and with forge's options (L3), its yes with no note of theirs allows those commands and «No» denies them; any
- * other answer records nothing. Each hash is recorded once. Returns what it recorded.
+ * `dirs` whose commands are not trusted (`ask` or `changed`), the question forge prints now, in either locale, which
+ * shows the start of the hash of those commands (Q1, P1): when it was asked, and every question of the call with its
+ * text asks it as forge printed it (asPrinted), its yes with no note of theirs allows those commands and «No» denies
+ * them; any other answer records nothing. Each checkout reads its own trust file again, so a hash a checkout before it
+ * recorded there is not recorded twice, and another clone with the same commands records them in its own (P2).
+ * Returns what it recorded.
  */
-export function answerTrust(dirs: readonly string[], asked: readonly Pick<TrustAsk, 'question' | 'options'>[],
+export function answerTrust(dirs: readonly string[], asked: readonly AskedQuestion[],
   submitted: { answers: ReadonlyMap<string, string>; notes: ReadonlyMap<string, string> }, at: string): { dir: string; hash: string; state: 'allowed' | 'denied' }[] {
   const recorded: { dir: string; hash: string; state: 'allowed' | 'denied' }[] = [];
   for (const dir of dirs) {
@@ -287,14 +305,15 @@ export function answerTrust(dirs: readonly string[], asked: readonly Pick<TrustA
     try { config = loadConfig(dir); } catch { continue; }
     const t = trustIn(dir, config);
     const hash = t.hash;
-    if ((t.state !== 'ask' && t.state !== 'changed') || !hash || recorded.some(r => r.hash === hash)) continue;
-    for (const locale of ['es', 'en'] as const) {
-      const ask = trustAsk(t, locale === 'es');
-      if (!asked.some(q => q.question === ask.question && sameOptions(q.options, ask.options))) continue;
+    if ((t.state !== 'ask' && t.state !== 'changed') || !hash) continue;
+    for (const es of [true, false]) {
+      const ask = trustAsk(t, es);
+      const same = asked.filter(q => q.question === ask.question);
+      if (!same.length) continue;
+      if (!same.every(q => asPrinted(q, ask))) break;
       const a = submitted.answers.get(ask.question);
-      const state = a === TRUST_YES[locale] && !submitted.notes.has(ask.question) ? 'allowed' : a === 'No' ? 'denied' : null;
-      if (!state) continue;
-      if (updateTrust(dir, r => ({ ...r, commands: recordTrust(r.commands, state, t.commands, hash, at) })).ok) recorded.push({ dir, hash, state });
+      const state = a === TRUST_YES[es ? 'es' : 'en'] && !submitted.notes.has(ask.question) ? 'allowed' : a === 'No' ? 'denied' : null;
+      if (state && updateTrust(dir, r => ({ ...r, commands: recordTrust(r.commands, state, t.commands, hash, at) })).ok) recorded.push({ dir, hash, state });
       break;
     }
   }
