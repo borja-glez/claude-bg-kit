@@ -15130,10 +15130,26 @@ var RECORDED_MAX = 20;
 var RECORDED_TOPS = 10;
 function headOf(cwd) {
   try {
-    const [top, head] = (0, import_node_child_process.execFileSync)("git", ["-C", cwd, "rev-parse", "--show-toplevel", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split(/\r?\n/).map((l3) => l3.trim());
-    return top && head && SHA2.test(head) ? { top: import_node_path3.default.resolve(top), head } : null;
+    const [top, gitDir, head] = (0, import_node_child_process.execFileSync)("git", ["-C", cwd, "rev-parse", "--show-toplevel", "--absolute-git-dir", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split(/\r?\n/).map((l3) => l3.trim());
+    return top && gitDir && head && SHA2.test(head) ? { top: import_node_path3.default.resolve(top), gitDir: import_node_path3.default.resolve(gitDir), head } : null;
   } catch {
     return null;
+  }
+}
+function logStatOf(gitDir) {
+  try {
+    const st2 = (0, import_node_fs3.statSync)(import_node_path3.default.join(gitDir, "logs", "HEAD"));
+    return { size: st2.size, mtimeMs: st2.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+function rebaseInProgress(top) {
+  try {
+    const out = (0, import_node_child_process.execFileSync)("git", ["-C", top, "rev-parse", "--git-path", "rebase-merge", "--git-path", "rebase-apply"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return out.split(/\r?\n/).map((l3) => l3.trim()).filter(Boolean).some((p) => (0, import_node_fs3.existsSync)(import_node_path3.default.resolve(top, p)));
+  } catch {
+    return false;
   }
 }
 function readReflog(top, max = REFLOG_SCAN) {
@@ -15154,7 +15170,7 @@ function readReflog(top, max = REFLOG_SCAN) {
   }
   return out;
 }
-var REPLAY_ACTION = /^(rebase|pull --rebase)\b.*\((pick|reword|edit|squash|fixup)\)$/;
+var REPLAY_ACTION = /^(rebase|pull --rebase)\b.*\((pick|reword|edit|squash|fixup|continue)\)$/;
 function replaysSince(entries2, pos) {
   const out = [];
   for (const e of entries2) {
@@ -15207,7 +15223,14 @@ function readLastHead(seatDir) {
         if (p && Number.isInteger(p.at) && p.at >= 0 && typeof p.sha === "string" && SHA2.test(p.sha)) reflog[k2] = { at: p.at, sha: p.sha };
       }
     }
-    return { session: o.session, heads, recorded, reflog };
+    const logs = {};
+    if (o.logs && typeof o.logs === "object" && !Array.isArray(o.logs)) {
+      for (const [k2, v] of Object.entries(o.logs).slice(-HEADS_MAX)) {
+        const s = v;
+        if (s && typeof s.size === "number" && typeof s.mtimeMs === "number") logs[k2] = { size: s.size, mtimeMs: s.mtimeMs };
+      }
+    }
+    return { session: o.session, heads, recorded, reflog, logs };
   } catch {
     return null;
   }
@@ -15215,7 +15238,8 @@ function readLastHead(seatDir) {
 function writeLastHead(seatDir, doc) {
   const recorded = Object.fromEntries(Object.entries(doc.recorded ?? {}).filter(([, v]) => v.length).slice(-RECORDED_TOPS).map(([k2, v]) => [k2, v.slice(-RECORDED_MAX)]));
   const reflog = Object.fromEntries(Object.entries(doc.reflog ?? {}).slice(-HEADS_MAX));
-  const out = { session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)), ...Object.keys(recorded).length ? { recorded } : {}, ...Object.keys(reflog).length ? { reflog } : {} };
+  const logs = Object.fromEntries(Object.entries(doc.logs ?? {}).slice(-HEADS_MAX));
+  const out = { session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)), ...Object.keys(recorded).length ? { recorded } : {}, ...Object.keys(reflog).length ? { reflog } : {}, ...Object.keys(logs).length ? { logs } : {} };
   writeAtomic(lastHeadFile(seatDir), `${JSON.stringify(out)}
 `);
 }
@@ -15635,6 +15659,7 @@ function pickProject(entries2, sessionId) {
 var SOURCES = ["startup", "resume", "clear", "compact", "fork"];
 var RENEW_MS = 6e4;
 var MAX_COMMITS = 20;
+var SHA3 = /^[0-9a-f]{7,64}$/;
 var COMMIT_RE = /(^|[;&|(]\s*|\s)git\s+((-c|-C)\s+\S+\s+|--no-pager\s+)*commit(?![\w-])/;
 function isCommitCommand(cmd) {
   return COMMIT_RE.test(cmd) && !/(^|\s)--dry-run(?![\w-])/.test(cmd);
@@ -15908,18 +15933,22 @@ function postCommit(io, input) {
   const heads = mine?.heads ?? {};
   const recorded = mine?.recorded ?? {};
   const last = heads[at2.top];
-  const reflog = readReflog(at2.top);
+  const stat = logStatOf(at2.gitDir);
+  const storedStat = mine?.logs?.[at2.top];
+  const statKept = !!stat && storedStat?.size === stat.size && storedStat.mtimeMs === stat.mtimeMs;
+  const reflog = last === at2.head && mine?.reflog?.[at2.top] && statKept ? [] : readReflog(at2.top);
   const top = reflog[0] ?? null;
   const pos = mine?.reflog?.[at2.top] ?? (last ? reflog.find((e) => e.sha === last) ?? top : null);
   let newest2 = null;
   const save = () => {
     const stored = mine?.reflog?.[at2.top];
-    if (last === at2.head && !newest2 && (!top || stored?.at === top.at && stored.sha === top.sha)) return;
+    if (last === at2.head && !newest2 && (statKept || !stat) && (!top || stored?.at === top.at && stored.sha === top.sha)) return;
     writeLastHead(own.seat.dir, {
       session: sid,
       heads: { ...heads, [at2.top]: at2.head },
       reflog: { ...mine?.reflog, ...top ? { [at2.top]: { at: top.at, sha: top.sha } } : {} },
-      recorded: newest2 ? { ...recorded, [at2.top]: [...recorded[at2.top] ?? [], newest2] } : recorded
+      recorded: newest2 ? { ...recorded, [at2.top]: [...recorded[at2.top] ?? [], newest2] } : recorded,
+      logs: { ...mine?.logs, ...stat ? { [at2.top]: stat } : {} }
     });
   };
   const task = ctx.viewer.task;
@@ -15951,15 +15980,16 @@ function postCommit(io, input) {
   shas = shas.slice(0, MAX_COMMITS).filter((s) => git(["merge-base", "--is-ancestor", s, at2.head]) !== null);
   if (last && last !== at2.head) {
     if (git(["merge-base", "--is-ancestor", last, at2.head]) === null) {
+      if (rebaseInProgress(at2.top)) return "";
       const all = lines(file);
       let checked = 0;
       const replays = replaysSince(reflog, pos);
       const kept = all.flatMap((l3) => {
         const s = field(l3, "sha");
-        if (!s || checked >= MAX_COMMITS) return [l3];
+        if (!s || !SHA3.test(s) || checked >= MAX_COMMITS) return [l3];
         checked++;
-        if (git(["merge-base", "--is-ancestor", s, at2.head]) !== null) return [l3];
-        const subject = replays.length ? git(["log", "-1", "--format=%s", s])?.trim() : void 0;
+        if (git(["merge-base", "--is-ancestor", "--end-of-options", s, at2.head]) !== null) return [l3];
+        const subject = replays.length ? git(["log", "-1", "--format=%s", "--end-of-options", s])?.trim() : void 0;
         const k2 = subject ? replays.findIndex((r3) => r3.subject === subject && git(["merge-base", "--is-ancestor", r3.sha, at2.head]) !== null) : -1;
         if (k2 < 0) return [];
         const [r2] = replays.splice(k2, 1);

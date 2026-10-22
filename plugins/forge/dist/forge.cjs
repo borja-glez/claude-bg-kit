@@ -20289,7 +20289,7 @@ var command14 = (args, ctx) => {
         throw new UsageError(`proposals to-task: ${id} is approved only by a mark in approvals/, and this roadmap was published before the owner's rule, so an editor could have written it: republish it with /waypoint:plan, then pull the approvals again`);
       }
       if (standing === "no-rule") {
-        throw new UsageError(`proposals to-task: ${id} has no mark of the roadmap's owner: a mark in approvals/ that no decision of this checkout backs counts only on a roadmap with the owner's rule`);
+        throw new UsageError(`proposals to-task: ${id} has no mark of the roadmap's owner: a mark in approvals/ that no decision of this checkout backs counts only on a roadmap with the owner's rule: approve it in this checkout (/forge:decide <id> confirm), or publish the roadmap with /waypoint:plan`);
       }
       const spent = readEvents(io.cwd).find((e) => e.kind === "proposal" && e.action === "to-task" && e.id === id);
       const text3 = readText6(planArg, "--plan");
