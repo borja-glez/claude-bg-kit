@@ -1900,6 +1900,10 @@ describe('plugin layout', () => {
       .toEqual([{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" hook answer' }] }]);
     expect(read('plugins/forge/hooks/hooks.json').split('hook answer')).toHaveLength(2);
   });
+  it('forge hooks: guard on PreToolUse for Bash, PowerShell, Edit, Write and NotebookEdit (D9)', () => {
+    expect(JSON.parse(read('plugins/forge/hooks/hooks.json')).hooks.PreToolUse)
+      .toEqual([{ matcher: 'Bash|PowerShell|Edit|Write|NotebookEdit', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" hook guard' }] }]);
+  });
   it('the final merge goes through a recorded answer: authorize merge-on-finish with the run id, and each ask as printed (I-03)', () => {
     const large = runRef('large');
     for (const w of ['FORGE authorize merge-on-finish --run <runId>', '"runId"']) expect(large, w).toContain(w);

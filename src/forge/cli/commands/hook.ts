@@ -1,5 +1,6 @@
 import type { Command } from '../context.js';
 import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { appendEvent, readEvents } from '../../ledger.js';
 import { parseRun, readRunText, saveRun, stopFile } from '../../run.js';
 import { decideStop, decideExecutionStop } from '../../hook.js';
@@ -7,11 +8,13 @@ import { readExecution, updateExecution, executionTaskFile } from '../../executi
 import { planLocale, replyIn, sessionReply } from '../../../lib/locale.js';
 import { normalizePublicTask } from '../../../lib/execution-state.js';
 import { UsageError } from '../errors.js';
-import { mainCheckout } from '../../local.js';
+import { hookRoot, mainCheckout } from '../../local.js';
 import { memberForHook } from '../../members.js';
 import { hookLive } from '../../live.js';
 import { hookRoute } from '../../route-hooks.js';
 import { hookAnswer } from '../../auth.js';
+import { TRUST_RULES, evaluateGuard, guardOutput, parseGuardInput, type GuardCtx, type GuardInput } from '../../guard.js';
+import { trustPlace } from '../../trust.js';
 import { liveJobs } from '../../jobs.js';
 import type { Io } from '../run.js';
 import { stopContext, runRootOf } from '../shared.js';
@@ -73,10 +76,40 @@ function hookStop(io: Io): string {
   } catch { return ''; }
 }
 
+/**
+ * The guard's context for a PreToolUse call (D9), from the hook's directory (hookRoot): the main checkout, the git common
+ * dir (absolute: trustPlace resolves git's answer against the directory it ran in; null outside git), no autonomous run.
+ * H4: lazy, so only a file rule that met a protected name asks git; a Bash or PowerShell call starts no git process.
+ */
+export function guardCtx(io: Io, input: GuardInput): GuardCtx {
+  const dir = hookRoot(io, input);
+  let main: string | undefined;
+  let common: string | null | undefined;
+  return {
+    get main() { return (main ??= mainCheckout(dir)); },
+    get gitCommonDir() {
+      if (common === undefined) { const f = trustPlace(dir).file; common = f ? path.dirname(path.dirname(f)) : null; }
+      return common;
+    },
+    autonomous: null,
+  };
+}
+
+// The PreToolUse hook (D9): Claude Code's deny for a call TRUST_RULES denies, nothing for any other call.
+function hookGuard(io: Io): string {
+  try {
+    const input = parseGuardInput(JSON.parse(io.stdin ?? ''));
+    return input ? guardOutput(evaluateGuard(input, guardCtx(io, input), TRUST_RULES)) : '';
+  } catch {
+    // fail-open while autonomous is null: any error lets the call through (6b-1 makes an autonomous run fail closed here)
+    return '';
+  }
+}
+
 export const command: Command = (args, ctx) => {
   const { io } = ctx;
   const which = args[0];
-  const out = which === 'stop' ? hookStop(io) : which === 'answer' ? hookAnswer(io) : which === 'live' ? hookLive(io)
+  const out = which === 'stop' ? hookStop(io) : which === 'answer' ? hookAnswer(io) : which === 'live' ? hookLive(io) : which === 'guard' ? hookGuard(io)
     : which === 'route-session' ? hookRoute(io, 'session') : which === 'route-prompt' ? hookRoute(io, 'prompt') : '';
   return { code: 0, stdout: out, stderr: '' };
 };

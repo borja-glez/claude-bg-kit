@@ -102,6 +102,15 @@ export function evaluateGuard(input: GuardInput, ctx: GuardCtx, rules: readonly 
   return { decision: 'allow' };
 }
 
+// The names (as guardPath spells them) a protected file's path holds: each file rule checks them before it reads ctx,
+// whose fields may ask git (H4), so a call on any other file costs no git process.
+const AUTH_DIR = ['.forge', 'execution', 'auth'];
+const holds = (g: string, names: readonly string[]): boolean => {
+  const parts = g.split(/[\\/]/);
+  return parts.some((_, i) => names.every((n, j) => parts[i + j] === n));
+};
+const isTrustFile = (g: string): boolean => path.basename(g) === 'trust.json' && path.basename(path.dirname(g)) === 'forge';
+
 // Denies when any file the call names is protected, so a harmless path in one field hides none in the other.
 const fileRule = (id: string, reason: string, hits: (target: string, ctx: GuardCtx) => boolean): GuardRule => ({
   id,
@@ -125,10 +134,13 @@ const shellRule = (id: string, reason: string, args: RegExp): GuardRule => ({
 export const TRUST_RULES: readonly GuardRule[] = [
   fileRule('auth-records',
     "forge: .forge/execution/auth/ holds the person's authorizations. Only the person's answer to the question forge printed records one (forge's hook takes it from AskUserQuestion): do not write it.",
-    (t, ctx) => isInside(t, path.join(ctx.main, '.forge', 'execution', 'auth'))),
+    (t, ctx) => holds(guardPath(t), AUTH_DIR) && isInside(t, path.join(ctx.main, ...AUTH_DIR))),
   fileRule('trust-file',
     "forge: trust.json holds the person's trust in the commands of .forge/config.yaml. Only the person's answer to the question forge printed records it (forge's hook takes it from AskUserQuestion): do not write it.",
-    (t, ctx) => ctx.gitCommonDir !== null && guardPath(t) === guardPath(path.join(ctx.gitCommonDir, 'forge', 'trust.json'))),
+    (t, ctx) => {
+      const g = guardPath(t);
+      return isTrustFile(g) && ctx.gitCommonDir !== null && g === guardPath(path.join(ctx.gitCommonDir, 'forge', 'trust.json'));
+    }),
   fileRule('local-yaml',
     "forge: .forge/local.yaml holds the person's permissions and preferences. Only the person's answer records them, through FORGE local set (a surface after their yes, workflow, autonomy): do not edit it.",
     t => { const g = guardPath(t); return path.basename(g) === 'local.yaml' && path.basename(path.dirname(g)) === '.forge'; }),

@@ -1,10 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
   TRUST_RULES, evaluateGuard, forgeCalls, guardOutput, guardPath, parseGuardInput, targetPath, type GuardCtx, type GuardRule, type GuardVerdict,
 } from '../src/forge/guard.js';
+import { run } from '../src/forge/cli/run.js';
+import { useTempDirs } from './helpers/tmp.js';
 
+const tmp = useTempDirs();
 const M = path.resolve(os.tmpdir(), 'guard-main');
 const G = path.join(M, '.git');
 const CTX: GuardCtx = { main: M, gitCommonDir: G, autonomous: null };
@@ -67,6 +72,16 @@ describe('the trust rules of the guard (D9)', () => {
     expect(targetPath({ tool_name: 'NotebookEdit', tool_input: { file_path: harmless, notebook_path: LOCAL } }, CTX)).toBe(LOCAL);
     expect(targetPath({ tool_name: 'Edit', tool_input: { file_path: harmless, notebook_path: LOCAL } }, CTX)).toBe(harmless);
   });
+  it('reads ctx only for a path whose name can be protected, so a shell call or another file asks git nothing (H4)', () => {
+    const lazy: GuardCtx = { get main(): string { throw new Error('main read'); }, get gitCommonDir(): string | null { throw new Error('gitCommonDir read'); }, autonomous: null };
+    const shell = (command: string) => evaluateGuard({ tool_name: 'Bash', tool_input: { command } }, lazy, TRUST_RULES);
+    expect(ruleOf(shell('node /p/dist/forge.cjs hook answer < a.json'))).toBe('hook-answer');
+    expect(shell('ls')).toEqual({ decision: 'allow' });
+    for (const p of [path.join(M, 'src', 'a.ts'), path.join(M, '.forge', 'execution', 'T1.json'), path.join(M, 'auth', 'x.json')]) expect(file('Write', p, M, lazy), p).toEqual({ decision: 'allow' });
+    expect(ruleOf(file('Write', LOCAL, M, lazy))).toBe('local-yaml');
+    expect(() => file('Write', AUTH, M, lazy)).toThrow('main read');
+    expect(() => file('Write', TRUST, M, lazy)).toThrow('gitCommonDir read');
+  });
   it('denies a Bash or PowerShell call that runs forge hook answer or local set commands, however forge is spelled (Review Focus 1)', () => {
     const cases: [string, string, string?][] = [
       ['node "C:/Program Files/claude/plugins/forge/dist/forge.cjs" hook answer < answer.json', 'hook-answer'],
@@ -108,5 +123,45 @@ describe('the trust rules of the guard (D9)', () => {
     for (const junk of [null, [], 'x', { tool_name: 'Write' }, { tool_name: 5, tool_input: {} }, { tool_name: 'Write', tool_input: [] }]) expect(parseGuardInput(junk), JSON.stringify(junk)).toBeNull();
     expect(parseGuardInput({ tool_name: 'Write', tool_input: { file_path: 'a' }, session_id: 's', cwd: 'c', hook_event_name: 'PreToolUse' }))
       .toEqual({ tool_name: 'Write', tool_input: { file_path: 'a' }, session_id: 's', cwd: 'c' });
+  });
+});
+
+describe('forge hook guard (D9)', () => {
+  const SILENT = { code: 0, stdout: '', stderr: '' };
+  const git = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' });
+  let root: string;
+  beforeEach(() => { root = tmp('forge-guard-'); git(root, 'init', '-q', '-b', 'main'); });
+  const guard = (stdin: unknown, cwd = root) =>
+    run(['hook', 'guard'], { cwd, now: () => new Date('2026-10-22T10:00:00.000Z'), env: {}, stdin: typeof stdin === 'string' ? stdin : JSON.stringify(stdin) });
+  const pre = (tool_name: string, tool_input: Record<string, unknown>, cwd = root) =>
+    ({ session_id: 's1', transcript_path: 't.jsonl', cwd, permission_mode: 'default', hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id: 'toolu_1' });
+  const denied = (r: { code: number; stdout: string; stderr: string }) => {
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe('');
+    return JSON.parse(r.stdout).hookSpecificOutput as { hookEventName: string; permissionDecision: string; permissionDecisionReason: string };
+  };
+  it('prints the PreToolUse deny for a write of an authorization, of trust.json or of local.yaml, also from a worktree', () => {
+    for (const p of [path.join(root, '.forge', 'execution', 'auth', 'merge-x.json'), path.join(root, '.git', 'forge', 'trust.json'), path.join(root, '.forge', 'local.yaml')]) {
+      expect(denied(guard(pre('Write', { file_path: p, content: '{}' }))), p).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'deny' });
+    }
+    writeFileSync(path.join(root, 'a.txt'), 'a');
+    git(root, 'add', 'a.txt');
+    git(root, 'commit', '-q', '-m', 'a');
+    const wt = path.join(root, '.claude', 'worktrees', 'w');
+    git(root, 'worktree', 'add', '-q', '-b', 'w', wt);
+    expect(denied(guard(pre('Edit', { file_path: path.join(root, '.forge', 'execution', 'auth', 'm.json'), old_string: 'a', new_string: 'b' }, wt), wt)).permissionDecision).toBe('deny');
+    expect(denied(guard(pre('Write', { file_path: path.join(root, '.git', 'forge', 'trust.json'), content: '' }, wt), wt)).permissionDecision).toBe('deny');
+  });
+  it('denies a Bash call to hook answer and lets local set surfaces through', () => {
+    expect(denied(guard(pre('Bash', { command: 'node /p/dist/forge.cjs hook answer < a.json', description: 'x' }))).permissionDecisionReason).toContain("Only the person's answer");
+    expect(guard(pre('Bash', { command: 'node /p/dist/forge.cjs local set surfaces.web allowed --expect h' }))).toEqual(SILENT);
+  });
+  it('prints nothing for anything else, and fails open: another file, a Read, junk stdin, no tool_input, outside git (Review Focus 3)', () => {
+    expect(guard(pre('Write', { file_path: path.join(root, 'src', 'a.ts'), content: '' }))).toEqual(SILENT);
+    expect(guard(pre('Read', { file_path: path.join(root, '.forge', 'local.yaml') }))).toEqual(SILENT);
+    for (const junk of ['not json', '', { tool_name: 'Write' }]) expect(guard(junk), JSON.stringify(junk)).toEqual(SILENT);
+    const plain = tmp('forge-guard-plain-');
+    expect(denied(guard(pre('Write', { file_path: path.join(plain, '.forge', 'local.yaml'), content: '' }, plain), plain)).permissionDecision).toBe('deny');
+    expect(guard(pre('Write', { file_path: path.join(plain, '.git', 'forge', 'trust.json'), content: '' }, plain), plain)).toEqual(SILENT);
   });
 });
