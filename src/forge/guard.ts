@@ -146,7 +146,7 @@ const fileRule = (id: string, reason: string, hits: (target: string, ctx: GuardC
 });
 
 // forge's parser takes `--cwd <dir>` out wherever it sits before it reads the command's words (runCommand), so do the rules.
-const CWD_FLAG = /(?:^|\s)--cwd\s+(?:"[^"]*"|'[^']*'|\S+)/gi;
+export const CWD_FLAG = /(?:^|\s)--cwd\s+(?:"[^"]*"|'[^']*'|\S+)/gi;
 
 const shellRule = (id: string, reason: string, args: RegExp): GuardRule => ({
   id,

@@ -16,34 +16,41 @@ const SEGMENTS = new WeakMap<GuardInput, Segment[] | null>();
 export function bashSegments(input: GuardInput, ctx: GuardCtx): Segment[] | null {
   if (SEGMENTS.has(input)) return SEGMENTS.get(input) ?? null;
   const command = SHELL_TOOLS.includes(input.tool_name) ? shellCommand(input) : null;
-  const cwd = input.cwd ?? ctx.autonomous?.worktree ?? ctx.main;
+  const cwd = input.cwd ?? ctx.autonomous?.worktree ?? '';
   const segs = command === null ? null : shellSegments(command, cwd, dialectOf(input));
   SEGMENTS.set(input, segs);
   return segs;
 }
 
-/** The folder before the first wildcard of a glob, so a pattern is judged by where it would match (`../../*.log` → `../../`). */
-function globFolder(text: string, dialect: Dialect): string {
+/** The folder a glob is judged by: the part before its first wildcard; null when a `..` segment follows the wildcard (which match it climbs out of cannot be known). */
+function globFolder(text: string, dialect: Dialect): string | null {
   const wc = text.search(/[*?[{]/);
-  const head = wc < 0 ? text : text.slice(0, wc);
-  for (let k = head.length - 1; k >= 0; k--) {
-    if (head[k] === '/' || (dialect !== 'bash' && head[k] === '\\')) return head.slice(0, k + 1);
-  }
+  if (wc < 0) return text;
+  const sep = dialect === 'bash' ? /\// : /[\\/]/;
+  if (text.slice(wc).split(sep).some(s => s === '..')) return null;
+  const head = text.slice(0, wc);
+  for (let k = head.length - 1; k >= 0; k--) if (head[k] === '/' || (dialect !== 'bash' && head[k] === '\\')) return head.slice(0, k + 1);
   return '.';
 }
 
-// A cwd that cannot be known is resolved only for an already-absolute path; a relative one keeps this marker, so it reads as unknown.
-const NOCWD = (platform: NodeJS.Platform): string => (platform === 'win32' ? 'Z:\\__forge_nocwd__' : '/__forge_nocwd__');
+/** Whether a path resolves without a cwd: a root-anchored one in its dialect and platform (bash MSYS `/x/`, `/tmp`, a drive, or POSIX `/…`). */
+function absoluteish(text: string, dialect: Dialect, platform: NodeJS.Platform): boolean {
+  const win = platform === 'win32';
+  if (dialect === 'bash') {
+    if (!win) return text.startsWith('/');
+    return /^\/(?:cygdrive\/)?[A-Za-z](?:\/|$)/.test(text) || text === '/tmp' || text.startsWith('/tmp/') || /^[A-Za-z]:[\\/]/.test(text);
+  }
+  const t = text.replace(/\\/g, '/');
+  return win ? /^[A-Za-z]:\//.test(t) : t.startsWith('/');
+}
 
-/** The absolute path a write target names, or null when it cannot be known (a variable, a `~`, an unknown cwd, a spelling the shell hides). */
+/** The absolute path a write target names, or null when it cannot be known (a variable, a `~`, an unknown cwd with a relative word, a spelling the shell hides). */
 export function segmentPath(w: Word, seg: Segment, platform: NodeJS.Platform = process.platform): string | null {
   if (w.dynamic) return null;
   const text = w.glob ? globFolder(w.text, seg.dialect) : w.text;
-  if (seg.cwd === null) {
-    const marker = NOCWD(platform);
-    const r = shellPath(text, marker, seg.dialect, platform);
-    return r !== null && !r.startsWith(marker) ? r : null;
-  }
+  if (text === null) return null;
+  // Null cwd: only a root-anchored path is known; a relative word (any `..` included) is unknown.
+  if (seg.cwd === null) return absoluteish(text, seg.dialect, platform) ? shellPath(text, platform === 'win32' ? 'Z:\\' : '/', seg.dialect, platform) : null;
   return shellPath(text, seg.cwd, seg.dialect, platform);
 }
 
@@ -55,4 +62,32 @@ export function insideRoots(p: string, ctx: GuardCtx): boolean {
 /** A deny verdict with the reason the rules share: `forge autonomy · <rule>: <what>. Instead: <instead>`. */
 export function deny(rule: string, what: string, instead: string): GuardVerdict {
   return { decision: 'deny', rule, reason: `forge autonomy · ${rule}: ${what}. Instead: ${instead}` };
+}
+
+// The PowerShell parameters that take a value; every other `-Name` is a switch, so it never swallows the positional path after it (item 4).
+const PS_VALUED: readonly string[] = ['path', 'literalpath', 'filepath', 'destination', 'destinationpath', 'outfile', 'target', 'value', 'inputobject', 'source', 'itemtype',
+  'name', 'newname', 'filter', 'include', 'exclude', 'encoding', 'delimiter', 'stream', 'depth', 'width', 'tail', 'totalcount', 'uri', 'method', 'body', 'headers', 'contenttype', 'infile', 'form'];
+
+/**
+ * A PowerShell segment's parameters read by name (M11, item 4): `-Name value` (only when Name is, or abbreviates, a valued
+ * parameter), `-Name:value`, and every other `-Name` is a switch that takes no value. `named` keys are lower-cased;
+ * `positionals` are the words that are no parameter and no parameter's value. Writer rules read their targets from here.
+ */
+export function psParams(args: Word[]): { named: Record<string, Word>; positionals: Word[] } {
+  const named: Record<string, Word> = {};
+  const positionals: Word[] = [];
+  for (let k = 0; k < args.length; k++) {
+    const w = args[k], t = w.text;
+    const glued = /^-([A-Za-z][\w-]*):(.*)$/s.exec(t);
+    if (glued) { named[glued[1].toLowerCase()] = { text: glued[2], dynamic: w.dynamic, glob: false }; continue; }
+    const bare = /^-([A-Za-z][\w-]*)$/.exec(t);
+    if (bare) {
+      const nm = bare[1].toLowerCase(), next = args[k + 1];
+      if (PS_VALUED.some(v => v.startsWith(nm)) && next && !next.text.startsWith('-')) { named[nm] = next; k++; }
+      else named[nm] = { text: '', dynamic: false, glob: false };
+      continue;
+    }
+    positionals.push(w);
+  }
+  return { named, positionals };
 }
