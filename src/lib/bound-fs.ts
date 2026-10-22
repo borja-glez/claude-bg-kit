@@ -177,7 +177,7 @@ export function leftSeatOf(seats: readonly Seat[], open: Readonly<Record<string,
  */
 export interface LastHead { session: string; heads: Record<string, string>; recorded?: Record<string, string[]>; reflog?: Record<string, ReflogPos> }
 /** One line of the reflog of HEAD: `at` in unix seconds, `action` the subject before its first ': ' ('commit (amend)', 'merge side', 'pull'). */
-export interface ReflogEntry { at: number; sha: string; action: string }
+export interface ReflogEntry { at: number; sha: string; action: string; subject?: string }
 /** Where post-commit left off in the reflog of a worktree: its newest entry then. */
 export interface ReflogPos { at: number; sha: string }
 /** H4, M7: the reflog actions of the commits the session makes in its own worktree. `commit (merge)` is a merge concluded with
@@ -210,9 +210,20 @@ export function readReflog(top: string, max = REFLOG_SCAN): ReflogEntry[] {
     if (!m || !sha || !SHA.test(sha)) continue;
     const s = subject.join('\t');
     const colon = s.indexOf(': ');
-    out.push({ at: Number(m[1]), sha, action: colon < 0 ? s : s.slice(0, colon) });
+    out.push({ at: Number(m[1]), sha, action: colon < 0 ? s : s.slice(0, colon), subject: colon < 0 ? '' : s.slice(colon + 2) });
   }
   return out;
+}
+const REPLAY_ACTION = /^(rebase|pull --rebase)\b.*\((pick|reword|edit|squash|fixup)\)$/;
+/** I3: the commits a rebase (or `pull --rebase`) replayed after the position `pos`: [{ subject of the commit it copied, its new sha }],
+ *  oldest first. The reflog subject of such an entry is the copied commit's own subject. */
+export function replaysSince(entries: readonly ReflogEntry[], pos: ReflogPos | null): { subject: string; sha: string }[] {
+  const out: { subject: string; sha: string }[] = [];
+  for (const e of entries) {
+    if (pos && (e.at < pos.at || (e.at === pos.at && e.sha === pos.sha))) break;
+    if (e.subject && REPLAY_ACTION.test(e.action)) out.push({ subject: e.subject, sha: e.sha });
+  }
+  return out.reverse();
 }
 /** Of the reflog `entries` (newest first), the commits this worktree made (COMMIT_ACTIONS) after the position `pos` already
  *  read and since the claim `since` (ms), oldest first, at most `max`. L10: an entry with the position's second and sha ends

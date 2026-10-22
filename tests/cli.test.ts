@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { removeLeftovers } from '../src/cli/doctor.js';
 import { run, isCommitCommand, type Io } from '../src/cli/run.js';
 import { makesCommits, readForge } from '../src/cli/hooks.js';
-import { commitsSince, type ReflogEntry } from '../src/lib/bound-fs.js';
+import { commitsSince, readReflog, type ReflogEntry } from '../src/lib/bound-fs.js';
 import { describeViewer } from '../src/lib/viewer-role.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { launchCommand, launchRun } from '../src/lib/launcher.js';
@@ -1779,7 +1779,7 @@ describe('classic hooks', () => {
       commit('A');
       expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual(git('rev-list', '--max-count=20', 'HEAD').split('\n').reverse());
     });
-    it('a reset or a rebase drops the lines of the commits HEAD no longer reaches, and a rebase brings no commit (H4)', () => {
+    it('a reset or a rebase drops the lines of the commits HEAD no longer reaches, and a rebase keeps the task\'s own commits it replays (H4)', () => {
       setup(); gitInit(); bindAs('A'); ownTask('T002');
       hook('session-start', { session_id: 'A', cwd: dir });
       const a = commitFile('a.txt');
@@ -1795,8 +1795,79 @@ describe('classic hooks', () => {
       expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([a, c]);
       // a is dropped from under c, which is replayed onto the base with a new sha.
       git('rebase', '-q', '--onto', 'HEAD~2', 'HEAD~1');
+      const replayed = git('rev-parse', 'HEAD');
       commit('A', 'git rebase --onto HEAD~2 HEAD~1');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([replayed]);
+    });
+    it('a rebase onto commits made elsewhere keeps only the task\'s own lines, under their new shas (H4)', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      const side = path.join(tmp('wp-side-'), 'side');
+      git('worktree', 'add', '-q', '-b', 'up', side);
+      git('checkout', '-q', '-b', 'feat');
+      commitFile('t1.txt');
+      commit('A');
+      commitFile('t2.txt');
+      commit('A');
+      expect(pendingLines()).toHaveLength(2);
+      writeFileSync(path.join(side, 'm.txt'), 'm');
+      gitAt(side, 'add', 'm.txt');
+      gitAt(side, 'commit', '-q', '-m', 'on main');
+      const upstream = gitAt(side, 'rev-parse', 'HEAD');
+      git('rebase', '-q', 'up');
+      const [t1, t2] = git('rev-list', '--max-count=2', '--reverse', 'HEAD').split('\n');
+      commit('A', 'git rebase up');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([t1, t2]);
+      expect(pendingLines().map(l => JSON.parse(l).sha)).not.toContain(upstream);
+    });
+    it('a recorded commit that is amended loses its old line and gains the new one (H4)', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      const old = commitFile('a.txt');
+      commit('A');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([old]);
+      git('commit', '-q', '--amend', '-m', 'add a.txt, again');
+      const amended = git('rev-parse', 'HEAD');
+      commit('A', 'git commit --amend');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([amended]);
+    });
+    it('readReflog: the action is the subject before its first ": ", the rest is the subject, even when a message repeats both (H4)', () => {
+      setup(); gitInit();
+      git('commit', '-q', '--allow-empty', '-m', 'rebase (pick): x');
+      const [e, init] = readReflog(dir);
+      expect(e).toMatchObject({ sha: git('rev-parse', 'HEAD'), action: 'commit', subject: 'rebase (pick): x' });
+      expect(Number.isInteger(e.at)).toBe(true);
+      expect(init).toMatchObject({ action: 'commit (initial)', subject: 'init' });
+      expect(commitsSince([e], null, null, 20)).toEqual([e.sha]);
+      expect(readReflog(path.join(dir, 'not-a-repo-' + Date.now()))).toEqual([]);
+    });
+    it('a commit made after the hook\'s position but before the task was claimed is not the task\'s (H4)', () => {
+      setup(); gitInit(); bindAs('A');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      mkdirSync(wp('dbcache', 'state'), { recursive: true });
+      writeFileSync(wp('dbcache', 'state', 'T002.json'), JSON.stringify({ status: 'in_progress', owner: 'backend', claimedAt: new Date(Date.now() + 3_600_000).toISOString() }));
+      commitFile('early.txt');
+      commit('A', 'npm test');
       expect(pendingLines()).toEqual([]);
+    });
+    it('the first time, another live seat on the worktree keeps its commits out, and a Bash call that makes none records nothing (C2, H4)', () => {
+      setup(); writeFileSync(path.join(dir, '.gitignore'), '.waypoint/\n'); gitInit();
+      bindAs('A', {}, 'main'); ownTask('T001', 'main');
+      writeFileSync(wp('dbcache', 'state', 'T001.json'), JSON.stringify({ status: 'in_progress', owner: 'main', claimedAt: '2000-01-01T00:00:00.000Z' }));
+      const seat2 = wp('seats', 'main-2');
+      bindAs('B', {}, 'main-2', seat2); ownTask('T003', 'main-2');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      hook('session-start', { session_id: 'B', cwd: dir });
+      const b1 = commitFile('b1.txt');
+      commit('B', 'git commit -m b1');
+      rmSync(wp('last-head.json'), { force: true });
+      commit('A', 'npm test');
+      expect(pendingLines()).toEqual([]);
+      rmSync(wp('last-head.json'), { force: true });
+      const a1 = commitFile('a1.txt');
+      commit('A', 'git commit -m a1');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([a1]);
+      expect(pendingLines(seat2).map(l => JSON.parse(l).sha)).toEqual([b1]);
     });
     it('commitsSince: the commits this worktree made after the position read and the claim, oldest first, at most max (H4)', () => {
       const e = (at: number, sha: string, action: string): ReflogEntry => ({ at, sha, action });

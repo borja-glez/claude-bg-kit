@@ -18,7 +18,7 @@ import { forgeRoleOf } from '../lib/forge-activity.js';
 import { newestMemberFiles, normalizeMember, type MemberDoc } from '../lib/member-doc.js';
 import { endReasonOf, MAX_PROJECTS, parseBound, type BoundDoc } from '../lib/bound.js';
 import { bindingLive, describeViewer, type Viewer } from '../lib/viewer-role.js';
-import { boundFile, claudeBindings, COMMIT_ACTIONS, commitsSince, headOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readReflog, readSeats, recordBase, settleBinding, taskSinceOf, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
+import { boundFile, claudeBindings, COMMIT_ACTIONS, commitsSince, headOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readReflog, readSeats, recordBase, replaysSince, settleBinding, taskSinceOf, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
 import { pickProject, type ProjectEntry } from '../lib/project-pick.js';
 import { readDocs } from '../lib/read-docs.js';
 import { normalizeMessage } from '../page/normalize.js';
@@ -340,7 +340,8 @@ function ownShare(range: string[], seen: ReadonlySet<string>): string[] {
  * parent, at most MAX_COMMITS) go to <seat>/pending-commits.jsonl; with no base yet only a commit command's HEAD does.
  * H4: only what this worktree made. The reflog of HEAD gives the entries after the position this hook already read (kept
  * in last-head.json) whose action is commit, commit (amend), commit (initial), commit (merge), revert or cherry-pick, and
- * that HEAD still reaches; what a pull, a merge, a rebase, a reset or a checkout brings is not attributed. The first time,
+ * that HEAD still reaches, and not before the claim of the task; what a pull, a merge, a rebase, a reset or a checkout
+ * brings is not attributed, but the task's own commits a rebase replays keep their lines (under the new sha). The first time,
  * with no base, the task counts from its claim. Accepted limit: another person's commit in the same worktree is the task's.
  * When another live seat works the same worktree (C2), only a command that makes commits records; and what another
  * seat, live or ended, already saw or recorded there is not taken (ownShare). After an amend, a rebase or a reset, the
@@ -383,13 +384,17 @@ function postCommit(io: Io, input: HookInput): string {
     try { return execFileSync('git', ['-C', at.top, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; }
   };
   let shas: string[] = [];
+  const claim = taskSinceOf(ctx.wp, task);
+  // Nothing before the claim is the task's; the first time, with no base at all, the claim is also where the count starts.
   if (!pos) {
-    const since = last === undefined ? taskSinceOf(ctx.wp, task) : null;
-    if (since !== null) shas = commitsSince(reflog, null, since, MAX_COMMITS);
+    if (last === undefined && claim !== null) shas = commitsSince(reflog, null, claim, MAX_COMMITS);
     else if (isCommitCommand(cmd) && top && COMMIT_ACTIONS.includes(top.action) && top.sha === at.head) shas = [at.head];
   } else if (top && !(top.at === pos.at && top.sha === pos.sha)) {
+    shas = commitsSince(reflog, pos, claim, MAX_COMMITS);
+  }
+  if (shas.length) {
     const others = othersOn(ctx, own.seat, at.top, at.head);
-    if (!others.live || makesCommits(cmd)) shas = ownShare(commitsSince(reflog, pos, null, MAX_COMMITS), others.seen);
+    shas = !others.live || makesCommits(cmd) ? ownShare(shas, others.seen) : [];
   }
   // Only what HEAD still reaches: a commit the same command undid is not the task's.
   shas = shas.slice(0, MAX_COMMITS).filter(s => git(['merge-base', '--is-ancestor', s, at.head]) !== null);
@@ -398,13 +403,20 @@ function postCommit(io: Io, input: HookInput): string {
     if (git(['merge-base', '--is-ancestor', last, at.head]) === null) {
       const all = lines(file);
       let checked = 0;
-      const kept = all.filter(l => {
+      // I3: a commit a rebase replayed keeps its line under the new sha; the replay is told by the subject it copied.
+      const replays = replaysSince(reflog, pos);
+      const kept = all.flatMap(l => {
         const s = field(l, 'sha');
-        if (!s || checked >= MAX_COMMITS) return true;
+        if (!s || checked >= MAX_COMMITS) return [l];
         checked++;
-        return git(['merge-base', '--is-ancestor', s, at.head]) !== null;
+        if (git(['merge-base', '--is-ancestor', s, at.head]) !== null) return [l];
+        const subject = replays.length ? git(['log', '-1', '--format=%s', s])?.trim() : undefined; // fail-open: no subject, the line goes
+        const k = subject ? replays.findIndex(r => r.subject === subject && git(['merge-base', '--is-ancestor', r.sha, at.head]) !== null) : -1;
+        if (k < 0) return [];
+        const [r] = replays.splice(k, 1);
+        try { return [JSON.stringify({ ...JSON.parse(l), sha: r.sha })]; } catch { return []; }
       });
-      if (kept.length !== all.length) writeFileSync(file, kept.map(l => `${l}\n`).join(''));
+      if (kept.length !== all.length || kept.some((l, i) => l !== all[i])) writeFileSync(file, kept.map(l => `${l}\n`).join(''));
     }
   }
   const have = new Set(lines(file).map(l => field(l, 'sha')));
