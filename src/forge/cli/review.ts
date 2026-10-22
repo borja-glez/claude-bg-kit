@@ -6,7 +6,7 @@ import { UsageError } from './errors.js';
 import { appendEvent, appendPhase, ledgerRoot, readEvents, type LedgerEvent } from '../ledger.js';
 import { loadConfig, agentFor, ConfigError, type Profile, type ForgeConfig } from '../config.js';
 import {
-  detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, failingLabel,
+  detectValidators, selectValidators, runValidators, markPreexisting, blocking, baselineFailing, runOptions, validateEvent, failingLabel,
   type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult,
 } from '../validators.js';
 import { PATH_ORDER, diffZones, type PathName, type ReviewRole, type Zone } from '../triage.js';
@@ -166,9 +166,10 @@ function restoringGenerated<T>(deps: ReviewDeps, generated: string[], fn: () => 
 /** A validator run of the review commands (C6, C-12): through the tree cache of the main checkout (unless --no-cache or
  *  validate.cache: false), with the config's parallel batch and retry rule, putting back what the config's `generated`
  *  names. The results are raw (no baseline marks); durationMs is the call's clock. */
-function validateList(deps: ReviewDeps, config: ForgeConfig, list: Validator[], restored: string[], noCache: boolean): { results: ValidatorResult[]; durationMs: number } {
+function validateList(deps: ReviewDeps, config: ForgeConfig, list: Validator[], restored: string[], noCache: boolean,
+  baseline: ReadonlySet<string> | null): { results: ValidatorResult[]; durationMs: number } {
   const t0 = Date.now();
-  const opts = runOptions(config, readEvents(deps.cwd), deps.now(), deps.execMany);
+  const opts = runOptions(config, readEvents(deps.cwd), deps.now(), deps.execMany, baseline);
   const use = config.validate.cache && !noCache;
   const results = runWithCache(list,
     // C-03: with --out, the validators wait for a slot (swarm.validateJobs); a list the cache answered whole does not.
@@ -346,7 +347,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   // Validation, as `FORGE validate --all --path <p> --base <sha> --baseline <f>` runs it.
   const scope: Scope = pathName === 'trivial' || pathName === 'small' ? { mode: 'small' } : { mode: 'heavy', changed: touched };
   const restored: string[] = [];
-  const validation = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes('--no-cache'));
+  const validation = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes('--no-cache'), baselineFailing(baseline));
   const results: ValidatorResult[] = markPreexisting(validation.results, baseline);
   const ok = results.every(r => !blocking(r));
   const validatorsFile = path.join(dir, `validators-${n}.json`);
@@ -954,7 +955,7 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   // every heavy validator (the review's diff later selects among them).
   const scope: Scope = p === 'trivial' || p === 'small' ? { mode: 'small' } : { mode: 'heavy', changed: null };
   const restored: string[] = [];
-  const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes('--no-cache'));
+  const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes('--no-cache'), null);
   const file = path.join(dir, `baseline-${n}.json`);
   writeFileSync(file, JSON.stringify(results, null, 2) + '\n');
   const ts = deps.now().toISOString();

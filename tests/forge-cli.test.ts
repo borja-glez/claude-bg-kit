@@ -7,6 +7,7 @@ import { run as cli, defaultExec, defaultExecMany, type Io } from '../src/forge/
 import { startRun, saveRun } from '../src/forge/run.js';
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { readLocal } from '../src/forge/local.js';
+import { flakyHistory } from '../src/forge/validators.js';
 import { saveProposal, loadProposals, saveApproval, loadApproval, loadApprovals } from '../src/forge/proposals.js';
 import { normalizeProposal, proposalDigest, type ProposalDoc, type ApprovalDoc } from '../src/lib/proposals.js';
 import { parsePlan } from '../src/lib/plan.js';
@@ -512,6 +513,24 @@ describe('forge CLI', () => {
     ran.length = 0;
     run(['validate', '--all', '--task', 't1'], io);
     expect(ran).toEqual(['npm test']);
+  });
+  it('validate --baseline retries once a failure the base did not have: twice red is a failure, red then green is flaky and enters the history (D7)', () => {
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }));
+    writeFileSync(path.join(root, 'baseline.json'), JSON.stringify([{ validator: 'test', ok: true, flaky: false, durationMs: 1, failures: [] }]));
+    let codes = [1, 1];
+    const ran: string[] = [];
+    io.exec = cmd => { ran.push(cmd); return { code: codes.shift() ?? 1, output: 'FAIL x', ms: 3, timedOut: false }; };
+    const args = ['validate', '--all', '--task', 't1', '--baseline', 'baseline.json', '--no-cache'];
+    const twice = run(args, io);
+    expect(twice.code).toBe(1);
+    expect(ran).toEqual(['npm test', 'npm test']);
+    expect(JSON.parse(twice.stdout)[0]).toMatchObject({ validator: 'test', ok: false, flaky: false });
+    expect([...flakyHistory(readEvents(root), io.now())]).toEqual([]);
+    codes = [1, 0];
+    const once = run(args, io);
+    expect(once.code).toBe(0);
+    expect(JSON.parse(once.stdout)[0]).toMatchObject({ validator: 'test', ok: true, flaky: true });
+    expect([...flakyHistory(readEvents(root), io.now())]).toEqual(['test']);
   });
   it('validate --baseline does not count a failure the base commit already had; verdict leaves it out', () => {
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run', build: 'vite build' } }));

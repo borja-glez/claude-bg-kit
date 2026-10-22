@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectValidators, selectValidators, runValidators, failureLines, failingTests, failingLabel, globMatch, markPreexisting, blocking, flakyHistory, runOptions, resolveAffected, planAffected, type RepoReader, type Validator, type Scope } from '../src/forge/validators.js';
+import { detectValidators, selectValidators, runValidators, failureLines, failingTests, failingLabel, globMatch, markPreexisting, blocking, flakyHistory, baselineFailing, runOptions, resolveAffected, planAffected, type RepoReader, type Validator, type Scope } from '../src/forge/validators.js';
 import { parseConfig } from '../src/forge/config.js';
 
 // list(dir) returns the direct entries of dir, like readdirSync.
@@ -412,6 +412,19 @@ describe('validators in parallel, retried only with a flaky history (C-12)', () 
     expect([runOptions(cfg('always'), [], now).retry(l), runOptions(cfg('never'), events, now).retry(t)]).toEqual([true, false]);
     const many = () => [];
     expect(runOptions(cfg('flaky'), [], now, many).execMany).toBe(many);
+  });
+  it('with a baseline, flaky retries once a test failure the base did not have; deterministic kinds are not retried; without a baseline, or with an empty one, as before (D7, M6)', () => {
+    const now = new Date('2026-10-15T12:00:00.000Z');
+    const cfg = (retry: string) => parseConfig(`validate:\n  retry: ${retry}\n`);
+    const t = v('test', 'test'), b = v('build', 'build'), lint = v('lint', 'lint'), e = v('e2e', 'e2e'), ty = v('typecheck', 'typecheck');
+    const base = baselineFailing([{ validator: 'build', ok: false }, { validator: 'test', ok: true }]);
+    expect([...base!]).toEqual(['build']);
+    for (const none of [[], 'x', null, [5]]) expect(baselineFailing(none), JSON.stringify(none)).toBeNull();
+    const o = runOptions(cfg('flaky'), [], now, undefined, base);
+    expect([o.retry(t), o.retry(e), o.retry(b), o.retry(lint), o.retry(ty)]).toEqual([true, true, false, false, false]);
+    expect(runOptions(cfg('flaky'), [], now).retry(t)).toBe(false);
+    expect(runOptions(cfg('never'), [], now, undefined, base).retry(t)).toBe(false);
+    expect(runOptions(cfg('always'), [], now, undefined, base).retry(b)).toBe(true);
   });
 });
 

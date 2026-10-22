@@ -9,7 +9,7 @@ import { UsageError } from '../errors.js';
 import { restoringRegenerated } from '../swarm.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../../validate-cache.js';
 import {
-  detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, planAffected,
+  detectValidators, selectValidators, runValidators, markPreexisting, blocking, baselineFailing, runOptions, validateEvent, planAffected,
   type Scope, type Validator, type ValidatorResult,
 } from '../../validators.js';
 import { mainCheckout } from '../../local.js';
@@ -56,7 +56,13 @@ export const command: Command = (args, ctx) => {
   // path cannot go into a shell or there are too many; not at all (skipped: not-affected) when nothing relates.
   const plan = scope.mode === 'affected' ? planAffected(list, scope.files, process.platform, repoReader(repoDir).exists)
     : { run: list, skipped: new Map<string, ValidatorResult>(), notes: [] as string[] };
-  const opts = runOptions(config, readEvents(io.cwd), io.now(), io.execMany);
+  // D7: the baseline is read before the run, because a failure it did not have is retried once.
+  let baseline: unknown = null;
+  if (has('baseline')) {
+    if (flag('baseline') === undefined) throw new UsageError('validate: --baseline needs the JSON a validate run printed on the base commit');
+    try { baseline = JSON.parse(readFileSync(path.resolve(io.cwd, flag('baseline')!), 'utf8')); } catch { throw new UsageError('validate: --baseline must be the JSON written by forge validate'); }
+  }
+  const opts = runOptions(config, readEvents(io.cwd), io.now(), io.execMany, baselineFailing(baseline));
   // --cwd the run worktree of this checkout (forge's own): what the validators regenerated there is put back.
   // Any other checkout: only the files the config's `generated` names (nothing when it names none).
   const restored: string[] = [];
@@ -80,12 +86,7 @@ export const command: Command = (args, ctx) => {
   let k = 0;
   let results = list.map(v => plan.skipped.get(v.name) ?? ran[k++]);
   const durationMs = Date.now() - t0;
-  if (has('baseline')) {
-    if (flag('baseline') === undefined) throw new UsageError('validate: --baseline needs the JSON a validate run printed on the base commit');
-    let baseline: unknown;
-    try { baseline = JSON.parse(readFileSync(path.resolve(io.cwd, flag('baseline')!), 'utf8')); } catch { throw new UsageError('validate: --baseline must be the JSON written by forge validate'); }
-    results = markPreexisting(results, baseline);
-  }
+  if (has('baseline')) results = markPreexisting(results, baseline);
   const allOk = results.every(r => !blocking(r));
   appendEvent(io.cwd, validateEvent(ts(), flag('task'), results, durationMs, scope.mode, has('base-run') ? { baseline: true } : {}));
   const out = json(results, allOk ? 0 : 1);

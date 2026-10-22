@@ -370,11 +370,22 @@ export function flakyHistory(events: LedgerEvent[], now: Date, days = 30): Set<s
   return out;
 }
 
-/** How the config runs validators (validate.parallel, validate.retry), the retry rule read from the ledger. */
-export function runOptions(config: Pick<ForgeConfig, 'validate'>, events: LedgerEvent[], now: Date, execMany?: ExecMany): RunOptions {
+/** The validators a baseline had failing (D7); null when it names none (not an array, or no entry with a `validator`: `[]` is what review writes with no baseline). */
+export function baselineFailing(baseline: unknown): ReadonlySet<string> | null {
+  const named = (Array.isArray(baseline) ? baseline : []).filter((b): b is { validator: string; ok?: unknown } => !!b && typeof b === 'object' && typeof (b as { validator?: unknown }).validator === 'string');
+  return named.length ? new Set(named.filter(b => b.ok === false).map(b => b.validator)) : null;
+}
+
+/**
+ * How the config runs validators (validate.parallel, validate.retry), the retry rule read from the ledger. With a
+ * baseline (D7), `flaky` also retries once a test validator that fails now and did not fail there; a deterministic kind
+ * (typecheck, lint, build) is not retried, so a pass on the retry is the only way a new flaky enters the history.
+ */
+export function runOptions(config: Pick<ForgeConfig, 'validate'>, events: LedgerEvent[], now: Date, execMany?: ExecMany, baseline: ReadonlySet<string> | null = null): RunOptions {
   const policy = config.validate.retry;
   const flaky = policy === 'flaky' ? flakyHistory(events, now) : new Set<string>();
-  return { ...(execMany ? { execMany } : {}), concurrency: config.validate.parallel, retry: v => policy === 'always' || (policy === 'flaky' && flaky.has(v.name)) };
+  const fresh = (v: Validator) => baseline !== null && !baseline.has(v.name) && RUNS_TESTS.has(v.kind);
+  return { ...(execMany ? { execMany } : {}), concurrency: config.validate.parallel, retry: v => policy === 'always' || (policy === 'flaky' && (flaky.has(v.name) || fresh(v))) };
 }
 
 /**
