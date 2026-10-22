@@ -111,6 +111,20 @@ describe('shellSegments · what a shell does that the brief leaves to the parser
     expect(argv('Remove-Item a,b', 'powershell')).toEqual([['Remove-Item', 'a', 'b']]);
     expect(argv('rd/s/q x & if exist y (del y) & start "" /b rd z', 'cmd')).toEqual([['rd', '/s', '/q', 'x'], ['del', 'y'], ['rd', 'z']]);
   });
+  it('powershell: a parameter glued to its value with a colon is read like the spaced one', () => {
+    expect(argv('Start-Process rm -ArgumentList:"-rf x"', 'powershell')).toEqual([['rm', '-rf', 'x']]);
+    expect(argv("Start-Process -FilePath:rm -ArgumentList:'-rf','x' -Wait", 'powershell')).toEqual([['rm', '-rf', 'x']]);
+    expect(segs('pwsh -Command:"Remove-Item x"', 'powershell').map(s => s.argv[0]?.text)).toEqual(['pwsh', 'Remove-Item']);
+    expect(segs('powershell -NoProfile -c:"Remove-Item x"').map(s => s.argv[0]?.text)).toEqual(['powershell', 'Remove-Item']);
+    const enc = Buffer.from('Remove-Item -Recurse x', 'utf16le').toString('base64');
+    expect(segs(`powershell -EncodedCommand:${enc}`, 'powershell').map(s => s.argv[0]?.text)).toEqual(['powershell', 'Remove-Item']);
+    expect(segs('powershell -enc:@@@', 'powershell')[0].argv.at(-1)!.dynamic).toBe(true);
+    expect(segs('Invoke-Expression -Command:"Remove-Item x"', 'powershell').map(s => s.argv[0]?.text)).toEqual(['Invoke-Expression', 'Remove-Item']);
+  });
+  it("cmd: the ('…') of a for /f is a command, split in cmd", () => {
+    expect(segs("for /f %i in ('rd /s /q x') do echo %i", 'cmd').map(s => s.argv.map(w => w.text))).toContainEqual(['rd', '/s', '/q', 'x']);
+    expect(segs('for /f "usebackq" %i in (`del /q y`) do echo %i', 'cmd').map(s => s.argv.map(w => w.text))).toContainEqual(['del', '/q', 'y']);
+  });
   it('never throws on deep nesting or a brace bomb: what it cannot read is dynamic', () => {
     expect(segs(`${'$('.repeat(2000)}x${')'.repeat(2000)}`)[0].argv[0].dynamic).toBe(true);
     expect(segs(`echo ${'{a,b}'.repeat(30)}`)[0].argv[1].dynamic).toBe(true);

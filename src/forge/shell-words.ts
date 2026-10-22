@@ -88,6 +88,7 @@ const PSVAR = /(?:[A-Za-z_]\w*:)?\w+|[?$^]/y;
 const CMDVAR = /%[^%\s]+%|%~[A-Za-z$:]*\d|%[\d*]|%%?[A-Za-z]|![^!\s]+!/y;
 const DUP = /(?:\d+|-)(?=[\s;|&<>()]|$)/y;
 const MAX_LEVEL = 64;
+const FOR_CMD = /\(\s*(['`])([^\n]*?)\1\s*\)/y;
 const HERE = /[ \t]*\r?\n/y;
 
 /**
@@ -341,7 +342,18 @@ function lex(s: string, start: number, d: Dialect, stop: ')' | '}' | null, taint
     } else {
       if (c === '"') { i = cmdDq(i); continue; }
       if (c === '%' || c === '!') { i = cmdVar(i, 'u'); continue; }
-      if (c === '(' && !w) { push({ k: 'open', sub: false }); depth++; i++; continue; }
+      if (c === '(' && !w) {
+        // for /f … in ('command') or (`command`): the quoted text is a command cmd runs.
+        FOR_CMD.lastIndex = i;
+        const r = FOR_CMD.exec(s);
+        if (r) {
+          const a = i + r[0].indexOf(r[1]) + 1;
+          push({ k: 'open', sub: false });
+          toks.push({ k: 'nest', nests: [nest(a, a + r[2].length)] }, { k: 'close' });
+          i = FOR_CMD.lastIndex; continue;
+        }
+        push({ k: 'open', sub: false }); depth++; i++; continue;
+      }
     }
     if ((c === '&' && n === '&') || (c === '|' && n === '|')) { push({ k: 'sep', op: c === '&' ? '&&' : '||' }); i += 2; continue; }
     if (c === '|') { push({ k: 'sep', op: '|' }); i += d === 'bash' && n === '&' ? 2 : 1; continue; }
@@ -622,16 +634,26 @@ function command(seg: Segment, ws: Raw[], depth: number): Segment[] {
       let file: Raw | undefined, pos = 0;
       const args: Raw[] = [];
       for (let i = 1; i < ws.length; i++) {
-        const t = ws[i].text.toLowerCase(), p = t.slice(1), v = ws[i + 1];
-        const take = (k: number): Raw[] => { const out: Raw[] = []; for (; k < ws.length; k++) { out.push(ws[k]); if (!ws[k].comma) break; } i = k; return out; };
-        if (!/^-[a-z]/.test(t) || isDyn(ws[i])) { if (pos++ === 0) file = ws[i]; else args.push(...take(i)); }
-        else if ('filepath'.startsWith(p) || p === 'path' || p === 'pspath') { file = v; i++; }
-        else if ('argumentlist'.startsWith(p) || p === 'args') args.push(...take(i + 1));
-        else if (p.length > 1 && 'workingdirectory'.startsWith(p)) { seg.cwd = v && !isDyn(v) && seg.cwd !== null ? shellPath(v.text, seg.cwd, d) : null; i++; }
-        else if (/^(redirectstandard(output|error|input)|rs[oei])$/.test(p) && v) {
-          if (!isSink(v, d)) seg.redirects.push({ op: /input|rsi/.test(p) ? '<' : '>', target: pub(v) });
-          i++;
-        } else if (['verb', 'windowstyle', 'credential', 'environment'].some(x => x.startsWith(p))) i++;
+        // `-Name value` or `-Name:value`: the value glued after the colon is read as the next word would be.
+        const w = ws[i], g = /^-([a-z][\w-]*):/i.exec(w.text), at = g ? g[0].length : w.text.length;
+        const p = (g ? g[1] : w.text.slice(1)).toLowerCase(), glued = g && w.text.length > at ? cut(w, at) : null;
+        const param = /^-[a-z]/i.test(w.text) && !/[^u]/.test(w.mask.slice(0, at)) && (g !== null || !w.dyn);
+        const val = (): Raw | undefined => glued ?? ws[++i];
+        // An argument and the array items a comma joins to it.
+        const take = (k: number, first: Raw | undefined = ws[k]): Raw[] => {
+          const out: Raw[] = [];
+          for (let x = first; x; x = ws[++k]) { out.push(x); if (!ws[k].comma) break; }
+          i = k;
+          return out;
+        };
+        if (!param) { if (pos++ === 0) file = w; else args.push(...take(i)); }
+        else if ('filepath'.startsWith(p) || p === 'path' || p === 'pspath') file = val();
+        else if ('argumentlist'.startsWith(p) || p === 'args') args.push(...(glued ? take(i, glued) : take(i + 1)));
+        else if (p.length > 1 && 'workingdirectory'.startsWith(p)) { const v = val(); seg.cwd = v && !isDyn(v) && seg.cwd !== null ? shellPath(v.text, seg.cwd, d) : null; }
+        else if (/^(redirectstandard(output|error|input)|rs[oei])$/.test(p)) {
+          const v = val();
+          if (v && !isSink(v, d)) seg.redirects.push({ op: /input|rsi/.test(p) ? '<' : '>', target: pub(v) });
+        } else if (['verb', 'windowstyle', 'credential', 'environment'].some(x => x.startsWith(p))) val();
       }
       ws = file ? [file, ...args.flatMap(a => wordsIn(a, 'powershell'))] : [];
       continue;
@@ -662,7 +684,11 @@ function command(seg: Segment, ws: Raw[], depth: number): Segment[] {
     if (c && args[i]) sub([args[i]], 'bash');
   } else if (n0 === 'eval' && d === 'bash') sub(args, 'bash');
   else if (d === 'powershell' && (n0 === 'iex' || n0 === 'invoke-expression')) {
-    sub(args.filter(x => !(x.text.startsWith('-') && 'command'.startsWith(x.text.slice(1).toLowerCase()))), 'powershell');
+    sub(args.flatMap(x => { // -Command is dropped; a value glued after `-Command:` is kept
+      const m = /^-([a-z]*)(:?)/i.exec(x.text);
+      if (!m || !'command'.startsWith(m[1].toLowerCase())) return [x];
+      return m[2] && x.text.length > m[0].length ? [cut(x, m[0].length)] : [];
+    }), 'powershell');
   } else if (n0 === 'npx' || (n0 === 'npm' && /^(exec|x)$/.test(args[0]?.text ?? ''))) {
     args.forEach((x, k) => {
       if ((x.text === '-c' || x.text === '--call') && args[k + 1]) sub([args[k + 1]], 'bash');
@@ -689,19 +715,24 @@ function command(seg: Segment, ws: Raw[], depth: number): Segment[] {
     // -Command and -EncodedCommand come after any other option; a positional is read as a command (Windows PowerShell does).
     let cwd = seg.cwd;
     for (let i = 0; i < args.length; i++) {
-      const t = args[i].text, p = t.toLowerCase().replace(/^[-/]/, '').split(':')[0], v = args[i + 1];
-      if (!/^-|^\/[A-Za-z]+(:.*)?$/.test(t) || isDyn(args[i])) { sub(args.slice(i), 'powershell', false, cwd); break; }
+      // `-Name value` or `-Name:value`: the value glued after the colon is read as the next word would be.
+      const w = args[i], t = w.text, g = /^[-/][A-Za-z][\w-]*:/.exec(t), at = g ? g[0].length : t.length;
+      const p = t.slice(1, g ? at - 1 : undefined).toLowerCase(), glued = g && t.length > at ? cut(w, at) : null, v = glued ?? args[i + 1];
+      if (!/^-|^\/[A-Za-z]+(:.*)?$/.test(t) || w.mask.slice(0, at).includes('d') || (w.dyn && !glued)) {
+        sub(args.slice(i), 'powershell', false, cwd); break;
+      }
       if (p === 'e' || p === 'ec' || (p.length > 1 && 'encodedcommand'.startsWith(p))) {
         const code = v ? decode(v) : null;
-        if (v && code === null) v.dyn = true;
+        if (v && code === null) (glued ? w : v).dyn = true;
         if (code) more.push(...parse(code, cwd, 'powershell', null, depth + 1));
         break;
       }
-      if ('command'.startsWith(p)) { sub(args.slice(i + 1), 'powershell', false, cwd); break; }
+      if ('command'.startsWith(p)) { sub(glued ? [glued, ...args.slice(i + 1)] : args.slice(i + 1), 'powershell', false, cwd); break; }
       if ('file'.startsWith(p)) break;
       if ((p.length > 1 && 'workingdirectory'.startsWith(p)) || p === 'wd') {
-        cwd = v && !isDyn(v) && cwd !== null ? shellPath(v.text, cwd, 'powershell') : null; i++;
-      } else if (PWSH_VALUED.some(x => x.startsWith(p)) && v && !v.text.startsWith('-')) i++;
+        cwd = v && !isDyn(v) && cwd !== null ? shellPath(v.text, cwd, 'powershell') : null;
+        if (!glued) i++;
+      } else if (!glued && PWSH_VALUED.some(x => x.startsWith(p)) && v && !v.text.startsWith('-')) i++;
     }
   }
   seg.argv = ws.map(pub);
