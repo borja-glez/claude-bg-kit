@@ -11628,7 +11628,7 @@ function findCycle(plan) {
 var import_node_crypto = require("node:crypto");
 
 // src/lib/waypoint-version.ts
-var WAYPOINT_VERSION = true ? "0.32.1" : "0.0.0";
+var WAYPOINT_VERSION = true ? "0.32.2" : "0.0.0";
 var VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})/;
 var partsOf = (v) => {
   const m = typeof v === "string" ? VERSION.exec(v) : null;
@@ -15124,6 +15124,8 @@ function leftSeatOf(seats, open, now, alive = pidAlive) {
   }
   return best;
 }
+var COMMIT_ACTIONS = ["commit", "commit (amend)", "commit (initial)", "commit (merge)", "revert", "cherry-pick"];
+var REFLOG_SCAN = 200;
 var RECORDED_MAX = 20;
 var RECORDED_TOPS = 10;
 function headOf(cwd) {
@@ -15133,6 +15135,56 @@ function headOf(cwd) {
   } catch {
     return null;
   }
+}
+function readReflog(top, max = REFLOG_SCAN) {
+  let text;
+  try {
+    text = (0, import_node_child_process.execFileSync)("git", ["-C", top, "log", "-g", "--date=unix", "--format=%gd%x09%H%x09%gs", "-n", String(max), "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const line3 of text.split(/\r?\n/)) {
+    const [gd, sha, ...subject] = line3.split("	");
+    const m = /^HEAD@\{(\d+)\}$/.exec(gd ?? "");
+    if (!m || !sha || !SHA2.test(sha)) continue;
+    const s = subject.join("	");
+    const colon = s.indexOf(": ");
+    out.push({ at: Number(m[1]), sha, action: colon < 0 ? s : s.slice(0, colon), subject: colon < 0 ? "" : s.slice(colon + 2) });
+  }
+  return out;
+}
+var REPLAY_ACTION = /^(rebase|pull --rebase)\b.*\((pick|reword|edit|squash|fixup)\)$/;
+function replaysSince(entries2, pos) {
+  const out = [];
+  for (const e of entries2) {
+    if (pos && (e.at < pos.at || e.at === pos.at && e.sha === pos.sha)) break;
+    if (e.subject && REPLAY_ACTION.test(e.action)) out.push({ subject: e.subject, sha: e.sha });
+  }
+  return out.reverse();
+}
+function commitsSince(entries2, pos, since, max) {
+  const out = [];
+  for (const e of entries2) {
+    if (pos && (e.at < pos.at || e.at === pos.at && e.sha === pos.sha)) break;
+    if (since !== null && e.at < Math.floor(since / 1e3)) break;
+    if (COMMIT_ACTIONS.includes(e.action) && !out.includes(e.sha)) out.push(e.sha);
+  }
+  return out.slice(0, max).reverse();
+}
+function taskSinceOf(wpDir, task) {
+  if (!isPlanId(task)) return null;
+  const text = readText(import_node_path3.default.join(wpDir, "dbcache", "state", `${task}.json`), 64 * 1024);
+  if (text === null) return null;
+  try {
+    const st2 = JSON.parse(text);
+    for (const v of [st2?.claimedAt, st2?.startedAt]) {
+      const t = typeof v === "string" ? Date.parse(v) : NaN;
+      if (Number.isFinite(t)) return t;
+    }
+  } catch {
+  }
+  return null;
 }
 function readLastHead(seatDir) {
   const text = readText(lastHeadFile(seatDir), 64 * 1024);
@@ -15148,14 +15200,22 @@ function readLastHead(seatDir) {
         if (Array.isArray(v)) recorded[k2] = v.filter((s) => typeof s === "string" && SHA2.test(s)).slice(-RECORDED_MAX);
       }
     }
-    return { session: o.session, heads, recorded };
+    const reflog = {};
+    if (o.reflog && typeof o.reflog === "object" && !Array.isArray(o.reflog)) {
+      for (const [k2, v] of Object.entries(o.reflog).slice(-HEADS_MAX)) {
+        const p = v;
+        if (p && Number.isInteger(p.at) && p.at >= 0 && typeof p.sha === "string" && SHA2.test(p.sha)) reflog[k2] = { at: p.at, sha: p.sha };
+      }
+    }
+    return { session: o.session, heads, recorded, reflog };
   } catch {
     return null;
   }
 }
 function writeLastHead(seatDir, doc) {
   const recorded = Object.fromEntries(Object.entries(doc.recorded ?? {}).filter(([, v]) => v.length).slice(-RECORDED_TOPS).map(([k2, v]) => [k2, v.slice(-RECORDED_MAX)]));
-  const out = { session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)), ...Object.keys(recorded).length ? { recorded } : {} };
+  const reflog = Object.fromEntries(Object.entries(doc.reflog ?? {}).slice(-HEADS_MAX));
+  const out = { session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)), ...Object.keys(recorded).length ? { recorded } : {}, ...Object.keys(reflog).length ? { reflog } : {} };
   writeAtomic(lastHeadFile(seatDir), `${JSON.stringify(out)}
 `);
 }
@@ -15165,7 +15225,11 @@ function recordBase(seatDir, session, cwd) {
   const lh = readLastHead(seatDir);
   const mine = lh && lh.session === session ? lh : null;
   const heads = mine?.heads ?? {};
-  if (heads[at2.top] !== at2.head) writeLastHead(seatDir, { session, heads: { ...heads, [at2.top]: at2.head }, recorded: mine?.recorded });
+  const newest2 = readReflog(at2.top, 1)[0];
+  const pos = mine?.reflog?.[at2.top];
+  if (heads[at2.top] !== at2.head || newest2 && !pos) {
+    writeLastHead(seatDir, { session, heads: { ...heads, [at2.top]: at2.head }, recorded: mine?.recorded, reflog: { ...mine?.reflog, ...newest2 ? { [at2.top]: { at: newest2.at, sha: newest2.sha } } : {} } });
+  }
 }
 
 // src/cli/design-files.ts
@@ -15426,11 +15490,11 @@ function mainCheckoutFrom(root, gitFileText) {
 }
 
 // src/lib/worktree.ts
-function mainWorktreeFrom(porcelain) {
-  if (typeof porcelain !== "string") return null;
-  const line3 = porcelain.split(/\r?\n/).find((l3) => l3.startsWith("worktree "));
-  return line3 ? line3.slice("worktree ".length).trim() || null : null;
+function worktreeDirs(porcelain) {
+  if (typeof porcelain !== "string") return [];
+  return porcelain.split(/\r?\n/).filter((l3) => l3.startsWith("worktree ")).map((l3) => l3.slice("worktree ".length).trim()).filter(Boolean);
 }
+var mainWorktreeFrom = (porcelain) => worktreeDirs(porcelain)[0] ?? null;
 function samePath(a, b) {
   const norm3 = (p) => {
     const r2 = import_node_path5.default.resolve(p.replace(/\\/g, "/"));
@@ -15571,7 +15635,6 @@ function pickProject(entries2, sessionId) {
 var SOURCES = ["startup", "resume", "clear", "compact", "fork"];
 var RENEW_MS = 6e4;
 var MAX_COMMITS = 20;
-var SHA3 = /^[0-9a-f]{7,64}$/;
 var COMMIT_RE = /(^|[;&|(]\s*|\s)git\s+((-c|-C)\s+\S+\s+|--no-pager\s+)*commit(?![\w-])/;
 function isCommitCommand(cmd) {
   return COMMIT_RE.test(cmd) && !/(^|\s)--dry-run(?![\w-])/.test(cmd);
@@ -15845,10 +15908,19 @@ function postCommit(io, input) {
   const heads = mine?.heads ?? {};
   const recorded = mine?.recorded ?? {};
   const last = heads[at2.top];
+  const reflog = readReflog(at2.top);
+  const top = reflog[0] ?? null;
+  const pos = mine?.reflog?.[at2.top] ?? (last ? reflog.find((e) => e.sha === last) ?? top : null);
   let newest2 = null;
   const save = () => {
-    if (last === at2.head && !newest2) return;
-    writeLastHead(own.seat.dir, { session: sid, heads: { ...heads, [at2.top]: at2.head }, recorded: newest2 ? { ...recorded, [at2.top]: [...recorded[at2.top] ?? [], newest2] } : recorded });
+    const stored = mine?.reflog?.[at2.top];
+    if (last === at2.head && !newest2 && (!top || stored?.at === top.at && stored.sha === top.sha)) return;
+    writeLastHead(own.seat.dir, {
+      session: sid,
+      heads: { ...heads, [at2.top]: at2.head },
+      reflog: { ...mine?.reflog, ...top ? { [at2.top]: { at: top.at, sha: top.sha } } : {} },
+      recorded: newest2 ? { ...recorded, [at2.top]: [...recorded[at2.top] ?? [], newest2] } : recorded
+    });
   };
   const task = ctx.viewer.task;
   if (!task) {
@@ -15865,23 +15937,39 @@ function postCommit(io, input) {
     }
   };
   let shas = [];
-  if (!last) shas = isCommitCommand(cmd) ? [at2.head] : [];
-  else if (last !== at2.head) {
+  const claim = taskSinceOf(ctx.wp, task);
+  if (!pos) {
+    if (last === void 0 && claim !== null) shas = commitsSince(reflog, null, claim, MAX_COMMITS);
+    else if (isCommitCommand(cmd) && top && COMMIT_ACTIONS.includes(top.action) && top.sha === at2.head) shas = [at2.head];
+  } else if (top && !(top.at === pos.at && top.sha === pos.sha)) {
+    shas = commitsSince(reflog, pos, claim, MAX_COMMITS);
+  }
+  if (shas.length) {
     const others = othersOn(ctx, own.seat, at2.top, at2.head);
-    if (!others.live || makesCommits(cmd)) {
-      const range = (git(["rev-list", "--first-parent", "--reverse", `--max-count=${MAX_COMMITS}`, `${last}..${at2.head}`]) ?? "").split(/\r?\n/).map((s) => s.trim()).filter((s) => SHA3.test(s));
-      shas = ownShare(range, others.seen);
-    }
+    shas = !others.live || makesCommits(cmd) ? ownShare(shas, others.seen) : [];
+  }
+  shas = shas.slice(0, MAX_COMMITS).filter((s) => git(["merge-base", "--is-ancestor", s, at2.head]) !== null);
+  if (last && last !== at2.head) {
     if (git(["merge-base", "--is-ancestor", last, at2.head]) === null) {
       const all = lines(file);
       let checked = 0;
-      const kept = all.filter((l3) => {
+      const replays = replaysSince(reflog, pos);
+      const kept = all.flatMap((l3) => {
         const s = field(l3, "sha");
-        if (!s || checked >= MAX_COMMITS) return true;
+        if (!s || checked >= MAX_COMMITS) return [l3];
         checked++;
-        return git(["merge-base", "--is-ancestor", s, at2.head]) !== null;
+        if (git(["merge-base", "--is-ancestor", s, at2.head]) !== null) return [l3];
+        const subject = replays.length ? git(["log", "-1", "--format=%s", s])?.trim() : void 0;
+        const k2 = subject ? replays.findIndex((r3) => r3.subject === subject && git(["merge-base", "--is-ancestor", r3.sha, at2.head]) !== null) : -1;
+        if (k2 < 0) return [];
+        const [r2] = replays.splice(k2, 1);
+        try {
+          return [JSON.stringify({ ...JSON.parse(l3), sha: r2.sha })];
+        } catch {
+          return [];
+        }
       });
-      if (kept.length !== all.length) (0, import_node_fs7.writeFileSync)(file, kept.map((l3) => `${l3}
+      if (kept.length !== all.length || kept.some((l3, i) => l3 !== all[i])) (0, import_node_fs7.writeFileSync)(file, kept.map((l3) => `${l3}
 `).join(""));
     }
   }
