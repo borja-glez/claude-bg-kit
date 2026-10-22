@@ -4,11 +4,11 @@
 // AskUserQuestion, or FORGE local set after their yes), so these rules deny the model an Edit, Write or NotebookEdit of
 // those files and a Bash or PowerShell call of forge's hook answer or local set commands.
 // Its limit: it recognises patterns, it is no wall. An `echo >` or a script run through Bash still writes those files,
-// and a quoted word (`hook "answer"`) or a node flag that takes a value gets a call past the shell rules.
+// a quoted word (`hook "answer"`) or a node flag that takes a value gets a call past the shell rules, and a path spelled
+// through what only the disk knows (an 8.3 short name, a link or a junction) gets past the file rules.
 // This module is the contract: pure (it reads and writes no file), run by FORGE hook guard. Plan 6b-1 adds its own rules
 // to it, so GuardInput, GuardVerdict, GuardCtx, GuardRule, TRUST_RULES and evaluateGuard keep their names.
 import path from 'node:path';
-import { samePath } from '../lib/worktree.js';
 
 /** The fields of Claude Code's PreToolUse input the guard reads. */
 export interface GuardInput { tool_name: string; tool_input: Record<string, unknown>; session_id?: string; cwd?: string }
@@ -32,11 +32,18 @@ export function parseGuardInput(x: unknown): GuardInput | null {
   };
 }
 
-/** The file a call names: file_path, else notebook_path, resolved against input.cwd ?? ctx.main. */
+/** Every file a call names, resolved against input.cwd ?? ctx.main: the tool's own field first (notebook_path for
+ *  NotebookEdit, file_path for the others), then the other one when present. */
+export function targetPaths(input: GuardInput, ctx: GuardCtx): string[] {
+  const fields = input.tool_name === 'NotebookEdit' ? ['notebook_path', 'file_path'] : ['file_path', 'notebook_path'];
+  const base = (input.cwd ?? ctx.main).replace(/\\/g, '/');
+  return fields.map(f => input.tool_input[f]).filter((p): p is string => typeof p === 'string' && p !== '')
+    .map(p => path.resolve(base, p.replace(/\\/g, '/')));
+}
+
+/** The file a call names: its tool's own field (notebook_path for NotebookEdit, file_path for the others), else the other. */
 export function targetPath(input: GuardInput, ctx: GuardCtx): string | null {
-  const { file_path: file, notebook_path: notebook } = input.tool_input;
-  const p = typeof file === 'string' && file ? file : typeof notebook === 'string' && notebook ? notebook : null;
-  return p === null ? null : path.resolve((input.cwd ?? ctx.main).replace(/\\/g, '/'), p.replace(/\\/g, '/'));
+  return targetPaths(input, ctx)[0] ?? null;
 }
 
 /** The command line of a SHELL_TOOLS call. */
@@ -45,10 +52,29 @@ export function shellCommand(input: GuardInput): string | null {
   return SHELL_TOOLS.includes(input.tool_name) && typeof command === 'string' ? command : null;
 }
 
-/** p is dir or under it, both normalized as samePath (`\` as `/`, resolved, without case on win32). */
+/**
+ * A path as the guard compares it, samePath's rules (`\` as `/`, resolved, without case on win32) plus the other spellings
+ * of the same file: on win32 a `\\?\` or `\\.\` prefix, an NTFS stream (`::$DATA`, `:name`) and the trailing dots and
+ * spaces Windows drops from a name; and without case on macOS too, whose file system ignores it by default.
+ * `platform` is for tests.
+ */
+export function guardPath(p: string, platform: NodeJS.Platform = process.platform): string {
+  let s = p.replace(/\\/g, '/');
+  if (platform === 'win32') {
+    s = s.replace(/^\/\/[?.]\/UNC\//i, '//').replace(/^\/\/[?.]\//, '');
+    const drive = /^[A-Za-z]:/.exec(s)?.[0] ?? '';
+    s = drive + s.slice(drive.length).split('/')
+      .map(name => (name === '.' || name === '..' ? name : name.replace(/:.*$/, '').replace(/[. ]+$/, ''))).join('/');
+  }
+  const resolved = path.resolve(s);
+  return platform === 'win32' || platform === 'darwin' ? resolved.toLowerCase() : resolved;
+}
+
+/** p is dir or under it, both read as guardPath reads them. */
 export function isInside(p: string, dir: string): boolean {
-  for (let q = path.resolve(p.replace(/\\/g, '/')); ; q = path.dirname(q)) {
-    if (samePath(q, dir)) return true;
+  const at = guardPath(dir);
+  for (let q = guardPath(p); ; q = path.dirname(q)) {
+    if (q === at) return true;
     if (path.dirname(q) === q) return false;
   }
 }
@@ -76,23 +102,23 @@ export function evaluateGuard(input: GuardInput, ctx: GuardCtx, rules: readonly 
   return { decision: 'allow' };
 }
 
-// File names compare as samePath compares paths: without case on win32.
-const sameName = (a: string, b: string) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
-
+// Denies when any file the call names is protected, so a harmless path in one field hides none in the other.
 const fileRule = (id: string, reason: string, hits: (target: string, ctx: GuardCtx) => boolean): GuardRule => ({
   id,
   check(input, ctx) {
     if (!FILE_TOOLS.includes(input.tool_name)) return null;
-    const target = targetPath(input, ctx);
-    return target !== null && hits(target, ctx) ? { decision: 'deny', rule: id, reason } : null;
+    return targetPaths(input, ctx).some(t => hits(t, ctx)) ? { decision: 'deny', rule: id, reason } : null;
   },
 });
+
+// forge's parser takes `--cwd <dir>` out wherever it sits before it reads the command's words (runCommand), so do the rules.
+const CWD_FLAG = /(?:^|\s)--cwd\s+(?:"[^"]*"|'[^']*'|\S+)/gi;
 
 const shellRule = (id: string, reason: string, args: RegExp): GuardRule => ({
   id,
   check(input) {
     const command = shellCommand(input);
-    return command !== null && forgeCalls(command).some(a => args.test(a)) ? { decision: 'deny', rule: id, reason } : null;
+    return command !== null && forgeCalls(command).some(a => args.test(a.replace(CWD_FLAG, ' '))) ? { decision: 'deny', rule: id, reason } : null;
   },
 });
 
@@ -102,14 +128,16 @@ export const TRUST_RULES: readonly GuardRule[] = [
     (t, ctx) => isInside(t, path.join(ctx.main, '.forge', 'execution', 'auth'))),
   fileRule('trust-file',
     "forge: trust.json holds the person's trust in the commands of .forge/config.yaml. Only the person's answer to the question forge printed records it (forge's hook takes it from AskUserQuestion): do not write it.",
-    (t, ctx) => ctx.gitCommonDir !== null && samePath(t, path.join(ctx.gitCommonDir, 'forge', 'trust.json'))),
+    (t, ctx) => ctx.gitCommonDir !== null && guardPath(t) === guardPath(path.join(ctx.gitCommonDir, 'forge', 'trust.json'))),
   fileRule('local-yaml',
     "forge: .forge/local.yaml holds the person's permissions and preferences. Only the person's answer records them, through FORGE local set (a surface after their yes, workflow, autonomy): do not edit it.",
-    t => sameName(path.basename(t), 'local.yaml') && sameName(path.basename(path.dirname(t)), '.forge')),
+    t => { const g = guardPath(t); return path.basename(g) === 'local.yaml' && path.basename(path.dirname(g)) === '.forge'; }),
+  // The last word ends at a space, a redirection, a parenthesis or a backquote, but not at `"`: words inside a quoted
+  // text (`git commit -m "… hook answer"`) are no call.
   shellRule('hook-answer',
     "forge: hook answer is forge's own hook, run by Claude Code after AskUserQuestion. Only the person's answer reaches it: do not run it.",
-    /(?:^|\s)hook\s+answer(?:\s|$)/i),
+    /(?:^|\s)hook\s+answer(?=[\s<>()`]|$)/i),
   shellRule('local-set-commands',
     "forge: the trust in the commands of .forge/config.yaml is recorded only from the person's answer to the question forge printed (forge's hook takes it from AskUserQuestion): ask it and wait; do not run local set commands.",
-    /(?:^|\s)local\s+set\s+commands(?:\s|$)/i),
+    /(?:^|\s)local\s+set\s+commands(?=[\s<>()`]|$)/i),
 ];

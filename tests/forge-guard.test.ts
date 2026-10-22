@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
-import { TRUST_RULES, evaluateGuard, forgeCalls, guardOutput, parseGuardInput, type GuardCtx, type GuardRule, type GuardVerdict } from '../src/forge/guard.js';
+import {
+  TRUST_RULES, evaluateGuard, forgeCalls, guardOutput, guardPath, parseGuardInput, targetPath, type GuardCtx, type GuardRule, type GuardVerdict,
+} from '../src/forge/guard.js';
 
 const M = path.resolve(os.tmpdir(), 'guard-main');
 const G = path.join(M, '.git');
@@ -41,7 +43,29 @@ describe('the trust rules of the guard (D9)', () => {
       expect(ruleOf(file('Edit', AUTH.toUpperCase()))).toBe('auth-records');
       expect(ruleOf(file('Write', TRUST.split(path.sep).join('/')))).toBe('trust-file');
       expect(ruleOf(file('Write', LOCAL.toUpperCase()))).toBe('local-yaml');
+      // the spellings Windows reads as the same file: a \\?\ or \\.\ prefix, an NTFS stream, trailing dots and spaces
+      expect(ruleOf(file('Edit', '\\\\?\\' + AUTH))).toBe('auth-records');
+      expect(ruleOf(file('Write', TRUST + '::$DATA'))).toBe('trust-file');
+      expect(ruleOf(file('Write', LOCAL + '::$DATA'))).toBe('local-yaml');
+      expect(ruleOf(file('Write', '\\\\.\\' + LOCAL + ':x'))).toBe('local-yaml');
+      expect(ruleOf(file('Write', LOCAL + '. '))).toBe('local-yaml');
+      expect(ruleOf(file('Write', path.join(M, '.forge.', 'execution', 'auth', 'x.json')))).toBe('auth-records');
+      expect(guardPath('\\\\?\\UNC\\srv\\share\\r\\.forge\\local.yaml')).toBe(guardPath('\\\\srv\\share\\r\\.forge\\local.yaml'));
     }
+  });
+  it('folds case where the file system usually ignores it: Windows and macOS, not Linux (guardPath)', () => {
+    expect(guardPath(LOCAL.toUpperCase(), 'darwin')).toBe(guardPath(LOCAL, 'darwin'));
+    expect(path.basename(guardPath(path.join(M, '.FORGE', 'Local.YAML'), 'darwin'))).toBe('local.yaml');
+    expect(guardPath(LOCAL.toUpperCase(), 'linux')).not.toBe(guardPath(LOCAL, 'linux'));
+  });
+  it('NotebookEdit and Edit: a harmless path in one field hides no protected path in the other', () => {
+    const both = (tool: string, file_path: string, notebook_path: string) =>
+      evaluateGuard({ tool_name: tool, tool_input: { file_path, notebook_path, new_source: '' } }, CTX, TRUST_RULES);
+    const harmless = path.join(M, 'src', 'a.ts');
+    expect(ruleOf(both('NotebookEdit', harmless, LOCAL))).toBe('local-yaml');
+    expect(ruleOf(both('Edit', harmless, AUTH))).toBe('auth-records');
+    expect(targetPath({ tool_name: 'NotebookEdit', tool_input: { file_path: harmless, notebook_path: LOCAL } }, CTX)).toBe(LOCAL);
+    expect(targetPath({ tool_name: 'Edit', tool_input: { file_path: harmless, notebook_path: LOCAL } }, CTX)).toBe(harmless);
   });
   it('denies a Bash or PowerShell call that runs forge hook answer or local set commands, however forge is spelled (Review Focus 1)', () => {
     const cases: [string, string, string?][] = [
@@ -50,13 +74,24 @@ describe('the trust rules of the guard (D9)', () => {
       ['node /p/dist/forge.cjs --cwd wt local set commands allowed --expect abc', 'local-set-commands'],
       ["cd x && node.exe '/p/dist/forge.cjs' local   set commands none", 'local-set-commands'],
       ['& node "C:\\Users\\b\\forge\\dist\\forge.cjs" hook answer', 'hook-answer', 'PowerShell'],
+      // forge's parser takes --cwd <dir> out wherever it sits, and a shell metacharacter ends a word
+      ['node /p/forge.cjs local set --cwd wt commands allowed --expect h', 'local-set-commands'],
+      ['node /p/forge.cjs local --cwd wt set commands allowed --expect h', 'local-set-commands'],
+      ['node /p/forge.cjs local set --cwd "my wt" commands allowed --expect h', 'local-set-commands'],
+      ['node /p/forge.cjs hook --cwd . answer < a.json', 'hook-answer'],
+      ['node /p/forge.cjs hook answer<a.json', 'hook-answer'],
+      ['node /p/forge.cjs hook answer>out.txt', 'hook-answer'],
+      ['(node /p/forge.cjs hook answer)', 'hook-answer'],
+      ['x=$(node /p/forge.cjs hook answer)', 'hook-answer'],
+      ['`node /p/forge.cjs hook answer`', 'hook-answer'],
     ];
     for (const [command, id, tool] of cases) expect(ruleOf(sh(command, tool)), command).toBe(id);
   });
   it('lets through every other forge call and any text that only mentions them (Review Focus 1)', () => {
     for (const command of ['node /p/dist/forge.cjs local set surfaces.web allowed --expect h --cwd wt', 'node /p/dist/forge.cjs local get commands',
       'node /p/dist/forge.cjs hook live', 'grep -n "hook answer" src/forge/auth.ts', 'git commit -m "w6a 9: deny hook answer and local set commands"',
-      "rg 'forge.cjs hook answer' README.md", 'npm test && echo local set commands']) expect(sh(command), command).toEqual({ decision: 'allow' });
+      "rg 'forge.cjs hook answer' README.md", 'npm test && echo local set commands', 'git commit -m "node /p/forge.cjs hook answer"',
+      'node /p/forge.cjs local set surfaces.web allowed --cwd commands']) expect(sh(command), command).toEqual({ decision: 'allow' });
     expect(forgeCalls('a && node "/x y/forge.cjs" --cwd w hook answer | node /p/forge.cjs local get')).toEqual(['--cwd w hook answer', 'local get']);
   });
   it('evaluateGuard: the first deny wins, null does not apply, an allow stops nothing, no rule allows (the seam 6b-1 extends)', () => {
