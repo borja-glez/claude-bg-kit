@@ -91,9 +91,12 @@ export function confinedIn(p: string, dir: string, platform: NodeJS.Platform = p
     if (s.split('\\').some(name => name !== '.' && name !== '..' && /[. ]$/.test(name))) return false;
   } else if (s.includes('\\')) return false;
   if (!api.isAbsolute(s)) return false;
-  const fold = (x: string) => (win ? x.toLowerCase() : x);
-  const rel = api.relative(fold(api.resolve(dir)), fold(api.resolve(s)));
-  return rel === '' || (rel !== '..' && !rel.startsWith(`..${api.sep}`) && !api.isAbsolute(rel));
+  // ASCII letters only: NTFS does not fold the rest, and toLowerCase turns the Kelvin sign U+212A into a k.
+  const fold = (x: string) => (win ? x.replace(/[A-Z]/g, c => c.toLowerCase()) : x);
+  // Not path.relative: win32.relative compares with toLowerCase.
+  const at = fold(api.resolve(dir));
+  const q = fold(api.resolve(s));
+  return q === at || q.startsWith(at.endsWith(api.sep) ? at : at + api.sep);
 }
 
 // node or node.exe, its flags, the path of forge.cjs bare or quoted, and the arguments up to the end of that command.

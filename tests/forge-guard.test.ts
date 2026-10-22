@@ -136,6 +136,8 @@ describe('the trust rules of the guard (D9)', () => {
     for (const p of [`${W}\\src\\a.ts`, 'c:/R/.CLAUDE/worktrees/SPIKE-X/src/a.ts']) expect(confinedIn(p, W, 'win32'), p).toBe(true);
     for (const p of [`\\\\?\\${W}.\\a.ts`, `\\\\?\\${W} \\a.ts`, `\\\\.\\${W}\\a.ts`, `${W}:s\\a.ts`, `${W}.\\a.ts`, `${W}2\\a.ts`, `${W}\\..\\x`, `e:${W.slice(2)}\\a.ts`])
       expect(confinedIn(p, W, 'win32'), p).toBe(false);
+    // NTFS folds ASCII letters only: the Kelvin sign is not a K there, though toLowerCase makes it one.
+    expect(confinedIn(`C:\\wor${String.fromCharCode(0x212A)}\\wt\\spike-x\\a`, 'C:\\work\\wt\\spike-x', 'win32')).toBe(false);
     const P = '/u/r/.claude/worktrees/spike-x';
     expect(confinedIn(`${P}/src/a.ts`, P, 'linux')).toBe(true);
     expect(confinedIn('/u/r/.claude/worktrees/SPIKE-X/a', P, 'darwin')).toBe(false);

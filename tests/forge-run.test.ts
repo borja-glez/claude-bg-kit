@@ -221,6 +221,12 @@ describe('the autonomous block of run.json (6b)', () => {
       expect(parseRun(text(bad)), JSON.stringify(bad)).toBeNull();
     }
   });
+  it('refuses a branch name git would read as an option, or with whitespace or control characters', () => {
+    for (const b of ['-x', 'a b', 'a\nb', 'a\tb', 'a\u0000b', 'a\u007fb']) {
+      expect(parseRun(text({ ...auto, startBranch: b })), JSON.stringify(b)).toBeNull();
+      expect(parseRun(text({ ...auto, protectedBranches: ['main', b] })), JSON.stringify(b)).toBeNull();
+    }
+  });
   it('a run without the block is read as before', () => {
     expect(parseRun(JSON.stringify(startRun(new Date('2026-10-22T10:00:00Z'), { cycles: 3 }, 10, 's1')))).not.toHaveProperty('autonomous');
   });

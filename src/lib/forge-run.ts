@@ -24,7 +24,8 @@ export interface AutonomousRun {
   profile: Profile; name: string; runId: string; worktree: string; branch: string; startBranch: string; protectedBranches: string[];
 }
 
-const isBranchName = (x: unknown): x is string => typeof x === 'string' && x !== '' && !x.includes('..');
+// Later tasks hand these to git: no leading `-` (an option), no whitespace, no control character.
+const isBranchName = (x: unknown): x is string => typeof x === 'string' && x !== '' && !x.includes('..') && !x.startsWith('-') && !/[\s\u0000-\u001f\u007f]/.test(x);
 const isAbsolutePath = (x: unknown): x is string => typeof x === 'string' && /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(x);
 
 /** The seven fields of an autonomous block, or null when it does not hold together. Other fields are ignored (L6), so a
