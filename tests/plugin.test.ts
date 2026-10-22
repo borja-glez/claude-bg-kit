@@ -1061,6 +1061,8 @@ describe('plugin layout', () => {
       expect(input(a), a).toBe(input('forge-impl'));
       expect(read(`plugins/forge/agents/${a}.md`), a).not.toContain('FORGE validate --affected <files you changed');
     }
+    expect(step3('forge-impl')).toContain('preexisting: true');
+    expect(runRef('task-steps')).toContain('carries `--baseline`');
     const run = read('plugins/forge/skills/run/SKILL.md').split(/\r?\n/);
     const small1 = run.find(l => l.startsWith('1. A Small task is **always delegated**'))!;
     const medium2 = run.find(l => l.startsWith('2. For each task, write'))!;

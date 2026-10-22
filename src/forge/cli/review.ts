@@ -944,9 +944,12 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const threatModel = tmFile ? rel(deps.cwd, tmFile) : null;
   // J-11: the implementer's validate command, exactly as it runs it: the tests related to its changes since BASE, the
   // typecheck and the lint, in the code's directory. Paths with / and in double quotes, which every shell takes.
-  const validate = `node "${slash(deps.self ?? 'forge.cjs')}" validate --affected --base ${base} --task ${task}${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}`;
+  // D8: it carries --baseline whenever this prep wrote the baseline, so validate can tell the new failures from the base's.
+  const validateCmd = (baselineFile: string | null) => `node "${slash(deps.self ?? 'forge.cjs')}" validate --affected --base ${base} --task ${task}`
+    + `${baselineFile ? ` --baseline "${slash(baselineFile)}"` : ''}${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}`;
   // J-13: --no-baseline (the Small path) records BASE and the phase and runs no validator.
   if (noBaseline || !config) {
+    const validate = validateCmd(null);
     appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase, brief: Number(n), base, ...started });
     return json({ base, ...started, baseline: null, failing: [], cached: [], durationMs: 0, validate, threatModel, ...earlier });
   }
@@ -963,7 +966,7 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   appendEvent(deps.cwd, { ts, kind: 'phase', task: id, phase, brief: Number(n), base, ...started });
   return json({
     base, ...started, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results),
-    durationMs, validate, threatModel, ...(restored.length ? { restored } : {}), ...earlier,
+    durationMs, validate: validateCmd(file), threatModel, ...(restored.length ? { restored } : {}), ...earlier,
   });
 }
 

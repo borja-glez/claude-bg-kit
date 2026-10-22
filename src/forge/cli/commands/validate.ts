@@ -92,6 +92,11 @@ export const command: Command = (args, ctx) => {
   const out = json(results, allOk ? 0 : 1);
   if (!list.length) out.stderr = all.length ? 'no validators cover the affected paths\n' : 'no validators detected: add tests or list validators in .forge/config.yaml\n';
   out.stderr += plan.notes.map(n => `${n}\n`).join('');
+  // D8: with a baseline, say which failures are the change's own and which the base already had.
+  if (has('baseline') && results.some(r => !r.ok)) {
+    const names = (pick: (r: ValidatorResult) => boolean) => results.filter(r => !r.ok && pick(r)).map(r => r.validator).join(', ') || 'none';
+    out.stderr += `new failures: ${names(blocking)}; already failing on the base (not yours): ${names(r => !blocking(r))}\n`;
+  }
   if (denied) out.stderr += 'configCommands: denied — only the validators forge detects ran\n';
   if (restored.length) out.stderr += `restored ${restored.length} tracked file(s) the validators regenerated: ${restored.join(', ')}\n`;
   return out;

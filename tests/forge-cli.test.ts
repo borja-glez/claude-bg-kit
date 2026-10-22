@@ -552,6 +552,21 @@ describe('forge CLI', () => {
     expect(fallback.action).toBe('accept');
     expect(run(['validate', '--all', '--baseline'], io).code).toBe(2);
   });
+  it('validate --baseline says on stderr which failures are new and which already failed on the base (D8)', () => {
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run', build: 'vite build' } }));
+    writeFileSync(path.join(root, 'baseline.json'), JSON.stringify([
+      { validator: 'build', ok: false, flaky: false, durationMs: 1, failures: ['error during build'] },
+      { validator: 'test', ok: true, flaky: false, durationMs: 1, failures: [] },
+    ]));
+    io.exec = () => ({ code: 1, output: 'error during build', ms: 1, timedOut: false });
+    const args = ['validate', '--all', '--path', 'medium', '--task', 't1-1', '--baseline', 'baseline.json', '--no-cache'];
+    const r = run(args, io);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('new failures: test; already failing on the base (not yours): build\n');
+    expect(JSON.parse(r.stdout).find((x: { validator: string }) => x.validator === 'build')).toMatchObject({ ok: false, preexisting: true });
+    io.exec = () => ({ code: 0, output: '', ms: 1, timedOut: false });
+    expect(run(args, io).stderr).not.toContain('new failures');
+  });
   it('validate with no validators prints [] and says so', () => {
     const r = run(['validate', '--all'], io);
     expect(r.code).toBe(0);
@@ -606,7 +621,7 @@ describe('forge CLI', () => {
     mkdirSync(path.join(root, '.forge', 'work', 'T'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'work', 'T', 'baseline-1.json'), JSON.stringify([{ validator: 'test', ok: false, flaky: false, failures: ['> test', '> node -e "process.exit(1)"'] }]));
     const r = run(['validate', '--all', '--cwd', other, '--baseline', '.forge/work/T/baseline-1.json'], { ...io, exec: undefined, git: undefined });
-    expect(r.stderr).toBe('');
+    expect(r.stderr).toBe('new failures: none; already failing on the base (not yours): test\n');
     expect(JSON.parse(r.stdout)).toEqual([expect.objectContaining({ validator: 'test', ok: false, preexisting: true })]);
     expect(r.code).toBe(0);
   });

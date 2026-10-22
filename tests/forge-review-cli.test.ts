@@ -318,7 +318,9 @@ describe('forge prep', () => {
     const self = path.join(root, 'plugin dir', 'dist', 'forge.cjs');
     const out = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], { ...io, scriptPath: self }).stdout);
     const slash = (p: string) => path.resolve(p).split(path.sep).join('/');
-    expect(out.validate).toBe(`node "${slash(self)}" validate --affected --base ${head()} --task T1-1 --cwd "${slash(wt)}"`);
+    expect(out.validate).toBe(`node "${slash(self)}" validate --affected --base ${head()} --task T1-1 --baseline "${slash(path.join(work(), 'baseline-1.json'))}" --cwd "${slash(wt)}"`);
+    const small = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'small', '--no-baseline', '--cwd', wt], io).stdout);
+    expect(small.validate).not.toContain('--baseline');
   });
 
   it('writes baseline-<n>.json, logs the phase with the brief and the base, and prints the worktree HEAD', () => {
