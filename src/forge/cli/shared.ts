@@ -187,35 +187,46 @@ export function bindingDecision(last: { status: string; ts: string } | undefined
   return last.status;
 }
 
+/** D3: where a proposal stands against the roadmap owner's rule. `no-rule`: a mark that no decision of this checkout backs, on
+ *  a roadmap without the owner rule, so an editor could have written it. */
+export type OwnerStanding = 'ok' | 'no-mark' | 'edited' | 'no-rule';
+export interface OwnerCtx { last: Record<string, { status: string; ts: string }>; ownerRule: boolean; now: number }
+export function ownerCtx(root: string, now: Date): OwnerCtx {
+  return { last: lastDecisions(root), ownerRule: pulledRules(root) >= PAGE_RULES, now: now.getTime() };
+}
+/** The one rule that to-task, the stop conditions and `unownedReasons` share. */
+export function ownerStanding(pid: string, p: Parameters<typeof ownerCheck>[1], mark: ApprovalDoc | null | undefined, ctx: OwnerCtx): OwnerStanding {
+  const c = ownerCheck(pid, p, mark, bindingDecision(ctx.last[pid], mark, ctx.ownerRule, ctx.now));
+  return c !== 'no-mark' && !ctx.ownerRule && ctx.last[pid] === undefined ? 'no-rule' : c;
+}
+
 // What the stop conditions need from the repository: the stop file and the proposal mirror.
 // Approved work still pending = every approved/auto_approved proposal not yet done, with or without a task.
 export function stopContext(cwd: string, now: Date): StopContext {
   const proposals = loadProposals(cwd);
   const marks = loadApprovals(cwd);
-  const last = lastDecisions(cwd);
-  const ownerRule = pulledRules(cwd) >= PAGE_RULES;
+  const octx = ownerCtx(cwd, now);
   return {
     now,
     stopFile: existsSync(stopFile(cwd)),
     // Wave 4: approved work counts only with the owner's mark (with or without a task, as before); one without a task also
     // needs the mark to be of its present text: an edited one never becomes a task, so it does not hold the queue open.
     approvedPending: proposals.filter(p => p.taskId === undefined
-      ? ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule, now.getTime())) === 'ok'
+      ? ownerStanding(p.id, p, marks[p.id], octx) === 'ok'
       : markMatches(p, marks[p.id])).length,
     pendingProposals: proposals.filter(p => p.status === 'proposed' || p.status === 'discussing').length,
   };
 }
 
-/** Wave 4: approved proposals without a task that lack the roadmap owner's mark, or whose text changed since the mark: they
- *  never become tasks. The reason says which of the two. */
-export function unownedReasons(root: string, now: Date): Record<string, 'no-mark' | 'edited'> {
+/** Wave 4: approved proposals without a task that lack the roadmap owner's mark, whose text changed since the mark, or whose
+ *  lone mark counts for nothing on a roadmap without the owner rule (D3): they never become tasks. The reason says which. */
+export function unownedReasons(root: string, now: Date): Record<string, Exclude<OwnerStanding, 'ok'>> {
   const marks = loadApprovals(root);
-  const last = lastDecisions(root);
-  const ownerRule = pulledRules(root) >= PAGE_RULES;
-  const out: Record<string, 'no-mark' | 'edited'> = {};
+  const octx = ownerCtx(root, now);
+  const out: Record<string, Exclude<OwnerStanding, 'ok'>> = {};
   for (const p of loadProposals(root)) {
     if (!isActionable(p) || p.taskId !== undefined) continue;
-    const c = ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule, now.getTime()));
+    const c = ownerStanding(p.id, p, marks[p.id], octx);
     if (c !== 'ok') out[p.id] = c;
   }
   return out;

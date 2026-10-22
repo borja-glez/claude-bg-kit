@@ -743,6 +743,8 @@ describe('forge infinite', () => {
     saveProposal(root, 'p20261011090000aaab', doc('discussing'));
     saveProposal(root, 'p20261011090000aaac', doc('approved'));
     saveApproval(root, 'p20261011090000aaac', { status: 'approved', decidedAt: 'T', by: 'forge:decide', digest: proposalDigest('p20261011090000aaac', doc('approved')) });
+    // D3: a mark counts by itself only on a roadmap with the owner rule; this one is backed by this checkout's decision.
+    appendEvent(root, { ts: '2026-10-11T09:00:00.000Z', kind: 'proposal', action: 'decide', id: 'p20261011090000aaac', status: 'approved' });
     expect(JSON.parse(hook('{}').stdout).decision).toBe('block');
     run(['cycle', '--progress', 'yes'], io);
     saveProposal(root, 'p20261011090000aaac', doc('auto_approved', 'T002'));
@@ -2118,6 +2120,28 @@ describe('forge waypoint-cli', () => {
       });
       const DOC = (): Record<string, unknown> => ({ ...prop, ts: '2026-10-11T10:00:00.000Z', status: 'proposed', author: 'session' });
       const PLAN = 'docs/waypoint/demo/plan.yaml';
+      it('a mark no decision of this checkout backs approves nothing without the owner rule: to-task exits 2 and writes nothing (D3)', () => {
+        const a = JSON.parse(add().stdout).id;
+        const { id: _id, ...doc } = loadProposals(root).find(p => p.id === a)!;
+        saveProposal(root, a, { ...doc, status: 'approved', decidedBy: 'user:someone', decidedAt: 'T' });
+        saveApproval(root, a, MARK(a, 'approved'));
+        writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');
+        const plan = readFileSync(path.join(root, PLAN), 'utf8');
+        const page = path.join(root, '.forge', 'approvals-page.json');
+        const toTask = () => run(['proposals', 'to-task', a, '--plan', PLAN], io);
+        const none = toTask();
+        expect(none.code).toBe(2);
+        expect(none.stderr).toContain("no mark of the roadmap's owner");
+        writeFileSync(page, JSON.stringify({ rules: 1 }) + '\n');
+        const old = toTask();
+        expect(old.code).toBe(2);
+        expect(old.stderr).toContain('/waypoint:plan');
+        expect(readFileSync(path.join(root, PLAN), 'utf8')).toBe(plan);
+        expect(loadProposals(root).find(p => p.id === a)!.taskId).toBeUndefined();
+        expect(JSON.parse(run(['proposals', 'list'], io).stdout).unownedReasons).toEqual({ [a]: 'no-rule' });
+        writeFileSync(page, JSON.stringify({ rules: 2 }) + '\n');
+        expect(toTask().code).toBe(0);
+      });
       it('an approval that already became a task cannot be replayed: not by a pulled copy without its task, not by the plan', () => {
         const a = JSON.parse(add().stdout).id;
         run(['proposals', 'decide', a, 'approve'], io);
@@ -2135,7 +2159,9 @@ describe('forge waypoint-cli', () => {
         expect(readFileSync(path.join(root, PLAN), 'utf8')).toBe(planAfter);
         // Without the ledger event the plan itself remembers where the task came from.
         rmSync(path.join(root, '.forge', 'ledger.jsonl'), { force: true });
-        const viaPlan = run(['proposals', 'to-task', a, '--plan', PLAN], io);
+        // D3: with no decision left in the ledger the mark counts only on a roadmap with the owner rule.
+        writeFileSync(path.join(root, '.forge', 'approvals-page.json'), JSON.stringify({ rules: 2 }) + '\n');
+        const viaPlan =run(['proposals', 'to-task', a, '--plan', PLAN], io);
         expect(viaPlan.code).toBe(2);
         expect(viaPlan.stderr).toContain('already became T002');
         expect(readFileSync(path.join(root, PLAN), 'utf8')).toBe(planAfter);
@@ -2160,7 +2186,7 @@ describe('forge waypoint-cli', () => {
         run(['infinite', 'start', '--cycles', '2'], io);
         expect(JSON.parse(run(['infinite', 'status'], io).stdout).unowned).toBe(1);
       });
-      it('a decision reopened and decided again by the owner counts; one with no decision in the ledger counts by its mark', () => {
+      it('a decision reopened and decided again by the owner counts; one with no decision in the ledger counts by its mark on a roadmap with the owner rule (D3)', () => {
         const a = JSON.parse(add().stdout).id;
         run(['proposals', 'decide', a, 'approve'], io);
         run(['proposals', 'decide', a, 'reject', '--reopen'], io);
@@ -2172,6 +2198,7 @@ describe('forge waypoint-cli', () => {
         const { id: _id, ...doc } = loadProposals(root).find(p => p.id === b)!;
         saveProposal(root, b, { ...doc, status: 'approved' });
         saveApproval(root, b, { status: 'approved', decidedAt: 'T', by: 'page', digest: proposalDigest(b, doc) });
+        writeFileSync(path.join(root, '.forge', 'approvals-page.json'), JSON.stringify({ rules: 2 }) + '\n');
         expect(run(['proposals', 'to-task', b, '--plan', PLAN], io).code).toBe(0);
       });
       it('carry 12: an owner mark newer than this checkout\'s latest decision counts, only on a roadmap with the owner rule', () => {
@@ -2238,6 +2265,8 @@ describe('forge waypoint-cli', () => {
         const { taskId: _t, ...noTask } = doc;
         saveProposal(root, a, noTask);
         rmSync(path.join(root, '.forge', 'ledger.jsonl'), { force: true });
+        // D3: with no decision left in the ledger the mark counts only on a roadmap with the owner rule.
+        writeFileSync(path.join(root, '.forge', 'approvals-page.json'), JSON.stringify({ rules: 2 }) + '\n');
         const again = run(['proposals', 'to-task', a, '--plan', PLAN], io);
         expect(again.code).toBe(2);
         expect(again.stderr).toContain('already became T002');
@@ -2255,7 +2284,11 @@ describe('forge waypoint-cli', () => {
         const { taskId: _t, ...noTask } = p;
         saveProposal(root, a, noTask);
         rmSync(path.join(root, '.forge', 'ledger.jsonl'), { force: true });
-        expect(run(['proposals', 'to-task', a, '--plan', PLAN], io).code).toBe(2);
+        // D3: with the owner rule, so the refusal below is the plan's link and not the missing rule.
+        writeFileSync(path.join(root, '.forge', 'approvals-page.json'), JSON.stringify({ rules: 2 }) + '\n');
+        const again = run(['proposals', 'to-task', a, '--plan', PLAN], io);
+        expect(again.code).toBe(2);
+        expect(again.stderr).toContain('already became');
       });
       it('the ledger alone refuses a proposal that already became a task, even when the plan lost the link', () => {
         const a = JSON.parse(add().stdout).id;

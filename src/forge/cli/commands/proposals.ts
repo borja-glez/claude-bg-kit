@@ -8,7 +8,7 @@ import {
   removeApproval, addProposal, ProposalInputError, type AddOutcome, type DecideError,
 } from '../../proposals.js';
 import {
-  normalizeProposal, isActionable, canDecide, normalizeApproval, ownerCheck, ownerApproved, proposalDigest, PROPOSAL_STATUSES,
+  normalizeProposal, isActionable, canDecide, normalizeApproval, proposalDigest, PROPOSAL_STATUSES,
   type Decision, type ProposalDoc, type ApprovalDoc,
 } from '../../../lib/proposals.js';
 import { PAGE_RULES } from '../../../lib/publish.js';
@@ -17,7 +17,7 @@ import { proposalToTask, proposalOfIncludes, proposalsOfIncludes } from '../../t
 import type { PlanTask } from '../../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { UsageError } from '../errors.js';
-import { lastDecisions, approvalsPageFile, pulledRules, bindingDecision, unownedReasons } from '../shared.js';
+import { approvalsPageFile, ownerCtx, ownerStanding, unownedReasons } from '../shared.js';
 
 /** Why `proposals decide` refused, naming who decided and when, or what blocks the reopen. */
 function decideRefusal(id: string, doc: ProposalDoc, error: DecideError): string {
@@ -302,10 +302,17 @@ export const command: Command = (args, ctx) => {
       // A decision this checkout reopened since stops counting, even if its mark is still in the roadmap, unless the
       // owner decided again after it (carry 12).
       const mark = loadApproval(io.cwd, id);
-      const lastStatus = bindingDecision(lastDecisions(io.cwd)[id], mark, pulledRules(io.cwd) >= PAGE_RULES, io.now().getTime());
-      const check = ownerCheck(id, found, mark, lastStatus);
-      if (check === 'no-mark') throw new UsageError(`proposals to-task: ${id} has no mark of the roadmap's owner (approvals/${id}); only the owner's approvals become tasks`);
-      if (!ownerApproved(id, found, mark, lastStatus)) throw new UsageError(`proposals to-task: ${id} was edited after the owner's approval; it needs a new approval`);
+      const standing = ownerStanding(id, found, mark, ownerCtx(io.cwd, io.now()));
+      if (standing === 'no-mark') throw new UsageError(`proposals to-task: ${id} has no mark of the roadmap's owner (approvals/${id}); only the owner's approvals become tasks`);
+      if (standing === 'edited') throw new UsageError(`proposals to-task: ${id} was edited after the owner's approval; it needs a new approval`);
+      if (standing === 'no-rule' && existsSync(approvalsPageFile(io.cwd))) {
+        throw new UsageError(`proposals to-task: ${id} is approved only by a mark in approvals/, and this roadmap was published before the owner's rule, `
+          + 'so an editor could have written it: republish it with /waypoint:plan, then pull the approvals again');
+      }
+      if (standing === 'no-rule') {
+        throw new UsageError(`proposals to-task: ${id} has no mark of the roadmap's owner: a mark in approvals/ that no decision of this checkout backs `
+          + "counts only on a roadmap with the owner's rule");
+      }
       // A mark is spent once: a proposal that already became a task (the ledger, which a pull never touches, or the plan)
       // is not turned into another by a copy that lost its taskId.
       const spent = readEvents(io.cwd).find(e => e.kind === 'proposal' && e.action === 'to-task' && e.id === id);
