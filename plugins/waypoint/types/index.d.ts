@@ -22,7 +22,7 @@ export type WaypointBand = (
   // joinable, on a notice about a run: whether forge takes members in it (an active plan run; an ephemeral one never).
   | { mode: 'notice'; project: string; locale: string; kind: 'other-live' | 'previous'; subject: 'task' | 'run' | 'design';
       seat: string | null; task: string | null; title: string | null; since: string | null; runId: string | null;
-      integrated?: number; total?: number; stopReason?: string | null; joinable?: boolean; roadmapUrl: string | null; key: string }
+      integrated?: number; total?: number; stopReason?: string | null; joinable?: boolean; coordinatorOpen?: boolean; roadmapUrl: string | null; key: string }
 ) & { viewer: { role: 'owner' | 'other-live' | 'previous' | 'none'; coordinator: boolean; runId: string | null } };
 declare module 'claude-code' {
   interface PluginState {
