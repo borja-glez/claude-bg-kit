@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { startRun, saveRun, runFile, endRun, parseRun, readRunText } from '../src/forge/run.js';
 import { run } from '../src/forge/cli/run.js';
@@ -100,6 +100,62 @@ describe('autonomousFor', () => {
     saveRun(main, { ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: auto() });
     expect(autonomousFor(main, { session_id: 'person', cwd: `${wt}2` })).toBeNull();
     expect(autonomousFor(main, { session_id: 'person', cwd: path.join(wt, '..', '..', '..') })).toBeNull();
+  });
+});
+
+describe('autonomousFor only reads, and its fail-closed paths hold (fix round 1)', () => {
+  const member = (hook: string) => writeMember(main, { sessionId: `sid-${hook}`, role: 'executor', runId: ex().runId, task: 'T001', name: null, since: T0.toISOString(), hookSession: hook });
+  it('writes nothing for a main with only a legacy swarm.json, and the coordinator still belongs', () => {
+    saveRun(main, { ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: auto() });
+    writeFileSync(path.join(main, '.forge', 'swarm.json'), JSON.stringify({
+      active: true, parallel: 5, mergeAuthorized: false, project: 'shop', base: 'main', coordinator: 'main', hookSession: 'coord-1',
+      startedAt: T0.toISOString(), lastTickAt: T0.toISOString(), lastBlockTick: null, sleepUntil: null, stopReason: null, stallReason: null, notice: null, fronts: {},
+    }));
+    const before = readdirSync(path.join(main, '.forge')).sort();
+    expect(autonomousFor(main, { session_id: 'coord-1' })).not.toBeNull();
+    expect(autonomousRun(main)).not.toBeNull();
+    expect(readdirSync(path.join(main, '.forge')).sort()).toEqual(before);
+  });
+  it('reads an autonomous key written with a JSON escape', () => {
+    const text = JSON.stringify({ ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: auto() }).replace('"autonomous"', '"autonom\\u006fus"');
+    expect(text).not.toContain('"autonomous"');
+    writeFileSync(runFile(main), text);
+    expect(autonomousFor(main, { session_id: 'coord-1' })).not.toBeNull();
+  });
+  it.runIf(process.platform === 'win32')('a task folder is matched without case on Windows when execution.json does not read', () => {
+    saveRun(main, { ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: auto() });
+    writeFileSync(executionFile(main), 'not json');
+    expect(autonomousFor(main, { session_id: 'x', cwd: path.join(main, '.claude', 'worktrees', 'TASK-T001') })).not.toBeNull();
+  });
+  it('an execution with closedAt is not the run\'s', () => {
+    saveRun(main, { ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: auto() });
+    seedExecution(main, ex({ closedAt: T0.toISOString(), closedBy: 'close', tasks: { T001: task('T001') } }));
+    member('member-1');
+    expect(autonomousFor(main, { session_id: 'member-1' })).toBeNull();
+    expect(autonomousFor(main, { session_id: 'x', cwd: taskWorktree(main, 'T001') })).toBeNull();
+    expect(autonomousFor(main, { session_id: 'coord-1' })!.roots).toEqual([wt, runTmp('spike-x')]);
+  });
+  it('a relative scratchpad is not a root', () => {
+    saveRun(main, { ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: auto() });
+    expect(autonomousFor(main, { session_id: 'coord-1', scratchpad_dir: 'scratch' })!.roots).toEqual([wt, runTmp('spike-x')]);
+  });
+  it('with an invalid block, a member of another session\'s execution gets null unless its cwd is under .claude/worktrees', () => {
+    writeFileSync(runFile(main), JSON.stringify({ ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: { profile: 'nope' } }));
+    seedExecution(main, ex({ hookSession: 'someone-else', tasks: { T001: task('T001') } }));
+    member('member-1');
+    expect(autonomousFor(main, { session_id: 'member-1', cwd: main })).toBeNull();
+    expect(autonomousFor(main, { session_id: 'member-1', cwd: wt })).toMatchObject({ runId: INVALID_RUN });
+  });
+  it('autonomousRun lists the run worktree among its dirs when execution.json does not read', () => {
+    saveRun(main, { ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: auto() });
+    writeFileSync(executionFile(main), 'not json');
+    expect(autonomousRun(main)!.dirs).toContain(runWorktree(main));
+  });
+  it('ids has no duplicate when the execution\'s hookSession is the run\'s sessionId', () => {
+    saveRun(main, { ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: auto() });
+    seedExecution(main, ex());
+    member('coord-1');
+    expect(autonomousRun(main)!.ids).toEqual(['coord-1']);
   });
 });
 
