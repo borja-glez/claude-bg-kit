@@ -13,6 +13,7 @@ import { command as log } from './log.js';
 import { command as prefs } from './prefs.js';
 import { command as begin } from './begin.js';
 import { command as proposals } from './proposals.js';
+import { command as resource } from './resource.js';
 import { command as review } from './review.js';
 import { command as roadmap } from './roadmap.js';
 import { command as round } from './round.js';
@@ -49,6 +50,6 @@ export const COMMANDS: Readonly<Record<string, Command>> = {
   'verify-env': verifyEnv, 'verify-plan': verifyPlan, 'verify-preflight': verifyPreflight,
   'verify-result': verifyResult, 'verify-cleanup': verifyCleanup, 'verify-close': verifyClose, 'verify-spawn': verifySpawn,
   'waypoint-cli': waypointCli, 'sp-path': spPath, 'sp-specs': spSpecs, 'sp-plans': spPlans, 'sp-plan': spPlan,
-  tdd, tree, config, infinite, cycle, authorize, swarm, setup, stop, hook,
+  tdd, tree, config, infinite, cycle, authorize, swarm, setup, stop, hook, resource,
   'roadmap-doc': roadmap, 'roadmap-run': roadmap,
 };

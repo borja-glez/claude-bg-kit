@@ -79,6 +79,23 @@ export function isInside(p: string, dir: string): boolean {
   }
 }
 
+/** p is dir or under it, for a rule that allows only inside: unlike isInside (which folds spellings toward «same file», right to deny) it never folds toward inside. */
+export function confinedIn(p: string, dir: string, platform: NodeJS.Platform = process.platform): boolean {
+  const win = platform === 'win32';
+  const api = win ? path.win32 : path.posix;
+  let s = p;
+  if (win) {
+    s = s.replace(/\//g, '\\');
+    if (/^\\\\[?.]\\/.test(s)) return false;
+    if (/:/.test(s.replace(/^[A-Za-z]:/, ''))) return false;
+    if (s.split('\\').some(name => name !== '.' && name !== '..' && /[. ]$/.test(name))) return false;
+  } else if (s.includes('\\')) return false;
+  if (!api.isAbsolute(s)) return false;
+  const fold = (x: string) => (win ? x.toLowerCase() : x);
+  const rel = api.relative(fold(api.resolve(dir)), fold(api.resolve(s)));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${api.sep}`) && !api.isAbsolute(rel));
+}
+
 // node or node.exe, its flags, the path of forge.cjs bare or quoted, and the arguments up to the end of that command.
 const FORGE_CALL = /\bnode(?:\.exe)?["']?\s+(?:-\S+\s+)*(?:"[^"\n]*forge\.cjs"|'[^'\n]*forge\.cjs'|[^\s"'`;|&<>]*forge\.cjs)(?=[\s"'`;|&<>]|$)([^\n;|&]*)/gi;
 

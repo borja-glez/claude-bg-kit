@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  TRUST_RULES, evaluateGuard, forgeCalls, guardOutput, guardPath, parseGuardInput, targetPath, type GuardCtx, type GuardRule, type GuardVerdict,
+  TRUST_RULES, confinedIn, evaluateGuard, forgeCalls, guardOutput, guardPath, parseGuardInput, targetPath, type GuardCtx, type GuardRule, type GuardVerdict,
 } from '../src/forge/guard.js';
 import { run } from '../src/forge/cli/run.js';
 import { guardCtx } from '../src/forge/cli/commands/hook.js';
@@ -130,6 +130,16 @@ describe('the trust rules of the guard (D9)', () => {
     for (const junk of [null, [], 'x', { tool_name: 'Write' }, { tool_name: 5, tool_input: {} }, { tool_name: 'Write', tool_input: [] }]) expect(parseGuardInput(junk), JSON.stringify(junk)).toBeNull();
     expect(parseGuardInput({ tool_name: 'Write', tool_input: { file_path: 'a' }, session_id: 's', cwd: 'c', hook_event_name: 'PreToolUse' }))
       .toEqual({ tool_name: 'Write', tool_input: { file_path: 'a' }, session_id: 's', cwd: 'c' });
+  });
+  it('confinedIn never folds a spelling toward inside (CARRY-1)', () => {
+    const W = 'C:\\r\\.claude\\worktrees\\spike-x';
+    for (const p of [`${W}\\src\\a.ts`, 'c:/R/.CLAUDE/worktrees/SPIKE-X/src/a.ts']) expect(confinedIn(p, W, 'win32'), p).toBe(true);
+    for (const p of [`\\\\?\\${W}.\\a.ts`, `\\\\?\\${W} \\a.ts`, `\\\\.\\${W}\\a.ts`, `${W}:s\\a.ts`, `${W}.\\a.ts`, `${W}2\\a.ts`, `${W}\\..\\x`, `e:${W.slice(2)}\\a.ts`])
+      expect(confinedIn(p, W, 'win32'), p).toBe(false);
+    const P = '/u/r/.claude/worktrees/spike-x';
+    expect(confinedIn(`${P}/src/a.ts`, P, 'linux')).toBe(true);
+    expect(confinedIn('/u/r/.claude/worktrees/SPIKE-X/a', P, 'darwin')).toBe(false);
+    expect(confinedIn('/u/r/.claude/worktrees/spike-x2\\..\\spike-x\\a', P, 'linux')).toBe(false);
   });
 });
 

@@ -205,3 +205,23 @@ describe('seatOf: the seat of the run\'s Claude session (G-08)', () => {
     expect(seatOf(mk(), 'c1', NOW)).toBeNull();
   });
 });
+
+describe('the autonomous block of run.json (6b)', () => {
+  const wt = path.resolve('/repo/.claude/worktrees/spike-tetris');
+  const auto = { profile: 'spike', name: 'tetris', runId: 'spike-tetris', worktree: wt, branch: 'forge/spike-tetris', startBranch: 'main', protectedBranches: ['main'] };
+  const text = (a: unknown) => JSON.stringify({ ...startRun(new Date('2026-10-22T10:00:00Z'), { hours: 2 }, 10, 's1'), autonomous: a });
+  const named = (name: string) => ({ ...auto, name, runId: `spike-${name}`, branch: `forge/spike-${name}` });
+  it('keeps a valid block, and only its seven fields (L6)', () => {
+    expect(parseRun(text(auto))?.autonomous).toEqual(auto);
+    expect(parseRun(text({ ...auto, idea: 'a later field' }))?.autonomous).toEqual(auto);
+  });
+  it('refuses the whole run when the block does not hold together', () => {
+    for (const bad of [{ ...auto, profile: 'prod' }, { ...auto, runId: 'spike-other' }, { ...auto, branch: 'main' }, { ...auto, worktree: 'rel/path' },
+      { ...auto, name: 'Tetris' }, { ...auto, protectedBranches: [] }, { ...auto, startBranch: 'a..b' }, named('a--b'), named('a-'), named('x'.repeat(41)), 'spike']) {
+      expect(parseRun(text(bad)), JSON.stringify(bad)).toBeNull();
+    }
+  });
+  it('a run without the block is read as before', () => {
+    expect(parseRun(JSON.stringify(startRun(new Date('2026-10-22T10:00:00Z'), { cycles: 3 }, 10, 's1')))).not.toHaveProperty('autonomous');
+  });
+});
