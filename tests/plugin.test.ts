@@ -266,7 +266,7 @@ describe('plugin layout', () => {
       expect(run).toContain(s);
     }
     for (const s of ['its `diff` verbatim', '`ask.question` with exactly the three `ask.options`', '`missing` and `unknown` tools',
-      'allowed --expect <the surface\'s hash from verify-plan>', 'When `diffTruncated` is true', 'FORGE verify-result --task <id>']) expect(runRef('verify')).toContain(s);
+      'allowed --expect <the surface\'s hash from verify-plan>', 'When `diffTruncated` is true', 'FORGE verify-close --task <id> --dir <WORK>/reviews-1-1 --evidence <WORK>/evidence/1-1/']) expect(runRef('verify')).toContain(s);
     expect(runRef('autonomy')).toContain('critique-dismiss');
     for (const s of ['**Print `announce` as it is, as a message of its own, before step 2**', 'Print its `say` lines as they are',
       '`run-deps`', '`main-deps`', '--retry-deps']) expect(runRef('execution')).toContain(s);
@@ -2054,7 +2054,7 @@ describe('plugin layout', () => {
     for (const w of ['git status --porcelain', 'FORGE tree snapshot', 'FORGE tdd', 'FORGE prefs', 'FORGE local set surfaces.', 'FORGE route stage']) expect(run, w).not.toContain(w);
     expect(run.split('\n').find(l => l.startsWith('4. **Verification, only when the task asks for it**'))).toContain('`## Small` in `references/verify.md`');
     const verify = runRef('verify');
-    for (const w of ['## Small', '**Permission.**', 'FORGE local set surfaces.<name> allowed', 'FORGE verify-plan --task <id> --path small --base <BASE> --asked', 'FORGE verify-result --task <id>']) {
+    for (const w of ['## Small', '**Permission.**', 'FORGE local set surfaces.<name> allowed', 'FORGE verify-plan --task <id> --path small --base <BASE> --asked', 'FORGE verify-close --task <id> --dir <WORK>/reviews-1-1 --evidence <WORK>/evidence/1-1/']) {
       expect(verify, w).toContain(w);
     }
     const large = runRef('large');
@@ -2142,4 +2142,23 @@ describe('plugin layout', () => {
   });
 
   it('convergence names the env-unverified residual (H1)', () => expect(runRef('convergence')).toContain('`env-unverified`'));
+
+  it('the Small path closes with verify-close, the flow pass is closed before the verdicts, and a session without a track continues in the worktree of its branch (H2, H3, H6)', () => {
+    const v = runRef('verify');
+    const small = v.slice(v.indexOf('\n## Small'), v.indexOf('\n## Flow pass'));
+    expect(small).toContain('FORGE verify-close --task <id> --dir <WORK>/reviews-1-1 --evidence <WORK>/evidence/1-1/');
+    expect(small).not.toContain('FORGE verify-result');
+    const flow = v.slice(v.indexOf('\n## Flow pass'));
+    const close = flow.indexOf('FORGE verify-close --flow <flow.dir>');
+    expect(close).toBeGreaterThan(-1);
+    expect(close).toBeLessThan(flow.indexOf('--verify <flow.dir>/verify.json'));
+    const large = runRef('large');
+    const step4 = large.slice(large.indexOf('4. **Final review.**'), large.indexOf('5. Log the phase'));
+    const closeLarge = step4.indexOf('FORGE verify-close --flow');
+    expect(closeLarge).toBeGreaterThan(-1);
+    expect(closeLarge).toBeLessThan(step4.indexOf('FORGE verdict --task <project>-final'));
+    const multi = read('plugins/waypoint/skills/work/references/multisession.md');
+    for (const w of ['git worktree list --porcelain', 'node "<WP>" launch <plan> <track>']) expect(multi, w).toContain(w);
+    expect(multi).not.toContain('continue from there');
+  });
 });
