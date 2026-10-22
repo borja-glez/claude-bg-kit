@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { removeLeftovers } from '../src/cli/doctor.js';
 import { run, isCommitCommand, type Io } from '../src/cli/run.js';
 import { makesCommits, readForge } from '../src/cli/hooks.js';
+import { commitsSince, type ReflogEntry } from '../src/lib/bound-fs.js';
 import { describeViewer } from '../src/lib/viewer-role.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { launchCommand, launchRun } from '../src/lib/launcher.js';
@@ -1741,16 +1742,18 @@ describe('classic hooks', () => {
       commit('A', 'git commit -m x');
       expect(JSON.parse(pendingLines()[0]).task).toBe('T002');
     });
-    it('a merge records only its own commit, and an amend drops the line of the commit it replaced', () => {
+    it('a merge brings nothing to the task, and an amend is a commit of this worktree (H4)', () => {
       setup(); gitInit(); bindAs('A'); ownTask('T002');
       hook('session-start', { session_id: 'A', cwd: dir });
-      git('checkout', '-q', '-b', 'side');
-      commitFile('s.txt');
-      git('checkout', '-q', '-');
+      // The merge writes the reflog entry "merge side" (not "commit (merge)"): a merge git concludes by itself is not attributed.
+      const side = path.join(tmp('wp-side-'), 'side');
+      git('worktree', 'add', '-q', '-b', 'side', side);
+      writeFileSync(path.join(side, 's.txt'), 's');
+      gitAt(side, 'add', 's.txt');
+      gitAt(side, 'commit', '-q', '-m', 'on side');
       git('merge', '--no-ff', '-q', '-m', 'merge side', 'side');
-      const merge = git('rev-parse', 'HEAD');
       commit('A', 'git merge --no-ff side');
-      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([merge]);
+      expect(pendingLines()).toEqual([]);
       git('commit', '-q', '--amend', '-m', 'merge side, again');
       const amended = git('rev-parse', 'HEAD');
       commit('A', 'git commit --amend');
@@ -1776,7 +1779,7 @@ describe('classic hooks', () => {
       commit('A');
       expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual(git('rev-list', '--max-count=20', 'HEAD').split('\n').reverse());
     });
-    it('a reset or a rebase drops the lines of the commits HEAD no longer reaches', () => {
+    it('a reset or a rebase drops the lines of the commits HEAD no longer reaches, and a rebase brings no commit (H4)', () => {
       setup(); gitInit(); bindAs('A'); ownTask('T002');
       hook('session-start', { session_id: 'A', cwd: dir });
       const a = commitFile('a.txt');
@@ -1792,9 +1795,83 @@ describe('classic hooks', () => {
       expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([a, c]);
       // a is dropped from under c, which is replayed onto the base with a new sha.
       git('rebase', '-q', '--onto', 'HEAD~2', 'HEAD~1');
-      const replayed = git('rev-parse', 'HEAD');
       commit('A', 'git rebase --onto HEAD~2 HEAD~1');
-      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([replayed]);
+      expect(pendingLines()).toEqual([]);
+    });
+    it('commitsSince: the commits this worktree made after the position read and the claim, oldest first, at most max (H4)', () => {
+      const e = (at: number, sha: string, action: string): ReflogEntry => ({ at, sha, action });
+      const log = [e(50, 'f', 'commit'), e(40, 'e', 'merge side'), e(40, 'd', 'commit (amend)'), e(30, 'c', 'pull'), e(20, 'b', 'commit'), e(10, 'a', 'commit (initial)')];
+      expect(commitsSince(log, null, null, 20)).toEqual(['a', 'b', 'd', 'f']);
+      expect(commitsSince(log, { at: 20, sha: 'b' }, null, 20)).toEqual(['d', 'f']);
+      expect(commitsSince(log, null, 35_000, 20)).toEqual(['d', 'f']);
+      expect(commitsSince(log, null, null, 2)).toEqual(['d', 'f']);
+      expect(commitsSince(log, { at: 50, sha: 'f' }, null, 20)).toEqual([]);
+      expect(commitsSince([e(5, 'x', 'commit (merge)'), e(4, 'y', 'rebase (pick)'), e(3, 'z', 'reset')], null, null, 20)).toEqual(['x']);
+      expect(commitsSince([e(5, 'r', 'revert'), e(4, 'p', 'cherry-pick'), e(3, 'q', 'rebase (finish)'), e(2, 'm', 'merge side')], null, null, 20)).toEqual(['p', 'r']);
+    });
+    it('a fast-forward merge of commits made elsewhere adds nothing to the open task; a commit made here does (H4)', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      const side = path.join(tmp('wp-side-'), 'side');
+      git('worktree', 'add', '-q', '-b', 'side', side);
+      writeFileSync(path.join(side, 's.txt'), 's');
+      gitAt(side, 'add', 's.txt');
+      gitAt(side, 'commit', '-q', '-m', 'on side');
+      git('merge', '-q', '--ff-only', 'side');
+      commit('A', 'git merge --ff-only side');
+      expect(pendingLines()).toEqual([]);
+      const mine = commitFile('m.txt');
+      commit('A', 'git commit -m m');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([mine]);
+    });
+    it('a commit the same command undid is not the task\'s (H4, Review Focus 5)', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      commitFile('x.txt');
+      git('reset', '-q', '--hard', 'HEAD~1');
+      commit('A', 'git commit -m x && git reset --hard HEAD~1');
+      expect(pendingLines()).toEqual([]);
+    });
+    it('a revert and a cherry-pick made here are the task\'s (H4, M7)', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      git('checkout', '-q', '-b', 'side');
+      const picked = commitFile('p.txt');
+      git('checkout', '-q', '-');
+      git('cherry-pick', picked);
+      const cp = git('rev-parse', 'HEAD');
+      commit('A', 'git cherry-pick side');
+      git('revert', '--no-edit', 'HEAD');
+      const rv = git('rev-parse', 'HEAD');
+      commit('A', 'git revert HEAD');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([cp, rv]);
+    });
+    it('the first time, with no position read, the task counts from its claim (H4, Review Focus 5)', () => {
+      setup(); gitInit(); bindAs('A');
+      const at = (iso: string, name: string) => {
+        writeFileSync(path.join(dir, name), name);
+        git('add', name);
+        execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', name],
+          { cwd: dir, env: { ...process.env, GIT_COMMITTER_DATE: iso, GIT_AUTHOR_DATE: iso } });
+        return git('rev-parse', 'HEAD');
+      };
+      at('2026-10-11T09:00:00Z', 'before.txt');
+      mkdirSync(wp('dbcache', 'state'), { recursive: true });
+      writeFileSync(wp('dbcache', 'state', 'T002.json'), JSON.stringify({ status: 'in_progress', owner: 'backend', claimedAt: '2026-10-11T09:30:00.000Z' }));
+      const a1 = at('2026-10-11T09:40:00Z', 'a1.txt'), a2 = at('2026-10-11T09:45:00Z', 'a2.txt');
+      commit('A', 'npm test');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([a1, a2]);
+    });
+    it('a last-head.json written before the reflog position gives nothing behind its base again (H4, upgrade)', () => {
+      setup(); gitInit(); bindAs('A');
+      mkdirSync(wp('dbcache', 'state'), { recursive: true });
+      writeFileSync(wp('dbcache', 'state', 'T002.json'), JSON.stringify({ status: 'in_progress', owner: 'backend', claimedAt: '2000-01-01T00:00:00.000Z' }));
+      commitFile('old.txt');
+      const top = path.resolve(git('rev-parse', '--show-toplevel'));
+      writeFileSync(wp('last-head.json'), JSON.stringify({ session: 'A', heads: { [top]: git('rev-parse', 'HEAD') } }));
+      const mine = commitFile('new.txt');
+      commit('A', 'git commit -m new');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([mine]);
     });
     it('a renewal that cannot be written never drops a commit, nor the reminder', () => {
       setup(); gitInit(); bindAs('A'); ownTask('T002');

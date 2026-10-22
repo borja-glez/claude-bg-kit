@@ -175,7 +175,17 @@ export function leftSeatOf(seats: readonly Seat[], open: Readonly<Record<string,
  * last-head.json: the base post-commit compares HEAD with, per conversation and worktree (A-17), and per worktree the
  * newest commit of each of this seat's recordings (C2: what another seat on the same worktree must not take).
  */
-export interface LastHead { session: string; heads: Record<string, string>; recorded?: Record<string, string[]> }
+export interface LastHead { session: string; heads: Record<string, string>; recorded?: Record<string, string[]>; reflog?: Record<string, ReflogPos> }
+/** One line of the reflog of HEAD: `at` in unix seconds, `action` the subject before its first ': ' ('commit (amend)', 'merge side', 'pull'). */
+export interface ReflogEntry { at: number; sha: string; action: string }
+/** Where post-commit left off in the reflog of a worktree: its newest entry then. */
+export interface ReflogPos { at: number; sha: string }
+/** H4, M7: the reflog actions of the commits the session makes in its own worktree. `commit (merge)` is a merge concluded with
+ *  `git commit`. What a pull, a fast-forward or plain merge, a rebase, a reset or a checkout brings is never attributed. L10:
+ *  with core.logAllRefUpdates=false the reflog is empty and nothing is attributed (Task 12's README says so). */
+export const COMMIT_ACTIONS: readonly string[] = ['commit', 'commit (amend)', 'commit (initial)', 'commit (merge)', 'revert', 'cherry-pick'];
+/** The reflog entries post-commit reads at most. */
+export const REFLOG_SCAN = 200;
 /** At most this many recordings are remembered per worktree, for this many worktrees. */
 const RECORDED_MAX = 20;
 const RECORDED_TOPS = 10;
@@ -187,11 +197,54 @@ export function headOf(cwd: string): { top: string; head: string } | null {
     return top && head && SHA.test(head) ? { top: path.resolve(top), head } : null;
   } catch { return null; }
 }
+/** The reflog of HEAD in the worktree `top`, newest first (at most `max`); [] when git fails. */
+export function readReflog(top: string, max = REFLOG_SCAN): ReflogEntry[] {
+  let text: string;
+  try {
+    text = execFileSync('git', ['-C', top, 'log', '-g', '--date=unix', '--format=%gd%x09%H%x09%gs', '-n', String(max), 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch { return []; /* fail-open: with no reflog the hook attributes nothing */ }
+  const out: ReflogEntry[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const [gd, sha, ...subject] = line.split('\t');
+    const m = /^HEAD@\{(\d+)\}$/.exec(gd ?? '');
+    if (!m || !sha || !SHA.test(sha)) continue;
+    const s = subject.join('\t');
+    const colon = s.indexOf(': ');
+    out.push({ at: Number(m[1]), sha, action: colon < 0 ? s : s.slice(0, colon) });
+  }
+  return out;
+}
+/** Of the reflog `entries` (newest first), the commits this worktree made (COMMIT_ACTIONS) after the position `pos` already
+ *  read and since the claim `since` (ms), oldest first, at most `max`. L10: an entry with the position's second and sha ends
+ *  the scan, so a newer entry with that same pair is left out; harmless. */
+export function commitsSince(entries: readonly ReflogEntry[], pos: ReflogPos | null, since: number | null, max: number): string[] {
+  const out: string[] = [];
+  for (const e of entries) {
+    if (pos && (e.at < pos.at || (e.at === pos.at && e.sha === pos.sha))) break;
+    if (since !== null && e.at < Math.floor(since / 1000)) break;
+    if (COMMIT_ACTIONS.includes(e.action) && !out.includes(e.sha)) out.push(e.sha);
+  }
+  return out.slice(0, max).reverse();
+}
+/** When `task` was claimed (else started), in ms, from its state cache doc; null without either. */
+export function taskSinceOf(wpDir: string, task: string): number | null {
+  if (!isPlanId(task)) return null;
+  const text = readText(path.join(wpDir, 'dbcache', 'state', `${task}.json`), 64 * 1024);
+  if (text === null) return null;
+  try {
+    const st = JSON.parse(text) as { claimedAt?: unknown; startedAt?: unknown } | null;
+    for (const v of [st?.claimedAt, st?.startedAt]) {
+      const t = typeof v === 'string' ? Date.parse(v) : NaN;
+      if (Number.isFinite(t)) return t;
+    }
+  } catch { /* a broken cache file has no claim time */ }
+  return null;
+}
 export function readLastHead(seatDir: string): LastHead | null {
   const text = readText(lastHeadFile(seatDir), 64 * 1024);
   if (text === null) return null;
   try {
-    const o = JSON.parse(text) as { session?: unknown; heads?: unknown; recorded?: unknown } | null;
+    const o = JSON.parse(text) as { session?: unknown; heads?: unknown; recorded?: unknown; reflog?: unknown } | null;
     if (!o || !isSafeId(o.session) || !o.heads || typeof o.heads !== 'object' || Array.isArray(o.heads)) return null;
     const heads: Record<string, string> = {};
     for (const [k, v] of Object.entries(o.heads as Record<string, unknown>).slice(-HEADS_MAX)) if (typeof v === 'string' && SHA.test(v)) heads[k] = v;
@@ -201,12 +254,20 @@ export function readLastHead(seatDir: string): LastHead | null {
         if (Array.isArray(v)) recorded[k] = v.filter((s): s is string => typeof s === 'string' && SHA.test(s)).slice(-RECORDED_MAX);
       }
     }
-    return { session: o.session, heads, recorded };
+    const reflog: Record<string, ReflogPos> = {};
+    if (o.reflog && typeof o.reflog === 'object' && !Array.isArray(o.reflog)) {
+      for (const [k, v] of Object.entries(o.reflog as Record<string, unknown>).slice(-HEADS_MAX)) {
+        const p = v as { at?: unknown; sha?: unknown } | null;
+        if (p && Number.isInteger(p.at) && (p.at as number) >= 0 && typeof p.sha === 'string' && SHA.test(p.sha)) reflog[k] = { at: p.at as number, sha: p.sha };
+      }
+    }
+    return { session: o.session, heads, recorded, reflog };
   } catch { return null; }
 }
 export function writeLastHead(seatDir: string, doc: LastHead): void {
   const recorded = Object.fromEntries(Object.entries(doc.recorded ?? {}).filter(([, v]) => v.length).slice(-RECORDED_TOPS).map(([k, v]) => [k, v.slice(-RECORDED_MAX)]));
-  const out = { session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)), ...(Object.keys(recorded).length ? { recorded } : {}) };
+  const reflog = Object.fromEntries(Object.entries(doc.reflog ?? {}).slice(-HEADS_MAX));
+  const out = { session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)), ...(Object.keys(recorded).length ? { recorded } : {}), ...(Object.keys(reflog).length ? { reflog } : {}) };
   writeAtomic(lastHeadFile(seatDir), `${JSON.stringify(out)}\n`);
 }
 /** HEAD of the worktree `cwd` becomes the base of `session` there; another conversation's file starts over. */
@@ -216,5 +277,10 @@ export function recordBase(seatDir: string, session: string, cwd: string): void 
   const lh = readLastHead(seatDir);
   const mine = lh && lh.session === session ? lh : null;
   const heads = mine?.heads ?? {};
-  if (heads[at.top] !== at.head) writeLastHead(seatDir, { session, heads: { ...heads, [at.top]: at.head }, recorded: mine?.recorded });
+  const newest = readReflog(at.top, 1)[0];
+  const pos = mine?.reflog?.[at.top];
+  // H2: a file from before the reflog position also gets one now, so the next commit reads from here.
+  if (heads[at.top] !== at.head || (newest && !pos)) {
+    writeLastHead(seatDir, { session, heads: { ...heads, [at.top]: at.head }, recorded: mine?.recorded, reflog: { ...mine?.reflog, ...(newest ? { [at.top]: { at: newest.at, sha: newest.sha } } : {}) } });
+  }
 }

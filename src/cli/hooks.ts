@@ -18,7 +18,7 @@ import { forgeRoleOf } from '../lib/forge-activity.js';
 import { newestMemberFiles, normalizeMember, type MemberDoc } from '../lib/member-doc.js';
 import { endReasonOf, MAX_PROJECTS, parseBound, type BoundDoc } from '../lib/bound.js';
 import { bindingLive, describeViewer, type Viewer } from '../lib/viewer-role.js';
-import { boundFile, claudeBindings, headOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readSeats, recordBase, settleBinding, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
+import { boundFile, claudeBindings, COMMIT_ACTIONS, commitsSince, headOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readReflog, readSeats, recordBase, settleBinding, taskSinceOf, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
 import { pickProject, type ProjectEntry } from '../lib/project-pick.js';
 import { readDocs } from '../lib/read-docs.js';
 import { normalizeMessage } from '../page/normalize.js';
@@ -338,6 +338,10 @@ function ownShare(range: string[], seen: ReadonlySet<string>): string[] {
  * A-17, B-05: for the owner by binding only (another session leaves before git; an owner by forge records through
  * integrate). The commits HEAD gained in the worktree of the command since this conversation's base there (first
  * parent, at most MAX_COMMITS) go to <seat>/pending-commits.jsonl; with no base yet only a commit command's HEAD does.
+ * H4: only what this worktree made. The reflog of HEAD gives the entries after the position this hook already read (kept
+ * in last-head.json) whose action is commit, commit (amend), commit (initial), commit (merge), revert or cherry-pick, and
+ * that HEAD still reaches; what a pull, a merge, a rebase, a reset or a checkout brings is not attributed. The first time,
+ * with no base, the task counts from its claim. Accepted limit: another person's commit in the same worktree is the task's.
  * When another live seat works the same worktree (C2), only a command that makes commits records; and what another
  * seat, live or ended, already saw or recorded there is not taken (ownShare). After an amend, a rebase or a reset, the
  * lines HEAD no longer reaches go. With no task open the base follows HEAD, so nothing committed between tasks is given
@@ -356,11 +360,20 @@ function postCommit(io: Io, input: HookInput): string {
   const heads = mine?.heads ?? {};
   const recorded = mine?.recorded ?? {};
   const last = heads[at.top];
+  const reflog = readReflog(at.top);
+  const top = reflog[0] ?? null;
+  // The position this hook left off at (H4). A last-head.json from before the position existed (H2) has a base and no position:
+  // the newest entry at that base is where the hook left off; the claim cuts only a worktree with no base at all.
+  const pos = mine?.reflog?.[at.top] ?? (last ? reflog.find(e => e.sha === last) ?? top : null);
   // The newest commit this hook records: the seat's marker of what is its own (C2).
   let newest: string | null = null;
   const save = () => {
-    if (last === at.head && !newest) return;
-    writeLastHead(own.seat.dir, { session: sid, heads: { ...heads, [at.top]: at.head }, recorded: newest ? { ...recorded, [at.top]: [...(recorded[at.top] ?? []), newest] } : recorded });
+    const stored = mine?.reflog?.[at.top];
+    if (last === at.head && !newest && (!top || (stored?.at === top.at && stored.sha === top.sha))) return;
+    writeLastHead(own.seat.dir, {
+      session: sid, heads: { ...heads, [at.top]: at.head }, reflog: { ...mine?.reflog, ...(top ? { [at.top]: { at: top.at, sha: top.sha } } : {}) },
+      recorded: newest ? { ...recorded, [at.top]: [...(recorded[at.top] ?? []), newest] } : recorded,
+    });
   };
   const task = ctx.viewer.task;
   if (!task) { save(); return ''; }
@@ -370,14 +383,17 @@ function postCommit(io: Io, input: HookInput): string {
     try { return execFileSync('git', ['-C', at.top, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; }
   };
   let shas: string[] = [];
-  if (!last) shas = isCommitCommand(cmd) ? [at.head] : [];
-  else if (last !== at.head) {
+  if (!pos) {
+    const since = last === undefined ? taskSinceOf(ctx.wp, task) : null;
+    if (since !== null) shas = commitsSince(reflog, null, since, MAX_COMMITS);
+    else if (isCommitCommand(cmd) && top && COMMIT_ACTIONS.includes(top.action) && top.sha === at.head) shas = [at.head];
+  } else if (top && !(top.at === pos.at && top.sha === pos.sha)) {
     const others = othersOn(ctx, own.seat, at.top, at.head);
-    if (!others.live || makesCommits(cmd)) {
-      const range = (git(['rev-list', '--first-parent', '--reverse', `--max-count=${MAX_COMMITS}`, `${last}..${at.head}`]) ?? '')
-        .split(/\r?\n/).map(s => s.trim()).filter(s => SHA.test(s));
-      shas = ownShare(range, others.seen);
-    }
+    if (!others.live || makesCommits(cmd)) shas = ownShare(commitsSince(reflog, pos, null, MAX_COMMITS), others.seen);
+  }
+  // Only what HEAD still reaches: a commit the same command undid is not the task's.
+  shas = shas.slice(0, MAX_COMMITS).filter(s => git(['merge-base', '--is-ancestor', s, at.head]) !== null);
+  if (last && last !== at.head) {
     // An amend, a rebase or a reset: the old base is no longer under HEAD, nor are the commits it replaced.
     if (git(['merge-base', '--is-ancestor', last, at.head]) === null) {
       const all = lines(file);
