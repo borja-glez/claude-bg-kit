@@ -10,11 +10,14 @@
 // Writing these files by hand gets past it: this closes the casual path (adding --yes), not a deliberate forgery.
 // Only the person's own submit counts: a choice the engine sent while they were away, a follow-up instead of the submit,
 // or a yes they added a note to is not a yes.
+import { execFileSync } from 'node:child_process';
 import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isRunBranch, isSafeId } from '../lib/execution-state.js';
-import { mainCheckout } from './local.js';
+import { samePath, worktreeDirs } from '../lib/worktree.js';
+import { hookRoot, mainCheckout } from './local.js';
 import { sleepSync } from './pid.js';
+import { answerTrust, TRUST_QUESTION_END, type TrustAsk } from './trust.js';
 
 export type AuthKind = 'merge' | 'merge-on-finish';
 export interface AuthOption { label: string; description: string }
@@ -391,11 +394,47 @@ export function useAuth(root: string, r: AuthRecord, at: string, runId?: string)
   writeAuth(root, { ...r, usedAt: at, ...(r.runId === null && runId ? { runId } : {}) });
 }
 
-/** The questions of an AskUserQuestion call, as asked. */
-function questionsOf(toolInput: unknown): string[] {
+type Asked = Pick<TrustAsk, 'question' | 'options'>;
+const optionOf = (o: unknown): AuthOption | null =>
+  (isObject(o) && typeof o.label === 'string' && typeof o.description === 'string' ? { label: o.label, description: o.description } : null);
+
+/** The questions of an AskUserQuestion call, as asked: each one's text and its options (none when one is malformed). */
+function askedOf(toolInput: unknown): Asked[] {
   const qs = isObject(toolInput) ? toolInput.questions : null;
   if (!Array.isArray(qs)) return [];
-  return qs.slice(0, MAX_QUESTIONS).map(q => (isObject(q) ? q.question : null)).filter((q): q is string => typeof q === 'string');
+  const out: Asked[] = [];
+  for (const q of qs.slice(0, MAX_QUESTIONS)) {
+    if (!isObject(q) || typeof q.question !== 'string') continue;
+    const options = Array.isArray(q.options) ? q.options.map(optionOf) : [];
+    out.push({ question: q.question, options: options.every((o): o is AuthOption => o !== null) ? options : [] });
+  }
+  return out;
+}
+
+/** The records of `dir` that wait for an answer to one of the questions `asked`, each with the text it was read as. A
+ *  file that cannot be read is neither answered nor counted: the checks refuse while it is there. One answer answers one
+ *  record: a question that two records carry answers neither. */
+function pendingIn(dir: string, asked: readonly string[]): { rec: AuthRecord; text: string }[] {
+  if (!existsSync(dir)) return [];
+  const { entries } = scanDir(dir);
+  const carriers = new Map<string, number>();
+  for (const e of entries) carriers.set(e.rec.question, (carriers.get(e.rec.question) ?? 0) + 1);
+  return entries.filter(e => !e.rec.answer && !e.rec.usedAt && asked.includes(e.rec.question) && carriers.get(e.rec.question) === 1);
+}
+
+/** D9, H3: the checkouts whose trust question hook answer looks for: every worktree of the clone of `root` and of the
+ *  clone of the input's `cwd` (git worktree list, the main checkout first), or `root` alone when git lists none. */
+function trustDirs(root: string, cwd: unknown): string[] {
+  const dirs: string[] = [];
+  for (const from of typeof cwd === 'string' && cwd && !samePath(cwd, root) ? [root, cwd] : [root]) {
+    let listed: string[];
+    // fail-open: where git cannot list the worktrees (no repository, a timeout), that directory adds none.
+    try {
+      listed = worktreeDirs(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: from, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }));
+    } catch { listed = []; }
+    for (const d of listed) if (!dirs.some(x => samePath(x, d))) dirs.push(d);
+  }
+  return dirs.length ? dirs : [root];
 }
 
 /** What the person submitted: question → the chosen label or their own text, and question → the note they added. */
@@ -477,6 +516,8 @@ function resultFromTranscript(file: unknown, toolUseId: unknown): Record<string,
  * - a record dated ahead of now;
  * - a record that changed since it was read (another hook answered it before this write's re-check: its answer
  *   stays; two answers at the same instant can both land, each the person's own).
+ * D9: it also records the person's answer to forge's trust question in the commands of .forge/config.yaml (answerTrust),
+ * looked for only when a question asked ends as that question does, so any other question costs no git call.
  * It prints nothing and fails open: bad input, another tool or event, no pending record or any error records nothing.
  * The answers come from tool_response; only an input without one reads the transcript, and then only the line of
  * this call (`tool_use_id`).
@@ -485,19 +526,14 @@ export function hookAnswer(io: { cwd: string; stdin?: string; env?: Record<strin
   try {
     const o = JSON.parse(io.stdin ?? '') as unknown;
     if (!isObject(o) || o.tool_name !== 'AskUserQuestion' || o.hook_event_name !== 'PostToolUse') return '';
-    const asked = questionsOf(o.tool_input);
-    if (!asked.length) return '';
-    const projectDir = io.env?.CLAUDE_PROJECT_DIR?.trim();
-    const root = projectDir || (typeof o.cwd === 'string' && o.cwd ? o.cwd : io.cwd);
+    const asked = askedOf(o.tool_input);
+    const questions = asked.map(q => q.question);
+    if (!questions.length) return '';
+    const root = hookRoot(io, o);
     const dir = authDir(root);
-    if (!existsSync(dir)) return '';
-    // A file that cannot be read is neither answered nor counted: the checks refuse while it is there.
-    const { entries } = scanDir(dir);
-    const carriers = new Map<string, number>();
-    for (const e of entries) carriers.set(e.rec.question, (carriers.get(e.rec.question) ?? 0) + 1);
-    // One answer answers one record: a question that two records carry answers neither.
-    const pending = entries.filter(e => !e.rec.answer && !e.rec.usedAt && asked.includes(e.rec.question) && carriers.get(e.rec.question) === 1);
-    if (!pending.length) return '';
+    const pending = pendingIn(dir, questions);
+    const trusting = questions.some(q => Object.values(TRUST_QUESTION_END).some(end => q.endsWith(end)));
+    if (!pending.length && !trusting) return '';
     const submitted = submittedOf(o.tool_response !== undefined ? o.tool_response : resultFromTranscript(o.transcript_path, o.tool_use_id));
     if (!submitted) return '';
     const by = isSafeId(o.session_id) ? o.session_id : null;
@@ -511,6 +547,7 @@ export function hookAnswer(io: { cwd: string; stdin?: string; env?: Record<strin
       // A write re-checks the record first: one another hook answered before it keeps that answer.
       writeAuthIn(dir, { ...r, answeredAt: at, answer, answeredBy: by, ...(note ? { note } : {}) }, text);
     }
-  } catch { /* fail open: a hook never breaks the session */ }
+    if (trusting) answerTrust(trustDirs(root, o.cwd), asked, submitted, at);
+  } catch { /* fail-open: a hook never breaks the session (the authorizations and the trust alike) */ }
   return '';
 }

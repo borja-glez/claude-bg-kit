@@ -6,8 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { parseConfig } from '../src/forge/config.js';
 import { readExecution, runWorktree, taskWorktree } from '../src/forge/execution.js';
-import { assumeTrustedForTests, commandsHash, configCommands, readTrust, trustAsk, trustFile, trustOf, trustPlace } from '../src/forge/trust.js';
+import { assumeTrustedForTests, commandsHash, configCommands, readTrust, trustAsk, trustFile, trustOf, trustPlace, type TrustAsk } from '../src/forge/trust.js';
 import type { ExecTask } from '../src/lib/execution-state.js';
+import { mainWorktreeFrom, worktreeDirs } from '../src/lib/worktree.js';
 import { walk } from './helpers/files.js';
 import { hookAnswerStdin } from './helpers/hook-answer.js';
 import { useTempDirs } from './helpers/tmp.js';
@@ -366,6 +367,64 @@ describe('the other commands that run them, without trust (I-03)', () => {
     expect(r.detail).toContain('not trusted on this machine (changed)');
     expect(git(root, 'rev-parse', 'forge/run-shop')).toBe(tip);
     expect(existsSync(path.join(runWorktree(root), 'pwned'))).toBe(false);
+  });
+});
+
+describe('the person answers the trust question, and only that records it (D9)', () => {
+  // The question as the skill asks it: forge's `ask` in tool_input (its text and options), the person's label in tool_response.
+  const answer = (ask: TrustAsk, label: string, result?: Record<string, unknown>, env: Record<string, string> = {}) =>
+    run(['hook', 'answer'], {
+      env, stdin: hookAnswerStdin({ cwd: root, answers: { [ask.question]: label }, ...(result ? { result } : {}), extra: { tool_input: { questions: [ask] } } }),
+    });
+  it('the yes to the question forge printed trusts its commands, No denies them, and the hook prints nothing', () => {
+    const t = trustOfTriage();
+    expect(answer(t.ask, t.ask.options[0].label)).toEqual({ code: 0, stdout: '', stderr: '' });
+    expect(readTrust(root).commands).toMatchObject({ state: 'allowed', hash: t.hash, list: t.commands });
+    expect(run(['validate', '--all']).code).toBe(0);
+    config(root, 'validators:\n  - name: unit\n    cmd: node -e "1"\n');
+    const c = trustOfTriage();
+    answer(c.ask, 'No');
+    expect(readTrust(root).commands).toMatchObject({ state: 'denied', hash: c.hash });
+  });
+  it('records nothing for the yes with a note, their own text, a question forge would not print now, or a result not submitted', () => {
+    const t = trustOfTriage();
+    const yes = t.ask.options[0].label;
+    answer(t.ask, yes, { annotations: { [t.ask.question]: { notes: 'only until Friday' } } });
+    answer(t.ask, 'sí, pero solo unit');
+    answer({ ...t.ask, question: t.ask.question.replace('process.exit(0)', 'process.exit(1)') }, yes);
+    answer(t.ask, yes, { afkTimeoutMs: 60000 });
+    expect(readTrust(root).commands).toBeUndefined();
+  });
+  it('records nothing for the question forge printed asked with other options (L3)', () => {
+    const t = trustOfTriage();
+    const [yes, no] = t.ask.options;
+    answer({ ...t.ask, options: [{ ...yes, description: 'forge runs them from now on, whatever they become' }, no] }, yes.label);
+    answer({ ...t.ask, options: [yes, no, { label: 'Ask me later', description: 'forge asks again tomorrow' }] }, yes.label);
+    answer({ ...t.ask, options: [yes] }, yes.label);
+    expect(readTrust(root).commands).toBeUndefined();
+  });
+  it("the yes to a worktree's changed commands trusts that hash, and the main checkout stays trusted", () => {
+    const first = trustOfTriage();
+    answer(first.ask, first.ask.options[0].label);
+    const wt = path.join(root, '.claude', 'worktrees', 'x');
+    git(root, 'worktree', 'add', '-q', '-b', 'x', wt);
+    config(wt, 'validators:\n  - name: unit\n    cmd: node -e "0"\n');
+    const c = trustOfTriage('--cwd', wt);
+    answer(c.ask, c.ask.options[0].label);
+    expect(run(['validate', '--all', '--cwd', wt]).code).toBe(0);
+    expect(run(['validate', '--all']).code).toBe(0);
+    expect(readTrust(root).commands?.allowed).toHaveLength(2);
+  });
+  it("with CLAUDE_PROJECT_DIR outside the repository, the input's cwd still finds the checkout that asked (H3)", () => {
+    const t = trustOfTriage();
+    expect(answer(t.ask, t.ask.options[0].label, undefined, { CLAUDE_PROJECT_DIR: tmp('forge-trust-elsewhere-') }).stdout).toBe('');
+    expect(readTrust(root).commands).toMatchObject({ state: 'allowed', hash: t.hash });
+  });
+  it('worktreeDirs lists every checkout of git worktree list --porcelain in order, the main one first (L6)', () => {
+    const porcelain = 'worktree /r\r\nHEAD 1\r\nbranch refs/heads/main\r\n\r\nworktree /r/.claude/worktrees/x\nHEAD 2\nbranch refs/heads/x\n';
+    expect(worktreeDirs(porcelain)).toEqual(['/r', '/r/.claude/worktrees/x']);
+    expect(mainWorktreeFrom(porcelain)).toBe('/r');
+    for (const none of [null, undefined, '']) { expect(worktreeDirs(none)).toEqual([]); expect(mainWorktreeFrom(none)).toBeNull(); }
   });
 });
 

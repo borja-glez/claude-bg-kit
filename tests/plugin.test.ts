@@ -1924,9 +1924,13 @@ describe('plugin layout', () => {
 
   it('the trust in the config commands: trust.md, and triage, the start, auto mode, review and infinite send to it (I-03)', () => {
     const trust = runRef('trust');
-    for (const w of ['FORGE local set commands allowed --expect <hash> --cwd <trust.cwd>', 'FORGE local set commands denied', '`note: true`', '`untrusted-commands`', 'AskUserQuestion', 'trust.commands']) {
+    for (const w of ['`note: true`', '`untrusted-commands`', 'AskUserQuestion', 'trust.commands']) {
       expect(trust, w).toContain(w);
     }
+    // D9: forge's hook records the person's answer; the model never runs local set commands. H3: when the hook could not,
+    // the person does, typed after `!` in their own prompt (a shell line of theirs, no call of the model's).
+    expect(trust).toContain('`! FORGE local set commands allowed --expect <trust.hash> --cwd <trust.cwd>`');
+    expect(trust.replace('`! FORGE local set commands allowed', '')).not.toContain('FORGE local set commands allowed');
     const run = read('plugins/forge/skills/run/SKILL.md');
     expect(run).toContain('`references/trust.md`');
     expect(Buffer.byteLength(run, 'utf8')).toBeLessThanOrEqual(22528);

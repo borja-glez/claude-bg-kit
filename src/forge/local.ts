@@ -39,6 +39,13 @@ export function mainCheckout(root: string): string {
   } catch { return root; }
 }
 
+/** The directory a hook works from: the session's project (CLAUDE_PROJECT_DIR), else the hook input's cwd, else the
+ *  process's own. One rule for every hook that reads its input's cwd. */
+export function hookRoot(io: { cwd: string; env?: Record<string, string | undefined> }, input: { cwd?: unknown }): string {
+  const projectDir = io.env?.CLAUDE_PROJECT_DIR?.trim();
+  return projectDir || (typeof input.cwd === 'string' && input.cwd ? input.cwd : io.cwd);
+}
+
 export const localFile = (root: string) => path.join(mainCheckout(root), '.forge', 'local.yaml');
 
 /** The environment of a git call whose error is read: git speaks English, so «not a git repository» can be told apart. */

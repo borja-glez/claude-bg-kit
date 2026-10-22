@@ -3,12 +3,15 @@ import path from 'node:path';
 // Kept in a module of its own with no Node imports, so lens's neutral mod bundle can import it.
 export { mainCheckoutFrom } from './main-checkout.js';
 
-/** The main checkout: the path of the first `worktree` entry of `git worktree list --porcelain`. */
-export function mainWorktreeFrom(porcelain: string | null | undefined): string | null {
-  if (typeof porcelain !== 'string') return null;
-  const line = porcelain.split(/\r?\n/).find(l => l.startsWith('worktree '));
-  return line ? line.slice('worktree '.length).trim() || null : null;
+/** Every checkout of `git worktree list --porcelain`: the path of each `worktree` entry, in order (the main checkout
+ *  first); none for no output. */
+export function worktreeDirs(porcelain: string | null | undefined): string[] {
+  if (typeof porcelain !== 'string') return [];
+  return porcelain.split(/\r?\n/).filter(l => l.startsWith('worktree ')).map(l => l.slice('worktree '.length).trim()).filter(Boolean);
 }
+
+/** The main checkout: the path of the first `worktree` entry of `git worktree list --porcelain`. */
+export const mainWorktreeFrom = (porcelain: string | null | undefined): string | null => worktreeDirs(porcelain)[0] ?? null;
 
 /** Two paths name the same directory (git prints forward slashes; Windows paths are case-insensitive). */
 export function samePath(a: string, b: string): boolean {
