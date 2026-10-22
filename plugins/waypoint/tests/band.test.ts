@@ -621,6 +621,10 @@ test('the notices of a run and of what an earlier conversation left send their c
       presses: [['resume', '/waypoint:design resume']] },
     { model: notice({ ...run, kind: 'previous', stopReason: 'stalled', viewer: PREVIOUS }), line: '◌ ejecución parada: 3/12 integradas · hace 12 min', labels: ['Ver', 'Retomar', 'Cerrar'],
       presses: [['view', '/waypoint:status'], ['resume', '/forge:run --resume'], ['close', '/forge:stop']] },
+    // H5: the coordinator's conversation is still open, so the notice offers no Resume.
+    { model: notice({ ...run, kind: 'previous', stopReason: 'stalled', coordinatorOpen: true, viewer: PREVIOUS }),
+      line: '◌ ejecución parada, abierta en otra conversación: 3/12 integradas · hace 12 min', labels: ['Ver', 'Cerrar'],
+      presses: [['view', '/waypoint:status'], ['close', '/forge:stop']], absent: ['resume'] },
   ];
   for (const c of cases) {
     band = c.model;

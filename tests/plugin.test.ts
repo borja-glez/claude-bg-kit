@@ -2169,4 +2169,14 @@ describe('plugin layout', () => {
     for (const w of ['git worktree list --porcelain', 'node "<WP>" launch <plan> <track>']) expect(multi, w).toContain(w);
     expect(multi).not.toContain('continue from there');
   });
+
+  it('the READMEs describe wave 6a: the guard and its limit, --no-learn, the implementer baseline, env-unverified, no-rule, the reflog of post-commit (D1, D3, D4, D8, D9, H1, H4)', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const w of ['`hook guard`', 'PreToolUse', '--no-learn', '`env-unverified`', 'already failing on the base (not yours)', 'verify.flow: off', '`no-rule`']) expect(md, `${f}: ${w}`).toContain(w);
+    }
+    expect(read('plugins/forge/README.md')).toContain('## Security');
+    expect(read('plugins/forge/README.es.md')).toContain('## Seguridad');
+    for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) expect(read(f), f).toContain('reflog');
+  });
 });

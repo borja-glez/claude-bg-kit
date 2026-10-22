@@ -13,6 +13,13 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.32.2 — 2026-10-22
+
+#### Changed
+- `post-commit` gives a task only the commits made in its worktree: the reflog entries of `HEAD` of a commit, an amend, a first commit or a merge commit, a `revert` or a `cherry-pick` after the position it last read (kept in `last-head.json`) that HEAD still reaches. What a pull, merge, rebase, reset or checkout brings is not attributed, and the first time counts from the task's claim. A rebase keeps the task's own commits: each line is replaced by its replay, matched by subject. With `core.logAllRefUpdates=false` nothing is attributed. A commit someone else makes in the same worktree counts for the task (H4).
+- The band's notice of a stopped run whose coordinator's conversation is still open says «open in another conversation» and offers no Resume (H5).
+- `/waypoint:work` tells a session without a track that recovers a task to continue in the worktree that holds `track/<track>`, or in one `waypoint launch` creates (H6).
+
 ### 0.32.1 — 2026-10-20
 
 #### Changed
@@ -375,6 +382,21 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.27.0 — 2026-10-22
+
+#### Added
+- `hook guard`, a `PreToolUse` hook on Bash, PowerShell, Edit, Write and NotebookEdit. It denies the model's Edit, Write and NotebookEdit on the authorizations of `.forge/execution/auth/`, the trust in the commands of `.forge/config.yaml` (`<git common dir>/forge/trust.json`) and `.forge/local.yaml`, and a Bash or PowerShell call of `hook answer` or `local set commands` (also with `--cwd` between the words or a shell metacharacter right after them): only the person's answer records those. It recognises patterns and is no sandbox: quoting, node flags that take a value, scripts, the `nodejs` binary name and path names only the disk resolves can get past it, a quoted mention of a forge call followed by `(`, `)` or a backtick can be denied, and with `CLAUDE_PROJECT_DIR` outside the session's repository its auth and trust rules can miss (D9).
+- `verify-close --no-learn`: it writes no surface and prints in `learned` the notes it would have added (D4).
+
+#### Changed
+- The trust in the commands of `.forge/config.yaml` is recorded by `hook answer` from the person's answer to the question forge printed, which shows the full hash of the commands it lists; it records only when every matching checkout has that one hash. The person's fallback is to type `! FORGE local set commands allowed --expect <hash> --cwd "<dir>"` in the prompt. No skill runs `local set commands` any more (D9).
+- `proposals to-task` exits 2 for a proposal that only a mark in `approvals/` approves, with no decision of this checkout, on a roadmap without the owner's rule; `proposals list` gives it the reason `no-rule` (D3).
+- `/forge:review` closes its verification with `verify-close --no-learn`: it leaves no surface file changed, and its report lists the notes and how to keep them with `surfaces learn` (D4).
+- With `validate.retry: flaky` and a `--baseline`, a test validator (`test`, `e2e`) that fails and did not fail on the base runs once more; a pass then is `flaky` and enters the history. Typecheck, lint and build are not retried (D7).
+- `prep`'s `validate` carries `--baseline`, and `validate --baseline` names on stderr `new failures: …; already failing on the base (not yours): …`; the implementers fix only the new ones (D8).
+- A review where verify abstains (blocked, or only the environment failed) lists the verify findings it left open in `deferred` as `env-unverified`; they stay open, and `swarm step` says so (H1).
+- The Small path closes its verification with `verify-close`; Large closes its flow pass and commits its notes before the final review's verdicts (H2, H3).
 
 ### 0.26.0 — 2026-10-20
 
@@ -916,6 +938,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.13.8 — 2026-10-22
+
+#### Changed
+- Rebuilt with the band model of waypoint 0.32.2 (`coordinatorOpen` on the notice of a run); nothing lens shows changes.
 
 ### 0.13.7 — 2026-10-20
 
