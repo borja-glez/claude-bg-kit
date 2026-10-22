@@ -11,6 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { samePath } from '../lib/worktree.js';
 import { loadConfig, type ForgeConfig } from './config.js';
 import { gitEnv, gitFailure } from './local.js';
 
@@ -34,8 +35,6 @@ export const TRUST_QUESTION_END = { es: '¿Confías en ellos?', en: 'Do you trus
 const MAX_KEPT = 20;
 const MAX_LINES = 12;
 const MAX_SHOWN = 200;
-/** The characters of the hash the question shows: it ties the question to the set of commands it was asked about. */
-const HASH_SHOWN = 12;
 const HASH = /^[0-9a-f]{64}$/;
 
 let assumeTrusted = false;
@@ -110,8 +109,8 @@ function shown(cmd: string): { text: string; cut: boolean } {
 
 /** The question for the person: every command of the set they are asked to trust, what changed since the set they last
  *  allowed first (before → after); and whether they trust them, the yes first. When the question cannot show every
- *  command whole, it says where to read them. Its line before the last shows the start of the set's hash: two sets that
- *  read the same up to a cut never ask the same question, so an answer is to the set that was shown (answerTrust). */
+ *  command whole, it says where to read them. Its line before the last shows the set's whole hash: two sets that read
+ *  the same up to a cut never ask the same question, so an answer is to the set that was shown (answerTrust). */
 export function trustAsk(t: Trust, es: boolean): TrustAsk {
   let cut = false;
   const show = (cmd: string | null) => { if (cmd === null) return '—'; const s = shown(cmd); cut ||= s.cut; return s.text; };
@@ -127,7 +126,7 @@ export function trustAsk(t: Trust, es: boolean): TrustAsk {
   const partial = cut || more.length
     ? [es ? 'Aquí no se ven enteros todos los comandos: léelos en .forge/config.yaml antes de responder.' : 'Not every command is shown whole here: read them in .forge/config.yaml before you answer.']
     : [];
-  const hash = t.hash ? [`${es ? 'Hash de estos comandos' : 'Hash of these commands'}: ${t.hash.slice(0, HASH_SHOWN)}`] : [];
+  const hash = t.hash ? [`${es ? 'Hash de estos comandos' : 'Hash of these commands'}: ${t.hash}`] : [];
   return {
     question: [head, ...lines.slice(0, MAX_LINES), ...more, ...partial, ...hash, TRUST_QUESTION_END[es ? 'es' : 'en']].join('\n'),
     header: es ? 'Comandos' : 'Commands',
@@ -287,18 +286,25 @@ function asPrinted(q: AskedQuestion, ask: TrustAsk): boolean {
     });
 }
 
+/** The checkouts one answer may record: all of them when they share one hash, none when they do not (8-FIX2). The
+ *  person cannot tell apart two sets whose questions read the same, so neither is recorded; the person's own `!` line,
+ *  with the whole hash after --expect, then records the set they answered. */
+export function oneHashOnly<M extends { hash: string }>(matches: readonly M[]): readonly M[] {
+  return new Set(matches.map(m => m.hash)).size > 1 ? [] : matches;
+}
+
 /**
  * D9: the person's answer to the trust question, from an AskUserQuestion (forge's hook answer). For each checkout of
  * `dirs` whose commands are not trusted (`ask` or `changed`), the question forge prints now, in either locale, which
- * shows the start of the hash of those commands (Q1, P1): when it was asked, and every question of the call with its
- * text asks it as forge printed it (asPrinted), its yes with no note of theirs allows those commands and «No» denies
- * them; any other answer records nothing. Each checkout reads its own trust file again, so a hash a checkout before it
- * recorded there is not recorded twice, and another clone with the same commands records them in its own (P2).
- * Returns what it recorded.
+ * shows the whole hash of those commands (Q1, P1): when it was asked, and every question of the call with its text
+ * asks it as forge printed it (asPrinted), its yes with no note of theirs allows those commands and «No» denies them;
+ * any other answer records nothing. Every checkout is matched before anything is written, and the answer records only
+ * when all of them have one hash (oneHashOnly). It writes once per trust file: a worktree of a clone already written
+ * adds nothing, and another clone with the same commands records them in its own (P2). Returns what it recorded.
  */
 export function answerTrust(dirs: readonly string[], asked: readonly AskedQuestion[],
   submitted: { answers: ReadonlyMap<string, string>; notes: ReadonlyMap<string, string> }, at: string): { dir: string; hash: string; state: 'allowed' | 'denied' }[] {
-  const recorded: { dir: string; hash: string; state: 'allowed' | 'denied' }[] = [];
+  const matches: { dir: string; hash: string; state: 'allowed' | 'denied'; commands: ConfigCommand[] }[] = [];
   for (const dir of dirs) {
     let config: ForgeConfig;
     // fail-open: a config that does not parse runs nothing, so nothing of it is trusted.
@@ -313,8 +319,18 @@ export function answerTrust(dirs: readonly string[], asked: readonly AskedQuesti
       if (!same.every(q => asPrinted(q, ask))) break;
       const a = submitted.answers.get(ask.question);
       const state = a === TRUST_YES[es ? 'es' : 'en'] && !submitted.notes.has(ask.question) ? 'allowed' : a === 'No' ? 'denied' : null;
-      if (state && updateTrust(dir, r => ({ ...r, commands: recordTrust(r.commands, state, t.commands, hash, at) })).ok) recorded.push({ dir, hash, state });
+      if (state) matches.push({ dir, hash, state, commands: t.commands });
       break;
+    }
+  }
+  const recorded: { dir: string; hash: string; state: 'allowed' | 'denied' }[] = [];
+  const written: string[] = [];
+  for (const { dir, hash, state, commands } of oneHashOnly(matches)) {
+    const file = trustFile(dir);
+    if (!file || written.some(f => samePath(f, file))) continue;
+    if (updateTrust(dir, r => ({ ...r, commands: recordTrust(r.commands, state, commands, hash, at) })).ok) {
+      written.push(file);
+      recorded.push({ dir, hash, state });
     }
   }
   return recorded;

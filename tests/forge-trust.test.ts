@@ -7,7 +7,7 @@ import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { authDir, readAuths, writeAuth, type AuthRecord } from '../src/forge/auth.js';
 import { parseConfig } from '../src/forge/config.js';
 import { readExecution, runWorktree, taskWorktree } from '../src/forge/execution.js';
-import { assumeTrustedForTests, commandsHash, configCommands, readTrust, trustAsk, trustFile, trustOf, trustPlace, type TrustAsk } from '../src/forge/trust.js';
+import { assumeTrustedForTests, commandsHash, configCommands, oneHashOnly, readTrust, trustAsk, trustFile, trustOf, trustPlace, type TrustAsk } from '../src/forge/trust.js';
 import type { ExecTask } from '../src/lib/execution-state.js';
 import { mainWorktreeFrom, worktreeDirs } from '../src/lib/worktree.js';
 import { walk } from './helpers/files.js';
@@ -381,10 +381,33 @@ describe('the person answers the trust question, and only that records it (D9)',
     });
   // A command over 200 characters is cut in the question: two sets that differ past the cut read the same up to there.
   const longCmd = (end: string) => `validators:\n  - name: unit\n    cmd: ${JSON.stringify(`node -e "/*${'x'.repeat(230)}*/ '${end}'"`)}\n`;
-  it('the question shows the first 12 characters of the hash of the commands it lists, on the line before its last', () => {
+  it('the question shows the whole hash of the commands it lists, on the line before its last', () => {
     const t = trustOfTriage();
     const lines: string[] = t.ask.question.split('\n');
-    expect(lines[lines.length - 2]).toContain(t.hash.slice(0, 12));
+    expect(t.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(lines[lines.length - 2]).toContain(t.hash);
+  });
+  it("two sets built so their hashes share 12 hex characters: a yes to the worktree's question never records main's (8-FIX2)", () => {
+    // A birthday search found this pair: the same up to the 200-character cut, and hashes that both start fdbe1c52cb8d.
+    config(root, longCmd('evil28351230'));
+    const main = trustOfTriage();
+    const wt = path.join(root, '.claude', 'worktrees', 'x');
+    git(root, 'worktree', 'add', '-q', '-b', 'x', wt);
+    config(wt, longCmd('benign14755471'));
+    const w = trustOfTriage('--cwd', wt);
+    expect([main.hash.slice(0, 12), w.hash.slice(0, 12)]).toEqual(['fdbe1c52cb8d', 'fdbe1c52cb8d']);
+    expect(main.hash).not.toBe(w.hash);
+    answer(w.ask, w.ask.options[0].label, { env: { CLAUDE_PROJECT_DIR: wt } });
+    expect(readTrust(root).commands?.allowed).toEqual([w.hash]);
+    expect(run(['validate', '--all']).code).toBe(2);
+  });
+  it('an answer records only when every checkout whose question it answers has one hash (8-FIX2)', () => {
+    const m = (dir: string, hash: string) => ({ dir, hash, state: 'allowed' as const });
+    expect(oneHashOnly([])).toEqual([]);
+    expect(oneHashOnly([m('/a', 'h1')])).toEqual([m('/a', 'h1')]);
+    expect(oneHashOnly([m('/a', 'h1'), m('/b', 'h1')])).toEqual([m('/a', 'h1'), m('/b', 'h1')]);
+    expect(oneHashOnly([m('/a', 'h1'), m('/b', 'h2')])).toEqual([]);
+    expect(oneHashOnly([m('/a', 'h1'), m('/b', 'h1'), m('/c', 'h2')])).toEqual([]);
   });
   it('the yes to the question forge printed trusts its commands, No denies them, and the hook prints nothing', () => {
     const t = trustOfTriage();
