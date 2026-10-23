@@ -534,6 +534,30 @@ describe('final fix · I2: T6-PRIVILEGED (a container handed the host is denied,
     B('docker run --rm --cap-drop ALL alpine true'), B('docker run --rm --security-opt no-new-privileges alpine true'), B('docker run --rm --pid=container:fg-spike-x--db alpine ps'),
     B('docker compose -p fg-spike-x--stack run --rm app npm test'),
   ])('allows %s', (_, input) => expect(databaseRule.check(input, MORE)).toBeNull());
+  // 6b-2 Task 0: exec --privileged hands the container the host like run --privileged, even on a container of the run
+  it.each<Row>([
+    B('docker exec --privileged fg-spike-x--db sh'), B('docker exec -it --privileged fg-spike-x--db sh'), B('podman exec --privileged fg-spike-x--db sh'),
+    B('docker container exec --privileged fg-spike-x--db sh'), B('docker compose -p fg-spike-x--stack exec --privileged db sh'),
+  ])('6b-2 Task 0: denies %s', (_, input) => {
+    const v = databaseRule.check(input, MORE);
+    expect(v).toMatchObject({ decision: 'deny', rule: 'database' });
+    expect((v as { reason: string }).reason).toMatch(/--privileged hands the container this machine/);
+  });
+  it.each<Row>([B('docker exec -it fg-spike-x--db psql -U postgres -c "select 1"'), B('docker compose -p fg-spike-x--stack exec db sh')])(
+    '6b-2 Task 0: allows %s', (_, input) => expect(databaseRule.check(input, MORE)).toBeNull());
+});
+
+describe('6b-2 Task 0 · docker context use|create|rm|update changes the daemon the run talks to', () => {
+  it.each<Row>([
+    B('docker context use remote'), B('docker context create x --docker host=ssh://h'), B('docker context rm x'), B('docker context update x --description y'),
+    B('docker --debug context use x'), B('podman context use remote'),
+  ])('denies %s', (_, input) => {
+    const v = databaseRule.check(input, MORE);
+    expect(v).toMatchObject({ decision: 'deny', rule: 'database' });
+    expect((v as { reason: string }).reason).toMatch(/docker context/);
+  });
+  it.each<Row>([B('docker context ls'), B('docker context inspect default'), B('docker context show'), B('docker --context default ps')])(
+    'allows %s', (_, input) => expect(databaseRule.check(input, MORE)).toBeNull());
 });
 
 describe('fix round 3 · N5: a read-named MCP tool of a database server reads', () => {

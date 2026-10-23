@@ -258,8 +258,6 @@ Una ejecución autónoma es aquella cuyo `.forge/run.json` lleva un bloque `auto
 - un script `node -e` o `python -c`, un `.sh` del repositorio, las órdenes que corren dentro de un script de `make`, `just` o `npm`, ni un heredoc;
 - una llamada estática de .NET en PowerShell (`[IO.File]::Delete`, `[IO.Directory]::Delete`), la misma clase que `node -e`;
 - `compose up` con un fichero compose cuyos montajes el guard no lee;
-- la configuración de git que ejecuta órdenes, dada con `-c` o por el entorno (`include.path`, `credential.helper`, `core.pager`, `GIT_SSH_COMMAND`, …);
-- ssh, scp y rsync hacia un host local, cuya orden y ruta remotas no se leen;
 - un formulario que un MCP de navegador envía a un sitio externo;
 - las herramientas de Claude Code que escriben fuera de la máquina sin pasar por el `matcher` (publicar un Artifact, un agente programado en remoto);
 - los enlaces y uniones que ya existen en el repositorio;

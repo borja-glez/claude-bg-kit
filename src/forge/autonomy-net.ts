@@ -9,7 +9,7 @@
 // process. T5-FILE: re-exported from autonomy-rules.ts; this file never imports it.
 import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
 import { isLocalHost } from './resources.js';
-import { commandName, type Segment, type Word } from './shell-words.js';
+import { commandName, GIT_VALUED, type Segment, type Word } from './shell-words.js';
 import { bashSegments, deny, mcpWords, withContainers } from './autonomy-shared.js';
 import { BASH_TABLES, scan, type OptTable } from './autonomy-tables.js';
 import { readWebRequest, type WebReq } from './autonomy-parse.js';
@@ -381,8 +381,14 @@ function publisherDeny(name0: string, args: Word[]): GuardVerdict | null {
   const has = (set: Set<string>): boolean => words.some(w => set.has(w));
   if (SSH_LIKE.has(name)) return sshAllLocal(name, args) ? null : netWrite(`${name} connects to another host`);
   if (name === 'rsync') { const rem = ops.filter(w => rsyncRemote(w.text)); if (!rem.length) return null; return rem.every(w => !w.dynamic && isLocalHost(hostToken(w.text))) ? null : netWrite('rsync copies to another host'); }
-  if (name === 'git' && o0 === 'send-email') return netWrite('git send-email sends patches off this machine');
-  if (name === 'git' && o0 === 'svn' && ['dcommit', 'branch', 'tag'].includes(words[1] ?? '')) return netWrite(`git svn ${words[1]} sends commits off this machine`); // m7
+  if (name === 'git') {
+    // 6b-2 Task 0: find the subcommand past git's global options (`git -C <dir> svn dcommit`, `git -c k=v svn dcommit`)
+    let gi = 0;
+    while (gi < args.length && args[gi].text.startsWith('-')) gi += GIT_VALUED.includes(args[gi].text) ? 2 : 1;
+    const gsub = args[gi]?.text.toLowerCase(), gnext = args[gi + 1]?.text.toLowerCase();
+    if (gsub === 'send-email') return netWrite('git send-email sends patches off this machine');
+    if (gsub === 'svn' && ['dcommit', 'branch', 'tag'].includes(gnext ?? '')) return netWrite(`git svn ${gnext} sends commits off this machine`); // m7
+  }
   if ((name === 'npm' || name === 'pnpm' || name === 'yarn' || name === 'bun') && !RUN_SUBS.has(o0) && has(NPM_PUBLISH)) return netWrite(`${name} publishes a package off this machine`);
   if (name === 'cargo' && has(new Set(['publish', 'yank', 'owner']))) return netWrite('cargo reaches the registry');
   if (name === 'twine' && words.includes('upload')) return netWrite('twine upload reaches the registry');

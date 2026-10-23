@@ -258,8 +258,6 @@ An autonomous run is one whose `.forge/run.json` carries an `autonomous` block. 
 - a `node -e` or `python -c` script, a `.sh` of the repository, the commands that run inside a `make`, `just` or `npm` script, or a heredoc;
 - a PowerShell .NET static call (`[IO.File]::Delete`, `[IO.Directory]::Delete`), the same class as `node -e`;
 - `compose up` with a compose file whose mounts the guard does not read;
-- the git config that runs commands, given through `-c` or the environment (`include.path`, `credential.helper`, `core.pager`, `GIT_SSH_COMMAND`, …);
-- ssh, scp and rsync to a local host, whose remote command and path are not read;
 - a form that a browser MCP submits to an external site;
 - the Claude Code tools that write off the machine without going through the `matcher` (publishing an Artifact, a remotely scheduled agent);
 - links and junctions that already exist in the repository;

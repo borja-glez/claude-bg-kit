@@ -816,6 +816,47 @@ describe('final fix', () => {
   });
 });
 
+// ---- 6b-2 Task 0 (H-6): git's command-running config (m1) and ssh, scp and rsync to this machine (m3) ----
+
+describe('6b-2 Task 0 · git config and environment (m1)', () => {
+  it.each([
+    ['S6', bash(`git -c include.path=${W('g')} status`)], ['S8', bash("git -c credential.helper='!x' fetch")], ['S9', bash("git -c core.pager='less -R' log")],
+    ['S12', bash("git -c diff.external='x' diff")], ['S16', bash("git -c core.editor='x' commit")], ['S7', bash(`GIT_CONFIG_GLOBAL=${W('g')} git foo`)],
+    ['S10', bash("GIT_SSH_COMMAND='x' git fetch")], ['S11', bash("GIT_EXTERNAL_DIFF='x' git diff")], ['S13', bash(`XDG_CONFIG_HOME=${W('xdg')} git foo`)],
+    ['S14', bash(`HOME=${W('')} git foo`)], ['S17', bash("GIT_PAGER='less' git log")], ['--config-env', bash('git --config-env=core.pager=P log')],
+    ['-c with a glued key', bash('git -ccore.pager=x log')], ['a dynamic key', bash('git -c "$K"=x status')], ['GIT_EDITOR', bash('GIT_EDITOR=vim git commit')],
+  ] as const)('denies as an unknown target a -c key or a git environment outside the allow-lists: %s', (_, input) => unknown('git', gitRule.check(input, CTX)));
+  it.each([
+    B('git -c user.name=x -c user.email=x@y commit -m x'), B('git -c color.ui=never log'), B('git -c advice.detachedHead=false checkout HEAD~1'),
+    B('git -c core.autocrlf=false -c core.safecrlf=false add -A'), B('git -c commit.gpgsign=false commit -m x'), B('git -c tag.gpgsign=false tag v1'),
+    B('git -c init.defaultBranch=main init sub'), B('git -c protocol.file.allow=always submodule update'), B('git -c pull.rebase=false pull'),
+    B('git -c merge.ff=false merge forge/run-x'), B('git -c diff.renames=true diff'), B('git -c log.showSignature=false log'), B('git -c format.pretty=oneline log'),
+    B('GIT_AUTHOR_NAME=x GIT_AUTHOR_EMAIL=x@y GIT_COMMITTER_NAME=x git commit -m x'), B('GIT_TERMINAL_PROMPT=0 git fetch'), B('GIT_TRACE=1 GIT_TRACE_PERFORMANCE=1 git status'),
+    B('GIT_PAGER=cat git log'), B(`GIT_DIR=${W('.git')} git status`), B('HOME=/x npm test'),
+  ])('allows the everyday keys and names: %s', (_, input) => expect(gitRule.check(input, CTX)).toBeNull());
+  it.each([B(`git -C ${W('')} svn dcommit`), B('git -C sub svn branch x'), B('git --no-pager svn tag v1'), B('git -c user.name=x svn dcommit')])(
+    'denies git svn dcommit|branch|tag behind global options like the plain form: %s', (_, input) => expect(networkRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'network' }));
+});
+
+describe('6b-2 Task 0 · ssh, scp and rsync to this machine (m3)', () => {
+  const deniesAll = (input: ReturnType<typeof bash>) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toMatchObject({ decision: 'deny' });
+  it.each([
+    ['N1', bash("ssh localhost 'rm -rf ~/x'")], ['N2', bash('scp x localhost:/etc/x')], ['N9', bash('rsync -a src/ localhost:/outside/')],
+    ['ssh after options', bash('ssh -p 22 -o BatchMode=yes 127.0.0.1 rm -rf /x')], ['ssh git', bash('ssh localhost git -C /x push')], ['ssh kill', bash('ssh localhost pkill node')],
+    ['ssh a writer command on a remote host still denies', bash("ssh host 'rm -rf /x'")],
+    ['scp relative', bash('scp x localhost:x')], ['scp user@', bash(`scp -r dist me@localhost:${OUT('dist')}`)],
+    ['rsync --remove-source-files', bash(`rsync -a --remove-source-files localhost:${OUT('src')}/ dst/`)],
+  ] as const)('denies: %s', (_, input) => deniesAll(input));
+  it.each([
+    ['N1 by files', bash("ssh localhost 'rm -rf ~/x'"), 'files'], ['N2 by files', bash('scp x localhost:/etc/x'), 'files'], ['N9 by files', bash('rsync -a src/ localhost:/outside/'), 'files'],
+    ['a remote ssh that only reads stays network\'s', bash("ssh host 'ls -la'"), 'network'], ['scp to a remote host', bash('scp x host:/etc/x'), 'network'],
+  ] as const)('the rule that denies: %s', (_, input, rule) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toMatchObject({ decision: 'deny', rule }));
+  it.each([
+    B(`ssh localhost ls ${W('')}`), B(`ssh localhost cat ${W('a.txt')}`), B('ssh -N -L 5432:localhost:5432 localhost'), B(`scp a.txt localhost:${W('b.txt')}`),
+    B(`rsync -a src/ localhost:${W('dst')}/`), B('rsync -a localhost:/etc/hosts ./hosts'), B('rsync -a src/ dst/'),
+  ])('allows what stays inside the roots: %s', (_, input) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
+});
+
 describe('fix round 1 · mcp-write (T5-BROWSER, more write words)', () => {
   it.each([
     ['mcp__github__manage_notification_subscription'], ['mcp__github__rerun_failed_jobs'], ['mcp__x__toggleFeatureFlag'], ['mcp__x__acceptInvitation'],

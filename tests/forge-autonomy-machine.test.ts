@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import path from 'node:path';
 import { AUTONOMY_RULES, machineRule } from '../src/forge/autonomy-rules.js';
 import { evaluateGuard } from '../src/forge/guard.js';
-import { CTX, ATTENDED, bash, pwsh, mcp, B, P } from './helpers/autonomy.js';
+import { CTX, ATTENDED, WT, sh, bash, pwsh, mcp, B, P } from './helpers/autonomy.js';
 
 // T6-MACHINE-RULE (final fix, review I3 and m2): the ninth rule. Labels are the final review's probe rows (hunt.ts, hunt2.ts).
 type Row = [string, ReturnType<typeof bash>];
@@ -63,6 +64,43 @@ describe('machine · persistence and user-level settings', () => {
     P(`[Environment]::SetEnvironmentVariable('X', 'y', 'Process')`), B('reg query HKCU\\Software\\X'), B('schtasks /query /tn x'), B('schtasks'),
     B('git config --global user.name x'), // git's config is the git rule's (one place)
   ])('allows a read, or a setting inside the run: %s', (_, input) => expect(machineRule.check(input, CTX)).toBeNull());
+});
+
+// 6b-2 Task 0 (H-6): the out-of-run holes 6b-1 carried. Each class has a deny row and, where an everyday form exists, an allow row.
+describe('machine · 6b-2 Task 0: processes by port, scheduling, user-level config, docker contexts', () => {
+  it.each<Row>([
+    B('fuser -k 3000/tcp'), B('fuser -km /mnt/x'), B('fuser --kill -n tcp 3000'), B('fuser -k -TERM 3000/tcp'),
+    B('at now + 1 minute'), B('at -f job.sh 10:00'), B('batch'), B('echo x | at midnight'), B('atrm 3'),
+    B('defaults write com.apple.dock autohide -bool true'), B('defaults delete com.apple.dock'), B('defaults -currentHost write x y 1'),
+    B('go env -w GOPATH=/x'), B('go env -u GOFLAGS'), B('go env -w=true GOBIN=/x'),
+    B('conda config --add channels x'), B('conda config --set auto_activate_base false'), B('mamba config --remove-key channels'),
+    B('poetry config virtualenvs.in-project true'), B('poetry config --unset repositories.x'), B('poetry -C api config cache-dir /x'),
+    B('bundle config set path vendor/bundle'), B('bundle config set --global path x'), B('bundle config path x'), B('bundle config unset path'),
+    P('Set-ExecutionPolicy Unrestricted -Scope CurrentUser'), P('Set-ExecutionPolicy RemoteSigned'), P('Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope LocalMachine'),
+    P('Set-ExecutionPolicy Bypass -Sc:CurrentUser -Force'), P('Set-ExecutionPolicy Bypass $scope'),
+  ])('denies: %s', (_, input) => denies(input));
+  it.each<Row>([
+    B('fuser 3000/tcp'), B('fuser -v -n tcp 3000'), B('atq'), B('at -l'),
+    B('defaults read com.apple.dock'), B('defaults domains'), B('go env'), B('go env GOPATH'), B('go env -json'),
+    B('conda config --show channels'), B('conda config --get'), B('poetry config --local virtualenvs.in-project true'), B('poetry config --list'),
+    B('poetry config virtualenvs.in-project'), B('bundle config set --local path vendor/bundle'), B('bundle config'), B('bundle config get path'),
+    P('Set-ExecutionPolicy Bypass -Scope Process'), P('Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force'), P('Set-ExecutionPolicy Bypass Process'),
+    P('Get-ExecutionPolicy -List'),
+  ])('allows: %s', (_, input) => expect(machineRule.check(input, CTX)).toBeNull());
+});
+
+describe('machine · 6b-2 Task 0: a pid kill from Bash (m5) and a server of the run (N2)', () => {
+  const PG = sh(path.join(WT, '.pg'));
+  it.each<Row>([
+    ['K1', bash('taskkill /PID 1234 /F')], ['//PID', bash('taskkill //PID 1234 //F')], ['/T', bash('taskkill /PID 1234 /T /F')],
+    ['tasklist', bash('tasklist /FI "PID eq 1234"')], ['M11', bash(`pg_ctl -D ${PG} stop`)], ['-m fast restart', bash(`pg_ctl -D ${PG} -m fast restart`)],
+    ['--pgdata=', bash(`pg_ctl --pgdata=${PG} stop`)], ['glued -D', bash(`pg_ctl -D${PG} stop`)], ['PGDATA', bash(`PGDATA=${PG} pg_ctl stop`)], ['relative', bash('pg_ctl -D .pg stop')],
+  ])('every rule allows %s', (_, input) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
+  it.each<Row>([
+    ['/IM', bash('taskkill /F /IM node.exe')], ['/FI', bash('taskkill /FI "IMAGENAME eq node.exe" /F')],
+    ['P19', bash('pg_ctl stop')], ['outside -D', bash('pg_ctl -D /var/lib/pg stop')],
+    ['dynamic -D', bash('pg_ctl -D "$PGDIR" stop')], ['register', bash(`pg_ctl register -D ${PG}`)], ['B11', bash('pg_ctlcluster 16 main stop')],
+  ])('denies %s', (_, input) => denies(input));
 });
 
 describe('machine · wiring', () => {

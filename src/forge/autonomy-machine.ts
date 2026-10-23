@@ -3,10 +3,13 @@
 // or of every process; a kill of a pid the run started stays allowed), their services (a stop, restart, enable, disable or
 // mask), the machine's power, and their user-level setup (environment variables, scheduled jobs, the registry, the package
 // managers' config). git's config is the git rule's: it already denies every config write, so it is judged in one place.
+// 6b-2 Task 0 (H-6) closes the holes 6b-1 left outside the run: killing a port's holder (`fuser -k`), scheduling (`at`,
+// `batch`, `atrm`), more user-level config (`defaults`, `go env -w`, conda/poetry/bundle config, `Set-ExecutionPolicy`),
+// and a stop of a database server whose data dir is inside the run's roots is allowed (N2, `pg_ctl`).
 // Pure: reads no file, starts no process. Listed last in AUTONOMY_RULES and re-exported from autonomy-rules.ts.
-import type { GuardRule, GuardVerdict } from './guard.js';
+import type { GuardCtx, GuardRule, GuardVerdict } from './guard.js';
 import { commandName, type Segment, type Word } from './shell-words.js';
-import { bashSegments, deny } from './autonomy-shared.js';
+import { bashSegments, deny, insideRoots, segmentPath } from './autonomy-shared.js';
 import { scan, T } from './autonomy-tables.js';
 
 const INSTEAD = 'this reaches processes, services or settings outside the run; stop what the run started by its pid, and keep settings inside the worktree';
@@ -23,6 +26,8 @@ const psParam = (w: Word, names: readonly string[]): boolean => {
 // ---- processes ------------------------------------------------------------------------------------------------------
 
 const KILL_BY_NAME = new Set(['pkill', 'killall', 'killall5', 'skill']);
+// 6b-2 Task 0: fuser -k kills the processes holding a port or file; without -k it only lists them (a read).
+const kills = (args: Word[]): boolean => args.some(w => w.text === '--kill' || /^-[a-z]*k/.test(w.text));
 const STOP_PROCESS = new Set(['stop-process', 'spps']);
 // The commands that pick processes by name: a kill given their pids is a kill by name (`kill $(pgrep node)`).
 const LISTERS = new Set(['pgrep', 'pidof', 'ps', 'get-process', 'gps', 'tasklist']);
@@ -80,13 +85,31 @@ const SYSTEMCTL_OK = new Set(['status', 'show', 'cat', 'help', 'list-units', 'li
   'daemon-reload', 'reset-failed', 'whoami']);
 const SERVICE_OK = new Set(['status', 'start', 'reload', 'help']);
 const PG_STOP = new Set(['stop', 'restart', 'kill', 'register', 'unregister']);
+// N2: pg_ctl stop|restart|kill of a server whose data dir is inside the run's roots is the run's own; register/unregister touch the machine's services.
+const PG_DATA = new Set(['stop', 'restart', 'kill']);
 const SC_WRITES = new Set(['stop', 'pause', 'config', 'delete', 'create', 'failure', 'control', 'sdset']);
 const LAUNCHCTL_WRITES = new Set(['unload', 'bootout', 'load', 'bootstrap', 'remove', 'stop', 'kill', 'disable', 'enable', 'submit']);
 const PS_SERVICES = new Set(['stop-service', 'spsv', 'restart-service', 'set-service', 'suspend-service', 'remove-service', 'new-service']);
 const POWER = new Set(['shutdown', 'reboot', 'poweroff', 'halt', 'stop-computer', 'restart-computer']);
 
+/** The data dir of a pg_ctl call (-D/--pgdata, glued or `=`, or the PGDATA env) resolves inside the run's roots. */
+function pgDataInside(seg: Segment, ctx: GuardCtx): boolean {
+  const args = seg.argv.slice(1);
+  let dir: Word | undefined;
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k].text;
+    if (t === '-D' || t === '--pgdata') dir = args[k + 1];
+    else if (t.startsWith('-D') && t.length > 2) dir = { text: t.slice(2), dynamic: args[k].dynamic, glob: args[k].glob };
+    else if (t.startsWith('--pgdata=')) dir = { text: t.slice('--pgdata='.length), dynamic: args[k].dynamic, glob: args[k].glob };
+  }
+  if (!dir) dir = seg.env.PGDATA;
+  if (!dir || dir.dynamic) return false;
+  const p = segmentPath(dir, seg);
+  return p !== null && insideRoots(p, ctx);
+}
+
 /** What a service or power command does to the machine; null when it only reads or starts. */
-function service(name: string, seg: Segment): string | null {
+function service(name: string, seg: Segment, ctx: GuardCtx): string | null {
   const args = seg.argv.slice(1), ws = plain(args);
   if (POWER.has(name)) return `${name} powers off or restarts this machine`;
   if (PS_SERVICES.has(name)) return `${seg.argv[0].text} changes a service of this machine`;
@@ -96,7 +119,13 @@ function service(name: string, seg: Segment): string | null {
     return verb && (verb.dynamic || !SYSTEMCTL_OK.has(lower(verb))) ? `systemctl ${verb.text} changes a service of this machine, or the machine` : null;
   }
   if (name === 'service' && ws[1] !== undefined && !SERVICE_OK.has(ws[1])) return `service ${ws[0]} ${ws[1]} changes a service of this machine`;
-  if ((name === 'pg_ctl' || name === 'pg_ctlcluster') && ws.some(w => PG_STOP.has(w))) return `${name} ${ws.find(w => PG_STOP.has(w))} acts on a database server of this machine`;
+  if (name === 'pg_ctlcluster' && ws.some(w => PG_STOP.has(w))) return `pg_ctlcluster ${ws.find(w => PG_STOP.has(w))} acts on a database server of this machine`;
+  if (name === 'pg_ctl') {
+    const verb = ws.find(w => PG_STOP.has(w));
+    // N2: a stop|restart|kill of the run's own server (its data dir inside the roots) is allowed; register/unregister always touch the machine
+    if (verb && PG_DATA.has(verb) && pgDataInside(seg, ctx)) return null;
+    if (verb) return `pg_ctl ${verb} acts on a database server of this machine`;
+  }
   if ((name === 'net' || name === 'net1') && (ws[0] === 'stop' || ws[0] === 'pause')) return `net ${ws[0]} changes a service of this machine`;
   // in PowerShell `sc` is Set-Content; sc.exe is the service tool
   const scExe = seg.dialect !== 'powershell' || /\.exe$/i.test(seg.argv[0].text);
@@ -109,6 +138,12 @@ function service(name: string, seg: Segment): string | null {
 // ---- persistence and user-level settings ----------------------------------------------------------------------------
 
 const CRONTAB = T('-u= -l -r -e -i -s -n= -c -T -V --help --version');
+// 6b-2 Task 0 (scheduling): `at`/`batch` schedule a job, `atrm` removes one; `at -l`/`-c` and `atq` only read.
+const AT_READ = new Set(['-l', '-c']);
+// macOS `defaults`: the verbs that change the person's preferences (read, read-type, domains, find, export only read).
+const DEFAULTS_WRITE = new Set(['write', 'delete', 'rename', 'import', 'rename-key']);
+// conda/mamba `config` write options (--show, --show-sources, --get, --describe, --validate only read).
+const CONDA_WRITE = new Set(['--add', '--append', '--prepend', '--set', '--remove', '--remove-key', '--stdin', '--write-default']);
 const REG_WRITES = new Set(['add', 'delete', 'import', 'copy', 'restore', 'load', 'unload']);
 const SCHTASKS_WRITES = /^[/-](?:create|delete|change|run|end)$/i;
 const PS_TASKS = new Set(['register-scheduledtask', 'unregister-scheduledtask', 'set-scheduledtask', 'start-scheduledtask', 'stop-scheduledtask', 'enable-scheduledtask',
@@ -165,11 +200,50 @@ function pipArgs(name: string, args: Word[]): Word[] | null {
   return /^pip[0-9.]*$/.test(lower(args[m + 1])) ? args.slice(m + 2) : null;
 }
 
+/** `Set-ExecutionPolicy`: the Scope (a `-Scope`/`-Sc…` parameter, glued or next, else the positional after the policy). */
+function executionPolicyScope(seg: Segment): string | null {
+  const args = seg.argv.slice(1), positionals: string[] = [];
+  let scope: string | undefined;
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k].text, g = /^-([A-Za-z]+):(.*)$/.exec(t);
+    if (g) { if (g[1].length >= 2 && 'scope'.startsWith(g[1].toLowerCase())) scope = g[2]; continue; }
+    const bare = /^-([A-Za-z]+)$/.exec(t);
+    if (bare) {
+      const p = bare[1].toLowerCase();
+      if (p.length >= 2 && 'scope'.startsWith(p)) { scope = args[k + 1]?.text; k++; }
+      else if (p.length >= 2 && 'executionpolicy'.startsWith(p)) k++; // its value is the policy, not the scope
+      continue;
+    }
+    positionals.push(t);
+  }
+  return scope ?? positionals[1] ?? null; // positional 0 is the policy, positional 1 the scope
+}
+
 /** What a call changes of the person's user-level setup; null when it reads, or keeps the setting inside the run. */
 function setting(name: string, seg: Segment): string | null {
   const args = seg.argv.slice(1), ws = plain(args);
   if (name === 'setx') return 'setx sets an environment variable of the person that outlives the run';
   if (name === 'crontab') { const sc = scan(args, CRONTAB, seg.dialect); return sc.unknown || !sc.flags.has('-l') || sc.ops.length ? 'crontab changes the person\'s scheduled jobs' : null; }
+  if (name === 'fuser' && kills(args)) return 'fuser -k kills the processes holding a port or file, which may be the person\'s';
+  if (name === 'batch' || name === 'atrm') return `${name} changes the person's scheduled jobs`;
+  if (name === 'at') return args.some(w => AT_READ.has(w.text)) ? null : 'at schedules a job on this machine';
+  if (name === 'defaults') { const w = ws.find(x => DEFAULTS_WRITE.has(x)); if (w) return `defaults ${w} changes the person's macOS preferences`; }
+  if (name === 'go' && ws[0] === 'env' && args.some(w => /^-[wu](?:$|=)/.test(w.text))) return 'go env -w changes the person\'s go environment';
+  if (['conda', 'mamba', 'micromamba'].includes(name) && ws[0] === 'config' && args.some(w => CONDA_WRITE.has(w.text.split('=')[0]))) return `${name} config writes the person's conda settings`;
+  if (name === 'poetry' || name === 'bundle') {
+    const ci = args.findIndex(w => w.text === 'config');
+    if (ci >= 0) {
+      const rest = args.slice(ci + 1), ops = rest.filter(w => !w.text.startsWith('-')), verb = ops[0]?.text;
+      if (rest.some(w => w.text === '--local')) return null; // a project-local setting is the run's own
+      if (name === 'poetry' && (rest.some(w => w.text === '--unset') || ops.length >= 2)) return 'poetry config writes the person\'s poetry settings';
+      if (name === 'bundle' && (verb === 'set' || verb === 'unset' || (verb !== undefined && verb !== 'get' && ops.length >= 2))) return 'bundle config writes the person\'s bundler settings';
+    }
+  }
+  if (seg.dialect === 'powershell' && name === 'set-executionpolicy') {
+    const scope = executionPolicyScope(seg);
+    if (scope === null) return 'Set-ExecutionPolicy with no -Scope changes the machine or the person\'s policy';
+    if (!/^process$/i.test(scope)) return `Set-ExecutionPolicy -Scope ${scope} changes the person's or the machine's execution policy`;
+  }
   if (name === 'reg' && REG_WRITES.has(ws[0] ?? '')) return `reg ${ws[0]} changes the registry`;
   if (name === 'schtasks') { const w = args.find(x => SCHTASKS_WRITES.test(x.text)); if (w) return `schtasks ${w.text} changes the person's scheduled tasks`; }
   if (PS_TASKS.has(name)) return `${seg.argv[0].text} changes the person's scheduled tasks`;
@@ -189,7 +263,7 @@ function setting(name: string, seg: Segment): string | null {
 // ---- the rule -------------------------------------------------------------------------------------------------------
 
 /** What one segment reaches of the person's processes, services or settings; null when nothing. */
-function reach(segs: Segment[], i: number): string | null {
+function reach(segs: Segment[], i: number, ctx: GuardCtx): string | null {
   const seg = segs[i];
   if (!seg.argv.length) return null;
   // a .NET call is a word the shell evaluates: read it before the dynamic-name skip
@@ -200,7 +274,7 @@ function reach(segs: Segment[], i: number): string | null {
   if (name === 'taskkill') { const w = seg.argv.slice(1).find(x => /^[/-](?:im|fi)$/i.test(x.text)); if (w) return `taskkill ${w.text} stops processes by name or filter, which may be the person's`; }
   if (STOP_PROCESS.has(name) || (ps && name === 'kill')) { const s = stopProcess(seg); if (s || STOP_PROCESS.has(name)) return s; }
   if (name === 'kill') { const k = kill(seg, segs, i); if (k) return k; }
-  return service(name, seg) ?? setting(name, seg);
+  return service(name, seg, ctx) ?? setting(name, seg);
 }
 
 export const machineRule: GuardRule = {
@@ -209,7 +283,7 @@ export const machineRule: GuardRule = {
     if (!ctx.autonomous) return null;
     const segs = bashSegments(input, ctx);
     if (!segs) return null;
-    for (let i = 0; i < segs.length; i++) { const what = reach(segs, i); if (what) return deny('machine', what, INSTEAD); }
+    for (let i = 0; i < segs.length; i++) { const what = reach(segs, i, ctx); if (what) return deny('machine', what, INSTEAD); }
     return null;
   },
 };

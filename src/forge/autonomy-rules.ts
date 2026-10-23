@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
 import { confinedIn, CWD_FLAG, FILE_TOOLS, forgeCalls, shellCommand, targetPaths } from './guard.js';
+import { isLocalHost } from './resources.js';
 import { commandName, GIT_VALUED, isNullSink, shellPath, type Dialect, type Segment, type Word } from './shell-words.js';
 import { bashSegments, containerFiles, deny, insideRoots, resolvePwd, segmentPath } from './autonomy-shared.js';
 import { copyEnds, isPsPipeItem, knownWriteCommand, newItemName, plainOperands, writeInfo } from './autonomy-parse.js';
@@ -51,7 +52,9 @@ const isShell = (name: string): boolean => /^(?:sh|bash|zsh|dash|ksh|fish|pwsh|p
 const READ_BASH = new Set(['cat', 'less', 'more', 'head', 'tail', 'ls', 'dir', 'tree', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'fd', 'wc', 'diff', 'cmp', 'comm', 'stat', 'file', 'du', 'df',
   'which', 'where', 'type', 'command', 'realpath', 'readlink', 'basename', 'dirname', 'jq', 'yq', 'sha1sum', 'sha256sum', 'sha512sum', 'md5sum', 'cksum', 'hexdump', 'xxd', 'od', 'strings',
   'echo', 'printf', 'test', '[', 'true', 'false', 'cd', 'pushd', 'popd', 'pwd', 'env', 'printenv', 'date', 'sleep', 'uname', 'whoami', 'id', 'hostname', 'ps', 'cut', 'uniq', 'tr', 'column',
-  'nl', 'fold', 'paste', 'rev', 'tac', 'seq', 'man', 'help', 'findstr']);
+  'nl', 'fold', 'paste', 'rev', 'tac', 'seq', 'man', 'help', 'findstr',
+  // m5 (6b-2 Task 0): taskkill/tasklist write no file; their `/switch` words are not paths. The machine rule judges a kill by name or filter (/IM, /FI).
+  'taskkill', 'tasklist']);
 // PowerShell verbs that only read; their cmdlets (and the read names below) never write.
 const PS_READ_VERBS = new Set(['get', 'test', 'resolve', 'select', 'measure', 'format', 'compare', 'find', 'search', 'show', 'read', 'join', 'split', 'sort', 'group', 'where', 'foreach',
   'convertto', 'convertfrom', 'wait', 'enter', 'exit']);
@@ -121,6 +124,14 @@ function judge(word: Word, seg: Segment, ctx: GuardCtx): 'ok' | 'outside' | 'unk
 
 // ---- files ----------------------------------------------------------------------------------------------------------
 
+// m3 (6b-2 Task 0): scp and rsync to a LOCAL host write to this machine. A `[user@]host:path` operand on a local host is a
+// files target with a null cwd (an absolute path outside the roots denies, a relative one is unknown); a remote host is the
+// network rule's. A single-letter `m[1]` is a Windows drive, not a host.
+const SCP_RSYNC = new Set(['scp', 'rsync']);
+const REMOTE_SPEC = /^([^/\\:]+)(::?)(.+)$/;
+/** scp's destination: its last non-option operand (a valued option's value is never last). */
+const scpDest = (seg: Segment): Word[] => { const ops = seg.argv.slice(1).filter(w => !w.text.startsWith('-')); return ops.length ? [ops[ops.length - 1]] : []; };
+
 export const filesRule: GuardRule = {
   id: 'files',
   check(input, ctx) {
@@ -152,6 +163,23 @@ export const filesRule: GuardRule = {
       }
       const name = commandName(seg.argv[0] ?? { text: '', dynamic: false, glob: false });
       if (name === 'git') continue; // git is the git rule's domain
+      if (SCP_RSYNC.has(name)) {
+        // m3: judge where scp/rsync write; a local host:path lands on this machine (null cwd), a remote host is network's.
+        const cv = cwdDeny(seg); if (cv) return cv;
+        if (seg.dynamicArgs) return unknown(`${name} runs on files the hook cannot see`);
+        const targets = name === 'rsync' ? writeInfo(seg).targets : scpDest(seg);
+        for (const t of [...targets, ...redirs]) {
+          if (t.dynamic) return unknown(t.text || 'a path the shell hides');
+          const m = REMOTE_SPEC.exec(t.text), isSpec = !!m && !/^[A-Za-z]$/.test(m[1]);
+          if (isSpec) { const at = m![1].lastIndexOf('@'); if (!isLocalHost(at >= 0 ? m![1].slice(at + 1) : m![1])) continue; } // a remote host: network's
+          const word = isSpec ? { text: m![3], dynamic: false, glob: t.glob } : t;
+          const wseg = isSpec ? { ...seg, cwd: null } : seg;
+          const r = judge(word, wseg, ctx);
+          if (r === 'outside') return outside(segmentPath(word, wseg) ?? word.text);
+          if (r === 'unknown') return unknown(word.text || 'a path the shell hides');
+        }
+        continue;
+      }
       const info = writeInfo(seg);
       if (info.writer) {
         const cv = cwdDeny(seg); if (cv) return cv;
@@ -548,6 +576,15 @@ interface GitParse {
 const MSG_SUBS = new Set(['commit', 'tag', 'merge', 'stash', 'notes']);
 const MSG_VALUED = new Set(['-m', '--message', '-F', '--file', '--author', '--date', '--trailer', '--cleanup']);
 
+// m1 (6b-2 Task 0): the git -c keys and GIT_* environment the run may set. Anything else on a git segment hides how git
+// runs (a pager, editor, diff/credential helper, include path, …) and is an unknown target. Keys are lower-cased.
+const GIT_C_ALLOW: readonly (string | RegExp)[] = [/^user\./, /^color\./, /^advice\./, 'core.autocrlf', 'core.safecrlf',
+  'commit.gpgsign', 'tag.gpgsign', 'init.defaultbranch', /^protocol\./, 'pull.rebase', 'merge.ff', 'diff.renames', /^log\./, /^format\./];
+const gitCKeyAllowed = (k: string): boolean => GIT_C_ALLOW.some(a => (typeof a === 'string' ? a === k : a.test(k)));
+const gitEnvAllowed = (k: string, v: string): boolean =>
+  /^GIT_AUTHOR_/.test(k) || /^GIT_COMMITTER_/.test(k) || k === 'GIT_TERMINAL_PROMPT' || k === 'GIT_DIR' || k === 'GIT_WORK_TREE'
+  || /^GIT_TRACE/.test(k) || (k === 'GIT_PAGER' && v === 'cat');
+
 /** git's global options (composing -C over the cwd, work tree, git dir and -c), its subcommand and operands. */
 function gitParse(seg: Segment): GitParse {
   const argv = seg.argv;
@@ -662,7 +699,10 @@ function gitSeg(seg: Segment, ctx: GuardCtx): GuardVerdict | null {
 
   if (g.unknownGlobal) return U('a git global option the hook does not know hides the command');
   if (sub === 'push') return D('git push sends commits off this machine');
-  for (const cf of g.cflags) { const k = cf.replace(/^'/, '').split('=')[0].toLowerCase(); if (k.startsWith('alias.') || k === 'core.sshcommand' || k === 'core.hookspath' || k === 'core.fsmonitor') return D(`git -c ${cf} changes how git runs`); }
+  // m1: a -c key or a GIT_*/HOME/XDG_CONFIG_HOME on the segment must be on the allow-lists; anything else hides how git runs (unknown target).
+  // GIT_CONFIG_PARAMETERS/COUNT/KEY_n/VALUE_n already denied above, so the loop never meets them; GIT_CONFIG_GLOBAL/SYSTEM fall here.
+  for (const cf of g.cflags) { const k = cf.replace(/^'/, '').split('=')[0].toLowerCase(); if (!gitCKeyAllowed(k)) return U(`the git -c key ${k || cf} the hook does not allow`); }
+  for (const [k, w] of Object.entries(seg.env)) if ((/^GIT_/.test(k) || k === 'HOME' || k === 'XDG_CONFIG_HOME') && !gitEnvAllowed(k, w.text)) return U(`the git environment ${k} the hook does not allow`);
   if (sub === 'checkout' || sub === 'switch') {
     const cb = createdBranchFlag(rest, operands);
     if (cb) { if (cb.word?.dynamic) return U('a branch name the hook cannot read'); if (cb.word && isProtected(cb.word.text)) return D(`creating ${prot} would move it`); if (cb.force && cb.word && !ownsBranch(cb.word.text)) return D(`${cb.word.text} is not the run's branch`); }

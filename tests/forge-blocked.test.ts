@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { appendFileSync, mkdirSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
 import { startRun, saveRun, endRun, type RunState } from '../src/forge/run.js';
@@ -98,6 +98,14 @@ describe('forge blocked', () => {
     rmSync(ledger, { recursive: true });
     expect(JSON.parse(cli(['note']).stdout)).toMatchObject({ noted: 1, decisions: [1], skipped: [] });
     expect(JSON.parse(cli(['list']).stdout).pending).toBe(0);
+  });
+  it('a record after a torn last line starts on a line of its own (T10-TORN-LINE)', () => {
+    autonomous('en');
+    appendBlocked(main, 'spike-x', rec('git', 'git push', 0));
+    appendFileSync(blockedFile(main, 'spike-x'), '{"ts":"2026-10-22T10:01:00.000Z","rule":"git","to');
+    appendBlocked(main, 'spike-x', rec('network', 'npm publish', 2));
+    expect(readFileSync(blockedFile(main, 'spike-x'), 'utf8').split('\n').filter(Boolean)).toHaveLength(3);
+    expect(JSON.parse(cli(['list']).stdout).blocked.map((b: BlockedRecord) => b.target)).toEqual(['git push', 'npm publish']);
   });
   it('list and note work on a run that is no longer active', () => {
     saveRun(main, endRun(state('en'), 'done'));

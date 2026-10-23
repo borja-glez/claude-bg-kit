@@ -488,6 +488,8 @@ const POPD = new Set(['popd', 'pop-location']);
 export const GIT_VALUED: readonly string[] = ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--exec-path', '--attr-source'];
 const XARGS_VALUED = ['-a', '-d', '-E', '-I', '-J', '-L', '-n', '-P', '-s', '--arg-file', '--delimiter', '--eof', '--max-lines',
   '--max-args', '--max-procs', '--max-chars', '--process-slot-var'];
+// ssh's options that take a value, so the word after them is not the host (6b-2 Task 0, m3).
+const SSH_VALUED = new Set(['-b', '-c', '-D', '-E', '-e', '-F', '-I', '-i', '-J', '-L', '-l', '-m', '-O', '-o', '-p', '-Q', '-R', '-S', '-W', '-w']);
 const PWSH_VALUED = ['executionpolicy', 'ep', 'windowstyle', 'inputformat', 'outputformat', 'version', 'configurationname',
   'custompipename', 'settingsfile', 'psconsolefile'];
 // cmd reads `rd/s/q`, `cd..` and `cd\` as the builtin and its arguments.
@@ -723,6 +725,17 @@ function command(seg: Segment, ws: Raw[], depth: number): Segment[] {
       if (long) sub([cut(x, long.length + 1)], 'bash');
       else if (n0 === 'tar' && /^-I./.test(x.text)) sub([cut(x, 2)], 'bash');
     });
+  } else if (n0 === 'ssh') {
+    // 6b-2 Task 0 (m3): ssh runs the words past its options and host as a shell command on the remote host (an unknown cwd), split like wsl's.
+    let k = 0;
+    for (; k < args.length; k++) {
+      const t = args[k].text;
+      if (t === '--') { k++; break; }
+      if (!t.startsWith('-')) break; // the host
+      if (SSH_VALUED.has(t) && !t.includes('=')) k++;
+    }
+    const cmd = args.slice(k + 1);
+    if (cmd.length) sub(cmd, 'bash', false, null);
   } else if (n0 === 'cmd') {
     for (let i = 0; i < args.length; i++) {
       const t = args[i].text;

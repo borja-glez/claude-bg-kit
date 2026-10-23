@@ -2,7 +2,7 @@
 // The guard rules of an autonomous run apply only to the sessions this module names; an attended session gets null.
 // Only files are read here (run.json and, when it has an autonomous block, the execution and its members): never git.
 // Each read that fails says in a comment which way it errs (M17): roots toward fewer, ids and dirs toward more sessions under the rules.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { LIMITS } from '../lib/decisions.js';
 import path from 'node:path';
 import { parseRun, runFile, type RunState } from './run.js';
@@ -254,11 +254,24 @@ export interface BlockedRecord { ts: string; rule: string; tool: string; target:
 
 export const blockedFile = (main: string, runId: string): string => path.join(autonomousDir(main, runId), 'blocked.jsonl');
 
+/** Whether the file does not end in a newline, so a torn last line would merge with the next record (T10-TORN-LINE). */
+function needsLeadingNewline(file: string): boolean {
+  try {
+    const size = statSync(file).size;
+    if (size === 0) return false;
+    const fd = openSync(file, 'r');
+    try { const buf = Buffer.alloc(1); readSync(fd, buf, 0, 1, size - 1); return buf[0] !== 0x0a; } finally { closeSync(fd); }
+  } catch { return false; } // no file yet, or unreadable: start without a prefix
+}
+
 /** Appends a denial, without its secrets, to blocked.jsonl. Null, or the error's message when it could not (M17); never throws. */
 export function appendBlocked(main: string, runId: string, r: BlockedRecord): string | null {
   try {
     mkdirSync(autonomousDir(main, runId), { recursive: true });
-    appendFileSync(blockedFile(main, runId), JSON.stringify({ ...r, target: redactSecrets(r.target), reason: redactSecrets(r.reason) }) + '\n');
+    const file = blockedFile(main, runId);
+    // T10-TORN-LINE (6b-2 Task 0): a crash mid-write can leave a torn last line; start this record on its own line so it survives.
+    const prefix = needsLeadingNewline(file) ? '\n' : '';
+    appendFileSync(file, prefix + JSON.stringify({ ...r, target: redactSecrets(r.target), reason: redactSecrets(r.reason) }) + '\n');
     return null;
   } catch (e) { return e instanceof Error ? e.message : String(e); }
 }

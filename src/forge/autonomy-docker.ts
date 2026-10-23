@@ -1,15 +1,16 @@
 // Plan 6b-1, Task 6 (fix 1): the database rule's reading of containers, volumes and compose projects. A container, volume,
 // pod or compose project the run acts on must be one it registered (FORGE resource add); prune and podman's system reset
 // always deny; `run|create` mounts (T6-DOCKER-MOUNTS) need a registered named volume, or a bind path inside the run's roots
-// unless it is read-only, and `run|create` and compose `run` never hand the container the host (final fix I2, T6-PRIVILEGED:
-// --privileged, --device, a host namespace, a host-reaching --cap-add, an unconfined --security-opt). The commands a container runs are not read here: autonomy-shared.ts's containerSegments hands them
+// unless it is read-only, and `run|create`, `exec` and compose `run|exec` never hand the container the host (final fix I2,
+// 6b-2 Task 0, T6-PRIVILEGED: --privileged, --device, a host namespace, a host-reaching --cap-add, an unconfined --security-opt).
+// 6b-2 Task 0 also denies `context use|create|rm|update` (it switches the daemon the run talks to). The commands a container runs are not read here: autonomy-shared.ts's containerSegments hands them
 // to the rules (T6-CONTAINER-INNER). Pure; it returns what it finds and autonomy-db.ts words the verdict.
 import path from 'node:path';
 import type { GuardCtx } from './guard.js';
 import type { ResourceKind } from './resources.js';
 import type { Segment, Word } from './shell-words.js';
 import { insideRoots, resolvePwd, segmentPath } from './autonomy-shared.js';
-import { COMPOSE_CLIS, COMPOSE_GLOBAL, COMPOSE_RUN, DOCKER_GLOBAL, DOCKER_RUN, head, scan, type OptTable, type Scan } from './autonomy-tables.js';
+import { COMPOSE_CLIS, COMPOSE_EXEC, COMPOSE_GLOBAL, COMPOSE_RUN, DOCKER_GLOBAL, DOCKER_RUN, head, scan, type OptTable, type Scan } from './autonomy-tables.js';
 import { COMPOSE_DESTROYERS, DESTROY_WORDS, DOCKER_ALIAS, DOCKER_ALWAYS, DOCKER_DESTROYERS, DOCKER_SUB } from './autonomy-db-tables.js';
 
 /** What the docker reading found: a deny (`unknown` for an unknown target) with its words, and a hint for the `instead` text. */
@@ -107,7 +108,8 @@ function mounts(args: Word[], seg: Segment, ctx: GuardCtx): DockerFinding | null
 function compose(args: Word[], seg: Segment, ctx: GuardCtx): DockerFinding | null {
   const h = head(args, COMPOSE_GLOBAL, seg.dialect), sub = lower(args[h.at]), rest = args.slice(h.at + 1);
   if (h.unknown) return args.some(w => COMPOSE_DESTROYERS.has(lower(w)) || lower(w) === 'up') ? unk('compose has an option the hook does not know') : null;
-  if (sub === 'run') { const host = hostAccess(runOptions(rest, COMPOSE_RUN, seg)); if (host) return host; } // I2
+  // I2 and 6b-2 Task 0: run and exec never hand the container the host (--privileged and the like)
+  if (sub === 'run' || sub === 'exec') { const host = hostAccess(runOptions(rest, sub === 'run' ? COMPOSE_RUN : COMPOSE_EXEC, seg)); if (host) return host; }
   // I3: `up -V` renews the project's anonymous volumes
   const renew = sub === 'up' && rest.some(w => w.text === '--renew-anon-volumes' || /^-[A-Za-z]*V[A-Za-z]*$/.test(w.text));
   if (!COMPOSE_DESTROYERS.has(sub) && !renew) return null;
@@ -140,6 +142,8 @@ export function dockerFinding(name: string, args: Word[], seg: Segment, ctx: Gua
   if (g.unknown) return rest0.some(w => DESTROY_WORDS.has(lower(w))) ? unk(`${name} has a global option the hook does not know`) : null;
   let w0 = lower(rest0[0]), w1 = lower(rest0[1]), from = 1;
   if (w0 === 'compose') return compose(rest0.slice(1), seg, ctx);
+  // 6b-2 Task 0: switching or editing the docker context changes which daemon the run talks to (context ls/inspect/show read)
+  if (w0 === 'context' && ['use', 'create', 'rm', 'update'].includes(w1)) return den(`docker context ${w1} changes the daemon the run talks to`);
   if (w0 === 'container' && ['run', 'create', 'cp'].includes(w1)) { w0 = w1; w1 = lower(rest0[2]); from = 2; }
   const two = `${w0} ${w1}`;
   if (DOCKER_ALWAYS.has(two)) return den(`${name} ${two} deletes containers or volumes the run did not register`);
@@ -161,6 +165,8 @@ export function dockerFinding(name: string, args: Word[], seg: Segment, ctx: Gua
   if (key === 'exec') {
     const h = head(rest, table, seg.dialect);
     if (h.unknown) return unk(`${name} exec has an option the hook does not know`);
+    const host = hostAccess(h.sc); // 6b-2 Task 0: exec --privileged hands the container the host, like run --privileged
+    if (host) return host;
     ws = rest.slice(h.at, h.at + 1);
   } else {
     const sc = scan(rest, table, seg.dialect);
