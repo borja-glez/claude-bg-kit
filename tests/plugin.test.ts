@@ -2215,4 +2215,23 @@ describe('plugin layout', () => {
       expect(existsSync(new URL(`${r}.md`, INFINITE_REFS)), r).toBe(true);
     }
   });
+
+  it('decisions carry why not and trade-offs, and a guard denial is noted, never retried (6b-1)', () => {
+    const dec = runRef('decisions');
+    for (const w of ['"whyNot"', '"tradeoffs"', 'blocked']) expect(dec, w).toContain(w);
+    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('references/autonomous.md');
+    const auto = read('plugins/forge/skills/infinite/references/autonomous.md');
+    for (const w of ['## Each cycle', '## Stop', 'FORGE blocked note --session <SID>', 'FORGE resource add', 'PLAYWRIGHT_BROWSERS_PATH', 'FORGE stop', 'new conversation']) expect(auto, w).toContain(w);
+    for (const a of ['forge-impl', 'forge-impl-high', 'forge-impl-heavy', 'forge-impl-light', 'forge-mech', 'forge-fable', 'forge-verify', 'forge-verify-heavy']) {
+      expect(read(`plugins/forge/agents/${a}.md`), a).toContain('`forge autonomy ·`');
+    }
+  });
+  it('no forge agent can spawn subagents: tools without Agent, or Agent disallowed (6b-1)', () => {
+    for (const f of readdirSync(new URL('../plugins/forge/agents/', import.meta.url)).filter(x => x.endsWith('.md'))) {
+      const head = read(`plugins/forge/agents/${f}`).split(/\r?\n---\r?\n/)[0];
+      const tools = /\ntools: (.+)/.exec(head)?.[1];
+      const denied = /\ndisallowedTools: (.+)/.exec(head)?.[1];
+      expect(tools ? !/\bAgent\b/.test(tools) : /\bAgent\b/.test(denied ?? ''), f).toBe(true);
+    }
+  });
 });

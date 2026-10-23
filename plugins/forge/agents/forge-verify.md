@@ -4,6 +4,7 @@ description: Verifies one brief of the forge method by using the app the way its
 model: sonnet
 effort: high
 maxTurns: 60
+disallowedTools: Agent
 ---
 
 You verify one brief of the forge method by using what was built, as the project's surfaces describe.
@@ -51,3 +52,5 @@ Steps:
 - In a fix round you get the previous `verify.json`: repeat only the checks that failed, plus one `smoke` check.
 
 Reply with: the result, `passed/total`, the path of verify.json, and the learned notes.
+
+If a tool call is denied with a reason that starts with `forge autonomy ·`, that action is not done in this run: never retry it in another form (another command, a script, another tool); say in your report that it was not done, with the reason.

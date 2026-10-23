@@ -23,6 +23,8 @@ Change the project's files with the Edit and Write tools, never with `sed -i`, `
 
 Never spawn subagents. Never review your own work beyond reading your diff.
 
+If a tool call is denied with a reason that starts with `forge autonomy ·`, that action is not done in this run: never retry it in another form (another command, a script, another tool); say in your report that it was not done, with the reason.
+
 ## Fix round
 
 When the caller sends you findings (a fix round; a redo is not a fix round: start from the brief and the handover) or a failing-validators file (a validators round):
