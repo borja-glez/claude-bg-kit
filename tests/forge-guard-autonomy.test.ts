@@ -106,6 +106,9 @@ describe('hook guard in an autonomous run', () => {
     for (const reason of reasons) expect(reason).toMatch(/^forge autonomy · guard-error: the autonomous block of \.forge\/run\.json does not read/);
     expect(guard({ session_id: 'coord-1', cwd: wt, tool_name: 'Bash', tool_input: { command: 'node /p/forge.cjs stop' } })).toBeNull();
     expect(guard({ session_id: 'coord-1', cwd: wt, tool_name: 'Bash', tool_input: { command: 'node /p/forge.cjs stop; rm -rf x' } })).toMatchObject({ permissionDecision: 'deny' });
+    for (const flags of ['--require=/x.js', '-r /x.js', '--import /x.mjs', '--eval 1', '-e 1']) {
+      expect(guard({ session_id: 'coord-1', cwd: wt, tool_name: 'Bash', tool_input: { command: `node ${flags} /p/forge.cjs stop` } }), flags).toMatchObject({ permissionDecision: 'deny' });
+    }
   });
   it('a denial it cannot record still denies, and says so on stderr (M17)', () => {
     autonomous();

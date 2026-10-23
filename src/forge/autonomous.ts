@@ -205,7 +205,7 @@ const UNREADABLE_RUN = `forge autonomy · ${GUARD_ERROR}: the autonomous block o
 /** The call is `node …forge.cjs stop` and nothing else: the one thing a session of an unreadable run may do (STOP-ALLOWED). */
 function isPlainStop(input: GuardInput): boolean {
   const command = shellCommand(input);
-  if (command === null || /[;|&\n`$()<>]/.test(command) || !/^\s*node/i.test(command)) return false;
+  if (command === null || /[;|&\n`$()<>]/.test(command) || !/^\s*node(?:\.exe)?\s+[^-\s]/i.test(command)) return false; // no node flag before the script: `--require=x` runs a file
   const calls = forgeCalls(command);
   return calls.length === 1 && calls[0].replace(CWD_FLAG, ' ').trim() === 'stop';
 }
