@@ -2221,7 +2221,10 @@ describe('plugin layout', () => {
     for (const w of ['"whyNot"', '"tradeoffs"', 'blocked']) expect(dec, w).toContain(w);
     expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('references/autonomous.md');
     const auto = read('plugins/forge/skills/infinite/references/autonomous.md');
-    for (const w of ['## Each cycle', '## Stop', 'FORGE blocked note --session <SID>', 'FORGE resource add', 'PLAYWRIGHT_BROWSERS_PATH', 'FORGE stop', 'new conversation']) expect(auto, w).toContain(w);
+    for (const w of ['## Each cycle', '## Stop', 'FORGE blocked note --session <SID>', 'FORGE resource add --kind <k> --name <n> [--host h]', 'PLAYWRIGHT_BROWSERS_PATH', 'FORGE stop',
+      'new conversation']) expect(auto, w).toContain(w);
+    // T12-STOP-NOTE: the stop of an autonomous run notes the last denials first
+    expect(read('plugins/forge/skills/infinite/references/stop.md')).toContain('FORGE blocked note --session <SID>');
     for (const a of ['forge-impl', 'forge-impl-high', 'forge-impl-heavy', 'forge-impl-light', 'forge-mech', 'forge-fable', 'forge-verify', 'forge-verify-heavy']) {
       expect(read(`plugins/forge/agents/${a}.md`), a).toContain('`forge autonomy ·`');
     }
@@ -2238,7 +2241,8 @@ describe('plugin layout', () => {
   it('the forge READMEs describe the autonomy guard, the resource register and decisions with trade-offs (6b-1)', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
-      for (const w of ['`forge autonomy ·', '`resource add', '`blocked note', 'whyNot', 'tradeoffs', 'PLAYWRIGHT_BROWSERS_PATH', 'fg_', 'disableAllHooks', '`self`']) expect(md, `${f}: ${w}`).toContain(w);
+      for (const w of ['`forge autonomy ·', '`resource add', '`blocked note', 'whyNot', 'tradeoffs', 'PLAYWRIGHT_BROWSERS_PATH', 'fg_', 'disableAllHooks', '`self`', '`machine`', '--privileged'])
+        expect(md, `${f}: ${w}`).toContain(w);
       expect(md.split('\n').find(l => l.startsWith('- `hook guard`')), f).toContain('MCP');
     }
   });

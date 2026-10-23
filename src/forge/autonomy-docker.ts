@@ -1,20 +1,21 @@
 // Plan 6b-1, Task 6 (fix 1): the database rule's reading of containers, volumes and compose projects. A container, volume,
 // pod or compose project the run acts on must be one it registered (FORGE resource add); prune and podman's system reset
 // always deny; `run|create` mounts (T6-DOCKER-MOUNTS) need a registered named volume, or a bind path inside the run's roots
-// unless it is read-only. The commands a container runs are not read here: autonomy-shared.ts's containerSegments hands them
+// unless it is read-only, and `run|create` and compose `run` never hand the container the host (final fix I2, T6-PRIVILEGED:
+// --privileged, --device, a host namespace, a host-reaching --cap-add, an unconfined --security-opt). The commands a container runs are not read here: autonomy-shared.ts's containerSegments hands them
 // to the rules (T6-CONTAINER-INNER). Pure; it returns what it finds and autonomy-db.ts words the verdict.
 import path from 'node:path';
 import type { GuardCtx } from './guard.js';
 import type { ResourceKind } from './resources.js';
 import type { Segment, Word } from './shell-words.js';
 import { insideRoots, resolvePwd, segmentPath } from './autonomy-shared.js';
-import { COMPOSE_CLIS, COMPOSE_GLOBAL, DOCKER_GLOBAL, DOCKER_RUN, head, scan } from './autonomy-tables.js';
+import { COMPOSE_CLIS, COMPOSE_GLOBAL, COMPOSE_RUN, DOCKER_GLOBAL, DOCKER_RUN, head, scan, type OptTable, type Scan } from './autonomy-tables.js';
 import { COMPOSE_DESTROYERS, DESTROY_WORDS, DOCKER_ALIAS, DOCKER_ALWAYS, DOCKER_DESTROYERS, DOCKER_SUB } from './autonomy-db-tables.js';
 
 /** What the docker reading found: a deny (`unknown` for an unknown target) with its words, and a hint for the `instead` text. */
-export type DockerFinding = { what: string; unknown: boolean; hint?: 'volumes' };
+export type DockerFinding = { what: string; unknown: boolean; hint?: 'volumes' | 'host' };
 const den = (what: string): DockerFinding => ({ what, unknown: false });
-const unk = (what: string, hint?: 'volumes'): DockerFinding => ({ what, unknown: true, hint });
+const unk = (what: string, hint?: DockerFinding['hint']): DockerFinding => ({ what, unknown: true, hint });
 const lower = (w: Word | undefined): string => w?.text.toLowerCase() ?? '';
 
 /** A container or volume name of the run: registered as that kind, or under a registered compose project (`<project>-…`, `<project>_…`). */
@@ -59,10 +60,40 @@ function mount(word: Word, seg: Segment, ctx: GuardCtx): DockerFinding | null {
   const ro = ['readonly', 'ro'].some(k => kv.has(k) && !/^(?:false|0)$/i.test(kv.get(k)!));
   return source(src, ro && type !== 'volume', seg, ctx);
 }
+
+// ---- host access (final fix I2, T6-PRIVILEGED) ---------------------------------------------------------------------------
+
+// What hands a container this machine past its mounts: a device, the capabilities that reach the host, a host namespace,
+// an unconfined security profile. `--network host` stays: the network rules judge what goes through it.
+const HOST_CAPS = new Set(['all', 'sys_admin', 'sys_ptrace', 'sys_module', 'sys_rawio', 'dac_read_search']);
+const HOST_NAMESPACES = new Set(['--pid', '--ipc', '--uts', '--userns', '--cgroupns']);
+const UNCONFINED = new Set(['seccomp=unconfined', 'apparmor=unconfined', 'label=disable', 'systempaths=unconfined']);
+
+/** The options before what a `run|create` (or compose `run`) starts, read with its table, or with docker run's in every word when that table does not know one. */
+function runOptions(args: Word[], table: OptTable, seg: Segment): Scan {
+  const h = head(args, table, seg.dialect);
+  return h.unknown ? scan(args, DOCKER_RUN, seg.dialect) : h.sc;
+}
+
+/** An option that gives the container the host (a deny, not an unknown target); a value only the shell names of one that could is unknown. */
+function hostAccess(sc: Scan): DockerFinding | null {
+  const host = (what: string): DockerFinding => ({ what: `${what} hands the container this machine past its mounts`, unknown: false, hint: 'host' });
+  if (sc.flags.has('--privileged')) return host('--privileged');
+  for (const { key, w } of sc.vals) {
+    const v = w.text.trim().toLowerCase();
+    if (key === '--device') return host(`--device ${w.text}`);
+    if (w.dynamic && (key === '--cap-add' || key === '--security-opt' || HOST_NAMESPACES.has(key))) return unk(`a ${key} value only the shell names`, 'host');
+    if ((key === '--cap-add' && v.split(',').some(c => HOST_CAPS.has(c.trim().replace(/^cap_/, '')))) || (HOST_NAMESPACES.has(key) && v === 'host')
+      || (key === '--security-opt' && UNCONFINED.has(v.replace(':', '=')))) return host(`${key} ${w.text}`);
+  }
+  return null;
+}
+
 function mounts(args: Word[], seg: Segment, ctx: GuardCtx): DockerFinding | null {
-  const h = head(args, DOCKER_RUN, seg.dialect);
   // with an option the table does not know, the mount options are looked for in every later word
-  const sc = h.unknown ? scan(args, DOCKER_RUN, seg.dialect) : h.sc;
+  const sc = runOptions(args, DOCKER_RUN, seg);
+  const host = hostAccess(sc);
+  if (host) return host;
   for (const v of sc.vals) {
     const r = v.key === '-v' || v.key === '--volume' ? volume(v.w, seg, ctx) : v.key === '--mount' ? mount(v.w, seg, ctx)
       : v.key === '--volumes-from' ? names([{ ...v.w, text: v.w.text.replace(/:(?:ro|rw)$/, '') }], 'container', 'run --volumes-from', ctx) : null;
@@ -76,6 +107,7 @@ function mounts(args: Word[], seg: Segment, ctx: GuardCtx): DockerFinding | null
 function compose(args: Word[], seg: Segment, ctx: GuardCtx): DockerFinding | null {
   const h = head(args, COMPOSE_GLOBAL, seg.dialect), sub = lower(args[h.at]), rest = args.slice(h.at + 1);
   if (h.unknown) return args.some(w => COMPOSE_DESTROYERS.has(lower(w)) || lower(w) === 'up') ? unk('compose has an option the hook does not know') : null;
+  if (sub === 'run') { const host = hostAccess(runOptions(rest, COMPOSE_RUN, seg)); if (host) return host; } // I2
   // I3: `up -V` renews the project's anonymous volumes
   const renew = sub === 'up' && rest.some(w => w.text === '--renew-anon-volumes' || /^-[A-Za-z]*V[A-Za-z]*$/.test(w.text));
   if (!COMPOSE_DESTROYERS.has(sub) && !renew) return null;

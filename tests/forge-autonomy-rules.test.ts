@@ -780,6 +780,34 @@ describe('fix round 3 · re-review breakage', () => {
   });
 });
 
+// ---- final fix (final-review.md): provider paths (I4), git message values (m4), CLAUDE_* env (m6), git svn (m7) ----
+
+describe('final fix', () => {
+  const PS = (p: string) => `Microsoft.PowerShell.Core\\FileSystem::${PM(p)}`;
+  it.each([
+    ['F1', pwsh(`Remove-Item -Recurse '${PS('x\\y')}'`)], ['F6', pwsh(`Remove-Item -LiteralPath ${PS('x\\y')} -Recurse -Force`)], ['F7', pwsh(`Set-Content ${PS('x\\y.txt')} -Value z`)],
+    ['inside the worktree too', pwsh(`Remove-Item -Recurse 'Microsoft.PowerShell.Core\\FileSystem::${PW('build')}'`)],
+  ] as const)('I4: files reads a provider-qualified path as no relative name: %s', (_, input) => unknown('files', filesRule.check(input, CTX)));
+  it.each([
+    ['E1', bash('git commit -m "/api: add endpoint"')], ['E16', bash('git commit -m "C:\\x style paths"')], ['E27', bash('git commit -m "~tilde"')],
+    ['G3', bash('git commit -m "/forge:stop: handle x"')], ['G4', bash('git merge -m "/x" main')], ['G2', bash('git commit -F msg.txt')],
+    ['bundled -am', bash('git commit -am "/x: y"')], ['--message', bash('git commit --message "/x"')], ['--author', bash('git commit --author "A <a@b.c>" -m x')],
+    ['--trailer', bash('git commit -m x --trailer "Refs: /x/y"')], ['--date', bash('git commit --date "~2 days" -m x')], ['tag -m', bash('git tag -a v1 -m "/x"')],
+  ] as const)('m4: git reads the values of its message options as text, not paths: %s', (_, input) => expect(verdict(input)).toBeNull());
+  it.each([B(`git commit -m "/x" ${OUT('a.ts')}`), B(`git commit -am x -- ${OUT('a.ts')}`), B(`git -C ${sh(MAIN)} commit -m "/x"`)])(
+    'm4: the operands after a message are still judged: %s', (_, input) => expect(gitRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'git' }));
+  it.each([
+    ['S2', bash(`CLAUDE_CONFIG_DIR=${W('cfg')} claude -p "rm -rf /x"`)], ['env wrapper', bash('env CLAUDE_CONFIG_DIR=/tmp/c claude -p x')],
+    ['export', bash('export CLAUDE_CONFIG_DIR=/tmp/c && claude -p x')], ['pwsh $env:', pwsh(`$env:CLAUDE_CONFIG_DIR='C:\\c'; claude -p x`)],
+    ['another CLAUDE_*', bash('CLAUDE_CODE_PLUGIN_DIR=/tmp/p claude -p x')],
+  ] as const)('m6: self denies a claude whose CLAUDE_* environment is set on the line: %s', (_, input) => expect(selfRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'self' }));
+  it.each([B('claude -p "summarize"'), B('CLAUDE_X=1 node x.js'), B('export CLAUDE_X=1 && node x.js')])('m6: allows %s', (_, input) => expect(selfRule.check(input, CTX)).toBeNull());
+  it('m7: git svn dcommit, branch and tag send commits off the machine; a fetch or rebase reads', () => {
+    for (const c of ['git svn dcommit', 'git svn branch x', 'git svn tag v1']) expect(networkRule.check(bash(c), CTX), c).toMatchObject({ decision: 'deny', rule: 'network' });
+    for (const c of ['git svn fetch', 'git svn rebase']) expect(networkRule.check(bash(c), CTX), c).toBeNull();
+  });
+});
+
 describe('fix round 1 · mcp-write (T5-BROWSER, more write words)', () => {
   it.each([
     ['mcp__github__manage_notification_subscription'], ['mcp__github__rerun_failed_jobs'], ['mcp__x__toggleFeatureFlag'], ['mcp__x__acceptInvitation'],

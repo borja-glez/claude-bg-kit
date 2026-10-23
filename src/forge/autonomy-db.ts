@@ -151,6 +151,9 @@ const HINTS = {
   // T6-H8-COST and T6-SCRIPT-TARGET: run the tool itself, its target visible
   script: `run the tool directly when the script only generates or inspects, and with its target visible on the command when it writes: ${MIGRATOR_FORMS}`,
   volumes: "remove the run's volumes by name with docker volume rm",
+  // final fix I2 (T6-PRIVILEGED)
+  host: 'run the container without host access: no --privileged or --device, no host --pid, --ipc, --uts, --userns or --cgroupns, no --cap-add of ALL, SYS_ADMIN, '
+    + 'SYS_PTRACE, SYS_MODULE, SYS_RAWIO or DAC_READ_SEARCH, and no unconfined --security-opt',
   migrator: MIGRATOR_FORMS,
 } as const;
 type Hint = keyof typeof HINTS;

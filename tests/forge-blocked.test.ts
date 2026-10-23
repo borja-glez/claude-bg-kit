@@ -86,6 +86,19 @@ describe('forge blocked', () => {
     expect(JSON.parse(cli(['note']).stdout)).toMatchObject({ noted: 1, decisions: first.decisions });
     expect(JSON.parse(run(['decision', 'list', '--all'], { cwd: main, now: () => T0, env: {} }).stdout)).toHaveLength(1);
   });
+  it('a failure that is not a bad record leaves the denial pending for the next note (T10-NARROW-CATCH)', () => {
+    autonomous('en');
+    appendBlocked(main, 'spike-x', rec('git', 'git push', 0));
+    // a directory where the ledger goes: addDecision throws a plain error (no DecisionInputError), as a busy ledger would
+    const ledger = path.join(main, '.forge', 'ledger.jsonl');
+    mkdirSync(ledger, { recursive: true });
+    const failed = cli(['note']);
+    expect(failed.code).toBe(1);
+    expect(JSON.parse(cli(['list']).stdout).pending).toBe(1);
+    rmSync(ledger, { recursive: true });
+    expect(JSON.parse(cli(['note']).stdout)).toMatchObject({ noted: 1, decisions: [1], skipped: [] });
+    expect(JSON.parse(cli(['list']).stdout).pending).toBe(0);
+  });
   it('list and note work on a run that is no longer active', () => {
     saveRun(main, endRun(state('en'), 'done'));
     appendBlocked(main, 'spike-x', rec('git', 'git push', 0));

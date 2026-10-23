@@ -70,8 +70,8 @@ describe('database', () => {
 });
 
 describe('AUTONOMY_RULES', () => {
-  it('holds the eight rules, self first, each id once', () => {
-    expect(AUTONOMY_RULES.map(r => r.id)).toEqual(['self', 'files', 'install', 'git', 'network', 'cloud', 'mcp-write', 'database']);
+  it('holds the nine rules, self first and machine last, each id once', () => {
+    expect(AUTONOMY_RULES.map(r => r.id)).toEqual(['self', 'files', 'install', 'git', 'network', 'cloud', 'mcp-write', 'database', 'machine']);
   });
 });
 
@@ -490,8 +490,50 @@ describe('fix round 3 · N3: trigger DDL is no dynamic SQL', () => {
 describe('fix round 3 · N4: T6-MOUNT-SETTINGS-LIMIT (known limit, Task 13 docs)', () => {
   it.each<Row>([
     ['S21', bash(`docker run --rm -v "$PWD":/app alpine sh -c "echo '{}' > /app/.claude/settings.local.json"`)],
-    ['S22', bash('docker run --rm -v "$PWD/.claude":/c alpine rm /c/settings.json')],
   ])('a container writing the worktree settings through a $PWD mount passes: %s', (_, input) => expect(evaluateGuard(input, MORE, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
+  // final fix (I1): the settings folder itself as a mount source denies, $PWD spelled or literal (S22 passed before)
+  it.each<Row>([['S22', bash('docker run --rm -v "$PWD/.claude":/c alpine rm /c/settings.json')]])(
+    'a mount of the settings folder itself is denied by self: %s', (_, input) => expect(evaluateGuard(input, MORE, AUTONOMY_RULES)).toMatchObject({ decision: 'deny', rule: 'self' }));
+});
+
+// ---- final fix (final-review.md I1, I2): literal absolute worktree mounts, and containers handed the host ------------------
+
+const WS = sh(WT);
+describe('final fix · I1: everyday docker lines with literal absolute worktree paths (every rule allows)', () => {
+  it.each<Row>([
+    ['C13', bash(`docker run --rm -v ${WS}:/app -w /app node:20 npm test`)], ['D6', pwsh(`docker run -v "${WT}:/app" node:20 npm test`)],
+    ['D7', bash(`docker run -v ${WS}/data:/var/lib/postgresql/data postgres:16`)], ['D8', bash(`docker run --mount type=bind,source=${WS},target=/app node:20 npm test`)],
+    ['D9', bash(`docker run -e DATA=${WS}/x node:20 node x.js`)], ['D10', bash(`cross-env OUT=${WS}/dist npm run build`)],
+    ['D14', bash(`docker run -v ${WS}/.env:/app/.env:ro node:20 x`)], ['D12', bash(`docker compose -f ${WS}/compose.yaml up -d`)],
+    ['glued --volume=', bash(`docker run --rm --volume=${WS}:/app -w /app node:20 npm test`)], ['glued --mount=', bash(`docker run --mount=type=bind,src=${WS},dst=/app node:20 ls`)],
+    ['compose run -v', bash(`docker compose -p fg-spike-x--stack run --rm -v ${WS}:/app app npm test`)], ['podman', bash(`podman run --rm -v ${WS}:/app:Z node:20 npm test`)],
+  ])('allows %s', (_, input) => expect(evaluateGuard(input, MORE, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
+  it.each<Row>([
+    ['settings folder', bash(`docker run --rm -v ${WS}/.claude:/c alpine ls /c`)], ['settings file', bash(`docker run --rm -v ${WS}/.claude/settings.json:/s alpine true`)],
+    ['--mount source', bash(`docker run --rm --mount type=bind,source=${WS}/.claude,target=/c alpine ls`)], ['relative', bash('docker run --rm -v .claude:/c alpine ls')],
+    ['KEY=value', bash(`cross-env OUT=${WS}/.claude/settings.json node gen.js`)], ['pwsh', pwsh(`docker run -v "${path.join(WT, '.claude')}:/c" alpine ls`)],
+  ])('still denies the settings, literal or as a mount source of their folder: %s', (_, input) => expect(evaluateGuard(input, MORE, AUTONOMY_RULES)).toMatchObject({ decision: 'deny', rule: 'self' }));
+});
+
+describe('final fix · I2: T6-PRIVILEGED (a container handed the host is denied, not unknown)', () => {
+  it.each<Row>([
+    ['C1', bash(`docker run --privileged -v ${WS}:/app alpine sh`)], ['C2', bash('docker run --device /dev/sda alpine')], ['C3', bash('docker run --pid=host --cap-add=SYS_ADMIN alpine')],
+    ['C4', bash('docker run --security-opt seccomp=unconfined --cap-add=ALL alpine')], ['C11', bash('docker run --userns=host -v /:/h alpine')], ['C12', bash('podman run --privileged alpine')],
+    ...[B('docker create --privileged alpine'), B('nerdctl run --cap-add sys_ptrace alpine'), B('docker run --cap-add NET_ADMIN,SYS_MODULE alpine'), B('docker run --cap-add CAP_SYS_RAWIO alpine'),
+      B('docker run --cap-add=DAC_READ_SEARCH alpine'), B('docker run --ipc host alpine'), B('docker run --uts=host alpine'), B('docker run --cgroupns host alpine'),
+      B('docker run --security-opt apparmor:unconfined alpine'), B('docker run --security-opt label=disable alpine'), B('docker run --security-opt=systempaths=unconfined alpine'),
+      B('docker container run --rm --privileged alpine'), B('docker compose -p fg-spike-x--stack run --rm --cap-add SYS_ADMIN app sh'),
+      B('docker compose -p fg-spike-x--stack run --rm --privileged app sh'), B('podman-compose -p fg-spike-x--stack run --cap-add=ALL app sh')] as Row[],
+  ])('denies %s', (_, input) => {
+    const v = databaseRule.check(input, MORE);
+    expect(v).toMatchObject({ decision: 'deny', rule: 'database' });
+    expect((v as { reason: string }).reason).not.toMatch(/unknown target/);
+  });
+  it.each<Row>([
+    B('docker run --rm --network host fg-spike-x--img'), B('docker run --rm --net=host curlimages/curl curl -s localhost:3000'), B('docker run --rm --cap-add NET_ADMIN alpine ip a'),
+    B('docker run --rm --cap-drop ALL alpine true'), B('docker run --rm --security-opt no-new-privileges alpine true'), B('docker run --rm --pid=container:fg-spike-x--db alpine ps'),
+    B('docker compose -p fg-spike-x--stack run --rm app npm test'),
+  ])('allows %s', (_, input) => expect(databaseRule.check(input, MORE)).toBeNull());
 });
 
 describe('fix round 3 · N5: a read-named MCP tool of a database server reads', () => {

@@ -190,15 +190,22 @@ export function containerSegments(seg: Segment): Segment[] {
   return !c ? [] : c.unknown ? everyStart(c.inner, seg) : nested(c.inner, c.env, c.envUnk, seg);
 }
 
+/** The host side of a mount option: `src` of `-v src:dst[:opts]` (a drive letter kept), `source=`/`src=` of `--mount`; null for an anonymous volume. */
+function mountSource(v: OptValue): Word | null {
+  const m = v.key === '--mount' ? /(?:^|,)\s*(?:source|src)=([^,]*)/i.exec(v.w.text) : v.key === '-v' || v.key === '--volume' ? /^((?:[A-Za-z]:)?[^:]*):/.exec(v.w.text) : null;
+  return m && m[1] ? { ...v.w, text: m[1] } : null;
+}
+
 /**
  * T6-CONTAINER-FILES and N2: what the files rule reads of a container CLI call. `skip`: the words it leaves alone (the
  * command a container runs; every option value of `run|create|exec` and of compose's `run|exec`, since a mount source is
  * T6-DOCKER-MOUNTS' and `-w`, `--tmpfs`, `--name`, `-e` are no host paths, while `--env-file`/`--label-file` are reads; the
  * global options' values, compose's -f/--env-file being reads; for `cp`, every operand but a host destination, a host
- * source being only read). `writes`: the host files the call writes (`--cidfile`, in any spelling). Null when the call
- * cannot be read, so the files rule judges every word.
+ * source being only read). `writes`: the host files the call writes (`--cidfile`, in any spelling). `mounts`: the host
+ * sources of its mounts (final fix I1: the self rule judges them, so a mount of the settings folder is denied). Null when
+ * the call cannot be read, so the files rule judges every word.
  */
-export function containerFiles(seg: Segment): { skip: Set<Word>; writes: Word[] } | null {
+export function containerFiles(seg: Segment): { skip: Set<Word>; writes: Word[]; mounts: Word[] } | null {
   const c = containerSub(seg);
   if (c === null || c === 'unknown') return null;
   const skip = new Set<Word>(c.globals.map(v => v.w));
@@ -207,15 +214,19 @@ export function containerFiles(seg: Segment): { skip: Set<Word>; writes: Word[] 
     if (sc.unknown) return null;
     // `<container>:<path>` (two letters or more: one is a drive) is the container's side
     for (const w of sc.ops) if (w !== dest || /^[^:/\\]{2,}:/.test(w.text)) skip.add(w);
-    return { skip, writes: [] };
+    return { skip, writes: [], mounts: [] };
   }
   const call = containerCall(seg);
-  if (!call) return c.compose ? { skip, writes: [] } : null;
+  if (!call) return c.compose ? { skip, writes: [], mounts: [] } : null;
   if (call.unknown) return null;
-  const writes: Word[] = [];
+  const writes: Word[] = [], mounts: Word[] = [];
   for (const w of call.inner) skip.add(w);
-  for (const v of call.opts) { if (v.key === '--cidfile') writes.push(v.w); else skip.add(v.w); }
-  return { skip, writes };
+  for (const v of call.opts) {
+    if (v.key === '--cidfile') writes.push(v.w); else skip.add(v.w);
+    const src = mountSource(v);
+    if (src) mounts.push(src);
+  }
+  return { skip, writes, mounts };
 }
 
 /** A segment and the commands its containers run, nested up to three deep (`docker exec c docker run …`). */

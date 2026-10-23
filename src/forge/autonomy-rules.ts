@@ -17,10 +17,13 @@ import { copyEnds, isPsPipeItem, knownWriteCommand, newItemName, plainOperands, 
 // Task 5 (T5-FILE): the rules for writes off the machine live in autonomy-net.ts, and Task 6's database rule in
 // autonomy-db.ts (neither imports this file); re-exported here, and listed in AUTONOMY_RULES at the end, so the hook
 // assembles every rule from one module and the tests import them from autonomy-rules.js.
+// The final fix's ninth rule, `machine` (the person's processes, services and user-level settings), is autonomy-machine.ts's.
 import { networkRule, cloudRule, mcpWriteRule } from './autonomy-net.js';
 import { databaseRule, inlineSqlWords } from './autonomy-db.js';
+import { machineRule } from './autonomy-machine.js';
 export { networkRule, cloudRule, mcpWriteRule } from './autonomy-net.js';
 export { databaseRule } from './autonomy-db.js';
+export { machineRule } from './autonomy-machine.js';
 
 // A write target kept for compatibility with the review probes; the rules read writeInfo directly.
 export function writeTargets(seg: Segment): Word[] { return writeInfo(seg).targets; }
@@ -89,9 +92,10 @@ const PS_DRIVES = new Set(['alias', 'cert', 'env', 'function', 'hkcu', 'hklm', '
  * `..` (Go's `./...` is no `..`). Under an in-root cwd such a word is inside by construction (T4-FAILCLOSED 1).
  * T4-STREAM-WORD: `name:rest` with no separator before the colon is the relative path `name` (an NTFS stream of a file in
  * the cwd: `docker run -v data:/app/data`), unless `name` is one letter (a drive) or, in powershell, one of its drives.
+ * Final fix I4: a `::` anywhere is a PowerShell provider-qualified path (`Microsoft.PowerShell.Core\FileSystem::C:\x`), never relative.
  */
 function relativeInside(text: string, dialect: Dialect): boolean {
-  if (!text || /^[\\/~]/.test(text)) return false;
+  if (!text || /^[\\/~]/.test(text) || text.includes('::')) return false;
   const stream = /^([^\\/:]+):(.*)$/s.exec(text);
   if (stream) {
     const name = stream[1];
@@ -196,6 +200,18 @@ function claudeSwitch(argv: Word[]): boolean {
   return false;
 }
 
+/**
+ * m6: whether a segment sets a CLAUDE_* variable: before its command (`CLAUDE_CONFIG_DIR=x claude`, also through `env`), by
+ * `export`/`declare`/`typeset`, PowerShell's `$env:CLAUDE_…` or cmd's `set CLAUDE_…=`.
+ */
+function setsClaudeEnv(seg: Segment): boolean {
+  if (Object.keys(seg.env).some(k => /^CLAUDE_/i.test(k))) return true;
+  const a = seg.argv.map(w => w.text);
+  if (/^\$env:CLAUDE_/i.test(a[0] ?? '')) return true;
+  const name = seg.argv.length ? commandName(seg.argv[0]) : '';
+  return ['export', 'declare', 'typeset', 'set'].includes(name) && a.slice(1).some(t => /^CLAUDE_\w*=/i.test(t));
+}
+
 /** Whether a glob (`*`, `?`, `[…]`) matches the name `.claude` — bash's leading-dot rule ignored, which fails closed (T4-GLOB-SHORT). */
 function globMatchesClaude(name: string): boolean {
   if (!/[*?[]/.test(name)) return false;
@@ -271,8 +287,29 @@ function projectClaude(p: string, ctx: GuardCtx, platform: NodeJS.Platform = pro
   return real !== null && real !== q && (under(fold(real), roots) || under(fold(real), realRoots(roots)));
 }
 
-/** Whether a word, resolved against `cwd` (the segment's by default), reaches the project `.claude`; the text form when it cannot be resolved. */
+/**
+ * Final fix I1: the path parts of a `KEY=value` word (its value) or a `src:dst[:opts]` word (each part, a drive letter kept
+ * with its path): `OUT=<wt>/dist`, `<wt>/data:/var/lib/data:ro`. Null for a word that is one path. Read before resolving,
+ * so the parts are judged alike on every platform (on win32 the whole word never resolves; elsewhere it resolves as one name).
+ */
+function pathParts(text: string): string[] | null {
+  const kv = /^[A-Za-z_]\w*=([\s\S]*)$/.exec(text);
+  const raw = (kv ? kv[1] : text).split(':'), parts: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    if (/^[A-Za-z]$/.test(raw[i]) && /^[\\/]/.test(raw[i + 1] ?? '')) { parts.push(`${raw[i]}:${raw[i + 1]}`); i++; } else parts.push(raw[i]);
+  }
+  return kv || parts.length > 1 ? parts.filter(Boolean) : null;
+}
+
+/** Whether a word, resolved against `cwd` (the segment's by default), reaches the project `.claude`; by its path parts when it has several (I1). */
 function settingsTarget(w: Word, seg: Segment, ctx: GuardCtx, cwd: string | null = seg.cwd): boolean {
+  const parts = pathParts(w.text);
+  if (parts) return parts.some(t => pathSettings({ text: t, dynamic: w.dynamic, glob: w.glob && /[*?[]/.test(t) }, seg, ctx, cwd));
+  return pathSettings(w, seg, ctx, cwd);
+}
+
+/** One path: resolved, whether it reaches the project `.claude`; the text form when it cannot be resolved. */
+function pathSettings(w: Word, seg: Segment, ctx: GuardCtx, cwd: string | null): boolean {
   // a glob is resolved by its literal text (a `.cl*de/` that stands for `.claude` is read by claudeName), a plain word by segmentPath
   const p = !w.dynamic && cwd !== null && /[*?[]/.test(w.text) ? shellPath(w.text, cwd, seg.dialect) : segmentPath(w, { ...seg, cwd });
   if (p !== null) return projectClaude(p, ctx);
@@ -317,10 +354,16 @@ export const selfRule: GuardRule = {
         // what it is given: its literal operands and glued flag values are judged against the project .claude. A reader given the settings path passes.
         let cands = plainOperands(seg);
         if (isInterpreter(name)) cands = cands.slice(1);
-        for (const w of seg.argv.slice(1)) if (!w.dynamic && w.text.startsWith('-') && w.text.includes('=')) cands.push(valWord(w, w.text.indexOf('=') + 1));
+        // I1: a container's command and option values are the container's, as the files rule reads them (T6-CONTAINER-FILES);
+        // its host writes and the host sources of its mounts are judged (a mount of the settings folder is denied)
+        const box = containerFiles(seg);
+        if (box) cands = [...cands.filter(w => !box.skip.has(w)), ...box.writes, ...box.mounts];
+        else for (const w of seg.argv.slice(1)) if (!w.dynamic && w.text.startsWith('-') && w.text.includes('=')) cands.push(valWord(w, w.text.indexOf('=') + 1));
         if (cands.some(w => settingsTarget(w, seg, ctx))) return deny('self', `${name} given the project settings could rewrite them and switch the hook off`, SELF_INSTEAD);
       }
       if (name === 'claude' && claudeSwitch(seg.argv)) return deny('self', 'this claude command could switch the guard off', SELF_INSTEAD);
+      // m6: a CLAUDE_* variable set on the line (CLAUDE_CONFIG_DIR and the like) may load the settings and plugins from elsewhere, without the guard
+      if (name === 'claude' && segs.some(setsClaudeEnv)) return deny('self', 'claude with a CLAUDE_* variable set could load its settings and plugins from elsewhere, without the guard', SELF_INSTEAD);
     }
     const command = shellCommand(input);
     if (command !== null) for (const call of forgeCalls(command)) {
@@ -498,6 +541,10 @@ interface GitParse {
   gitDirValue: Word | null; gitDirSet: boolean; unknownGlobal: boolean;
 }
 
+// m4: the subcommands that take a message, and their options whose value is text (or, for -F, a file read).
+const MSG_SUBS = new Set(['commit', 'tag', 'merge', 'stash', 'notes']);
+const MSG_VALUED = new Set(['-m', '--message', '-F', '--file', '--author', '--date', '--trailer', '--cleanup']);
+
 /** git's global options (composing -C over the cwd, work tree, git dir and -c), its subcommand and operands. */
 function gitParse(seg: Segment): GitParse {
   const argv = seg.argv;
@@ -517,11 +564,14 @@ function gitParse(seg: Segment): GitParse {
   for (const [k, v] of Object.entries(seg.env)) if (/^GIT_CONFIG_KEY_\d+$/.test(k) || k === 'GIT_CONFIG_PARAMETERS') cflags.push(v.text);
   const sub = argv[i]?.text.toLowerCase() ?? '';
   const rest = argv.slice(i + 1);
+  // m4: the values of the message options are text, no operands (`git commit -m "/api: x"`, `-am`); `-F <file>` is a read
+  const text = new Set<Word>();
+  if (MSG_SUBS.has(sub)) for (let k = 0; k < rest.length - 1 && rest[k].text !== '--'; k++) if (MSG_VALUED.has(rest[k].text) || /^-[A-Za-z]*[mF]$/.test(rest[k].text)) text.add(rest[++k]);
   // `--` is a pathspec separator only for the subcommands that restore files; elsewhere it only ends options.
   const sepAt = ['checkout', 'switch', 'restore', 'reset', 'stash'].includes(sub) ? rest.findIndex(w => w.text === '--') : -1;
   const before = sepAt >= 0 ? rest.slice(0, sepAt) : rest;
-  const operands = before.filter(w => w.text !== '--' && !w.text.startsWith('-'));
-  const allOperands = rest.filter(w => w.text !== '--' && !w.text.startsWith('-'));
+  const operands = before.filter(w => w.text !== '--' && !w.text.startsWith('-') && !text.has(w));
+  const allOperands = rest.filter(w => w.text !== '--' && !w.text.startsWith('-') && !text.has(w));
   let base: string | null = seg.cwd;
   for (const c of cDirs) { if (base === null) break; base = c.dynamic || !c.text ? null : segmentPath(c, { ...seg, cwd: base }); }
   const wtW = workTree ?? seg.env.GIT_WORK_TREE ?? null;
@@ -693,7 +743,7 @@ export const gitRule: GuardRule = {
   },
 };
 
-// ---- all eight ------------------------------------------------------------------------------------------------------
+// ---- all nine -------------------------------------------------------------------------------------------------------
 
-/** The autonomy rules in the order the hook runs them (the first deny wins): self first, so nothing switches the guard off. */
-export const AUTONOMY_RULES: readonly GuardRule[] = [selfRule, filesRule, installRule, gitRule, networkRule, cloudRule, mcpWriteRule, databaseRule];
+/** The autonomy rules in the order the hook runs them (the first deny wins): self first, so nothing switches the guard off; machine last. */
+export const AUTONOMY_RULES: readonly GuardRule[] = [selfRule, filesRule, installRule, gitRule, networkRule, cloudRule, mcpWriteRule, databaseRule, machineRule];

@@ -3,7 +3,7 @@ import { UsageError } from '../errors.js';
 import { mainCheckout } from '../../local.js';
 import { parseRun, readRunText } from '../../run.js';
 import { blockedDecision, markNoted, notedCount, readBlocked } from '../../autonomous.js';
-import { addDecision, decisionNoteId, decisionWrites } from '../../decisions.js';
+import { addDecision, decisionNoteId, decisionWrites, DecisionInputError } from '../../decisions.js';
 
 export const command: Command = (args, ctx) => {
   const { io, flag, has, json } = ctx;
@@ -35,7 +35,11 @@ export const command: Command = (args, ctx) => {
           const { n, event } = addDecision(main, blockedDecision(all[i], es), { ts: all[i].ts, runId: auto.runId });
           decisions.push(n);
           if (session) publish.push(...decisionWrites({ event, session, eid: decisionNoteId(event, session) }));
-        } catch { skipped.push(i); }
+        } catch (e) {
+          // T10-NARROW-CATCH: any other failure (a busy ledger, a full disk) keeps this record pending for the next note
+          if (!(e instanceof DecisionInputError)) { if (i > start) markNoted(main, auto.runId, i); throw e; }
+          skipped.push(i);
+        }
       }
       if (all.length > start) markNoted(main, auto.runId, all.length);
       return json({ noted: decisions.length, decisions, skipped, ...(session ? { publish } : {}) });

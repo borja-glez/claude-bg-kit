@@ -382,6 +382,7 @@ function publisherDeny(name0: string, args: Word[]): GuardVerdict | null {
   if (SSH_LIKE.has(name)) return sshAllLocal(name, args) ? null : netWrite(`${name} connects to another host`);
   if (name === 'rsync') { const rem = ops.filter(w => rsyncRemote(w.text)); if (!rem.length) return null; return rem.every(w => !w.dynamic && isLocalHost(hostToken(w.text))) ? null : netWrite('rsync copies to another host'); }
   if (name === 'git' && o0 === 'send-email') return netWrite('git send-email sends patches off this machine');
+  if (name === 'git' && o0 === 'svn' && ['dcommit', 'branch', 'tag'].includes(words[1] ?? '')) return netWrite(`git svn ${words[1]} sends commits off this machine`); // m7
   if ((name === 'npm' || name === 'pnpm' || name === 'yarn' || name === 'bun') && !RUN_SUBS.has(o0) && has(NPM_PUBLISH)) return netWrite(`${name} publishes a package off this machine`);
   if (name === 'cargo' && has(new Set(['publish', 'yank', 'owner']))) return netWrite('cargo reaches the registry');
   if (name === 'twine' && words.includes('upload')) return netWrite('twine upload reaches the registry');
