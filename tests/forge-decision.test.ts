@@ -169,6 +169,30 @@ describe('forge decision CLI', () => {
     // The file of a project without a roadmap goes with the work, in the worktree.
     expect(JSON.parse(run(['decision', 'md', '--scope', 'T1'], inWt).stdout).path).toBe(path.join(wt, 'docs', 'forge', 'decisions', 'T1.md'));
   });
+  it("add in a prepared profile's worktree takes that profile's runId before its run starts, and list --run finds it (T6B2-PRESTART-DECISIONS)", () => {
+    const main = tmp('forge-dec-prep-');
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: main, stdio: 'ignore' });
+    git('init', '-q', '-b', 'main');
+    git('config', 'core.autocrlf', 'false');
+    writeFileSync(path.join(main, 'a.txt'), 'a');
+    git('add', 'a.txt');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'a');
+    const wt = path.join(main, '.claude', 'worktrees', 'spike-combo');
+    git('worktree', 'add', '-q', '-b', 'forge/spike-combo', wt);
+    const other = path.join(main, '.claude', 'worktrees', 'product-other');
+    git('worktree', 'add', '-q', '-b', 'forge/product-other', other);
+    writeFileSync(path.join(wt, 'd.json'), JSON.stringify(INPUT));
+    writeFileSync(path.join(other, 'd.json'), JSON.stringify({ ...INPUT, what: 'not prepared' }));
+    writeFileSync(path.join(main, 'd.json'), JSON.stringify({ ...INPUT, what: 'in main' }));
+    mkdirSync(path.join(main, '.forge', 'autonomous', 'spike-combo'), { recursive: true });
+    writeFileSync(path.join(main, '.forge', 'autonomous', 'spike-combo', 'start.json'), JSON.stringify({ startBranch: 'main', defaultBranch: null, at: at(0) }));
+    const add = (cwd: string) => JSON.parse(run(['decision', 'add', '--data-file', 'd.json'], { cwd, now: () => new Date(at(0)), env: {} }).stdout);
+    expect(add(wt).runId).toBe('spike-combo');
+    expect(add(other).runId).toBeUndefined();
+    expect(add(main).runId).toBeUndefined();
+    const listed = JSON.parse(run(['decision', 'list', '--auto', '--run', 'spike-combo'], { cwd: main, now: () => new Date(at(1)), env: {} }).stdout);
+    expect(listed.map((d: { what: string }) => d.what)).toEqual(['diseño aprobado (v4)']);
+  });
   it('an unknown subcommand prints its usage', () => {
     const r = run(['decision', 'nope'], io);
     expect(r.code).toBe(2);
@@ -363,6 +387,15 @@ describe('decision publish (6b-2)', () => {
     expect(r.publish.map((w: { data: { decision: { what: string } } }) => w.data.decision.what)).toEqual(['diseño aprobado (v4)']);
     expect(cli(['decision', 'publish', '--session', 'main', '--since', at(0)]).publish.map((w: { data: { decision: { what: string } } }) => w.data.decision.what)).toEqual(['attended']);
     expect(run(['decision', 'publish', '--session', 'main', '--since', at(0), '--run', '../x'], { cwd: root, now: () => new Date(at(5)), env: {} }).code).toBe(2);
+  });
+  it('--run publishes every decision of that run whatever --since says; without --run, --since still applies (T6B2-PRESTART-DECISIONS)', () => {
+    addDecision(root, INPUT, { ts: at(0), runId: 'spike-x' });
+    addDecision(root, { ...INPUT, what: 'early, no run' }, { ts: at(0) });
+    addDecision(root, { ...INPUT, what: 'later' }, { ts: at(3), runId: 'spike-x' });
+    const whats = (r: { publish: { data: { decision: { what: string } } }[] }) => r.publish.map(w => w.data.decision.what);
+    expect(whats(cli(['decision', 'publish', '--session', 'main', '--since', at(2), '--run', 'spike-x']))).toEqual(['diseño aprobado (v4)', 'later']);
+    expect(whats(cli(['decision', 'publish', '--session', 'main', '--since', at(2)]))).toEqual([]);
+    expect(whats(cli(['decision', 'publish', '--session', 'main', '--since', at(0)]))).toEqual(['early, no run']);
   });
   it('marks under their own lock: one a dead command left is taken over, and none stays after (m-7)', () => {
     addDecision(root, INPUT, { ts: at(0) });

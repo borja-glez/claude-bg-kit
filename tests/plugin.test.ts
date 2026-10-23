@@ -2265,7 +2265,24 @@ describe('plugin layout', () => {
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('forge/<profile>-<name>');
   });
   it('the stop report of an autonomous run names its branch, its worktree, the parked ideas and that nothing left the branch (6b-2 M-4)', () => {
-    const item2 = read('plugins/forge/skills/infinite/references/stop.md').split('\n').find(l => l.startsWith('2. '))!;
-    for (const w of ['In an autonomous run', 'worktree', 'FORGE proposals list --status discussing', '`parked`', 'start branch']) expect(item2, w).toContain(w);
+    const lines = read('plugins/forge/skills/infinite/references/stop.md').split('\n');
+    const item2 = lines.find(l => l.startsWith('2. '))!;
+    for (const w of ['In an autonomous run', 'forge/<profile>-<name>', 'worktree', 'FORGE proposals list --status discussing', '`parked`', 'FORGE decision list --auto --run <runId>']) expect(item2, w).toContain(w);
+    const item3 = lines.find(l => l.startsWith('3. '))!;
+    for (const w of ['In an autonomous run', 'start branch']) expect(item3, w).toContain(w);
+  });
+  it('every cycle of a profile reads its reference, builds on its branch, asks nothing and finds its critic batch on disk (6b-2 Task 7 fix 1)', () => {
+    const core = read('plugins/forge/skills/infinite/SKILL.md');
+    const lines = core.split('\n');
+    // T6B2-CYCLE-POINTER: the §3 preamble (the line before «Let `SID` be»), step 3.1, where every cycle starts, and step 3.5
+    const at = lines.findIndex(l => l.startsWith('Let `SID` be'));
+    expect(lines.slice(0, at).filter(l => l.trim()).at(-1), 'the §3 preamble').toContain('references/autonomous.md');
+    expect(lines.find(l => l.startsWith('1. **Read decisions.**')), '3.1').toContain('references/autonomous.md');
+    expect(lines.find(l => l.startsWith('5. **Record.**')), '3.5').toContain('references/autonomous.md');
+    expect(read('plugins/waypoint/skills/work/SKILL.md')).toContain("or `forge/<profile>-<name>` in a forge profile's worktree");
+    expect(runRef('trust')).toContain('**In an autonomous profile** (`run.autonomous` in `FORGE infinite status`) never ask the trust question');
+    const auto = read('plugins/forge/skills/infinite/references/autonomous.md');
+    for (const w of ['FORGE proposals batch --pending --out', 'count: 0', '--base forge/<p>-<n>']) expect(auto, w).toContain(w);
+    expect(auto).not.toContain('stalled tick');
   });
 });

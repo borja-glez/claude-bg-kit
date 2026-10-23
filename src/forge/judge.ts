@@ -7,7 +7,7 @@
 // main checkout's ledger (T6B2-DECISION-FIRST). Task 5: `proposals unpark` applies the person's answer to a parked idea, in
 // the same order, and never judges it: insisting integrates it, withdrawing rejects it.
 import { appendEvent, readEvents, type LedgerEvent } from './ledger.js';
-import { loadApproval, loadProposal, saveApproval, saveProposal } from './proposals.js';
+import { loadApproval, loadProposal, loadProposals, saveApproval, saveProposal } from './proposals.js';
 import { checkDecision, DecisionInputError } from './decisions.js';
 import { normalizeParked, proposalDigest, type ApprovalDoc, type ProposalDoc, type ProposalParked } from '../lib/proposals.js';
 import type { CriticVerdict } from './critic.js';
@@ -108,10 +108,16 @@ function verdictFor(id: string, doc: ProposalDoc, verdicts: readonly CriticVerdi
  * - failing closed, one with no add event in this ledger (its origin is unknown, as a proposal pulled from the roadmap) or
  *   whose text is no longer the one forge added (someone else edited it).
  */
+/** T6B2-SOURCE-USER: whether the proposal is a person's idea: its source is `user` now or was when it was added, or it came
+ *  from a note or the chat. */
+function isIdea(doc: ProposalDoc, add: LedgerEvent | null): boolean {
+  const from = typeof add?.from === 'string' ? add.from : '';
+  return doc.source === 'user' || add?.source === 'user' || from.startsWith('note:') || from === 'chat';
+}
+
 function waitsOwner(root: string, id: string, doc: ProposalDoc, add: LedgerEvent | null): boolean {
   if (!add) return true;
-  const from = typeof add.from === 'string' ? add.from : '';
-  const idea = doc.source === 'user' || add.source === 'user' || from.startsWith('note:') || from === 'chat';
+  const idea = isIdea(doc, add);
   if (idea && add.owner !== true) return true;
   if (idea && typeof add.author === 'string' && OWNER_USER.test(add.author) && add.author !== roadmapOwner(root)) return true;
   return typeof add.digest === 'string' && add.digest !== proposalDigest(id, doc);
@@ -126,6 +132,23 @@ function originalStanding(root: string, events: readonly LedgerEvent[], id: stri
   if (!doc) return 'waits-owner';
   if (doc.status === 'discussing' && doc.parked) return 'parked';
   return notJudgeable(root, events, id, doc) === null && !waitsOwner(root, id, doc, lastAdd(events, id)) ? 'open' : 'waits-owner';
+}
+
+/**
+ * 6b-2 Task 7 fix 1: the proposals of `root` that `proposals batch --pending` hands the critic, by id (oldest first): every one
+ * still to decide (notJudgeable: proposed, or under discussion and not parked; no `judge` event; no owner's mark), but a
+ * person's idea whose add event does not say it is the owner's: it waits for the owner, and a verdict would decide nothing.
+ * What the run must judge is kept on disk, so a compaction between two cycles loses none of it.
+ */
+export function pendingForJudge(root: string): string[] {
+  const events = readEvents(root).filter(e => e.kind === 'proposal');
+  return loadProposals(root)
+    .filter(({ id, ...doc }) => {
+      const add = lastAdd(events, id);
+      return notJudgeable(root, events, id, doc) === null && !(isIdea(doc, add) && add?.owner !== true);
+    })
+    .map(p => p.id)
+    .sort();
 }
 
 /** The doc decided by this run (or, `by` forge:decide, by the person's answer), and its roadmap update: a stale reason or

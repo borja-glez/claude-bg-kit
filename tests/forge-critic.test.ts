@@ -3,7 +3,9 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { readVerdicts, proposalBatch, CRITIC_TEXT_MAX } from '../src/forge/critic.js';
 import { run } from '../src/forge/cli/run.js';
-import { proposalDigest } from '../src/lib/proposals.js';
+import { proposalDigest, type ProposalDoc } from '../src/lib/proposals.js';
+import { saveApproval, saveProposal } from '../src/forge/proposals.js';
+import { appendEvent } from '../src/forge/ledger.js';
 import { useTempDirs } from './helpers/tmp.js';
 
 const tmp = useTempDirs();
@@ -80,5 +82,35 @@ describe('proposals batch', () => {
     const r = run(['proposals', 'batch', 'p20261022100000none', '--out', 'deep/er/b.json'], { cwd: root, now: () => new Date(), env: {} });
     expect(r.code).toBe(0);
     expect(JSON.parse(readFileSync(path.join(root, 'deep', 'er', 'b.json'), 'utf8'))).toMatchObject({ proposals: [] });
+  });
+  it('--pending takes every open proposal no judge decided and no owner marked, but the ideas that wait for the owner (6b-2 Task 7 fix 1)', () => {
+    const root = tmp('batch-pending-');
+    const io = { cwd: root, now: () => new Date('2026-10-22T12:00:00Z'), env: {} };
+    const ts = '2026-10-22T10:00:00.000Z';
+    const add = (id: string, title: string, doc: Record<string, unknown> = {}, event: Record<string, unknown> | null = {}) => {
+      saveProposal(root, id, { ts, category: 'feature', risk: 'low', title, rationale: title, evidence: 'e', pillar: 'p', status: 'proposed', source: 'scout', author: 'session:main', ...doc } as ProposalDoc);
+      if (event) appendEvent(root, { ts, kind: 'proposal', action: 'add', id, ...event });
+    };
+    const P = (s: string) => `p20261022100000${s}`;
+    add(P('scou'), 'scout one');
+    add(P('judg'), 'judged one');
+    appendEvent(root, { ts, kind: 'proposal', action: 'judge', id: P('judg'), status: 'proposed' });
+    add(P('mark'), 'marked one');
+    saveApproval(root, P('mark'), { status: 'approved', decidedAt: ts, by: 'forge:decide', digest: 'd'.repeat(64) });
+    add(P('park'), 'parked one', { status: 'discussing', parked: { why: 'w', loses: 'l', at: ts } });
+    add(P('disc'), 'discussed one', { status: 'discussing' });
+    add(P('rejd'), 'rejected one', { status: 'rejected' });
+    add(P('chat'), 'owner chat idea', { source: 'user', author: 'user:o' }, { from: 'chat', owner: true, author: 'user:o', source: 'user' });
+    add(P('note'), 'someone else idea', { source: 'user', author: 'user:x' }, { from: 'note:n1', owner: false, author: 'user:x', source: 'user' });
+    add(P('page'), 'written on the page', { source: 'user', author: 'user:x' }, null);
+    add(P('verf'), 'verify defect', { source: 'verify' }, { from: 'verify:T1' });
+    const r = run(['proposals', 'batch', '--pending', '--out', 'c/batch.json'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ count: 4, ids: [P('chat'), P('disc'), P('scou'), P('verf')], missing: [] });
+    expect(JSON.parse(readFileSync(path.join(root, 'c', 'batch.json'), 'utf8')).proposals.map((p: { id: string }) => p.id)).toEqual([P('chat'), P('disc'), P('scou'), P('verf')]);
+    // with nothing pending it still answers, with an empty batch; ids with --pending are refused
+    const empty = tmp('batch-pending-none-');
+    expect(JSON.parse(run(['proposals', 'batch', '--pending', '--out', 'b.json'], { ...io, cwd: empty }).stdout)).toMatchObject({ count: 0, ids: [] });
+    expect(run(['proposals', 'batch', '--pending', P('scou'), '--out', 'b.json'], io).code).toBe(2);
   });
 });

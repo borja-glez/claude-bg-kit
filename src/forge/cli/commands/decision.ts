@@ -8,6 +8,7 @@ import {
   addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionNoteId, decisionWrites, markPublished, takeUnpublished, shasOutside, shaCommits, NOTE_ID, DecisionInputError,
 } from '../../decisions.js';
 import { autonomousRun } from '../../autonomous.js';
+import { preparedProfileAt } from '../../profile.js';
 import { confinedIn } from '../../guard.js';
 import { claudeSessionId } from '../../../lib/claude-session.js';
 import { defaultGit } from '../exec.js';
@@ -68,13 +69,15 @@ export const command: Command = (args, ctx) => {
       if (new Set(shaCommits(named, range)).size < named.length) throw new UsageError('decision add: undo.shas names one commit twice (a full sha and its short form)');
     }
     // An active execution names the run the decision belongs to (its scope), unless the data names one. 6b-2: before it, the
-    // active autonomous run when this runs in its profile worktree or from one of its sessions, so publish --run prints it.
+    // active autonomous run when this runs in its profile worktree or from one of its sessions, so publish --run prints it;
+    // T6B2-PRESTART-DECISIONS: else, in a prepared profile's worktree, that profile's (its design and plan, before the start).
     const exec = readExecution(root);
     const auto = autonomousRun(root);
     const sid = claudeSessionId(undefined, io.env ?? process.env);
     const autoRun = auto && (confinedIn(io.cwd, auto.ctx.worktree) || (sid !== null && auto.ids.includes(sid))) ? auto.ctx.runId : null;
+    const runId = autoRun ?? preparedProfileAt(root, io.cwd) ?? (exec?.active ? exec.runId : null);
     try {
-      const { n, event } = addDecision(root, decision, { ts: ts(), ...(task ? { task } : {}), runId: autoRun ?? (exec?.active ? exec.runId : null) });
+      const { n, event } = addDecision(root, decision, { ts: ts(), ...(task ? { task } : {}), runId });
       const closes = typeof resolves === 'string' && !resolvesRefused ? resolves : null;
       const publish = session ? decisionWrites({ event, session, eid: decisionNoteId(event, session), resolves: closes }) : null;
       // 6b-2: the note it prints is this decision's publication: decision publish does not print it again.
@@ -93,7 +96,8 @@ export const command: Command = (args, ctx) => {
   }
   if (sub === 'publish') {
     // 6b-2: the roadmap notes of the decisions forge took on its own (by !== user) since --since that no command published
-    // yet, in order, for the skill to send in one batch; they count as published once printed. M-8: --run keeps that run's.
+    // yet, in order, for the skill to send in one batch; they count as published once printed. M-8: --run keeps that run's,
+    // and T6B2-PRESTART-DECISIONS: all of them, whatever --since says (a profile's design and plan come before its start).
     const session = flag('session');
     if (!session || !SESSION.test(session)) throw new UsageError('decision publish: --session needs the waypoint session id');
     const since = flag('since');

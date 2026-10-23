@@ -2,7 +2,7 @@
 // forge/<profile>-<name> in .claude/worktrees/<profile>-<name>, from the branch of the first start, which start.json keeps;
 // `infinite start --profile` reads them back into the autonomous block of run.json. The main checkout, its files and its
 // branch are never touched: git runs at the main checkout with `-C <dir>` for the checkout it asks about.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { PROFILES, isAutonomousName, type AutonomousRun, type Profile } from '../lib/forge-run.js';
 import { excludeWorktrees } from '../lib/git-info.js';
@@ -10,7 +10,7 @@ import { BRANCH_RE, samePath } from '../lib/worktree.js';
 import { UsageError } from './cli/errors.js';
 import { defaultGit } from './cli/exec.js';
 import { forgeDir } from './ledger.js';
-import { autonomousDir } from './resources.js';
+import { autonomousDir, autonomousRoot } from './resources.js';
 import { runMainsOf } from './autonomous.js';
 import { confinedIn, isInside } from './guard.js';
 import { parseRun, readRunText, runFile, type RunState } from './run.js';
@@ -153,6 +153,24 @@ export function profileBlock(main: string, cwd: string, profile: Profile, name: 
   const on = defaultGit(main)(['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
   if (on !== branch) throw new UsageError(`infinite start: ${worktree} is on ${on || 'no branch git can name'}, not ${branch}; switch it back to ${branch}`);
   return { profile, name, runId, worktree, branch, startBranch: recorded.startBranch, protectedBranches: protectedBranchesOf(recorded.startBranch, recorded.defaultBranch) };
+}
+
+/**
+ * T6B2-PRESTART-DECISIONS: the runId of the prepared profile whose worktree holds `cwd` (one that `infinite prepare` gave a
+ * start.json in `main`), or null. The design and the plan of a profile are decided there before its run starts: their
+ * decisions are that run's. confinedIn, H-2: a spelling never folds toward inside.
+ */
+export function preparedProfileAt(main: string, cwd: string): string | null {
+  let names: string[];
+  try { names = readdirSync(autonomousRoot(main)); } catch { return null; }
+  for (const runId of names.sort()) {
+    const dash = runId.indexOf('-');
+    const profile = runId.slice(0, dash) as Profile;
+    const name = runId.slice(dash + 1);
+    if (dash < 0 || !PROFILES.includes(profile) || !isAutonomousName(name) || !existsSync(startFile(main, runId))) continue;
+    if (confinedIn(cwd, profileNames(main, profile, name).worktree)) return runId;
+  }
+  return null;
 }
 
 /** T6B2-NO-EXECUTION: why `swarm start` does not run inside a profile in this version. */

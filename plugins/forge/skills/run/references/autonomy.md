@@ -7,7 +7,7 @@ forge asks at its gates unless autonomy is `auto`. It is `auto` when `FORGE begi
 - **Questions only at launch,** all in one message (AskUserQuestion), and none after:
   - changes in the tree that are not the task's (never automated: commit, stash or leave them, as `Rules for every path` in `SKILL.md` says);
   - on the Large path, the final merge: run `FORGE authorize merge-on-finish --branch <rama> --project <project> --locale <es|en>` (no run exists yet, so forge ties the answer to this session and to `<project>`, for 24 hours: name the project now, a kebab id, and write the design under it, `docs/waypoint/<project>/`, as `references/large.md` step 1 says) and ask its `ask` exactly as printed, also when the request already says «… e intégralo al acabar» (only a recorded answer authorizes); its yes becomes `--merge-on-finish` in `references/execution.md` step 1, which then does not ask again;
-  - the commands of `.forge/config.yaml`, when the triage printed `trust`: its `ask` as printed, recorded as `references/trust.md` says (forge never trusts them by itself, also in auto);
+  - the commands of `.forge/config.yaml`, when the triage printed `trust`: its `ask` as printed, recorded as `references/trust.md` says (forge never trusts them by itself, also in auto; in an autonomous profile nothing is asked: `references/trust.md`);
   - in infinite mode: the budget, as always.
 - **Any other doubt** becomes a question note on the roadmap (or a line of the final report without one), and the work takes the safe path of the `### Unattended` table (`references/execution.md`).
 - **What auto decides alone**, each recorded with `FORGE decision add` (`"by": "auto"`, as `references/decisions.md` says):

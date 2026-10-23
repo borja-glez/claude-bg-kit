@@ -16,7 +16,7 @@ import { PAGE_RULES } from '../../../lib/publish.js';
 import { NOTE_ID } from '../../../lib/notes.js';
 import { autoApprovable } from '../../policy.js';
 import { proposalBatch, readVerdicts } from '../../critic.js';
-import { judgeProposal, unparkProposal, JudgeError, type Judged, type Unparked } from '../../judge.js';
+import { judgeProposal, pendingForJudge, unparkProposal, JudgeError, type Judged, type Unparked } from '../../judge.js';
 import {
   convertedFrom, ideaLink, ideaNote, ideaOrigin, IDEA_MERGED, normalizeOwner, noteOf, pendingIdeas, roadmapOwner, saveOwner, type RoadmapOwner,
 } from '../../ideas.js';
@@ -414,20 +414,23 @@ export const command: Command = (args, ctx) => {
       return json({ id, taskId: task.id, write: { taskId: task.id } });
     }
     case 'batch': {
-      // The ids are every argument but --out and its value: an id after a flag still counts, and any other flag is refused.
+      // The ids are every argument but --out and its value (and --pending): an id after a flag still counts, and any other
+      // flag is refused. Task 7 fix 1: --pending takes, instead, every proposal still to judge (pendingForJudge), from disk.
       const out = subFlag('out');
       if (!out) throw new UsageError('proposals batch: --out is required');
       const at = rest.indexOf('--out');
-      const ids = rest.filter((_, i) => i !== at && i !== at + 1);
-      const flag = ids.find(a => a.startsWith('--'));
+      const pending = has('pending');
+      const named = rest.filter((a, i) => i !== at && i !== at + 1 && a !== '--pending');
+      const flag = named.find(a => a.startsWith('--'));
       if (flag) throw new UsageError(`proposals batch: unknown option ${flag}`);
-      if (ids.length === 0) throw new UsageError('proposals batch: at least one proposal id is required');
-      for (const id of ids) if (!PROPOSAL_ID.test(id)) throw new UsageError(`proposals batch: ${id} is not a proposal id (p + 14 digits + 4 letters/digits)`);
-      const batch = proposalBatch(io.cwd, ids);
+      if (pending && named.length) throw new UsageError('proposals batch: --pending takes no proposal ids');
+      if (!pending && named.length === 0) throw new UsageError('proposals batch: at least one proposal id (or --pending) is required');
+      for (const id of named) if (!PROPOSAL_ID.test(id)) throw new UsageError(`proposals batch: ${id} is not a proposal id (p + 14 digits + 4 letters/digits)`);
+      const batch = proposalBatch(io.cwd, pending ? pendingForJudge(io.cwd) : named);
       const file = path.resolve(io.cwd, out);
       mkdirSync(path.dirname(file), { recursive: true });
       writeFileSync(file, JSON.stringify({ proposals: batch.proposals }, null, 2) + '\n');
-      return json({ count: batch.proposals.length, missing: batch.missing, out });
+      return json({ count: batch.proposals.length, ids: batch.proposals.map(p => p.id), missing: batch.missing, out });
     }
     case 'judge': {
       // 6b-2: an autonomous run decides a proposal on its own, by the critic's verdict of its present text (src/forge/judge.ts).

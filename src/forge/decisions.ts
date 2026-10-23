@@ -256,13 +256,14 @@ export function markPublished(root: string, ns: number[]): void {
 }
 
 /**
- * `decision publish`'s decisions: by !== user since `since` (of `run` when given), not published yet, in order, each with
- * its event, read from the ledger once (m-7) and marked as published under the same lock, so two publishes never print one.
+ * `decision publish`'s decisions: by !== user, not published yet, in order, each with its event, read from the ledger once
+ * (m-7) and marked as published under the same lock, so two publishes never print one. With `run`, every one of that run
+ * (T6B2-PRESTART-DECISIONS: a profile's design and plan are decided before its start); without it, those since `since`.
  */
 export function takeUnpublished(root: string, f: { since: string; run?: string }): { d: Numbered; e: LedgerEvent }[] {
   return withPublishLock(root, () => {
     const done = publishedNs(root);
-    const rows = selectDecisions(root, readEvents(root), { since: f.since, ...(f.run ? { run: f.run } : {}), auto: true }).filter(x => !done.has(x.d.n));
+    const rows = selectDecisions(root, readEvents(root), { ...(f.run ? { run: f.run } : { since: f.since }), auto: true }).filter(x => !done.has(x.d.n));
     if (rows.length) writePublished(root, [...done, ...rows.map(x => x.d.n)]);
     return rows;
   });
