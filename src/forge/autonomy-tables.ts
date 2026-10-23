@@ -24,7 +24,7 @@ export interface OptTable {
  * A table from a space-separated spec: a trailing `=` takes a value, `?` a glued value only, `#` glued octal, `+` the
  * following words; a `/switch:` key takes its value glued after the colon. A two-character token (`-#`, `-:`, `+r`) is a key as is.
  */
-function T(spec: string, extra: Omit<OptTable, 'opts'> = {}): OptTable {
+export function T(spec: string, extra: Omit<OptTable, 'opts'> = {}): OptTable {
   const opts: Record<string, OptKind> = {};
   for (const tok of spec.split(/\s+/).filter(Boolean)) {
     const mark = tok.length > 2 && /[=?#+]$/.test(tok) ? tok.slice(-1) : '';
@@ -283,3 +283,54 @@ export function scan(args: Word[], table: OptTable, d: Dialect): Scan {
   }
   return { ops, vals, flags, unknown, stray };
 }
+
+/**
+ * Task 6: the options before a command's first operand, read with its table: the operand's index, the scan of the words
+ * before it, and whether an option outside the table came first. A word only the shell knows may be options too
+ * (`docker $FLAGS rm`): it counts as an unknown one.
+ */
+export function head(args: Word[], table: OptTable, d: Dialect): { at: number; unknown: boolean; sc: Scan } {
+  let unknown = false, at = args.length;
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i].text;
+    if (args[i].dynamic) { unknown = true; continue; }
+    if (t === '--') { at = i + 1; break; }
+    if (t.length < 2 || !t.startsWith('-')) { at = i; break; }
+    const sc = scan(args.slice(i, i + 2), table, d);
+    if (sc.unknown) unknown = true;
+    if (sc.vals.some(v => v.w === args[i + 1])) i++;
+  }
+  const sc = scan(args.slice(0, at), table, d);
+  return { at, unknown: unknown || sc.unknown, sc };
+}
+
+// ---- containers (Task 6): docker, podman and nerdctl, and compose -----------------------------------------------------
+
+export const CONTAINER_CLIS: ReadonlySet<string> = new Set(['docker', 'podman', 'nerdctl']);
+export const COMPOSE_CLIS: ReadonlySet<string> = new Set(['docker-compose', 'podman-compose']);
+// The global options of docker, podman and nerdctl together (none of them reads one of these keys differently).
+export const DOCKER_GLOBAL = T(`--config= -c= --context= -D --debug -H= --host= -l= --log-level= --tls --tlscacert= --tlscert= --tlskey= --tlsverify -v
+  --version -h --help -r --remote --connection= --url= --identity= --root= --runroot= --storage-driver= --storage-opt= --cgroup-manager= --events-backend=
+  --hooks-dir= --runtime= --tmpdir= --syslog --module= --ssh= --out= --noout --transient-store --imagestore= -a= --address= -n= --namespace= --snapshotter=
+  --cni-path= --cni-netconfpath= --data-root= --insecure-registry --hosts-dir= --experimental --host-gateway-ip= --debug-full`);
+// docker run / create (docker 27), with podman's and nerdctl's own options.
+export const DOCKER_RUN = T(`-a= --attach= --add-host= --annotation= --blkio-weight= --blkio-weight-device= --cap-add= --cap-drop= --cgroup-parent= --cgroupns=
+  --cidfile= --cpu-count= --cpu-percent= --cpu-period= --cpu-quota= --cpu-rt-period= --cpu-rt-runtime= -c= --cpu-shares= --cpus= --cpuset-cpus= --cpuset-mems=
+  -d --detach --detach-keys= --device= --device-cgroup-rule= --device-read-bps= --device-read-iops= --device-write-bps= --device-write-iops=
+  --disable-content-trust --dns= --dns-option= --dns-search= --domainname= --entrypoint= -e= --env= --env-file= --expose= --gpus= --group-add= --health-cmd=
+  --health-interval= --health-retries= --health-start-interval= --health-start-period= --health-timeout= --help -h= --hostname= --init -i --interactive
+  --io-maxbandwidth= --io-maxiops= --ip= --ip6= --ipc= --isolation= --kernel-memory= -l= --label= --label-file= --link= --link-local-ip= --log-driver= --log-opt=
+  --mac-address= -m= --memory= --memory-reservation= --memory-swap= --memory-swappiness= --mount= --name= --network= --net= --network-alias= --net-alias=
+  --no-healthcheck --oom-kill-disable --oom-score-adj= --pid= --pids-limit= --platform= --privileged -p= --publish= -P --publish-all --pull= -q --quiet
+  --read-only --restart= --rm --runtime= --security-opt= --shm-size= --sig-proxy --stop-signal= --stop-timeout= --storage-opt= --sysctl= --tmpfs= -t --tty
+  --ulimit= -u= --user= --userns= --uts= -v= --volume= --volume-driver= --volumes-from= -w= --workdir= --pod= --pod-id-file= --replace --systemd= --secret=
+  --arch= --os= --variant= --rootfs --http-proxy= --timezone= --umask= --uidmap= --gidmap= --subuidname= --subgidname= --hostuser= --passwd --passwd-entry=
+  --group-entry= --env-host --env-merge= --image-volume= --init-path= --personality= --preserve-fds= --requires= --retry= --retry-delay= --sdnotify=
+  --seccomp-policy= --tls-verify= --unsetenv= --unsetenv-all --cgroups= --cgroup-conf= --creds= --cert-dir= --authfile= --no-hosts --decryption-key=`);
+export const DOCKER_EXEC = T(`-d --detach --detach-keys= -e= --env= --env-file= -i --interactive --privileged -t --tty -u= --user= -w= --workdir= --help -l
+  --latest --preserve-fds= --preserve-fd=`);
+export const COMPOSE_GLOBAL = T(`-f= --file= -p= --project-name= --project-directory= --env-file= --profile= --parallel= --ansi= --progress= --compatibility
+  --dry-run --all-resources --verbose --no-ansi -v --version -h --help`);
+export const COMPOSE_RUN = T(`-d --detach --name= --entrypoint= -e= --env= -l= --label= -u= --user= --no-deps --rm -p= --publish= --service-ports --use-aliases
+  -v= --volume= -w= --workdir= -T --no-TTY -i --interactive -t --tty --build --pull= --quiet-pull --remove-orphans --cap-add= --cap-drop= --help`);
+export const COMPOSE_EXEC = T('-d --detach --privileged -u= --user= -T --no-TTY --index= -e= --env= -w= --workdir= --help -i --interactive -t --tty');

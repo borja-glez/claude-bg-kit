@@ -3,66 +3,40 @@
 // Fail-closed (T6-FAILCLOSED, the lesson of Tasks 4 and 5): a write is allowed only when its target is positively one of
 // those. Each client is read with its own option table (`scan`): an option outside it cancels the «this only reads» answer
 // and makes the target unknown; a word only the shell knows is unknown; SQL that acts past the registered target (another
-// database, a reconnect, a server program or file, the whole cluster) is unknown too. A migration or a database script
-// names its database only through the DATABASE_URL of its own segment (M15: also behind a launcher, read by Task 5's
-// effectiveCommand, T6-LAUNCHER-REUSE); an MCP tool is judged by the SQL it is given (H9). Pure: reads no file, starts no
-// process, opens no connection. It never imports autonomy-rules.ts, which lists it in AUTONOMY_RULES.
-import path from 'node:path';
+// database, a reconnect, a server program or file, the whole cluster) is unknown too, and so is SQL that touches a file
+// outside the run's roots (T6-SQL-FILES). A migration's target is read only from where the tool reads it (T6-MIGRATOR-TARGET);
+// a database script's from the DATABASE_URL of its own segment. Launchers are Task 5's effectiveCommand (T6-LAUNCHER-REUSE),
+// the commands a container runs autonomy-shared.ts's containerSegments (T6-CONTAINER-INNER), the docker reading
+// autonomy-docker.ts and the data autonomy-db-tables.ts. An MCP tool is judged by the SQL it is given (H9). Pure: reads no
+// file, starts no process, opens no connection. It never imports autonomy-rules.ts, which lists it in AUTONOMY_RULES.
 import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
 import { confinedIn } from './guard.js';
 import { dbPrefix, dockerPrefix, isLocalHost, type ResourceKind } from './resources.js';
-import { commandName, type Dialect, type Segment, type Word } from './shell-words.js';
-import { bashSegments, deny, mcpWords, segmentPath } from './autonomy-shared.js';
-import { scan, type OptKind, type OptTable, type Scan } from './autonomy-tables.js';
-import { effectiveCommand, type Eff } from './autonomy-net.js';
+import { commandName, isNullSink, type Segment, type Word } from './shell-words.js';
+import { bashSegments, deny, envUnknown, insideRoots, markEnvUnknown, mcpWords, segmentPath, withContainers } from './autonomy-shared.js';
+import { head, scan, type Scan } from './autonomy-tables.js';
+import { effectiveCommand, MANAGERS, MCP_READ_FIRST, MCP_WRITE_WORDS, type Eff } from './autonomy-net.js';
+import { dockerFinding } from './autonomy-docker.js';
+import {
+  CLIENTS, DB_CLIENTS, DB_GLUED, DB_TOOL_WRITES, DB_WORDS, DOCKER_HOSTS, FOR_LOCK, GOOSE_DRIVERS, GOOSE_T, INFO_WORDS, INTERPRETERS, KIND, MAKES, MCP_DB_WORDS,
+  META_READ, MIGRATORS, MONGO_REACH, MYSQL_ANYWHERE, MYSQL_STATEMENT, MYSQLADMIN_READ, PG_ANYWHERE, PG_STATEMENT, PM_OWN_COMMANDS, PM_RUN, PSQL_FILE_META,
+  PSQL_SAFE_META, QUERY_FIELDS, READ_KEYWORDS, READ_START, REDIS_READ, REDIS_READ_MODES, SCHEME_KIND, SIDE_EFFECTS, SQL_FIELDS, SQL_SHAPES, SQLITE_FILE_DOT,
+  SQLITE_REACH, SQLITE_SAFE_DOT, WITH_WRITES, type Client, type DbClient, type Migrator,
+} from './autonomy-db-tables.js';
+import { COMPOSE_CLIS, CONTAINER_CLIS } from './autonomy-tables.js';
 
-// ---- the lists (brief, Interfaces) ----------------------------------------------------------------------------------
-
-const DB_CLIENT_NAMES = ['psql', 'pg_restore', 'dropdb', 'createdb', 'mysql', 'mariadb', 'mysqladmin', 'sqlite3', 'mongosh', 'mongo', 'redis-cli'] as const;
-type DbClient = (typeof DB_CLIENT_NAMES)[number];
-export const DB_CLIENTS: ReadonlySet<string> = new Set(DB_CLIENT_NAMES);
-
-const DJANGO = /^(?:migrate|flush|loaddata|sqlflush)$/;
-const TYPEORM = /^(?:migration|schema):/;
-/**
- * The migration CLIs, each with the command word that makes a call of it a migration (`true`: every call). Spellings of one
- * CLI share its entry: django-admin and `python -m django` are manage.py; sequelize-cli and typeorm's ts-node bins too.
- */
-export const MIGRATORS: Readonly<Record<string, RegExp | true>> = {
-  prisma: /^(?:migrate|db)$/, rails: /^db:/, rake: /^db:/, knex: /^(?:migrate|seed):/, sequelize: /^db:/, 'sequelize-cli': /^db:/,
-  typeorm: TYPEORM, 'typeorm-ts-node-commonjs': TYPEORM, 'typeorm-ts-node-esm': TYPEORM, 'drizzle-kit': /^(?:push|migrate|drop)(?::|$)/,
-  alembic: /^(?:upgrade|downgrade)$/, 'manage.py': DJANGO, 'django-admin': DJANGO, django: DJANGO,
-  flyway: true, liquibase: true, dbmate: true, goose: true, migrate: true,
-};
-
-/** The commands of pnpm, yarn and bun that are not a script: any other first word runs the script (or the bin) of that name. */
-export const PM_OWN_COMMANDS: ReadonlySet<string> = new Set(['install', 'i', 'add', 'remove', 'rm', 'uninstall', 'update', 'up', 'upgrade', 'link',
-  'unlink', 'list', 'ls', 'outdated', 'why', 'audit', 'publish', 'pack', 'init', 'create', 'exec', 'dlx', 'x', 'run', 'run-script', 'store', 'config',
-  'info', 'view', 'login', 'logout', 'whoami', 'global', 'cache', 'patch', 'import', 'rebuild', 'prune', 'dedupe', 'bin', 'root', 'setup', 'env', 'fetch',
-  'licenses', 'test', 't', 'start']);
-
-// H8: the words of a database script's name.
-export const DB_WORDS = new Set(['db', 'database', 'migrate', 'migration', 'migrations', 'seed', 'seeds', 'drop', 'reset', 'truncate', 'wipe', 'purge', 'flush', 'fixtures']);
-export const DB_GLUED = /^(?:db|database)(?:reset|drop|seeds?|migrate|push|wipe|sync)$|^(?:reset|drop|seed|migrate|wipe)(?:db|database)$/;
-
-/** The docker/podman subcommands that destroy or reach into a container or volume: each name they act on must be the run's; prune always denies. */
-export const DOCKER_DESTROYERS: readonly string[] = ['rm', 'container rm', 'volume rm', 'volume prune', 'container prune', 'system prune', 'compose down', 'stop', 'kill', 'exec'];
-// The same subcommands by their other names: docker's aliases and the `container` group.
-const DOCKER_ALIAS: ReadonlyMap<string, string> = new Map([['container remove', 'container rm'], ['volume remove', 'volume rm'], ['container stop', 'stop'],
-  ['container kill', 'kill'], ['container exec', 'exec']]);
-// compose subcommands judged like `compose down`, by the project they act on (its containers are the project's).
-const COMPOSE_DESTROYERS = new Set(['down', 'rm', 'stop', 'kill', 'exec']);
-const DESTROY_WORDS = new Set(['rm', 'remove', 'prune', 'stop', 'kill', 'exec', 'down']);
-const DOCKERS = new Set(['docker', 'podman', 'docker-compose', 'podman-compose']);
+// The brief's lists, kept in autonomy-db-tables.ts (T6-SPLIT).
+export { DB_CLIENTS, MIGRATORS, PM_OWN_COMMANDS, DB_WORDS, DB_GLUED, DOCKER_DESTROYERS } from './autonomy-db-tables.js';
 
 // ---- SQL as each server reads it ------------------------------------------------------------------------------------
 
 // How a server reads quotes and comments: backslash escapes, dollar quotes, `#` comments, `--` needing a space after it,
-// nested block comments, MySQL's executable `/*!` comments, and backquoted and bracketed identifiers.
-interface SqlDialect { bs: boolean; dollar: boolean; hash: boolean; dashSpace: boolean; nested: boolean; bang: boolean; tick: boolean; bracket: boolean }
-const PG: SqlDialect = { bs: false, dollar: true, hash: false, dashSpace: false, nested: true, bang: false, tick: false, bracket: false };
-const MYSQL: SqlDialect = { bs: true, dollar: false, hash: true, dashSpace: true, nested: false, bang: true, tick: true, bracket: false };
-const SQLITE: SqlDialect = { bs: false, dollar: false, hash: false, dashSpace: false, nested: false, bang: false, tick: true, bracket: true };
+// nested block comments, MySQL's executable `/*!` comments, backquoted and bracketed identifiers, and psql's meta commands
+// (a backslash command takes the rest of its line as it is).
+interface SqlDialect { bs: boolean; dollar: boolean; hash: boolean; dashSpace: boolean; nested: boolean; bang: boolean; tick: boolean; bracket: boolean; meta: boolean }
+const PG: SqlDialect = { bs: false, dollar: true, hash: false, dashSpace: false, nested: true, bang: false, tick: false, bracket: false, meta: true };
+const MYSQL: SqlDialect = { bs: true, dollar: false, hash: true, dashSpace: true, nested: false, bang: true, tick: true, bracket: false, meta: false };
+const SQLITE: SqlDialect = { bs: false, dollar: false, hash: false, dashSpace: false, nested: false, bang: false, tick: true, bracket: true, meta: false };
 /** SQL is read as each of these servers reads it, so a quote or a comment one of them reads differently cannot hide a write. */
 const SQL_DIALECTS: readonly SqlDialect[] = [PG, MYSQL, SQLITE];
 
@@ -92,6 +66,11 @@ function sqlCode(sql: string, d: SqlDialect): string | null {
   let out = '';
   for (let i = 0; i < sql.length;) {
     const c = sql[i], n = sql[i + 1] ?? '';
+    if (d.meta && c === '\\' && /[A-Za-z!?]/.test(n)) {
+      const nl = sql.indexOf('\n', i), sep = sql.indexOf('\\\\', i + 1);
+      const e = Math.min(nl < 0 ? sql.length : nl, sep < 0 ? sql.length : sep);
+      out += sql.slice(i, e); i = e; continue;
+    }
     if (c === "'" || (c === '"' && d.bs)) {
       const e = quoteEnd(sql, i, c, d.bs);
       if (e < 0) return null;
@@ -131,16 +110,6 @@ function sqlCodes(sql: string): string[] | null {
   return codes.every((c): c is string => c !== null) ? codes : null;
 }
 
-const READ_START = new Set(['select', 'show', 'explain', 'describe', 'with']);
-const WITH_WRITES = /\b(?:insert|update|delete|merge|truncate|drop|alter|create|grant|revoke|copy|call|do)\b/;
-const FOR_LOCK = /\bfor\s+(?:no\s+key\s+)?update\b|\bfor\s+(?:key\s+)?share\b|\block\s+in\s+share\s+mode\b/;
-// The functions a SELECT calls for their effect (M5): the brief's list, then the families they belong to (every dblink
-// call, the large-object functions, the advisory locks) and the sqlite shell's file and extension functions.
-const SIDE_EFFECTS = new RegExp(String.raw`\b(?:pg_terminate_backend|pg_cancel_backend|setval|nextval|lo_unlink|lo_import|lo_export|dblink_exec|pg_reload_conf`
-  + String.raw`|set_config|pg_advisory_lock|dblink\w*|lo_\w+|pg_(?:try_)?advisory\w*|writefile|load_extension)\s*\(`);
-// psql's `\d…` and `\l`, sqlite's `.tables` and `.schema`, with arguments on their own line and no other client command.
-const META_READ = /^(?:\\(?:d[a-z+]*|l\+?|list\+?)|\.(?:tables|schema))(?:[ \t][^\\\n]*)?$/;
-
 /** The statements of a server's reading: split at `;` and at the `\g`/`\G` that ends one in psql and mysql. */
 const statements = (code: string): string[] => code.split(/;|\\g(?![a-z])/);
 
@@ -172,100 +141,59 @@ export function isDbScript(name: string): boolean {
   return (words.includes('schema') || words.includes('db')) && words.some(w => w === 'sync' || w === 'push' || w === 'drop');
 }
 
-// ---- the clients and their option tables (T6-FAILCLOSED) ------------------------------------------------------------
+// ---- verdicts -------------------------------------------------------------------------------------------------------
 
-/** An option table from a space-separated spec: a trailing `=` takes a value (glued, after `=` or the next word), `?` only a glued one. */
-function opts(spec: string): OptTable {
-  const o: Record<string, OptKind> = {};
-  for (const tok of spec.split(/\s+/).filter(Boolean)) {
-    const mark = tok.length > 2 && /[=?]$/.test(tok) ? tok.slice(-1) : '';
-    o[mark ? tok.slice(0, -1) : tok] = mark === '=' ? 'v' : mark === '?' ? 'g' : 'w';
-  }
-  return { opts: o };
-}
-/** sqlite3 reads each option with one dash or two. */
-const dashes = (spec: string): string => spec.split(/\s+/).filter(Boolean).flatMap(t => [t, `-${t}`]).join(' ');
-
-const PG_CONN = '-h= --host= -p= --port= -U= --username= -w --no-password -W --password';
-const PSQL = opts(`${PG_CONN} -a --echo-all -A --no-align -b --echo-errors -c= --command= --csv -d= --dbname= -e --echo-queries -E --echo-hidden -f= --file=
-  -F= --field-separator= -H --html -l --list -L= --log-file= -n --no-readline -o= --output= -P= --pset= -q --quiet -R= --record-separator= -s --single-step
-  -S --single-line -t --tuples-only -T= --table-attr= -v= --set= --variable= -V --version -x --expanded -X --no-psqlrc -z --field-separator-zero -0
-  --record-separator-zero -1 --single-transaction -? --help?`);
-const PG_RESTORE = opts(`${PG_CONN} --role= -a --data-only -c --clean -C --create -d= --dbname= -e --exit-on-error -f= --file= -F= --format= -I= --index=
-  -j= --jobs= -l --list -L= --use-list= -n= --schema= -N= --exclude-schema= -O --no-owner -P= --function= -s --schema-only -S= --superuser= -t= --table=
-  -T= --trigger= -v --verbose -V --version -x --no-privileges --no-acl -1 --single-transaction --disable-triggers --enable-row-security --if-exists
-  --no-comments --no-data-for-failed-tables --no-publications --no-security-labels --no-subscriptions --no-table-access-method --no-tablespaces --section=
-  --strict-names --transaction-size= --use-set-session-authorization --filter= -? --help`);
-const DROPDB = opts(`${PG_CONN} -e --echo -f --force -i --interactive -V --version --if-exists -? --help --maintenance-db=`);
-const CREATEDB = opts(`${PG_CONN} -D= --tablespace= -e --echo -E= --encoding= -l= --locale= --lc-collate= --lc-ctype= --builtin-locale= --icu-locale=
-  --icu-rules= --locale-provider= -O= --owner= -S= --strategy= -T= --template= -V --version -? --help --maintenance-db=`);
-// mysql 8 / MariaDB; `--delimiter` is left out on purpose: a new delimiter would hide statements from the `;` split.
-const MYSQL_COMMON = `-u= --user= -p? --password? -h= --host= -P= --port= -S= --socket= --protocol= -V --version -? --help -C --compress --connect-timeout=
-  --ssl-mode= --ssl-ca= --ssl-capath= --ssl-cert= --ssl-key= --ssl-cipher= --tls-version= --default-character-set= --skip-ssl --ssl --get-server-public-key
-  --server-public-key-path= --default-auth= --plugin-dir= --enable-cleartext-plugin --no-defaults --print-defaults --defaults-file= --defaults-extra-file=
-  --defaults-group-suffix= --login-path= --compression-algorithms= --zstd-compression-level=`;
-const MYSQL_T = opts(`${MYSQL_COMMON} -D= --database= -e= --execute= -B --batch -N --skip-column-names --column-names -s --silent -t --table -v --verbose
-  -E --vertical -f --force -A --no-auto-rehash --auto-rehash -H --html -X --xml -r --raw -n --unbuffered -q --quick -U --safe-updates --i-am-a-dummy -I
-  -w --wait -c --comments --skip-comments -L --skip-line-numbers --line-numbers -o --one-database --init-command= --max-allowed-packet= --net-buffer-length=
-  --show-warnings --binary-mode --binary-as-hex --local-infile? --pager? --no-pager --skip-pager --tee= --no-tee --sigint-ignore --reconnect --skip-reconnect
-  --syslog -j`);
-const MYSQLADMIN = opts(`${MYSQL_COMMON} -f --force -s --silent -v --verbose -w? --wait? -c= --count= -i= --sleep= -r --relative -E --vertical
-  --shutdown-timeout= -b --no-beep`);
-const SQLITE_T = opts(dashes(`-append -ascii -bail -batch -box -column -cmd= -csv -deserialize -echo -init= -header -noheader -help -html -interactive
-  -json -line -list -markdown -maxsize= -memtrace -mmap= -newline= -nofollow -nonce= -nullvalue= -quote -readonly -safe -separator= -stats -table -tabs
-  -version -vfs= -zip -utf8 -no-rowid-in-view`));
-const MONGO_T = opts(`--host= --port= -u= --username= -p= --password= --authenticationDatabase= --authenticationMechanism= --awsIamSessionToken=
-  --gssapiServiceName= --sspiHostnameCanonicalization= --sspiRealmOverride= --quiet --nodb --norc --shell --eval= -f= --file= --json? --retryWrites? --tls
-  --tlsCAFile= --tlsCertificateKeyFile= --tlsCertificateKeyFilePassword= --tlsAllowInvalidCertificates --tlsAllowInvalidHostnames --tlsCertificateSelector=
-  --tlsCRLFile= --tlsDisabledProtocols= --tlsFIPSMode --tlsUseSystemCA --apiVersion= --apiStrict --apiDeprecationErrors --verbose --version -h --help
-  --build-info --csfleLibraryPath= --cryptSharedLibPath= --keyVaultNamespace= --awsAccessKeyId= --awsSecretAccessKey= --awsSessionToken= --oidcFlows=
-  --oidcRedirectUri= --oidcTrustedEndpoint --oidcIdTokenAsAccessToken --skipStartupWarnings --ssl --sslCAFile= --sslPEMKeyFile= --sslAllowInvalidCertificates
-  --sslAllowInvalidHostnames --disableImplicitSessions --zstdCompressionLevel=`);
-// redis-cli: its connection and output options and the read modes; --pipe, --eval, --cluster, --rdb and the rest are left out (they write, or are unknown).
-const REDIS_T = opts(`-h= -p= -s= -a= --user= --pass= --askpass -u= -r= -i= -n= -2 -3 -x -X= -d= -D= -e -c -t= --tls --sni= --cacert= --cacertdir= --insecure
-  --tls-ciphers= --tls-ciphersuites= --cert= --key= --raw --no-raw --quoted-input --csv --json --quoted-json --show-pushes= --verbose --no-auth-warning --help
-  --version -v --scan --pattern= --count= --quoted-pattern= --bigkeys --memkeys --memkeys-samples= --hotkeys --stat --latency --latency-history --latency-dist`);
-const REDIS_READ = new Set(['GET', 'MGET', 'KEYS', 'SCAN', 'INFO', 'PING', 'TTL', 'TYPE', 'EXISTS', 'HGET', 'HGETALL', 'LRANGE', 'SMEMBERS', 'ZRANGE']);
-const REDIS_READ_MODES = ['--scan', '--bigkeys', '--memkeys', '--hotkeys', '--stat', '--latency', '--latency-history', '--latency-dist'];
-const MYSQLADMIN_READ = new Set(['ping', 'status', 'version', 'variables', 'processlist', 'extended-status']);
-
-type Family = 'pg' | 'mysql' | 'sqlite' | 'mongo' | 'redis';
-const KIND: Readonly<Record<Family, ResourceKind>> = { pg: 'postgres', mysql: 'mysql', sqlite: 'sqlite', mongo: 'mongo', redis: 'redis' };
-/** A client: its option table, the options whose value it runs inline, those that read SQL from a file, and those that only print and exit. */
-interface Client { family: Family; table: OptTable; sql: readonly string[]; files: readonly string[]; info: readonly string[] }
-const PG_INFO = ['-V', '--version', '-?', '--help'];
-const MYSQL_INFO = ['-V', '--version', '-?', '-I', '--help'];
-const MYSQL_CLIENT: Client = { family: 'mysql', table: MYSQL_T, sql: ['-e', '--execute', '--init-command'], files: [], info: MYSQL_INFO };
-const MONGO_CLIENT: Client = { family: 'mongo', table: MONGO_T, sql: ['--eval'], files: ['-f', '--file'], info: ['--version', '-h', '--help', '--build-info'] };
-const CLIENTS: Readonly<Record<DbClient, Client>> = {
-  psql: { family: 'pg', table: PSQL, sql: ['-c', '--command'], files: ['-f', '--file'], info: PG_INFO },
-  pg_restore: { family: 'pg', table: PG_RESTORE, sql: [], files: [], info: PG_INFO },
-  dropdb: { family: 'pg', table: DROPDB, sql: [], files: [], info: PG_INFO },
-  createdb: { family: 'pg', table: CREATEDB, sql: [], files: [], info: PG_INFO },
-  mysql: MYSQL_CLIENT, mariadb: MYSQL_CLIENT,
-  mysqladmin: { family: 'mysql', table: MYSQLADMIN, sql: [], files: [], info: MYSQL_INFO },
-  sqlite3: { family: 'sqlite', table: SQLITE_T, sql: ['-cmd', '--cmd'], files: ['-init', '--init'], info: ['-version', '--version', '-help', '--help'] },
-  mongosh: MONGO_CLIENT, mongo: MONGO_CLIENT,
-  'redis-cli': { family: 'redis', table: REDIS_T, sql: [], files: [], info: ['--version', '-v', '--help'] },
+// What else to do, by the kind of deny (T6-H8-COST, T6-COMPOSE-VOLUMES, T6-MIGRATOR-TARGET).
+const HINTS = {
+  script: 'run the tool directly when the script only generates or inspects',
+  volumes: "remove the run's volumes by name with docker volume rm",
+  migrator: "a migration's database is read from its URL option (migrate -database, flyway -url, liquibase, drizzle-kit, sequelize-cli, atlas and "
+    + 'prisma db execute --url, dbmate --url, diesel and sqlx --database-url, goose\'s DSN), from DATABASE_URL for rails, rake, dbmate, diesel and sqlx, '
+    + "and from DATABASE_URL with DIRECT_URL (and SHADOW_DATABASE_URL for migrate dev) for prisma; any other migrator is the person's to run",
+} as const;
+type Hint = keyof typeof HINTS;
+const instead = (ctx: GuardCtx, hint?: Hint): string => {
+  const id = ctx.autonomous?.runId ?? '';
+  const base = `register what you create with FORGE resource add (a name that starts with ${dbPrefix(id)} or ${dockerPrefix(id)}), then use that name; a script whose target you cannot see is never run`;
+  return hint ? `${base}; ${HINTS[hint]}` : base;
 };
+const D = (ctx: GuardCtx, what: string, hint?: Hint): GuardVerdict => deny('database', what, instead(ctx, hint));
+const U = (ctx: GuardCtx, what: string, hint?: Hint): GuardVerdict => D(ctx, `unknown target: ${what}`, hint);
 
-/**
- * The options before a command's first operand, read with its table: the operand's index, and whether an option outside
- * the table came first. A word only the shell knows may be options too (`docker $FLAGS rm`): it counts as an unknown one.
- */
-function head(args: Word[], table: OptTable, d: Dialect): { at: number; unknown: boolean } {
-  let unknown = false;
-  for (let i = 0; i < args.length; i++) {
-    const t = args[i].text;
-    if (args[i].dynamic) { unknown = true; continue; }
-    if (t === '--') return { at: i + 1, unknown };
-    if (t.length < 2 || !t.startsWith('-')) return { at: i, unknown };
-    const sc = scan(args.slice(i, i + 2), table, d);
-    if (sc.unknown) unknown = true;
-    if (sc.vals.some(v => v.w === args[i + 1])) i++;
+type Target = { kind: ResourceKind; name: string; host: string | null };
+/** A host of this machine for the database rule: a local host, or the name a container uses for the machine (T6-CONTAINER-INNER). */
+const dbLocal = (h: string): boolean => isLocalHost(h) || DOCKER_HOSTS.has(h.toLowerCase());
+
+/** Whether a target is the run's: a registered resource of its kind (a sqlite file by its path), or a sqlite file inside the worktree (confinedIn, B1). */
+function owned(t: Target, ctx: GuardCtx): boolean {
+  const a = ctx.autonomous!;
+  if (t.kind === 'sqlite') {
+    return (a.worktree !== '' && confinedIn(t.name, a.worktree)) || a.resources.some(r => r.kind === 'sqlite' && confinedIn(t.name, r.name) && confinedIn(r.name, t.name));
   }
-  return { at: args.length, unknown };
+  return a.resources.some(r => r.kind === t.kind && r.name === t.name);
 }
+
+function targetVerdict(t: Target, ctx: GuardCtx, hint?: Hint): GuardVerdict | null {
+  if (t.host !== null && !dbLocal(t.host)) return D(ctx, `${t.kind} ${t.name} on ${t.host} is not on this machine`, hint);
+  return owned(t, ctx) ? null : D(ctx, `${t.kind} ${t.name} is not one the run registered`, hint);
+}
+
+/** A client-side file (T6-SQL-FILES): null when it is a literal path inside the run's roots (or a null sink); else what is wrong with it. */
+function clientFile(w: Word, seg: Segment, ctx: GuardCtx): string | null {
+  if (w.dynamic) return 'a file only the shell names';
+  if (w.text.startsWith('|')) return 'a shell command';
+  if (isNullSink(w.text, seg.dialect)) return null;
+  const p = segmentPath(w, seg);
+  return p !== null && insideRoots(p, ctx) ? null : `${p ?? w.text}, outside the run's roots`;
+}
+
+/** The words of a meta command's arguments (quotes honored); null when the shell (backquotes) or a psql variable (`:var`) supplies one. */
+function metaArgs(s: string, vars: boolean): Word[] | null {
+  if (s.includes('`') || (vars && /:['"]?[A-Za-z_]/.test(s))) return null;
+  return [...s.matchAll(/'((?:[^']|'')*)'|"((?:[^"]|"")*)"|(\S+)/g)].map(m => ({ text: m[1] !== undefined ? m[1].replace(/''/g, "'") : m[2] ?? m[3], dynamic: false, glob: false }));
+}
+
+// ---- the clients ----------------------------------------------------------------------------------------------------
 
 /** A client call read with its table: `cmd` is redis-cli's command and its arguments; `sql` what the client runs inline (sqlite3's SQL arguments, redis-cli's command). */
 interface ClientCall { name: DbClient; c: Client; sc: Scan; unknown: boolean; cmd: Word[]; sql: Word[] }
@@ -282,16 +210,24 @@ function clientCall(seg: Segment): ClientCall | null {
   return { name: name as DbClient, c, sc, unknown: sc.unknown || h.unknown, cmd, sql };
 }
 
+/** K200: the SQL words a database client runs inline (not redis-cli's command), which the files rule leaves to this rule. */
+export function inlineSqlWords(seg: Segment): Word[] {
+  const k = clientCall(seg);
+  return k && k.c.family !== 'redis' ? k.sql : [];
+}
+
 const readWord = (w: Word): boolean => !w.dynamic && isReadSql(w.text);
 
 /** Whether a client call only reads: it prints and exits, or (M5: with no file, `<` or pipe feeding it) all it runs inline reads. */
 function clientReads(k: ClientCall, seg: Segment): boolean {
   const { c, sc, sql } = k;
   if (k.unknown) return false;
-  if (c.info.some(f => sc.flags.has(f))) return true;
+  const files = c.files.some(f => sc.flags.has(f)) || (k.name === 'psql' && !!seg.env.PSQLRC); // m4: PSQLRC runs a file like -f
+  // m3: sqlite3 runs -init and -cmd (and its SQL) before it prints its version
+  if (c.info.some(f => sc.flags.has(f)) && !(k.name === 'sqlite3' && (files || sql.length))) return true;
   // an operand only the shell knows may expand to more options (`$MORE` = `-c "drop table t"`)
   if (sc.ops.some(w => w.dynamic)) return false;
-  if (seg.after === '|' || seg.redirects.some(r => r.op === '<') || c.files.some(f => sc.flags.has(f))) return false;
+  if (seg.after === '|' || seg.redirects.some(r => r.op === '<') || files) return false;
   switch (k.name) {
     case 'psql': return sql.length ? sql.every(readWord) : sc.flags.has('-l') || sc.flags.has('--list');
     case 'pg_restore': return sc.flags.has('-l') || sc.flags.has('--list'); // lists the archive
@@ -308,7 +244,6 @@ function clientReads(k: ClientCall, seg: Segment): boolean {
 
 /** Where a call connects: the database names it may use and every host it may reach (none: this machine). */
 interface Conn { kind: ResourceKind; names: string[]; hosts: string[] }
-type Target = { kind: ResourceKind; name: string; host: string | null };
 
 /** The host of a host spec (`h`, `h:port`, `[v6]:port`, a bare IPv6 literal); null for a Unix socket (a path, or Linux's abstract `@name`): this machine. */
 function hostOf(spec: string): string | null {
@@ -318,8 +253,6 @@ function hostOf(spec: string): string | null {
 }
 
 interface DbUrl { kind: ResourceKind | null; given: boolean; hosts: string[]; ports: string[]; db: string; params: Map<string, string> }
-const SCHEME_KIND: ReadonlyMap<string, ResourceKind> = new Map([['postgres', 'postgres'], ['postgresql', 'postgres'], ['mysql', 'mysql'],
-  ['mariadb', 'mysql'], ['mongodb', 'mongo'], ['redis', 'redis'], ['rediss', 'redis']]);
 /** A database URL (`scheme://[user@]host[:port][,host…]/db?params`, also with a `+driver` or a `jdbc:` prefix); null when the text is none or does not decode. */
 function parseUrl(text: string): DbUrl | null {
   const m = /^(?:jdbc:)?([a-z][a-z0-9+.-]*):\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?/i.exec(text);
@@ -373,8 +306,8 @@ function clientConn(k: ClientCall, seg: Segment): Conn | 'unknown' | null {
     return true;
   };
   const named = (w: Word): boolean => { if (w.dynamic) return false; conn.names.push(w.text); return true; };
-  /** A postgres database word: a name, a conninfo string or a URI (their host, hostaddr and dbname). */
-  const pgWord = (w: Word): boolean => {
+  /** A postgres database word: a name, a conninfo string or a URI (their host, hostaddr and dbname; `nameIt` false reads only the hosts). */
+  const pgWord = (w: Word, nameIt = true): boolean => {
     if (w.dynamic) return false;
     let kv: Map<string, string> | null;
     if (/^postgres(?:ql)?:\/\//i.test(w.text)) {
@@ -382,31 +315,33 @@ function clientConn(k: ClientCall, seg: Segment): Conn | 'unknown' | null {
       if (!u) return false;
       if (u.given) hostGiven = true;
       conn.hosts.push(...u.hosts);
-      if (u.db) conn.names.push(u.db);
+      if (u.db && nameIt) conn.names.push(u.db);
       kv = u.params;
     } else if (w.text.includes('=')) kv = conninfo(w.text);
-    else return named(w);
+    else return nameIt ? named(w) : true;
     if (!kv || kv.has('service')) return false; // a service file names the host and the database
     for (const key of ['host', 'hostaddr']) { const v = kv.get(key); if (v !== undefined && !host(v)) return false; }
     const db = kv.get('dbname');
-    if (db !== undefined) { if (/=|:\/\//.test(db)) return false; conn.names.push(db); }
+    if (db !== undefined && nameIt) { if (/=|:\/\//.test(db)) return false; conn.names.push(db); }
     return true;
   };
   switch (k.c.family) {
     case 'pg': {
-      if (env.PGSERVICE || env.PGSERVICEFILE) return 'unknown';
+      if (env.PGSERVICE || env.PGSERVICEFILE || envUnknown(seg)) return 'unknown'; // a service or env file names the host and the database
       if (name === 'pg_restore' && (sc.flags.has('-C') || sc.flags.has('--create'))) return 'unknown'; // the archive names the database it creates
       const ds = name === 'psql' || name === 'pg_restore' ? vals('-d', '--dbname') : [];
       if (name === 'pg_restore' && !ds.length) return null;
       if (!vals('-h', '--host').every(host)) return 'unknown';
       for (const w of ds.length ? ds : sc.ops.slice(0, 1)) if (!pgWord(w)) return 'unknown';
+      // m5: dropdb's and createdb's maintenance database may be a conninfo or URL whose host is where they connect
+      for (const w of vals('--maintenance-db')) if (!pgWord(w, false)) return 'unknown';
       if (!conn.names.length && env.PGDATABASE && !pgWord(env.PGDATABASE)) return 'unknown';
       if (!hostGiven && env.PGHOST && !host(env.PGHOST)) return 'unknown';
       if (env.PGHOSTADDR && !host(env.PGHOSTADDR)) return 'unknown'; // hostaddr is where libpq connects, whatever the host
       break;
     }
     case 'mysql': {
-      if (['--login-path', '--defaults-file', '--defaults-extra-file', '--defaults-group-suffix'].some(f => sc.flags.has(f))) return 'unknown'; // an option file names the server
+      if (envUnknown(seg) || ['--login-path', '--defaults-file', '--defaults-extra-file', '--defaults-group-suffix'].some(f => sc.flags.has(f))) return 'unknown';
       if (!vals('-h', '--host').every(host)) return 'unknown';
       if (!hostGiven && env.MYSQL_HOST && !host(env.MYSQL_HOST)) return 'unknown';
       if (name !== 'mysqladmin') {
@@ -476,7 +411,7 @@ function clientConn(k: ClientCall, seg: Segment): Conn | 'unknown' | null {
 function toTarget(c: Conn): Target | 'unknown' {
   const names = [...new Set(c.names)];
   if (names.length !== 1) return 'unknown';
-  return { kind: c.kind, name: names[0], host: c.hosts.find(h => !isLocalHost(h)) ?? c.hosts[0] ?? null };
+  return { kind: c.kind, name: names[0], host: c.hosts.find(h => !dbLocal(h)) ?? c.hosts[0] ?? null };
 }
 
 /** The target of a client (`DB_CLIENTS`): what it connects to, 'unknown' when it cannot be read, null when the segment is no database call. */
@@ -486,25 +421,7 @@ export function dbTarget(seg: Segment): { kind: ResourceKind; name: string; host
   return c === null || c === 'unknown' ? c : toTarget(c);
 }
 
-// ---- SQL that acts past a registered target (T6-FAILCLOSED) ----------------------------------------------------------
-
-// psql meta commands that only show or set display options; any other (\c, \!, \o, \g, \copy, \i, \gexec…) acts past the database.
-const PSQL_SAFE_META = /^(?:d[a-z]*\+?|l\+?|list\+?|x|timing|pset|set|unset|echo|qecho|warn|conninfo|encoding|q|quit|a|t|f|h|help|\?|errverbose)$/;
-// Postgres, per statement: other servers (foreign data wrappers, subscriptions), server programs and files, and the whole cluster (roles, settings).
-const PG_STATEMENT = new RegExp([String.raw`^copy\b[^;]*\b(?:program|to\b(?!\s*stdout\b))`, String.raw`^(?:create|alter|drop)\s+(?:subscription|server|role|user|group|tablespace)\b`,
-  String.raw`^(?:create|alter|drop)\s+user\s+mapping\b`, String.raw`^import\s+foreign\b`, String.raw`^alter\s+system\b`, String.raw`^reassign\s+owned\b`,
-  String.raw`^create\s+extension\b[\s\S]*\b(?:dblink|postgres_fdw|file_fdw|adminpack|plsh|pl\w+u)\b`].join('|'));
-// Postgres, anywhere: calls that reach another database or session, and languages with the server's shell.
-const PG_ANYWHERE = /\b(?:dblink\w*|pg_(?:terminate|cancel)_backend|pg_reload_conf|lo_(?:import|export)|pg_file_write)\s*\(|\blanguage\s+(?:plpython\w*|plperlu|pltclu|plsh)\b/;
-// MySQL, per statement: client commands (connect, source, system…) and server-wide statements.
-const MYSQL_STATEMENT = new RegExp(String.raw`^(?:connect|source|system|tee|delimiter|kill|shutdown|clone|grant|revoke|flush|purge|reset|install|uninstall`
-  + String.raw`|(?:create|drop|alter|rename)\s+user|set\s+(?:global|persist)|(?:start|stop|change)\s+(?:replica|slave|master|replication|group_replication))\b`);
-const MYSQL_ANYWHERE = /\b(?:outfile|dumpfile|infile|federated)\b|@@global\b/;
-const SQLITE_REACH = /\battach\b|\bvacuum\b[^;]*\binto\b|\bwritefile\s*\(|\bload_extension\s*\(/;
-const MONGO_REACH = /getSiblingDB|\bgetDB\b|getMongo|\bMongo\s*\(|\bconnect\s*\(|adminCommand|\buse\s+\w|shutdownServer|\bload\s*\(|applyOps|\$out\b|\$merge\b|copyDatabase|cloneDatabase/i;
-// sqlite3 dot commands that show, format or load into the open file; any other (.open, .shell, .output, .read, .backup…) acts past it.
-const SQLITE_SAFE_DOT = new Set(['tables', 'schema', 'mode', 'headers', 'header', 'dump', 'indexes', 'indices', 'fullschema', 'width', 'nullvalue', 'separator',
-  'timer', 'changes', 'echo', 'bail', 'print', 'show', 'databases', 'stats', 'eqp', 'quit', 'exit', 'help', 'import', 'dbinfo', 'version', 'parameter']);
+// ---- SQL that acts past a registered target, or touches a file (T6-FAILCLOSED, T6-SQL-FILES, I2) ---------------------
 
 const ownsDb = (kind: ResourceKind, name: string, own: string, ctx: GuardCtx): boolean =>
   name === own.toLowerCase() || (ctx.autonomous?.resources ?? []).some(r => r.kind === kind && r.name === name);
@@ -515,75 +432,154 @@ function namesOther(code: string, ddl: RegExp, word: RegExp, kind: ResourceKind,
   return word.test(code.replace(ddl, ' '));
 }
 
+/** psql's meta commands in the Postgres reading (case kept): display ones pass; a file one passes on a literal path inside the roots; any other acts past. */
+function pgMetas(raw: string, seg: Segment, ctx: GuardCtx): boolean {
+  for (const m of raw.matchAll(/\\([A-Za-z]+\+?|[^A-Za-z\s])([^\n\\]*)/g)) {
+    const name = m[1].toLowerCase();
+    if (PSQL_SAFE_META.test(name)) continue;
+    if (!PSQL_FILE_META.has(name)) return true;
+    const a = metaArgs(m[2], true);
+    if (!a) return true;
+    let f: Word | undefined;
+    if (name === 'copy') {
+      // \copy … from|to <file> | program '<command>' | stdin | stdout | pstdin | pstdout
+      const i = a.reduce((last, w, j) => (/^(?:from|to)$/i.test(w.text) ? j : last), -1), next = a[i + 1]?.text.toLowerCase() ?? '';
+      if (i < 0 || next === 'program') return true;
+      if (/^p?std(?:in|out)$/.test(next)) continue;
+      f = a[i + 1];
+    } else f = name === 'lo_export' ? a[1] : a[0];
+    if (!f) { if (['o', 'out', 'g', 'gx'].includes(name)) continue; return true; }
+    if (clientFile(f, seg, ctx)) return true;
+  }
+  return false;
+}
+
+/** A server-side COPY: one whose last FROM/TO names a file or a program, not STDIN/STDOUT (T6-SQL-FILES). */
+function serverCopy(st: string): boolean {
+  if (!/^copy\b/.test(st)) return false;
+  const ms = [...st.matchAll(/\b(?:to|from)\b\s*([a-z]*)/g)], last = ms[ms.length - 1];
+  return !!last && !/^std(?:in|out)$/.test(last[1]);
+}
+
 function pgReaches(code: string, own: string, ctx: GuardCtx): boolean {
-  if ([...code.matchAll(/\\([a-z]+\+?|[^a-z\s])/g)].some(m => !PSQL_SAFE_META.test(m[1]))) return true;
   if (namesOther(code, /\b(?:create|drop|alter)\s+database\s+(?:if\s+(?:not\s+)?exists\s+)?([^\s;(]+)/g, /\bdatabase\b/, 'postgres', own, ctx)) return true;
-  return PG_ANYWHERE.test(code) || code.split(';').some(s => PG_STATEMENT.test(s.trim()));
+  return PG_ANYWHERE.test(code) || code.split(';').some(s => { const st = s.trim(); return PG_STATEMENT.test(st) || serverCopy(st); });
+}
+
+/**
+ * I2 (T6-MYSQL-QUALIFIERS): in a statement that is not a read, every `<ident>.<ident>` qualifier reaches past unless its
+ * first part is the connection's database, another registered mysql database, a table the statement references, or an
+ * alias it declares (`<table> [AS] <alias>` after from, join, update, into, using or a comma).
+ */
+function qualifiesPast(s: string, own: string, ctx: GuardCtx): boolean {
+  const declared = new Set<string>();
+  const decl = /(?:\b(?:from|join|update|into|table|tables|truncate|using|straight_join)\b|,)\s*(?:[a-z0-9_$]+\s*\.\s*)?([a-z0-9_$]+)(?!\s*\.)(?:\s+(?:as\s+)?([a-z0-9_$]+)(?!\s*\.))?/g;
+  for (const m of s.matchAll(decl)) { declared.add(m[1]); if (m[2]) declared.add(m[2]); }
+  for (const m of s.matchAll(/(?<![\w$]|\.\s*)([a-z0-9_$]+)(?=\s*\.\s*[a-z0-9_$*`])/g)) {
+    if (!/^\d+$/.test(m[1]) && !declared.has(m[1]) && !ownsDb('mysql', m[1], own, ctx)) return true;
+  }
+  return false;
 }
 
 function mysqlReaches(code: string, own: string, ctx: GuardCtx): boolean {
   if (/\\(?!g(?![a-z]))/.test(code)) return true; // a client command other than \g and \G (\u, \r, \!, \. …)
   if (namesOther(code, /\b(?:create|drop|alter)\s+(?:database|schema)\s+(?:if\s+(?:not\s+)?exists\s+)?([^\s;(]+)/g, /\b(?:database|schema)\b/, 'mysql', own, ctx)) return true;
-  // a table named with its database (db.table) where a statement names its tables
-  for (const m of code.matchAll(/\b(?:from|join|into|update|table|tables|truncate|to|exists)\s+([a-z0-9_$]+)\s*\.\s*[a-z0-9_$*]/g)) if (!ownsDb('mysql', m[1], own, ctx)) return true;
-  for (const s of code.split(/[;\n]/).map(x => x.trim())) {
-    const use = /^use\s+([^\s;]+)/.exec(s);
-    if ((use && !ownsDb('mysql', use[1], own, ctx)) || MYSQL_STATEMENT.test(s)) return true;
+  for (const st of code.split(';')) {
+    for (const line of st.split('\n').map(x => x.trim())) {
+      const use = /^use\s+([^\s;]+)/.exec(line);
+      if ((use && !ownsDb('mysql', use[1], own, ctx)) || MYSQL_STATEMENT.test(line)) return true;
+    }
+    if (!readStatement(st) && qualifiesPast(st, own, ctx)) return true;
   }
   return MYSQL_ANYWHERE.test(code);
 }
 
-/** Whether what a client runs on a registered target may act past it; SQL only the shell knows may. Files and stdin are not seen. */
-function reachesPast(k: ClientCall, t: Target, ctx: GuardCtx): boolean {
-  if (k.sql.some(w => w.dynamic)) return true;
-  const texts = k.sql.map(w => w.text), fam = k.c.family;
-  if (fam === 'mongo') return texts.some(s => MONGO_REACH.test(s));
-  if (fam === 'redis') return texts.some(s => /\bmigrate\b/i.test(s)); // MIGRATE writes a key into another server
-  for (const s of texts) {
-    if (fam === 'sqlite' && s.split('\n').some(l => { const m = /^\s*\.(\w+)/.exec(l); return !!m && !SQLITE_SAFE_DOT.has(m[1].toLowerCase()); })) return true;
-    const codes = sqlCodes(s);
-    if (codes === null) return true;
-    if (codes.some(code => (fam === 'pg' ? pgReaches(code, t.name, ctx) : fam === 'mysql' ? mysqlReaches(code, t.name, ctx) : SQLITE_REACH.test(code)))) return true;
+/** sqlite3's dot commands: display ones pass; a file one passes on a literal path inside the roots; any other (.shell, .load, .open…) acts past. */
+function sqliteDots(text: string, seg: Segment, ctx: GuardCtx): boolean {
+  for (const line of text.split('\n')) {
+    const m = /^\s*\.(\w+)(.*)$/.exec(line);
+    if (!m) continue;
+    const dot = m[1].toLowerCase();
+    if (SQLITE_SAFE_DOT.has(dot)) continue;
+    const a = SQLITE_FILE_DOT.has(dot) ? metaArgs(m[2], false) : null;
+    if (!a || a.some(w => /^-[xe]$/.test(w.text))) return true; // .once -x / -e open a program
+    const files = a.filter(w => !w.text.startsWith('-'));
+    const f = dot === 'backup' || dot === 'save' ? files[files.length - 1] : files[0];
+    if (!f) { if (dot === 'output' || dot === 'once') continue; return true; }
+    if (clientFile(f, seg, ctx)) return true;
   }
   return false;
 }
 
-// ---- verdicts -------------------------------------------------------------------------------------------------------
-
-const instead = (ctx: GuardCtx): string => {
-  const id = ctx.autonomous?.runId ?? '';
-  return `register what you create with FORGE resource add (a name that starts with ${dbPrefix(id)} or ${dockerPrefix(id)}), then use that name; a script whose target you cannot see is never run`;
-};
-const D = (ctx: GuardCtx, what: string): GuardVerdict => deny('database', what, instead(ctx));
-const U = (ctx: GuardCtx, what: string): GuardVerdict => D(ctx, `unknown target: ${what}`);
-
-/** Whether a target is the run's: a registered resource of its kind (a sqlite file by its path), or a sqlite file inside the worktree (confinedIn, B1). */
-function owned(t: Target, ctx: GuardCtx): boolean {
-  const a = ctx.autonomous!;
-  if (t.kind === 'sqlite') {
-    return (a.worktree !== '' && confinedIn(t.name, a.worktree)) || a.resources.some(r => r.kind === 'sqlite' && confinedIn(t.name, r.name) && confinedIn(r.name, t.name));
+/** Whether what a client runs on a registered target may act past it; SQL only the shell knows may. Files and stdin are not seen (mongosh scripts aside, I2). */
+function reachesPast(k: ClientCall, t: Target, seg: Segment, ctx: GuardCtx): boolean {
+  if (k.sql.some(w => w.dynamic)) return true;
+  const texts = k.sql.map(w => w.text), fam = k.c.family;
+  // a mongosh script file is JavaScript the hook cannot read, and JavaScript switches databases at will
+  if (fam === 'mongo') return k.c.files.some(f => k.sc.flags.has(f)) || k.sc.ops.some(w => /\.js$/i.test(w.text)) || texts.some(s => MONGO_REACH.test(s));
+  if (fam === 'redis') return texts.some(s => /\bmigrate\b/i.test(s)); // MIGRATE writes a key into another server
+  for (const s of texts) {
+    if (fam === 'sqlite' && sqliteDots(s, seg, ctx)) return true;
+    const codes = sqlCodes(s);
+    if (codes === null) return true;
+    if (fam === 'pg' && (pgMetas(sqlCode(s, PG)!, seg, ctx) || codes.some(code => pgReaches(code, t.name, ctx)))) return true;
+    if (fam === 'mysql' && codes.some(code => mysqlReaches(code, t.name, ctx))) return true;
+    if (fam === 'sqlite' && codes.some(code => SQLITE_REACH.test(code))) return true;
   }
-  return a.resources.some(r => r.kind === t.kind && r.name === t.name);
+  return false;
 }
 
-function targetVerdict(t: Target, ctx: GuardCtx): GuardVerdict | null {
-  if (t.host !== null && !isLocalHost(t.host)) return D(ctx, `${t.kind} ${t.name} on ${t.host} is not on this machine`);
-  return owned(t, ctx) ? null : D(ctx, `${t.kind} ${t.name} is not one the run registered`);
+/** m9: SQL that only creates or drops databases, by name ([] when it is anything else): judged by those names, not the database it connects to. */
+function ddlNames(k: ClientCall): string[] {
+  if ((k.c.family !== 'pg' && k.c.family !== 'mysql') || !k.sql.length || k.sql.some(w => w.dynamic)) return [];
+  const re = k.c.family === 'pg' ? /^(?:create|drop)\s+database\s+(?:if\s+(?:not\s+)?exists\s+)?([^\s;(]+)/ : /^(?:create|drop)\s+(?:database|schema)\s+(?:if\s+(?:not\s+)?exists\s+)?([^\s;(]+)/;
+  const names = new Set<string>();
+  for (const w of k.sql) {
+    const codes = sqlCodes(w.text);
+    if (!codes) return [];
+    for (const st of codes.flatMap(statements).map(s => s.trim()).filter(Boolean)) {
+      const m = re.exec(st);
+      if (!m) return [];
+      names.add(m[1]);
+    }
+  }
+  return [...names];
 }
 
 function clientVerdict(seg: Segment, ctx: GuardCtx): GuardVerdict | null {
   const k = clientCall(seg);
-  if (!k || clientReads(k, seg)) return null;
+  if (!k) return null;
+  // T6-SQL-FILES: a client-side output file (psql -o/-L, mysql --tee) only inside the run's roots
+  for (const v of k.unknown ? [] : k.sc.vals.filter(x => k.c.out.includes(x.key))) {
+    const bad = clientFile(v.w, seg, ctx);
+    if (bad) return U(ctx, `${k.name} ${v.key} writes ${bad}`);
+  }
+  if (clientReads(k, seg)) return null;
   const c = clientConn(k, seg);
   if (c === null) return null;
+  const ddl = c === 'unknown' ? [] : ddlNames(k);
+  if (c !== 'unknown' && ddl.length) {
+    const host = c.hosts.find(h => !dbLocal(h)) ?? c.hosts[0] ?? null;
+    for (const name of ddl) { const v = targetVerdict({ kind: c.kind, name, host }, ctx); if (v) return v; }
+    return null;
+  }
   const t = c === 'unknown' ? c : toTarget(c);
   if (t === 'unknown') return U(ctx, `${k.name} writes to a database the hook cannot read`);
-  return targetVerdict(t, ctx) ?? (reachesPast(k, t, ctx) ? U(ctx, `what ${k.name} is given acts past ${t.name}`) : null);
+  return targetVerdict(t, ctx) ?? (reachesPast(k, t, seg, ctx) ? U(ctx, `what ${k.name} is given acts past ${t.name}, or touches a file outside the run's roots`) : null);
 }
 
-/** Where a DATABASE_URL (or --db-url) points: the run's own SQLite path inside the worktree, a target, or 'unknown'. */
-function urlTarget(text: string, seg: Segment, ctx: GuardCtx): Target | 'inside' | 'unknown' {
-  const lite = /^(?:file|sqlite3?):(.*)$/i.exec(text);
+// ---- migrations, database scripts and their URLs (M15, H8, T6-MIGRATOR-TARGET, T6-MIGRATOR-URLS) -----------------------
+
+/** A go-sql-driver MySQL DSN (`user:pass@tcp(host:3306)/db?…`), as host and database; null when it is not one. */
+function mysqlDsn(text: string): { host: string | null; db: string } | null {
+  const m = /^(?:[^@/]*@)?(?:(\w+)\(([^)]*)\))?\/([^?]*)/.exec(text);
+  if (!m) return null;
+  return { host: m[1] === 'unix' ? null : m[2] ? hostOf(m[2]) : null, db: m[3] };
+}
+
+/** Where a URL (or a goose DSN of `kind`) points: the run's own SQLite path inside the worktree, a target, or 'unknown'. */
+function urlTarget(text: string, seg: Segment, ctx: GuardCtx, kind?: ResourceKind): Target | 'inside' | 'unknown' {
+  const lite = kind === 'sqlite' ? [text, text] : /^(?:file|sqlite3?):(.*)$/i.exec(text);
   if (lite) {
     let p: string;
     try { p = decodeURIComponent(lite[1].replace(/^\/\/(?:localhost)?(?=\/)/i, '').split(/[?#]/)[0]); } catch { return 'unknown'; }
@@ -595,6 +591,16 @@ function urlTarget(text: string, seg: Segment, ctx: GuardCtx): Target | 'inside'
     return abs === null ? 'unknown' : { kind: 'sqlite', name: abs, host: null };
   }
   const u = parseUrl(text);
+  if (!u && kind === 'mysql') {
+    const d = mysqlDsn(text);
+    return d && d.db ? { kind: 'mysql', name: d.db, host: d.host } : 'unknown';
+  }
+  if (!u && kind === 'postgres' && text.includes('=')) {
+    const kv = conninfo(text);
+    if (!kv || kv.has('service') || !kv.get('dbname')) return 'unknown';
+    const hosts = ['host', 'hostaddr'].flatMap(k => (kv.get(k) ?? '').split(',')).map(h => (h ? hostOf(h) : null)).filter((h): h is string => !!h);
+    return toTarget({ kind: 'postgres', names: [kv.get('dbname')!], hosts });
+  }
   if (!u || !u.kind || u.params.has('service')) return 'unknown';
   const conn: Conn = { kind: u.kind, names: [], hosts: [...u.hosts] };
   for (const key of ['host', 'hostaddr']) for (const s of (u.params.get(key) ?? '').split(',')) { const h = s ? hostOf(s) : null; if (h) conn.hosts.push(h); }
@@ -603,41 +609,66 @@ function urlTarget(text: string, seg: Segment, ctx: GuardCtx): Target | 'inside'
   return toTarget(conn);
 }
 
-/** A migration or database script: its target is known only through the URL its own segment gives (DATABASE_URL, supabase's --db-url). */
-function urlVerdict(seg: Segment, ctx: GuardCtx, what: string, urls: Word[], via: string): GuardVerdict | null {
-  if (!urls.length) return U(ctx, `${what}, and only a ${via} on the command itself says which`);
+/** Judges the URLs a call's target is read from; `via` names where they came from, `kind` reads a non-URL DSN. */
+function urlVerdict(seg: Segment, ctx: GuardCtx, what: string, urls: Word[], via: string, hint: Hint, kind?: ResourceKind): GuardVerdict | null {
+  if (!urls.length) return U(ctx, `${what}, and only ${via} on the command itself says which database`, hint);
   for (const u of urls) {
-    if (u.dynamic) return U(ctx, `${what}, on the database a ${via} only the shell knows names`);
-    const t = urlTarget(u.text, seg, ctx);
+    if (u.dynamic) return U(ctx, `${what}, on the database ${via} only the shell knows names`, hint);
+    const t = urlTarget(u.text, seg, ctx, kind);
     if (t === 'inside') continue;
-    if (t === 'unknown') return U(ctx, `${what}, on a database its ${via} does not let the hook read`);
-    const v = targetVerdict(t, ctx);
+    if (t === 'unknown') return U(ctx, `${what}, on a database ${via} does not let the hook read`, hint);
+    const v = targetVerdict(t, ctx, hint);
     if (v) return v;
   }
   return null;
 }
-const envUrl = (seg: Segment): Word[] => (seg.env.DATABASE_URL ? [seg.env.DATABASE_URL] : []);
+const envWords = (seg: Segment, keys: readonly string[]): Word[] => keys.map(k => seg.env[k]).filter((w): w is Word => !!w);
+const flagValues = (args: Word[], flag: string): Word[] => args.flatMap((w, i) =>
+  w.text === flag ? (args[i + 1] ? [args[i + 1]] : []) : w.text.startsWith(`${flag}=`) ? [{ ...w, text: w.text.slice(flag.length + 1) }] : []);
+/** A call's command words (options and `--` left out) joined, lower-cased, and whether one is only known to the shell. */
+const cmdWords = (args: Word[]): { joined: string; dynamic: boolean } => {
+  const ws = args.filter(w => w.text !== '--' && !w.text.startsWith('-'));
+  return { joined: ws.map(w => w.text.toLowerCase()).join(' '), dynamic: ws.some(w => w.dynamic) };
+};
 
-// ---- migrations and scripts (M15, H8, T6-SUPABASE-LOCAL) ------------------------------------------------------------
-
-const INFO_WORDS = /^(?:--?help|-h|--?version|-v|-V|help|version)$/;
-/** Whether a call of a MIGRATORS CLI migrates: a word before `--` matches its entry (a word only the shell knows may), unless it only prints help (`--help` anywhere) or its version. */
+/** Whether a call of a MIGRATORS CLI migrates: its words match `write` and not `safe` (a word only the shell knows may), unless it only prints help (`--help` anywhere) or its version. */
 function isMigration(name: string, args: Word[]): boolean {
   if (!Object.hasOwn(MIGRATORS, name)) return false;
-  const m = MIGRATORS[name];
+  const m: Migrator = MIGRATORS[name];
   if (args.some(w => w.text === '--help') || (args.length > 0 && args.every(w => INFO_WORDS.test(w.text)))) return false;
-  if (m === true) return true;
-  const cut = args.findIndex(w => w.text === '--');
-  return (cut < 0 ? args : args.slice(0, cut)).some(w => w.dynamic || (!w.text.startsWith('-') && m.test(w.text.toLowerCase())));
+  const { joined, dynamic } = cmdWords(args);
+  if (dynamic) return true;
+  return (m.write === true || m.write.test(joined)) && !m.safe?.test(joined);
 }
 
-// Interpreters that run a script file, whose name is then the command (`python manage.py`, `ruby bin/rails`, `node node_modules/.bin/knex`):
-// the family, its options that take a value, and those that run code given inline (no script file then).
-const INTERPRETERS: ReadonlyArray<[RegExp, ReadonlySet<string>, ReadonlySet<string>]> = [
-  [/^(?:python[0-9.]*|py)$/, new Set(['-W', '-X']), new Set(['-c', '-m'])],
-  [/^ruby$/, new Set(['-r', '-I', '-C', '-E', '-F']), new Set(['-e'])],
-  [/^node[0-9.]*$/, new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-C', '--conditions', '--input-type']), new Set(['-e', '--eval', '-p', '--print'])],
-];
+/**
+ * T6-MIGRATOR-TARGET: a migration's database is known only from (a) its explicit literal URL option, (b) DATABASE_URL on the
+ * segment for the tools that read it as their target (rails, rake, dbmate, diesel, sqlx), (c) for prisma migrate|db,
+ * DATABASE_URL and DIRECT_URL on the segment (and SHADOW_DATABASE_URL for migrate dev), or goose's `<driver> <dsn>`.
+ * Any other migrator reads code the hook cannot (settings.py, knexfile, alembic env.py…): unknown target.
+ */
+function migratorVerdict(run: Eff, seg: Segment, ctx: GuardCtx): GuardVerdict | null {
+  const m = MIGRATORS[run.name], what = `${run.name} migrates a database`, args = run.args;
+  const urls = (m.urls ?? []).flatMap(k => flagValues(args, k));
+  const envUnk = envUnknown(seg);
+  if (run.name === 'goose') {
+    const sc = scan(args, GOOSE_T, seg.dialect), kind = GOOSE_DRIVERS.get(sc.ops[0]?.text.toLowerCase() ?? '');
+    if (sc.unknown || !kind || !sc.ops[1]) return U(ctx, `${what}, and goose's driver and DSN cannot be read`, 'migrator');
+    return urlVerdict(seg, ctx, what, [sc.ops[1]], "goose's DSN", 'migrator', kind);
+  }
+  if (run.name === 'prisma' && !urls.length) {
+    const need = ['DATABASE_URL', 'DIRECT_URL', ...(/(?:^| )migrate dev(?: |$)/.test(cmdWords(args).joined) ? ['SHADOW_DATABASE_URL'] : [])];
+    const missing = need.filter(k => !seg.env[k]);
+    if (envUnk) return U(ctx, `${what}, and an env file the hook cannot read sets its URLs`, 'migrator');
+    if (missing.length) return U(ctx, `${what}, and ${missing.join(' and ')} ${missing.length > 1 ? 'are' : 'is'} not on the command itself`, 'migrator');
+    return urlVerdict(seg, ctx, what, envWords(seg, need), need.join(' and '), 'migrator');
+  }
+  const fromEnv = envUnk ? [] : envWords(seg, m.env ?? []);
+  if (!urls.length && !fromEnv.length) return U(ctx, `${what}, and the hook cannot read which database it migrates`, 'migrator');
+  return urlVerdict(seg, ctx, what, [...urls, ...fromEnv], 'its URL', 'migrator');
+}
+
+/** Interpreters running a script file: the script names the command (`python manage.py`, `ruby bin/rails`, `php artisan`). */
 function scriptOf(name: string, args: Word[]): Eff | null {
   const it = INTERPRETERS.find(([re]) => re.test(name));
   if (!it) return null;
@@ -651,70 +682,47 @@ function scriptOf(name: string, args: Word[]): Eff | null {
   return null;
 }
 
-/** T6-SUPABASE-LOCAL: `supabase db reset`, `supabase stop --no-backup`, `supabase migration up|down` (the local stack is the person's). */
-function supabaseResets(args: Word[]): boolean {
+/** T6-SUPABASE-LOCAL: the supabase commands that write the local stack's database (reset, push, migration up|down|repair, stop --no-backup). */
+function supabaseWrites(args: Word[]): boolean {
   const ws = args.filter(w => !w.text.startsWith('-')).map(w => w.text.toLowerCase());
   const noBackup = args.some(w => w.text === '--no-backup');
-  return (ws.includes('db') && ws.includes('reset')) || (ws.includes('stop') && noBackup) || (ws.includes('migration') && (ws.includes('up') || ws.includes('down')));
+  return (ws.includes('db') && (ws.includes('reset') || ws.includes('push'))) || (ws.includes('stop') && noBackup)
+    || (ws.includes('migration') && ['up', 'down', 'repair'].some(x => ws.includes(x)));
 }
-const flagValues = (args: Word[], flag: string): Word[] => args.flatMap((w, i) =>
-  w.text === flag ? (args[i + 1] ? [args[i + 1]] : []) : w.text.startsWith(`${flag}=`) ? [{ ...w, text: w.text.slice(flag.length + 1) }] : []);
-
-const words = (s: string): ReadonlySet<string> => new Set(s.split(/\s+/).filter(Boolean));
-/** A package manager: its own options (with a value, and switches), its run verbs, whether a bare first word runs a script, and the words it skips (with how many words after them). */
-interface Pm { valued: ReadonlySet<string>; switches: ReadonlySet<string>; run: ReadonlySet<string>; bare: boolean; skip: ReadonlyMap<string, number> }
-const PMS: ReadonlyMap<string, Pm> = new Map([
-  ['npm', { valued: words('-w --workspace --prefix -C --loglevel --script-shell --userconfig --globalconfig --cache --registry'),
-    switches: words(`--workspaces -ws --include-workspace-root --if-present --ignore-scripts --foreground-scripts --silent -s -q --quiet -d --verbose
-      --no-workspaces -y --yes --offline --prefer-offline --prefer-online`), run: words('run run-script rum urn'), bare: false, skip: new Map() }],
-  ['pnpm', { valued: words('--filter -F --filter-prod -C --dir --workspace-concurrency --reporter --loglevel --resume-from --test-pattern --changed-files-ignore-pattern'),
-    switches: words(`-r --recursive -w --workspace-root --if-present --parallel --stream --aggregate-output --silent -s --no-bail --bail --sequential --reverse
-      --report-summary --shell-mode -c --include-workspace-root --fail-if-no-match --use-stderr`), run: words('run run-script'), bare: true, skip: new Map([['recursive', 0]]) }],
-  ['yarn', { valued: words('--cwd --include --exclude -j --jobs --from --since'),
-    switches: words(`-s --silent --verbose -A --all -R --recursive -p --parallel -i --interlaced -v -t --topological --topological-dev -W --worktree --no-private
-      -n --dry-run --offline -T --top-level --binaries-only`), run: words('run'), bare: true, skip: new Map([['workspace', 1], ['workspaces', 0], ['foreach', 0]]) }],
-  ['bun', { valued: words('--filter -F --cwd --elide-lines --shell -r --preload --env-file --tsconfig-override -c --config --conditions'),
-    switches: words('--silent --if-present --bun -b --watch --hot --smol --no-install --no-clear-screen --no-env-file --workspaces --parallel --sequential'),
-    run: words('run'), bare: true, skip: new Map() }],
-]);
 
 /**
- * The indexes of the words a package manager may run as a script (H8): the word after `run|run-script`, and for pnpm, yarn
- * and bun a first word that is not one of PM_OWN_COMMANDS. An option outside the manager's table is read both ways (a switch,
- * or an option with a value) so that the word after it is judged in both readings.
+ * The indexes of the words a package manager may run as a script (H8): the word after `run|run-script` (m1: also after
+ * `--`), and for pnpm, yarn and bun a first word that is not one of PM_OWN_COMMANDS. The manager's own options are
+ * autonomy-net's MANAGERS (I1); one outside them is read both ways (a switch, or an option with a value).
  */
-function pmScripts(pm: Pm, args: Word[], i = 0, run = false, budget = 4): number[] {
+function pmScripts(name: string, args: Word[], i = 0, run = false, budget = 4): number[] {
+  const m = MANAGERS.get(name)!, pm = PM_RUN.get(name)!;
   for (; i < args.length; i++) {
     const w = args[i], t = w.text;
-    if (t === '--') return [];
+    if (t === '--') continue;
     if (t.length > 1 && t.startsWith('-')) {
       const eq = t.indexOf('='), key = eq > 0 ? t.slice(0, eq) : t;
-      if (pm.valued.has(key)) { if (eq < 0) i++; continue; }
-      if (pm.switches.has(key) || eq > 0) continue;
+      if (m.valued.has(key)) { if (eq < 0) i++; continue; }
+      if (m.switches.has(key) || eq > 0) continue;
       if (budget === 0) return args.map((_, j) => j).filter(j => j > i && !args[j].text.startsWith('-'));
-      return [...pmScripts(pm, args, i + 1, run, budget - 1), ...pmScripts(pm, args, i + 2, run, budget - 1)];
+      return [...pmScripts(name, args, i + 1, run, budget - 1), ...pmScripts(name, args, i + 2, run, budget - 1)];
     }
     if (w.dynamic) return [i];
     const lw = t.toLowerCase();
     if (!run && pm.run.has(lw)) { run = true; continue; }
-    if (!run && pm.skip.has(lw)) { i += pm.skip.get(lw)!; continue; }
+    if (!run && m.skip.has(lw)) { i += m.skip.get(lw)!; continue; }
     if (!run && (!pm.bare || PM_OWN_COMMANDS.has(lw))) return [];
     return [i];
   }
   return [];
 }
 
-// make, just and task: their options that take a value; every other word before `--` (not a VAR=value) is a target.
-const MAKES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['make', words(`-C --directory -f --file --makefile -I --include-dir -o --old-file --assume-old -W --what-if --new-file --assume-new -l --load-average
-    -O --output-sync --eval --jobserver-style`)],
-  ['just', words('-f --justfile -d --working-directory --shell --shell-arg --dotenv-filename --dotenv-path --color --chooser --command-color --list-heading --list-prefix')],
-  ['task', words('-t --taskfile -d --dir -o --output -c --color --interval -C --concurrency')],
-]);
-function targetsOf(args: Word[], valued: ReadonlySet<string>): Word[] {
+/** make, just, task and turbo targets: every word that is not an option, its value or a VAR=value (m1: `--` is skipped; turbo's `run` is no task). */
+function targetsOf(name: string, args: Word[], valued: ReadonlySet<string>): Word[] {
   const out: Word[] = [];
-  for (let i = 0; i < args.length && args[i].text !== '--'; i++) {
+  for (let i = 0; i < args.length; i++) {
     const w = args[i];
+    if (w.text === '--' || (name === 'turbo' && w.text === 'run')) continue;
     if (w.text.startsWith('-')) { if (valued.has(w.text)) i++; continue; }
     if (!w.dynamic && /^[A-Za-z_]\w*=/.test(w.text)) continue;
     out.push(w);
@@ -722,105 +730,52 @@ function targetsOf(args: Word[], valued: ReadonlySet<string>): Word[] {
   return out;
 }
 
-// ---- containers, volumes and compose projects -----------------------------------------------------------------------
+// ---- MCP tools (H9, T6-H9-SEARCH, m6) -------------------------------------------------------------------------------
 
-const DOCKER_GLOBAL = opts('--config= -c= --context= -D --debug -H= --host= -l= --log-level= --tls --tlscacert= --tlscert= --tlskey= --tlsverify -v --version -h --help');
-const COMPOSE_GLOBAL = opts(`-f= --file= -p= --project-name= --project-directory= --env-file= --profile= --parallel= --ansi= --progress= --compatibility
-  --dry-run --all-resources --verbose --no-ansi -v --version -h --help`);
-const DOCKER_SUB: ReadonlyMap<string, OptTable> = new Map([
-  ['rm', opts('-f --force -l --link -v --volumes --help')], ['stop', opts('-t= --time= --timeout= -s= --signal= --help')], ['kill', opts('-s= --signal= --help')],
-  ['exec', opts('-d --detach --detach-keys= -e= --env= --env-file= -i --interactive --privileged -t --tty -u= --user= -w= --workdir= --help')],
-  ['volume rm', opts('-f --force --help')],
-]);
-
-/** A container or volume name of the run: registered as that kind, or under a registered compose project (`<project>-…`, `<project>_…`). */
-const dockerOwned = (name: string, kind: ResourceKind, ctx: GuardCtx): boolean => (ctx.autonomous?.resources ?? []).some(r =>
-  (r.kind === kind && r.name === name) || (r.kind === 'compose' && (name === r.name || name.startsWith(`${r.name}-`) || name.startsWith(`${r.name}_`))));
-
-function composeVerdict(args: Word[], seg: Segment, ctx: GuardCtx): GuardVerdict | null {
-  const h = head(args, COMPOSE_GLOBAL, seg.dialect), sub = args[h.at]?.text.toLowerCase() ?? '';
-  if (h.unknown) return args.some(w => COMPOSE_DESTROYERS.has(w.text.toLowerCase())) ? U(ctx, 'compose has an option the hook does not know') : null;
-  if (!COMPOSE_DESTROYERS.has(sub)) return null;
-  const sc = scan(args.slice(0, h.at), COMPOSE_GLOBAL, seg.dialect);
-  const flag = (...keys: string[]): Word[] => sc.vals.filter(v => keys.includes(v.key)).map(v => v.w);
-  let projects = flag('-p', '--project-name');
-  if (!projects.length && seg.env.COMPOSE_PROJECT_NAME) projects = [seg.env.COMPOSE_PROJECT_NAME];
-  if (!projects.length) {
-    // the folder names the project, unless a compose file, a project folder or an env file elsewhere does
-    if (flag('-f', '--file', '--project-directory', '--env-file').length || seg.cwd === null) return U(ctx, `compose ${sub} acts on a project the hook cannot name`);
-    projects = [{ text: path.basename(seg.cwd).toLowerCase().replace(/[^a-z0-9_-]/g, '').replace(/^[-_]+/, ''), dynamic: false, glob: false }];
-  }
-  for (const p of projects) {
-    if (p.dynamic) return U(ctx, `compose ${sub} acts on a project only the shell names`);
-    if (!(ctx.autonomous?.resources ?? []).some(r => r.kind === 'compose' && r.name === p.text)) return D(ctx, `compose project ${p.text} is not one the run registered`);
-  }
-  return null;
-}
-
-function dockerVerdict(name: string, args: Word[], seg: Segment, ctx: GuardCtx): GuardVerdict | null {
-  if (name.endsWith('-compose')) return composeVerdict(args, seg, ctx);
-  const g = head(args, DOCKER_GLOBAL, seg.dialect), rest0 = args.slice(g.at);
-  // an option the global table does not know hides which word is the subcommand
-  if (g.unknown) return rest0.some(w => DESTROY_WORDS.has(w.text.toLowerCase())) ? U(ctx, `${name} has a global option the hook does not know`) : null;
-  const w0 = rest0[0]?.text.toLowerCase() ?? '', w1 = rest0[1]?.text.toLowerCase() ?? '';
-  if (w0 === 'compose') return composeVerdict(rest0.slice(1), seg, ctx);
-  const two = `${w0} ${w1}`;
-  const key = DOCKER_DESTROYERS.includes(two) ? two : DOCKER_ALIAS.get(two) ?? (DOCKER_DESTROYERS.includes(w0) ? w0 : null);
-  if (key === null) return null;
-  if (key.endsWith('prune')) return D(ctx, `${name} ${key} deletes containers or volumes the run did not register`);
-  const rest = rest0.slice(key === w0 ? 1 : 2), kind: ResourceKind = key === 'volume rm' ? 'volume' : 'container';
-  const table = DOCKER_SUB.get(key === 'container rm' ? 'rm' : key)!;
-  let names: Word[];
-  if (key === 'exec') {
-    const h = head(rest, table, seg.dialect);
-    if (h.unknown) return U(ctx, `${name} exec has an option the hook does not know`);
-    names = rest.slice(h.at, h.at + 1);
-  } else {
-    const sc = scan(rest, table, seg.dialect);
-    if (sc.unknown) return U(ctx, `${name} ${key} has an option the hook does not know`);
-    names = sc.ops;
-  }
-  for (const w of names) {
-    if (w.dynamic) return U(ctx, `${name} ${key} acts on a ${kind} only the shell names`);
-    if (!dockerOwned(w.text, kind, ctx)) return D(ctx, `${kind} ${w.text} is not one the run registered`);
-  }
-  return null;
-}
-
-// ---- MCP tools (H9) -------------------------------------------------------------------------------------------------
-
-const MCP_DB_WORDS = new Set(['sql', 'postgres', 'postgresql', 'pg', 'mysql', 'sqlite', 'db', 'database', 'supabase', 'neon', 'mongo', 'mongodb', 'redis', 'bigquery', 'snowflake']);
-const SQL_START = new Set(['select', 'insert', 'update', 'delete', 'merge', 'with', 'create', 'drop', 'alter', 'truncate', 'grant', 'revoke', 'copy', 'call',
-  'do', 'explain', 'show', 'describe', 'set', 'begin', 'commit', 'vacuum', 'reindex']);
-
-/** The first word of a text past blanks, `;`, `(` and comments; `*` when a comment never closes. */
-function leadWord(text: string): string {
+/** The text of a query from its first word on, past blanks, `;`, `(` and comments; `*` when a comment never closes. */
+function leadText(text: string): string {
   let s = text;
   for (;;) {
     s = s.replace(/^[\s;(]+/, '');
     if (s.startsWith('--') || s.startsWith('#')) { const e = s.indexOf('\n'); s = e < 0 ? '' : s.slice(e + 1); continue; }
     if (s.startsWith('/*')) { const e = s.indexOf('*/'); if (e < 0) return '*'; s = s.slice(e + 2); continue; }
-    return /^[a-z]+/i.exec(s)?.[0].toLowerCase() ?? '';
+    return s.toLowerCase();
   }
 }
-const strings = (v: unknown): string[] => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+/** T6-H9-SEARCH (b): a query is SQL when it starts with a read keyword, or with a write keyword in that keyword's grammar. */
+function sqlShaped(text: string): boolean {
+  const s = leadText(text), lw = /^[a-z]+/.exec(s)?.[0] ?? '';
+  return s === '*' || READ_KEYWORDS.has(lw) || !!SQL_SHAPES.get(lw)?.test(s);
+}
+/** m6: the strings of fields named as SQL, through nested arrays and objects (depth 4). */
+function sqlFields(v: unknown, key: string, depth: number, out: { key: string; text: string }[]): void {
+  if (depth > 4) return;
+  if (typeof v === 'string') { if (SQL_FIELDS.has(key) || QUERY_FIELDS.has(key)) out.push({ key, text: v }); return; }
+  if (Array.isArray(v)) { for (const x of v) sqlFields(x, key, depth + 1, out); return; }
+  if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) sqlFields(x, k.toLowerCase(), depth + 1, out);
+}
 
-/** An MCP tool given SQL that writes (a field named sql/statement, or a query field when the tool's name or the text says SQL): unknown target. */
+/** An MCP tool given SQL that writes (a sql/statement field; a query field when the tool's name or the text says SQL), or a database server's tool whose name says it writes. */
 function mcpVerdict(input: GuardInput, ctx: GuardCtx): GuardVerdict | null {
-  const name = input.tool_name;
-  const dbNamed = name.split('__').flatMap(p => mcpWords(p)).some(w => MCP_DB_WORDS.has(w));
-  for (const [key, v] of Object.entries(input.tool_input)) {
-    const k = key.toLowerCase(), always = k.includes('sql') || k === 'statement' || k === 'statements', query = k === 'query' || k === 'queries';
-    if (!always && !query) continue;
-    for (const s of strings(v)) {
-      const sql = always || dbNamed || leadWord(s) === '*' || SQL_START.has(leadWord(s));
-      if (sql && !isReadSql(s)) return U(ctx, `${name} is given SQL that writes, on a database the hook cannot see`);
-    }
+  const name = input.tool_name, all = name.split('__').flatMap(p => mcpWords(p)), tool = mcpWords(name);
+  const dbNamed = all.some(w => MCP_DB_WORDS.has(w)), search = all.some(w => w === 'search' || w === 'docs');
+  const fields: { key: string; text: string }[] = [];
+  sqlFields(input.tool_input, '', 0, fields);
+  for (const { key, text } of fields) {
+    const sql = SQL_FIELDS.has(key) || dbNamed || (!search && sqlShaped(text));
+    if (sql && !isReadSql(text)) return U(ctx, `${name} is given SQL that writes, on a database the hook cannot see`);
+  }
+  // a database server's tool that takes no SQL and whose name says it changes data (migrate-reset, drop-database, delete)
+  if (!fields.length && dbNamed && tool.some(w => MCP_WRITE_WORDS.has(w) || DB_TOOL_WRITES.has(w)) && !MCP_READ_FIRST.has(tool[0])) {
+    return U(ctx, `${name} changes a database the hook cannot see`);
   }
   return null;
 }
 
 // ---- the rule -------------------------------------------------------------------------------------------------------
+
+const DOCKERS = new Set([...CONTAINER_CLIS, ...COMPOSE_CLIS]);
+const DYNAMIC: Word = { text: '', dynamic: true, glob: false };
 
 function dbSeg(seg: Segment, ctx: GuardCtx): GuardVerdict | null {
   if (!seg.argv.length || seg.argv[0].dynamic) return null;
@@ -828,21 +783,40 @@ function dbSeg(seg: Segment, ctx: GuardCtx): GuardVerdict | null {
   if (eff === null || 'cancel' in eff) return null; // T6-LAUNCHER-REUSE: a runner the hook cannot read is network's to deny
   const { name } = eff;
   // the arguments xargs or find -exec add are one more word only the shell knows (`docker ps -aq | xargs docker rm -f`)
-  const args = seg.dynamicArgs ? [...eff.args, { text: '', dynamic: true, glob: false }] : eff.args;
-  const s: Segment = { ...seg, argv: [{ text: name, dynamic: false, glob: false }, ...args] };
+  const args = seg.dynamicArgs ? [...eff.args, DYNAMIC] : eff.args;
+  // m2: the NAME=value pairs an env wrapper sets reach the command; an env file it loads makes the environment unknown
+  const s: Segment = { ...seg, env: { ...seg.env, ...eff.env }, argv: [{ text: name, dynamic: false, glob: false }, ...args] };
+  if (eff.envFile || envUnknown(seg)) markEnvUnknown(s);
   if (DB_CLIENTS.has(name)) return clientVerdict(s, ctx);
-  if (DOCKERS.has(name)) return dockerVerdict(name, args, s, ctx);
+  if (DOCKERS.has(name)) {
+    const f = dockerFinding(name, args, s, ctx);
+    return f ? (f.unknown ? U(ctx, f.what, f.hint) : D(ctx, f.what, f.hint)) : null;
+  }
   const run = scriptOf(name, args) ?? { name, args };
-  if (isMigration(run.name, run.args)) return urlVerdict(seg, ctx, `${run.name} migrates a database`, envUrl(seg), 'DATABASE_URL');
-  if (name === 'supabase' && supabaseResets(args)) return urlVerdict(seg, ctx, 'supabase resets a database', flagValues(args, '--db-url'), '--db-url');
-  const pm = PMS.get(name), make = MAKES.get(name);
-  const cands = pm ? pmScripts(pm, args).map(i => ({ w: args[i], rest: args.slice(i + 1) })) : make ? targetsOf(args, make).map(w => ({ w, rest: [] })) : [];
+  if (isMigration(run.name, run.args)) return migratorVerdict(run, s, ctx);
+  if (name === 'supabase' && supabaseWrites(args)) return urlVerdict(s, ctx, 'supabase changes a database', flagValues(args, '--db-url'), '--db-url', 'migrator');
+  const make = MAKES.get(name);
+  const cands = PM_RUN.has(name) ? pmScripts(name, args).map(i => ({ w: args[i], rest: args.slice(i + 1) })) : make ? targetsOf(name, args, make).map(w => ({ w, rest: [] })) : [];
   for (const { w, rest } of cands) {
-    if (w.dynamic) return U(ctx, `${name} runs a script whose name only the shell knows`);
-    // a script whose name says database, or (pnpm/yarn/bun <bin>) a migrator's bin
-    if (isDbScript(w.text) || (pm && isMigration(commandName(w), rest))) return urlVerdict(seg, ctx, `${name} ${w.text} looks like a database script`, envUrl(seg), 'DATABASE_URL');
+    if (w.dynamic) return U(ctx, `${name} runs a script whose name only the shell knows`, 'script');
+    // a migrator's bin given its words (pnpm/yarn/bun <bin> …, m1 `npm run prisma -- migrate …`), or a script whose name says database
+    const bin = commandName(w);
+    if (PM_RUN.has(name) && rest.length && isMigration(bin, rest)) return migratorVerdict({ name: bin, args: rest }, s, ctx);
+    if (isDbScript(w.text)) {
+      if (envUnknown(s)) return U(ctx, `${name} ${w.text} looks like a database script, and an env file the hook cannot read sets its environment`, 'script');
+      return urlVerdict(s, ctx, `${name} ${w.text} looks like a database script`, envWords(s, ['DATABASE_URL']), 'a DATABASE_URL', 'script');
+    }
   }
   return null;
+}
+
+/** m9: `$env:NAME = 'value'` in PowerShell: the name and its value (a value holding `$` or a backtick is one only the shell knows). */
+function psEnvSet(seg: Segment): [string, Word] | null {
+  if (seg.dialect !== 'powershell' || !seg.argv.length) return null;
+  const a = seg.argv, m = /^\$env:([A-Za-z_]\w*)(?:=([\s\S]*))?$/i.exec(a[0].text);
+  if (!m) return null;
+  if (m[2] !== undefined) return a.length === 1 ? [m[1], { text: m[2], dynamic: /[$`]/.test(m[2]), glob: false }] : null;
+  return a.length === 3 && a[1].text === '=' ? [m[1], a[2]] : null;
 }
 
 export const databaseRule: GuardRule = {
@@ -852,7 +826,13 @@ export const databaseRule: GuardRule = {
     if (input.tool_name.startsWith('mcp__')) return mcpVerdict(input, ctx);
     const segs = bashSegments(input, ctx);
     if (!segs) return null;
-    for (const seg of segs) { const v = dbSeg(seg, ctx); if (v) return v; }
+    let ps: Record<string, Word> | null = null;
+    for (const seg of segs) {
+      const set = psEnvSet(seg);
+      if (set) { ps ??= {}; Object.defineProperty(ps, set[0], { value: set[1], enumerable: true, writable: true, configurable: true }); continue; }
+      // T6-CONTAINER-INNER: the commands a container runs are judged too, in their own environment
+      for (const x of withContainers(ps ? { ...seg, env: { ...ps, ...seg.env } } : seg)) { const v = dbSeg(x, ctx); if (v) return v; }
+    }
     return null;
   },
 };

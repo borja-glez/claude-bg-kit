@@ -10,7 +10,7 @@
 import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
 import { isLocalHost } from './resources.js';
 import { commandName, type Segment, type Word } from './shell-words.js';
-import { bashSegments, deny, mcpWords } from './autonomy-shared.js';
+import { bashSegments, deny, mcpWords, withContainers } from './autonomy-shared.js';
 import { BASH_TABLES, scan, type OptTable } from './autonomy-tables.js';
 import { readWebRequest, type WebReq } from './autonomy-parse.js';
 
@@ -31,7 +31,7 @@ const CLOUD_WRITE_VERBS = new Set(['deploy', 'delete', 'destroy', 'rm', 'remove'
   'terminate', 'run', 'scale', 'push', 'publish', 'start', 'stop', 'restart', 'cp', 'mv', 'sync', 'invoke', 'exec', 'import',
   'attach', 'detach', 'enable', 'disable', 'rollback', 'promote']);
 // The brief's words plus the fix-round-1 additions (Minor 9): manage, rerun, toggle, accept, decline, retry, terminate, kill.
-const MCP_WRITE_WORDS = new Set(['add', 'append', 'apply', 'approve', 'archive', 'assign', 'attach', 'batch', 'book', 'buy',
+export const MCP_WRITE_WORDS: ReadonlySet<string> = new Set(['add', 'append', 'apply', 'approve', 'archive', 'assign', 'attach', 'batch', 'book', 'buy',
   'cancel', 'charge', 'clear', 'close', 'comment', 'commit', 'create', 'delete', 'deploy', 'destroy', 'detach', 'disable',
   'dismiss', 'dispatch', 'drop', 'edit', 'enable', 'exec', 'execute', 'follow', 'fork', 'generate', 'import', 'insert', 'install',
   'invite', 'label', 'like', 'link', 'lock', 'mark', 'merge', 'modify', 'move', 'notify', 'order', 'patch', 'pause', 'pay', 'pin',
@@ -40,7 +40,7 @@ const MCP_WRITE_WORDS = new Set(['add', 'append', 'apply', 'approve', 'archive',
   'schedule', 'send', 'set', 'share', 'star', 'submit', 'subscribe', 'sync', 'transfer', 'trigger', 'unfollow', 'uninstall',
   'unlink', 'unlock', 'unpin', 'unpublish', 'unstar', 'unsubscribe', 'update', 'upload', 'upsert', 'vote', 'write',
   'manage', 'rerun', 'toggle', 'accept', 'decline', 'retry', 'terminate', 'kill']);
-const MCP_READ_FIRST = new Set(['list', 'get', 'search', 'read', 'fetch', 'view', 'show', 'describe', 'query', 'find', 'count',
+export const MCP_READ_FIRST: ReadonlySet<string> = new Set(['list', 'get', 'search', 'read', 'fetch', 'view', 'show', 'describe', 'query', 'find', 'count',
   'check', 'inspect', 'lookup', 'take', 'export', 'download', 'preview', 'explain', 'validate', 'analyze', 'summarize', 'diff',
   'status', 'whoami', 'ping']);
 const MCP_LOCAL_TOOLS = new Set(['tabs_create_mcp', 'tabs_close_mcp', 'new_page', 'select_page', 'close_page']);
@@ -73,8 +73,12 @@ const isWriteMethod = (m: string): boolean => m !== '' && !WRITE_METHODS.include
 
 // ---- runners --------------------------------------------------------------------------------------------------------
 
-/** The command a segment runs once its runners are unwrapped (Task 6 reuses it for the migrators behind a launcher, T6-LAUNCHER-REUSE). */
-export type Eff = { name: string; args: Word[] };
+/**
+ * The command a segment runs once its runners are unwrapped (Task 6 reuses it for the migrators behind a launcher,
+ * T6-LAUNCHER-REUSE): `env` holds the NAME=value pairs an env wrapper sets (cross-env, dotenv -v), `envFile` says one loaded
+ * an env file the hook cannot read (dotenv, env-cmd, pipenv, uv --env-file).
+ */
+export type Eff = { name: string; args: Word[]; env?: Record<string, Word>; envFile?: boolean };
 /**
  * T5-RUNNER-TABLES: each runner's own options before the package operand — the ones that take a value, its switches, and
  * the ones that name a package (read with PKG_BIN under T5-PKG-FLAG). An option outside its table cancels (unknown target).
@@ -103,9 +107,58 @@ const RUNNER_TABLES: Record<string, RunnerTable> = {
   'pdm run': RT('-p --project', '-l --list -s --site-packages --recreate -g --global'),
   'hatch run': RT('-e --env -p --project', ''),
   'pipx run': RT('--spec --python --pip-args --index-url', '--no-cache --fetch-missing-python --system-site-packages --path', '--spec'),
-  // T6-LAUNCHER-REUSE: Bundler's runner (`bundle exec rails db:drop`).
+  // T6-LAUNCHER-REUSE: Bundler's runner (`bundle exec rails db:drop`); fix 1 (I1, m2): yarn exec behind a workspace selector, pipenv run.
   'bundle exec': RT('--gemfile', '--keep-file-descriptors --no-color -V'),
+  'yarn exec': RT('', ''),
+  'pipenv run': RT('', ''),
 };
+// Runners that load an env file the hook cannot read (pipenv reads .env), besides an `--env-file` option of their own.
+const ENV_FILE_RUNNERS = new Set(['pipenv run']);
+
+/**
+ * I1: a package manager's own options and workspace selectors, one list for every rule (the database rule reads its scripts
+ * with it too): the options that take a value, its switches, and the words it skips with how many words after them.
+ */
+export interface Manager { valued: ReadonlySet<string>; switches: ReadonlySet<string>; skip: ReadonlyMap<string, number> }
+const words = (s: string): ReadonlySet<string> => new Set(s.split(/\s+/).filter(Boolean));
+export const MANAGERS: ReadonlyMap<string, Manager> = new Map([
+  ['npm', { valued: words('-w --workspace --prefix -C --loglevel --script-shell --userconfig --globalconfig --cache --registry'),
+    switches: words(`--workspaces -ws --include-workspace-root --if-present --ignore-scripts --foreground-scripts --silent -s -q --quiet -d --verbose
+      --no-workspaces -y --yes --offline --prefer-offline --prefer-online`), skip: new Map() }],
+  ['pnpm', { valued: words('--filter -F --filter-prod -C --dir --workspace-concurrency --reporter --loglevel --resume-from --test-pattern --changed-files-ignore-pattern'),
+    switches: words(`-r --recursive -w --workspace-root --if-present --parallel --stream --aggregate-output --silent -s --no-bail --bail --sequential --reverse
+      --report-summary --shell-mode -c --include-workspace-root --fail-if-no-match --use-stderr`), skip: new Map([['recursive', 0]]) }],
+  ['yarn', { valued: words('--cwd --include --exclude -j --jobs --from --since'),
+    switches: words(`-s --silent --verbose -A --all -R --recursive -p --parallel -i --interlaced -v -t --topological --topological-dev -W --worktree --no-private
+      -n --dry-run --offline -T --top-level --binaries-only`), skip: new Map([['workspace', 1], ['workspaces', 0], ['foreach', 0]]) }],
+  ['bun', { valued: words('--filter -F --cwd --elide-lines --shell -r --preload --env-file --tsconfig-override -c --config --conditions'),
+    switches: words('--silent --if-present --bun -b --watch --hot --smol --no-install --no-clear-screen --no-env-file --workspaces --parallel --sequential'),
+    skip: new Map() }],
+]);
+/** Where a manager's own leading options and workspace selectors end; `unknown` when an option outside its table came first (read as a switch). */
+export function managerRest(name: string, args: Word[]): { at: number; unknown: boolean } | null {
+  const m = MANAGERS.get(name);
+  if (!m) return null;
+  let i = 0, unknown = false;
+  for (; i < args.length; i++) {
+    const w = args[i], t = w.text;
+    if (w.dynamic) break;
+    if (t.length > 1 && t.startsWith('-') && t !== '--') {
+      const eq = t.indexOf('='), key = eq > 0 ? t.slice(0, eq) : t;
+      if (m.valued.has(key)) { if (eq < 0) i++; } else if (!m.switches.has(key)) unknown = true;
+      continue;
+    }
+    const n = m.skip.get(t.toLowerCase());
+    if (n === undefined) break;
+    i += n;
+  }
+  return { at: i, unknown };
+}
+// The words after which a package manager runs a bin.
+const MANAGER_RUNNERS: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map([
+  ['pnpm', new Map([['exec', 'pnpm exec'], ['dlx', 'pnpm dlx']])], ['npm', new Map([['exec', 'npm exec'], ['x', 'npm exec']])],
+  ['yarn', new Map([['exec', 'yarn exec'], ['dlx', 'yarn dlx']])], ['bun', new Map([['x', 'bun x']])],
+]);
 // Package specs whose installed bin differs from the package name.
 const PKG_BIN: Record<string, string> = {
   'netlify-cli': 'netlify', 'firebase-tools': 'firebase', 'aws-cdk': 'cdk', 'eas-cli': 'eas', 'vercel': 'vercel', 'wrangler': 'wrangler',
@@ -130,8 +183,9 @@ function pkgToBin(spec: string): string {
 /** A runner line the hook cannot read: the reason becomes the network rule's `unknown target`. */
 export type Cancel = { cancel: string };
 const UNKNOWN_RUNNER_OPT: Cancel = { cancel: 'a runner option the hook does not know hides the command it runs' };
+const UNKNOWN_MANAGER_OPT: Cancel = { cancel: 'a package manager option the hook does not know hides the command it runs' };
 /** Skip a runner's own options (its table) to its package operand, collecting the package-naming values; a Cancel when an option outside the table comes first. */
-function runnerRest(args: Word[], table: RunnerTable): { rest: Word[]; pkgs: Word[] } | Cancel {
+function runnerRest(args: Word[], table: RunnerTable): { rest: Word[]; pkgs: Word[]; own: Word[] } | Cancel {
   const pkgs: Word[] = [];
   let i = 0;
   while (i < args.length) {
@@ -147,7 +201,50 @@ function runnerRest(args: Word[], table: RunnerTable): { rest: Word[]; pkgs: Wor
     if (table.switches.has(key)) { i++; continue; }
     return UNKNOWN_RUNNER_OPT;
   }
-  return { rest: args.slice(i), pkgs };
+  return { rest: args.slice(i), pkgs, own: args.slice(0, i) };
+}
+
+// m2: env wrappers. dotenv and env-cmd always load an env file (.env by default); dotenv -v and cross-env set NAME=value.
+interface EnvWrap { valued: ReadonlySet<string>; switches: ReadonlySet<string>; pairs: ReadonlySet<string>; optional: ReadonlySet<string> }
+const ENV_WRAPS: ReadonlyMap<string, EnvWrap> = new Map([
+  ['dotenv', { valued: words('-e -v -p'), switches: words('--debug -o --override --quiet --no-expand'), pairs: words('-v'), optional: words('-c') }],
+  ['env-cmd', { valued: words('-f --file -e --environments -r --rc-file'), switches: words('--fallback --no-override --silent --verbose -x --expand-envs'),
+    pairs: words(''), optional: words('') }],
+]);
+const CANCEL_ENV: Cancel = { cancel: 'an env wrapper option the hook does not read hides the command it runs' };
+/** Sets a `NAME=value` word into env (defined, so a `__proto__` name stays a plain key); false when the word is no pair. */
+function setPair(env: Record<string, Word>, w: Word): boolean {
+  const m = /^([A-Za-z_]\w*)=([\s\S]*)$/.exec(w.text);
+  if (m) Object.defineProperty(env, m[1], { value: { ...w, text: m[2] }, enumerable: true, writable: true, configurable: true });
+  return !!m;
+}
+function envWrapped(name: string, args: Word[]): Eff | Cancel | null {
+  const env: Record<string, Word> = {};
+  if (name === 'cross-env') {
+    let i = 0;
+    while (i < args.length && setPair(env, args[i])) i++;
+    return args[i] ? (args[i].dynamic ? CANCEL_ENV : { name: alias(commandName(args[i])), args: args.slice(i + 1), env }) : null;
+  }
+  const t = ENV_WRAPS.get(name)!, dd = args.findIndex(w => w.text === '--');
+  let i = 0;
+  for (; i < args.length; i++) {
+    const w = args[i], x = w.text;
+    if (x === '--') { i++; break; }
+    if (w.dynamic) return CANCEL_ENV;
+    if (!x.startsWith('-') || x === '-') break;
+    const eq = x.indexOf('='), key = eq > 0 ? x.slice(0, eq) : x;
+    if (t.valued.has(key)) {
+      const v = eq > 0 ? { ...w, text: x.slice(eq + 1) } : args[++i];
+      if (t.pairs.has(key) && v) setPair(env, v);
+    } else if (t.optional.has(key)) {
+      // `-c [environment]`: its value is known only when `--` closes the options
+      const next = args[i + 1];
+      if (next && next.text !== '--' && !next.text.startsWith('-')) { if (dd < 0) return CANCEL_ENV; i++; }
+    } else if (!t.switches.has(key)) return CANCEL_ENV; // --use-shell (a shell line) and any option the hook does not know
+  }
+  const rest = args.slice(i);
+  if (!rest.length) return null;
+  return rest[0].dynamic ? CANCEL_ENV : { name: alias(commandName(rest[0])), args: rest.slice(1), env, envFile: true };
 }
 const isCloudOrPublisher = (bin: string): boolean => CLOUD_CLIS.has(bin) || PUBLISHER_NAMES.has(bin);
 /**
@@ -155,7 +252,7 @@ const isCloudOrPublisher = (bin: string): boolean => CLOUD_CLIS.has(bin) || PUBL
  * package and the operand is not that package's bin (or an alias of it), the line is unreadable (unknown target); when it is,
  * the cloud/publisher reading judges it. A dynamic `-p` value is unreadable too.
  */
-function innerOf(r: { rest: Word[]; pkgs: Word[] } | Cancel): Eff | Cancel | null {
+function innerOf(r: { rest: Word[]; pkgs: Word[]; own: Word[] } | Cancel): Eff | Cancel | null {
   if ('cancel' in r) return r;
   const { rest, pkgs } = r;
   if (pkgs.some(p => p.dynamic)) return { cancel: 'a runner package the shell hides' };
@@ -168,31 +265,42 @@ function innerOf(r: { rest: Word[]; pkgs: Word[] } | Cancel): Eff | Cancel | nul
 }
 
 /** Which runner a call is (a RUNNER_TABLES key) and how many of its words name the runner itself; null when it is not one. */
-function runnerOf(name: string, args: Word[]): { key: string; skip: number } | null {
+function runnerOf(name: string, args: Word[]): { key: string; skip: number } | Cancel | null {
   const a0 = args[0]?.text, a1 = args[1]?.text;
   if (name === 'npx' || name === 'bunx' || name === 'uvx') return { key: name, skip: 0 };
-  if (name === 'bun' && a0 === 'x') return { key: 'bun x', skip: 1 };
-  if (name === 'pnpm' && (a0 === 'dlx' || a0 === 'exec')) return { key: `pnpm ${a0}`, skip: 1 };
-  if (name === 'yarn' && a0 === 'dlx') return { key: 'yarn dlx', skip: 1 };
-  if (name === 'npm' && (a0 === 'exec' || a0 === 'x')) return { key: 'npm exec', skip: 1 };
+  const runs = MANAGER_RUNNERS.get(name);
+  if (runs) {
+    // I1: past the manager's own options and workspace selectors (`pnpm --filter api exec`, `yarn workspace api exec`)
+    const m = managerRest(name, args)!, key = runs.get(args[m.at]?.text ?? '');
+    if (key) return m.unknown ? UNKNOWN_MANAGER_OPT : { key, skip: m.at + 1 };
+    return m.unknown && args.some(w => runs.has(w.text)) ? UNKNOWN_MANAGER_OPT : null;
+  }
   if (name === 'uv' && a0 === 'tool' && a1 === 'run') return { key: 'uv tool run', skip: 2 };
-  if (['uv', 'poetry', 'pdm', 'hatch', 'pipx'].includes(name) && a0 === 'run') return { key: `${name} run`, skip: 1 };
+  if (['uv', 'poetry', 'pdm', 'hatch', 'pipx', 'pipenv'].includes(name) && a0 === 'run') return { key: `${name} run`, skip: 1 };
   if (name === 'bundle' && a0 === 'exec') return { key: 'bundle exec', skip: 1 };
   return null;
 }
 function unwrapRunner(name: string, args: Word[]): Eff | Cancel | null {
   const r = runnerOf(name, args);
-  if (r) return innerOf(runnerRest(args.slice(r.skip), RUNNER_TABLES[r.key]));
+  if (r && 'cancel' in r) return r;
+  if (r) {
+    const rest = runnerRest(args.slice(r.skip), RUNNER_TABLES[r.key]), inner = innerOf(rest);
+    if (inner && !('cancel' in inner) && !('cancel' in rest) && (ENV_FILE_RUNNERS.has(r.key) || rest.own.some(w => /^--env-file(?:=|$)/.test(w.text)))) inner.envFile = true;
+    return inner;
+  }
+  if (ENV_WRAPS.has(name) || name === 'cross-env') return envWrapped(name, args);
+  if (name === 'cross-env-shell') return { cancel: 'cross-env-shell runs a shell line the hook does not read' };
   if (/^(?:python[0-9.]*|py)$/.test(name)) {
     // `-m <module>`, or the module glued (`-malembic`, T6-LAUNCHER-REUSE)
     const mi = args.findIndex(w => /^-m/.test(w.text)), glued = mi >= 0 && args[mi].text.length > 2;
     const mod = glued ? { ...args[mi], text: args[mi].text.slice(2) } : args[mi + 1];
     if (mi >= 0 && mod && !mod.dynamic) return { name: pkgToBin(mod.text.toLowerCase()), args: args.slice(mi + (glued ? 1 : 2)) };
   }
-  // pnpm <bin> / yarn <bin> that is not a manager command: unwrap only when the bin is a cloud or publisher CLI (bounded).
-  if ((name === 'pnpm' || name === 'yarn') && args[0] && !args[0].text.startsWith('-') && !args[0].dynamic && !PKG_BUILTINS.has(args[0].text.toLowerCase())) {
-    const bin = pkgToBin(args[0].text.toLowerCase());
-    if (isCloudOrPublisher(bin)) return { name: bin, args: args.slice(1) };
+  // pnpm <bin> / yarn <bin> that is not a manager command (past its own options, I1): unwrap only when the bin is a cloud or publisher CLI (bounded).
+  const m = name === 'pnpm' || name === 'yarn' ? managerRest(name, args) : null, w0 = m && !m.unknown ? args[m.at] : undefined;
+  if (m && w0 && !w0.text.startsWith('-') && !w0.dynamic && !PKG_BUILTINS.has(w0.text.toLowerCase())) {
+    const bin = pkgToBin(w0.text.toLowerCase());
+    if (isCloudOrPublisher(bin)) return { name: bin, args: args.slice(m.at + 1) };
   }
   return null;
 }
@@ -207,7 +315,8 @@ export function effectiveCommand(seg: Segment): Eff | Cancel | null {
     const u = unwrapRunner(eff.name, eff.args);
     if (u === null) break;
     if ('cancel' in u) return u;
-    eff = u;
+    // the env an outer wrapper set reaches the command it runs
+    eff = { name: u.name, args: u.args, env: { ...eff.env, ...u.env }, envFile: !!(eff.envFile || u.envFile) };
   }
   return eff;
 }
@@ -637,7 +746,8 @@ export const networkRule: GuardRule = {
     if (!ctx.autonomous) return null;
     const segs = bashSegments(input, ctx);
     if (!segs) return null;
-    for (const seg of segs) { const v = networkSeg(seg); if (v) return v; }
+    // T6-CONTAINER-INNER: the commands a container runs are judged too
+    for (const seg of segs) for (const s of withContainers(seg)) { const v = networkSeg(s); if (v) return v; }
     return null;
   },
 };
@@ -648,7 +758,7 @@ export const cloudRule: GuardRule = {
     if (!ctx.autonomous) return null;
     const segs = bashSegments(input, ctx);
     if (!segs) return null;
-    for (const seg of segs) { const v = cloudSeg(seg); if (v) return v; }
+    for (const seg of segs) for (const s of withContainers(seg)) { const v = cloudSeg(s); if (v) return v; }
     return null;
   },
 };

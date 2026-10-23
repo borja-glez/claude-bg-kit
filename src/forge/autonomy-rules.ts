@@ -18,7 +18,7 @@ import { copyEnds, isPsPipeItem, knownWriteCommand, newItemName, plainOperands, 
 // autonomy-db.ts (neither imports this file); re-exported here, and listed in AUTONOMY_RULES at the end, so the hook
 // assembles every rule from one module and the tests import them from autonomy-rules.js.
 import { networkRule, cloudRule, mcpWriteRule } from './autonomy-net.js';
-import { databaseRule } from './autonomy-db.js';
+import { databaseRule, inlineSqlWords } from './autonomy-db.js';
 export { networkRule, cloudRule, mcpWriteRule } from './autonomy-net.js';
 export { databaseRule } from './autonomy-db.js';
 
@@ -161,6 +161,9 @@ export const filesRule: GuardRule = {
         // T4-UNKNOWN-CMD: a command in no table and not a reader is a fail-closed writer; an interpreter's script (first operand) is read, not written. `cmd` is a wrapper (its nested command is a separate segment).
         let cands = plainOperands(seg);
         if (isInterpreter(name)) cands = cands.slice(1);
+        // K200 (Task 6 fix 1): the SQL a database client runs inline is the database rule's; its file options (-o, -L, --tee) stay judged here
+        const sql = inlineSqlWords(seg);
+        if (sql.length) cands = cands.filter(w => !sql.includes(w));
         const v = cwdDeny(seg) ?? judgeAll(cands, seg); if (v) return v;
       }
     }
