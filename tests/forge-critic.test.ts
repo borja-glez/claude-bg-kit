@@ -40,6 +40,14 @@ describe('readVerdicts', () => {
     expect(Array.from(long[0].why)).toHaveLength(CRITIC_TEXT_MAX);
     expect(long[0].why.endsWith('\u{1F600}')).toBe(true);
   });
+  it('cleans as the decision record does: a why of only bidi or C1 characters is empty, so it is no verdict (6b-2 Task 4 fix 1, I-1)', () => {
+    const bidi = String.fromCharCode(0x202e);
+    const c1 = String.fromCharCode(0x85);
+    for (const why of [bidi, c1, ` ${String.fromCharCode(0x2066)} ${c1} `]) {
+      expect(readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: D, verdict: 'keep', why }] })), JSON.stringify(why)).toEqual([]);
+    }
+    expect(readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: D, verdict: 'keep', why: `a${bidi}b${c1}c` }] }))[0].why).toBe('a b c');
+  });
   it('is empty for text that is not a verdicts file', () => {
     expect(readVerdicts('[]')).toEqual([]);
     expect(readVerdicts('3')).toEqual([]);

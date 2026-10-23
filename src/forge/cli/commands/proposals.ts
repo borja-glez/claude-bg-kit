@@ -1,7 +1,8 @@
 import type { Command } from '../context.js';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { appendEvent, readEvents, forgeDir } from '../../ledger.js';
+import { appendEvent, readEvents, forgeDir, type LedgerEvent } from '../../ledger.js';
+import { confinedIn } from '../../guard.js';
 import { parsePlan, PlanError } from '../../../lib/plan.js';
 import {
   PROPOSAL_ID, saveProposal, loadProposals, loadProposal, decideDoc, mirrorProposal, saveApproval, loadApproval, loadApprovals,
@@ -24,9 +25,9 @@ import { parseDocument } from 'yaml';
 import { UsageError } from '../errors.js';
 import { approvalsPageFile, ownerCtx, ownerStanding, runRootOf, unownedReasons } from '../shared.js';
 
-/** The active autonomous run of run.json (found as every command finds it, runRootOf), or null. */
-function activeAutonomous(cwd: string): (RunState & { autonomous: NonNullable<RunState['autonomous']> }) | null {
-  const run = parseRun(readRunText(runRootOf(cwd)));
+/** The active autonomous run of run.json (found as every command finds it, runRootOf), or null. `main`: mainCheckout(cwd). */
+function activeAutonomous(cwd: string, main = mainCheckout(cwd)): (RunState & { autonomous: NonNullable<RunState['autonomous']> }) | null {
+  const run = parseRun(readRunText(runRootOf(cwd, main)));
   return run?.active && run.autonomous ? { ...run, autonomous: run.autonomous } : null;
 }
 
@@ -101,6 +102,11 @@ export const command: Command = (args, ctx) => {
       // A v2 names the proposal it revises with --revises, and only that one is exempt from the open-proposal check.
       const revises = subFlag('revises');
       if (has('revises') && (!revises || !PROPOSAL_ID.test(revises))) throw new UsageError('proposals add: --revises needs a proposal id');
+      // 6b-2 Task 4 fix 1, I-2: a v2 revises a proposal that exists and is still open, whose standing it then keeps.
+      const original = revises ? loadProposal(io.cwd, revises) : null;
+      if (revises && (!original || !canDecide(original.status))) {
+        throw new UsageError(`proposals add: --revises ${revises} must name an open proposal (proposed or discussing); ${original ? `it is ${original.status}` : 'there is none'}`);
+      }
       let r: AddOutcome;
       try {
         r = addProposal(io.cwd, o, { ts: ts(), author: subFlag('author') ?? o.author ?? 'session', now: io.now(), rand: io.rand ?? Math.random, ...(revises ? { revises } : {}) });
@@ -377,25 +383,33 @@ export const command: Command = (args, ctx) => {
       if (!critic) throw new UsageError('proposals judge: --critic <verdicts.json> is required');
       const session = subFlag('session');
       if (has('session') && (!session || !/^[A-Za-z0-9_\-.~:@+]{1,80}$/.test(session))) throw new UsageError('proposals judge: --session needs the waypoint session id');
-      // T6B2-ROOTS: run.json is found through runRootOf; the proposal and its mark are this checkout's (the profile worktree),
-      // and the decision goes to the main checkout's ledger, with the run's id.
-      const run = activeAutonomous(io.cwd);
+      // T6B2-ROOTS: run.json is found through runRootOf; the proposal and its mark are this checkout's, the run's worktree
+      // (fix 1, m-1: judge runs nowhere else), and the decision goes to the main checkout's ledger, with the run's id.
+      // T6B2-DECISION-FIRST: the main checkout is found once, before anything is written, and judgeProposal records the
+      // decision there before it writes the proposal.
+      const main = mainCheckout(io.cwd);
+      const run = activeAutonomous(io.cwd, main);
       if (!run) throw new UsageError('proposals judge: no autonomous run is active in .forge/run.json; outside a profile only the owner approves');
+      const worktree = run.autonomous.worktree;
+      if (!confinedIn(io.cwd, worktree)) throw new UsageError(`proposals judge: run it from the run's worktree, ${worktree}: the proposals it judges are there`);
       const verdicts = readVerdicts(readText(critic, '--critic'));
       const at = ts();
+      const recorded: { n?: number; event?: LedgerEvent } = {};
       let r: Judged;
-      try { r = judgeProposal(io.cwd, id, verdicts, at, (run.locale ?? '').toLowerCase().startsWith('es')); } catch (e) {
+      try {
+        r = judgeProposal(io.cwd, id, verdicts, at, (run.locale ?? '').toLowerCase().startsWith('es'), d => {
+          Object.assign(recorded, addDecision(main, d, { ts: at, runId: run.autonomous.runId }));
+        });
+      } catch (e) {
         if (e instanceof JudgeError) throw new UsageError(`proposals judge: ${e.message}`);
         throw e;
       }
       const { decision, ...out } = r;
-      if (!decision) return json({ id, ...out });
-      const main = mainCheckout(io.cwd);
-      const { n, event } = addDecision(main, decision, { ts: at, runId: run.autonomous.runId });
-      const publish = session ? decisionWrites({ event, session, eid: decisionNoteId(event, session) }) : null;
+      if (!decision || recorded.n === undefined || !recorded.event) return json({ id, ...out });
+      const publish = session ? decisionWrites({ event: recorded.event, session, eid: decisionNoteId(recorded.event, session) }) : null;
       // The note it prints is this decision's publication: decision publish does not print it again.
-      if (publish) markPublished(main, [n]);
-      return json({ id, ...out, decision: n, ...(publish ? { publish } : {}) });
+      if (publish) markPublished(main, [recorded.n]);
+      return json({ id, ...out, decision: recorded.n, ...(publish ? { publish } : {}) });
     }
     default:
       throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task|batch|judge> ...');

@@ -86,10 +86,16 @@ const contentOf = (e: LedgerEvent): string | null => {
   return JSON.stringify(rest);
 };
 
-export function addDecision(root: string, raw: unknown, ctx: { ts: string; task?: string; runId?: string | null }): { n: number; event: LedgerEvent } {
+/** 6b-2 T6B2-DECISION-FIRST: the checks addDecision makes, with nothing written; a DecisionInputError says what is wrong. A
+ *  command that writes more than its decision (`proposals judge`) runs them before it writes anything. */
+export function checkDecision(raw: unknown): z.output<typeof Input> {
   const r = Input.safeParse(raw);
   if (!r.success) throw new DecisionInputError(r.error.issues.map(i => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; '));
-  const { task: dataTask, runId: dataRun, weight, ...rest } = r.data;
+  return r.data;
+}
+
+export function addDecision(root: string, raw: unknown, ctx: { ts: string; task?: string; runId?: string | null }): { n: number; event: LedgerEvent } {
+  const { task: dataTask, runId: dataRun, weight, ...rest } = checkDecision(raw);
   const task = ctx.task ?? dataTask;
   const runId = dataRun ?? ctx.runId ?? undefined;
   const event: LedgerEvent = {

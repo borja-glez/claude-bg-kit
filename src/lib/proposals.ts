@@ -1,4 +1,5 @@
 import { sha256Hex } from './sha256.js';
+import { clean as cleanLine } from './decisions.js';
 export const PROPOSAL_CATEGORIES = ['feature', 'security', 'perf', 'quality', 'tests', 'deps'] as const;
 export const PROPOSAL_RISKS = ['low', 'medium', 'high'] as const;
 export const PROPOSAL_STATUSES = ['proposed', 'approved', 'rejected', 'discussing', 'auto_approved', 'done'] as const;
@@ -76,13 +77,12 @@ export function normalizeProposal(x: unknown): ProposalDoc | null {
 /** An ISO time as Date#toISOString writes it, that is a real date. */
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
-/** A parked mark, or null unless it has a why, what would be lost (each one line, without control characters, cut at a word
- *  to MAX_PROPOSAL_TEXT) and an ISO time. */
+/** A parked mark, or null unless it has a why, what would be lost (each one line, cleaned as the critic's text and the
+ *  decisions are, by lib/decisions' clean, and cut at a word to MAX_PROPOSAL_TEXT) and an ISO time. */
 export function normalizeParked(x: unknown): ProposalParked | null {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
   const o = x as Record<string, unknown>;
-  // eslint-disable-next-line no-control-regex
-  const oneLine = (v: unknown) => (str(v) ? clipWords(v.replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, ' ').trim(), MAX_PROPOSAL_TEXT) : '');
+  const oneLine = (v: unknown) => (str(v) ? clipWords(cleanLine(v, Infinity), MAX_PROPOSAL_TEXT) : '');
   const why = oneLine(o.why);
   const loses = oneLine(o.loses);
   const at = str(o.at) && ISO_TIME.test(o.at) && Number.isFinite(Date.parse(o.at)) ? o.at : '';

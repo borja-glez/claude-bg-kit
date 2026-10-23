@@ -1,5 +1,6 @@
 import { loadProposals, PROPOSAL_ID } from './proposals.js';
 import { proposalDigest, type ProposalDoc } from '../lib/proposals.js';
+import { clean as cleanLine } from '../lib/decisions.js';
 
 export const CRITIC_VERDICTS = ['keep', 'adapt', 'drop', 'clash'] as const;
 export const CRITIC_TEXT_MAX = 1000;
@@ -8,11 +9,13 @@ export interface CriticVerdict {
   id: string; digest: string; verdict: (typeof CRITIC_VERDICTS)[number]; why: string; changes?: string; loses?: string;
 }
 
-/** Free text from the critic: control characters out, trimmed, cut to CRITIC_TEXT_MAX; '' when it is not text. */
+/**
+ * Free text from the critic, cleaned as the decision record cleans it (6b-2 Task 4 fix 1, I-1: one function, lib/decisions'
+ * clean): C0, DEL and C1 controls and bidi overrides out, one line, trimmed, cut by code points to CRITIC_TEXT_MAX. '' when it
+ * is not text, so a `why` the decision would refuse is no verdict.
+ */
 function clean(x: unknown): string {
-  // eslint-disable-next-line no-control-regex
-  // Cut by code points, so a surrogate pair is never split.
-  return typeof x === 'string' ? Array.from(x.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ').trim()).slice(0, CRITIC_TEXT_MAX).join('') : '';
+  return typeof x === 'string' ? cleanLine(x, CRITIC_TEXT_MAX) : '';
 }
 
 /**

@@ -247,10 +247,9 @@ export const unownedOf = (runRoot: string, now: Date): number => Object.keys(uno
 
 /**
  * K2-01: the directory of the infinite run: the main checkout, wherever forge runs from; this directory only when it
- * alone holds a run.json (a run an older forge started in a worktree).
+ * alone holds a run.json (a run an older forge started in a worktree). `main`: mainCheckout(cwd) when the caller has it.
  */
-export function runRootOf(cwd: string): string {
-  const main = mainCheckout(cwd);
+export function runRootOf(cwd: string, main = mainCheckout(cwd)): string {
   if (samePath(main, cwd)) return main;
   return readRunText(main) === null && readRunText(cwd) !== null ? cwd : main;
 }
