@@ -18,6 +18,8 @@ export type Profile = (typeof PROFILES)[number];
 /** The name of an autonomous run: lowercase words joined by single hyphens, 40 characters at most (no `--`, no trailing `-`). */
 export const AUTONOMOUS_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_AUTONOMOUS_NAME = 40;
+/** M-5: a name AUTONOMOUS_NAME takes, of 40 characters at most: the one check of prepare, start and the block parseRun reads. */
+export const isAutonomousName = (x: unknown): x is string => typeof x === 'string' && x.length <= MAX_AUTONOMOUS_NAME && AUTONOMOUS_NAME.test(x);
 
 /** The autonomous run's identity: its worktree and branch, and the branches it must never touch. */
 export interface AutonomousRun {
@@ -35,7 +37,7 @@ function autonomousOf(x: unknown): AutonomousRun | null {
   const a = x as Record<string, unknown>;
   if (!PROFILES.includes(a.profile as Profile)) return null;
   const profile = a.profile as Profile;
-  if (typeof a.name !== 'string' || a.name.length > MAX_AUTONOMOUS_NAME || !AUTONOMOUS_NAME.test(a.name)) return null;
+  if (!isAutonomousName(a.name)) return null;
   const runId = `${profile}-${a.name}`;
   if (a.runId !== runId || a.branch !== `forge/${runId}` || !isAbsolutePath(a.worktree) || !isBranchName(a.startBranch)) return null;
   const pb = a.protectedBranches;

@@ -1,8 +1,9 @@
 // Which Claude Code session belongs to an autonomous run, which roots it may write in and which branches it must not move.
 // The guard rules of an autonomous run apply only to the sessions this module names; an attended session gets null.
-// Only files are read here (run.json and, when it has an autonomous block, the execution and its members): never git.
+// Only files are read here (run.json and, when it has an autonomous block, the execution and its members; when run.json does
+// not read, the sessions.json of each profiled start): never git.
 // Each read that fails says in a comment which way it errs (M17): roots toward fewer, ids and dirs toward more sessions under the rules.
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { LIMITS } from '../lib/decisions.js';
 import path from 'node:path';
 import { parseRun, runFile, type RunState } from './run.js';
@@ -74,10 +75,43 @@ function membersOf(main: string, runId: string): string[] {
   try { return listMembers(main, runId).map(m => m.hookSession).filter((s): s is string => !!s); } catch { return []; } // errs toward fewer ids: members unknown
 }
 
+/** H-1 (T3-TORN-RUN): `{ ids, worktree }` of an autonomous run, written by `infinite start --profile`, read when run.json does not read. */
+export const sessionsFile = (main: string, runId: string): string => path.join(autonomousDir(main, runId), 'sessions.json');
+
+/** Writes sessions.json unless it already says this; through a temporary file, so a reader never meets half of it. */
+export function recordSessions(main: string, runId: string, ids: string[], worktree: string): void {
+  const file = sessionsFile(main, runId);
+  const text = JSON.stringify({ ids, worktree }, null, 2) + '\n';
+  try { if (readFileSync(file, 'utf8') === text) return; } catch { /* absent or unreadable: written below */ }
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, text);
+    renameSync(tmp, file);
+  } finally { rmSync(tmp, { force: true }); }
+}
+
+/** Every session id of every sessions.json under .forge/autonomous/, each once: the run.json that would say which is current does not read. */
+function recordedIds(main: string): string[] {
+  let names: string[];
+  try { names = readdirSync(path.join(main, '.forge', 'autonomous')); } catch { return []; } // no folder: no profile started a run here
+  const ids: string[] = [];
+  for (const name of names) {
+    try {
+      const o: unknown = JSON.parse(readFileSync(sessionsFile(main, name), 'utf8'));
+      const list: unknown = o && typeof o === 'object' ? (o as { ids?: unknown }).ids : undefined;
+      if (!Array.isArray(list)) continue;
+      for (const id of list) if (typeof id === 'string' && id !== '' && !ids.includes(id)) ids.push(id);
+    } catch { /* errs toward fewer ids: a file that does not read names nobody */ }
+  }
+  return ids;
+}
+
 function load(main: string): Loaded {
   const text = readRun(main);
   if (text === null) return { kind: 'none' };
-  if (text === 'unread') return { kind: 'invalid', ids: [] };
+  // H-1: the ids the profiled starts recorded fail closed, wherever their cwd; the cwd rule of autonomousFor still applies.
+  if (text === 'unread') return { kind: 'invalid', ids: recordedIds(main) };
   const run = parseRun(text);
   // The text was read and holds no autonomous key (parsed, or as text when it is no JSON): it cannot be an autonomous run.
   if (!run && !mentionsAutonomous(text)) return { kind: 'none' };

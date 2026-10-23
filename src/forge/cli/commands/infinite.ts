@@ -8,11 +8,20 @@ import { claudeSessionId, noClaudeSession } from '../../../lib/claude-session.js
 import { UsageError } from '../errors.js';
 import { infinitePublish } from '../../infinite-doc.js';
 import { mainCheckout } from '../../local.js';
+import { prepareProfile, profileArgs, profileBlock } from '../../profile.js';
+import { autonomousFor, recordSessions } from '../../autonomous.js';
 import { stopContext, unownedOf, runRootOf, runReply } from '../shared.js';
 
 export const command: Command = (args, ctx) => {
-  const { io, flag, has, json } = ctx;
+  const { io, flag, has, json, ts } = ctx;
   const sub = args[0];
+  if (sub === 'prepare') {
+    const { profile, name } = profileArgs('infinite prepare', flag('profile'), flag('name'));
+    const out = prepareProfile(mainCheckout(io.cwd), io.cwd, profile, name, ts());
+    // M-10: where the session goes next, by path, since the start runs only from there.
+    const next = `enter the worktree ${out.worktree} (EnterWorktree with this path), then run infinite start --profile ${profile} --name ${name} from it`;
+    return json({ ...out, project: name, next });
+  }
   if (sub === 'start') {
     const num = (name: string, valid: (n: number) => boolean, what: string) => {
       if (!has(name)) return undefined;
@@ -31,6 +40,8 @@ export const command: Command = (args, ctx) => {
     // C1, K5-03: the run is bound to the session that starts it; only that session's Stop hook chains its cycles.
     const session = claudeSessionId(flag('session'), io.env ?? process.env);
     if (!session) throw new UsageError(noClaudeSession('infinite start', '--session'));
+    // 6b-2: --profile and --name go together; a --name alone is refused rather than starting a run no guard judges.
+    const profiled = has('profile') || has('name') ? profileArgs('infinite start', flag('profile'), flag('name')) : null;
     // An active run blocks a new one only while nothing stops it and a session drives it: a run whose stop reason
     // is already due (e.g. its session died after a budget ran out or a stop was asked), or one left without a
     // session by forge 0.15 (no Stop hook chains its cycles any more), is replaced.
@@ -38,12 +49,28 @@ export const command: Command = (args, ctx) => {
     // directory still counts as the active one.
     const runRoot = runRootOf(io.cwd);
     const current = parseRun(readRunText(runRoot));
+    if (profiled) {
+      // L-9: a profile never replaces another one that is active, and a stopped run's sessions stay its own (still guarded).
+      const runId = `${profiled.profile}-${profiled.name}`;
+      if (current?.active && current.autonomous && current.autonomous.runId !== runId) {
+        throw new UsageError(`infinite start: the autonomous run ${current.autonomous.runId} is active; stop it first (forge stop)`);
+      }
+      if (!current?.active && autonomousFor(runRoot, { session_id: session })) {
+        throw new UsageError('infinite start: this conversation belongs to a stopped autonomous run and stays guarded; open a new conversation to start a profile');
+      }
+    }
     if (current?.active && current.sessionId !== null
       && stopReason(current, stopContext(runRoot, io.now())) === null) throw new UsageError('infinite start: a run is already active (forge stop, or forge infinite status)');
     const main = mainCheckout(io.cwd);
+    const autonomous = profiled ? profileBlock(main, io.cwd, profiled.profile, profiled.name) : null;
+    const budget = { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}) };
+    const run: RunState = { ...startRun(io.now(), budget, queueMax, session, locale ?? null), ...(autonomous ? { autonomous } : {}) };
+    // A block parseRun refuses would make the guard deny every call of the run: never written.
+    if (autonomous && !parseRun(JSON.stringify(run))?.autonomous) throw new UsageError(`infinite start: the autonomous block of ${autonomous.runId} does not read back; check its start.json`);
     forgeDir(main);
     rmSync(stopFile(main), { force: true });
-    const run: RunState = startRun(io.now(), { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}) }, queueMax, session, locale ?? null);
+    // H-1: the session ids are on disk before run.json names them, so a run.json that does not read still guards them.
+    if (autonomous) recordSessions(main, autonomous.runId, [session], autonomous.worktree);
     saveRun(main, run);
     return json({ ...run, publish: { infinite: infinitePublish(main, run, io.now()) } });
   }
@@ -59,5 +86,5 @@ export const command: Command = (args, ctx) => {
     return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run),
       ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}), unowned: unownedOf(runRoot, io.now()), publish });
   }
-  throw new UsageError('usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE]|status>');
+  throw new UsageError('usage: forge infinite <prepare --profile spike|product --name N|start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE] [--profile P --name N]|status>');
 };

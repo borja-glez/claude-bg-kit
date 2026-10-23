@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
 import { startRun, saveRun, runFile } from '../src/forge/run.js';
@@ -55,6 +55,17 @@ describe('hook guard in an autonomous run', () => {
     writeFileSync(runFile(main), JSON.stringify({ ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: { profile: 'nope' } }));
     expect(guard({ session_id: 'coord-1', cwd: wt, tool_name: 'Edit', tool_input: { file_path: path.join(wt, 'a.ts'), old_string: 'a', new_string: 'b' } }))
       .toMatchObject({ permissionDecision: 'deny' });
+  });
+  it('fails closed for a session sessions.json names when run.json does not read, wherever its cwd (H-1, T3-TORN-RUN)', () => {
+    const cli = (cwd: string, args: string[]) => run(['infinite', ...args], { cwd, now: () => T0, env: {} });
+    expect(cli(main, ['prepare', '--profile', 'spike', '--name', 'x']).code).toBe(0);
+    expect(cli(wt, ['start', '--profile', 'spike', '--name', 'x', '--hours', '1', '--session', 'coord-1']).code).toBe(0);
+    // run.json as a folder: it exists and every read of it fails, as in the Windows rename window of saveRun
+    rmSync(runFile(main));
+    mkdirSync(runFile(main));
+    const ls = { tool_name: 'Bash', tool_input: { command: 'ls' } };
+    expect(guard({ session_id: 'coord-1', cwd: main, ...ls })).toMatchObject({ permissionDecision: 'deny' });
+    expect(guard({ session_id: 'person', cwd: main, ...ls })).toBeNull();
   });
   it('without any run, a session keeps 6a\'s behaviour', () => {
     expect(guard({ ...push, cwd: wt })).toBeNull();

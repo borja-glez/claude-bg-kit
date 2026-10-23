@@ -4,6 +4,7 @@ import type { Io } from './run.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
 import { swarmCtx, type SwarmDeps } from './swarm/context.js';
 import { SUBCOMMANDS } from './swarm/index.js';
+import { activeProfileAt, NO_EXECUTION } from '../profile.js';
 
 // I-12: what moved out of this file keeps its import path for the other modules and the tests.
 export type { GitDeps, SwarmDeps } from './swarm/context.js';
@@ -18,6 +19,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
   const [sub, ...rest] = args;
   const ctx = swarmCtx(sub, rest, io, deps, ext);
   const { has } = ctx;
+  // T6B2-NO-EXECUTION: swarm start says why it does not run inside an active profile's worktree, before the main-checkout
+  // rule below, whose advice (run it from the main checkout) would move the execution onto the person's checkout.
+  if (sub === 'start' && activeProfileAt(io.cwd)) throw new UsageError(`swarm start: ${NO_EXECUTION}`);
   if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge', 'takeover', 'step', 'cleanup'].includes(sub ?? '') && !(sub === 'worktree' && has('member'))) {
     const top = deps.git(['rev-parse', '--show-toplevel'])?.trim();
     const main = mainWorktreeFrom(deps.git(['worktree', 'list', '--porcelain']));
