@@ -5,10 +5,12 @@
 // autonomy-parse.ts (its option tables in autonomy-tables.ts); the readable command lists live here. They deny: switching
 // the guard off (self), writes outside the run's roots or whose target is unknown (files), global installs (install), and
 // dangerous git — refs, the work tree outside the roots, and the config, remotes and object store the clone shares (git).
+// The only file access is self's realpath of a settings candidate (T4-GLOB-SHORT); no process is started.
+import fs from 'node:fs';
 import path from 'node:path';
 import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
 import { confinedIn, CWD_FLAG, FILE_TOOLS, forgeCalls, shellCommand, targetPaths } from './guard.js';
-import { commandName, GIT_VALUED, isNullSink, type Dialect, type Segment, type Word } from './shell-words.js';
+import { commandName, GIT_VALUED, isNullSink, shellPath, type Dialect, type Segment, type Word } from './shell-words.js';
 import { bashSegments, deny, insideRoots, segmentPath } from './autonomy-shared.js';
 import { copyEnds, isPsPipeItem, knownWriteCommand, newItemName, plainOperands, writeInfo } from './autonomy-parse.js';
 
@@ -178,26 +180,85 @@ function claudeSwitch(argv: Word[]): boolean {
   return false;
 }
 
-/** Whether a word's text names a `.claude` directory, or anything under it (FC6) — the text form, for a path the shell hides. */
+/** Whether a glob (`*`, `?`, `[…]`) matches the name `.claude` — bash's leading-dot rule ignored, which fails closed (T4-GLOB-SHORT). */
+function globMatchesClaude(name: string): boolean {
+  if (!/[*?[]/.test(name)) return false;
+  let re = '^';
+  for (let i = 0; i < name.length; i++) {
+    const c = name[i];
+    if (c === '*') re += '.*';
+    else if (c === '?') re += '.';
+    else if (c === '[') { const e = name.indexOf(']', i + 1); if (e > i + 1) { re += '[' + name.slice(i + 1, e).replace(/\\/g, '\\\\').replace(/^!/, '^') + ']'; i = e; } else re += '\\['; }
+    else re += c.replace(/[.+^${}()|\\/]/g, '\\$&');
+  }
+  return new RegExp(re + '$', 'i').test('.claude');
+}
+
+/**
+ * Whether a path segment stands for `.claude`: the name itself, a glob that matches it, or on win32 an 8.3 short name of it —
+ * `CLAUDE~1` or the hash form `CL####~1` (Windows builds the short name from the long name's first letters, the dot dropped;
+ * git's `HEAD~1` is not one).
+ */
+function claudeName(name: string, platform: NodeJS.Platform = process.platform): boolean {
+  const n = name.replace(/[. ]+$/, '');
+  if (platform === 'win32' || platform === 'darwin' ? n.toLowerCase() === '.claude' : n === '.claude') return true;
+  if (platform === 'win32' && /^cl[a-z0-9_]{0,4}~\d+(?:\.[a-z0-9_]{0,3})?$/i.test(n)) return true;
+  return globMatchesClaude(n);
+}
+
+/** Whether a word's text names a `.claude` directory (by any spelling claudeName reads), or anything under it (FC6) — the text form, for a path the shell hides. */
 function isClaudeDest(text: string): boolean {
-  const s = text.replace(/\\/g, '/').replace(/\/+$/, '');
-  return s === '.claude' || s.endsWith('/.claude') || s.startsWith('.claude/') || s.includes('/.claude/');
+  return text.split(/[\\/]/).some(s => s !== '' && claudeName(s));
+}
+
+/** The resolved path with its nearest existing ancestor made real (short names, symlinks, junctions), or null when none resolves. */
+function nearestReal(p: string): string | null {
+  let head = p, tail = '';
+  for (let k = 0; k < 24; k++) {
+    try { const r = fs.realpathSync.native(head); return tail ? path.join(r, tail) : r; } catch { /* climb to the parent */ }
+    const parent = path.dirname(head);
+    if (parent === head) return null;
+    tail = tail ? path.join(path.basename(head), tail) : path.basename(head);
+    head = parent;
+  }
+  return null;
+}
+
+// The real paths of the run's roots, once per roots array (the roots may be reached through a link themselves).
+const REAL_ROOTS = new WeakMap<readonly string[], string[]>();
+function realRoots(roots: readonly string[]): string[] {
+  let r = REAL_ROOTS.get(roots);
+  if (!r) { r = roots.map(x => nearestReal(x) ?? x); REAL_ROOTS.set(roots, r); }
+  return r;
 }
 
 /**
  * Fix 5: the `.claude` that counts for `self` is the one Claude Code reads settings from — directly under one of the run's
  * roots (the worktree, and tmp since a session could start there) — not any `/.claude/` segment: the worktree itself lives
  * under `<main>/.claude/worktrees/`, and a `.claude` nested deeper in the worktree is ordinary content. `p` is resolved.
+ * T4-GLOB-SHORT: the segment under the root may be a glob or an 8.3 short name (claudeName), and when the lexical answer is
+ * no, the nearest existing ancestor is made real once (fs.realpathSync.native) so a short name, symlink or junction counts.
  */
 function projectClaude(p: string, ctx: GuardCtx, platform: NodeJS.Platform = process.platform): boolean {
+  const roots = ctx.autonomous?.roots ?? [];
+  const api = platform === 'win32' ? path.win32 : path.posix;
   // win32 folds a trailing dot or space and an NTFS stream onto the plain name: fold here too (toward «it is the settings file», the safe direction for self)
-  const q = platform === 'win32' ? p.split(/[\\/]/).map((n, i) => (n === '.' || n === '..' || (i === 0 && /^[A-Za-z]:$/.test(n)) ? n : n.replace(/:.*$/, '').replace(/[. ]+$/, ''))).join('\\') : p;
-  return (ctx.autonomous?.roots ?? []).some(r => confinedIn(q, path.join(r, '.claude')));
+  const fold = (x: string) => (platform === 'win32' ? x.split(/[\\/]/).map((n, i) => (n === '.' || n === '..' || (i === 0 && /^[A-Za-z]:$/.test(n)) ? n : n.replace(/:.*$/, '').replace(/[. ]+$/, ''))).join('\\') : x);
+  const under = (q: string, rs: readonly string[]) => rs.some(r => {
+    if (!confinedIn(q, r, platform) || confinedIn(r, q, platform)) return false;
+    const first = api.relative(api.resolve(r), api.resolve(q)).split(/[\\/]/)[0];
+    return first !== undefined && first !== '..' && claudeName(first, platform);
+  });
+  const q = fold(p);
+  if (under(q, roots)) return true;
+  const real = nearestReal(q);
+  return real !== null && real !== q && (under(fold(real), roots) || under(fold(real), realRoots(roots)));
 }
 
 /** Whether a word, resolved against `cwd` (the segment's by default), reaches the project `.claude`; the text form when it cannot be resolved. */
 function settingsTarget(w: Word, seg: Segment, ctx: GuardCtx, cwd: string | null = seg.cwd): boolean {
-  const p = segmentPath(w, { ...seg, cwd });
+  // a glob is resolved by its literal text (a `.cl*de/` that stands for `.claude` is read by claudeName), a plain word by segmentPath
+  const p = !w.dynamic && cwd !== null && /[*?[]/.test(w.text) ? shellPath(w.text, cwd, seg.dialect) : segmentPath(w, { ...seg, cwd });
   if (p !== null) return projectClaude(p, ctx);
   return isClaudeDest(w.text) || endsWithSettings(w.text.replace(/\\/g, '/'));
 }

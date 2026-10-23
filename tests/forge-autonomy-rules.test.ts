@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
 import path from 'node:path';
 import { selfRule, filesRule, installRule, gitRule } from '../src/forge/autonomy-rules.js';
 import { runTmp } from '../src/forge/resources.js';
+import { useTempDirs } from './helpers/tmp.js';
 import { MAIN, WT, TMP, CTX, ATTENDED, withAuto, sh, bash, pwsh, edit, mcp, B, P } from './helpers/autonomy.js';
 
 const OUT = (f: string) => sh(path.join(MAIN, f));
@@ -526,5 +528,42 @@ describe('fix round 5 · NTFS stream words (T4-STREAM-WORD)', () => {
   it.runIf(process.platform === 'win32')('a one-letter name stays a drive', () => {
     expect(filesRule.check(bash(`rm -rf ${drive2(PM('src'))}`), CTX)).toMatchObject({ decision: 'deny', rule: 'files' });
     expect(filesRule.check(bash(`rm -rf ${sh(PM('src'))}`), CTX)).toMatchObject({ decision: 'deny', rule: 'files' });
+  });
+});
+
+// ---- post-breaker fix (T4-GLOB-SHORT): a glob, a short name or a link that reaches .claude counts as the project settings ----
+
+describe('post-breaker fix · self (T4-GLOB-SHORT)', () => {
+  const selfOrFiles = (input: Parameters<typeof filesRule.check>[0]) => selfRule.check(input, CTX) ?? filesRule.check(input, CTX);
+  it.each([
+    // rr5-self D rows: a glob that stands for .claude, as an operand, a redirect target or a Copy-Item destination; and the other spellings
+    B('cp evil.json .cl*de/settings.json'), B('cp evil.json .claud?/settings.json'), B("cp evil.json '.[c]laude/settings.json'"), B('echo {} > .cl*de/settings.json'), P('Copy-Item evil.json .cl*de\\settings.json'),
+    B('ln -s .claude cfg'), P('New-Item -ItemType Junction -Path cfg -Target .claude'), B('cmd /c mklink /J cfg .claude'), B('cp evil.json sub/../.claude/settings.json'), B(`cp evil.json ${W('.CLAUDE/Settings.JSON')}`),
+    B('git -C sub checkout forge/x -- ../.claude/settings.json'), B('cp evil.json ./.claude./settings.json'), B('cd sub && cp ../evil.json ../.claude/settings.local.json'), B('ln -s ../../x .claude'),
+    B(`echo x > ${W('.cl*de/settings.json')}`), B('rm -rf .cl*'),
+  ])('denies reaching the project settings: %s', (_, input) => expect(selfOrFiles(input)).toMatchObject({ decision: 'deny' }));
+  it.runIf(process.platform === 'win32')('on win32 an 8.3 short name of .claude under a root counts, for the shell and the file tools', () => {
+    expect(selfRule.check(bash('cp evil.json CLAUDE~1/settings.json'), CTX)).toMatchObject({ decision: 'deny', rule: 'self' });
+    expect(selfRule.check(bash('cp evil.json cl8f3a~2/settings.json'), CTX)).toMatchObject({ decision: 'deny', rule: 'self' });
+    expect(selfRule.check(edit(path.join(WT, 'CLAUDE~1', 'settings.json')), CTX)).toMatchObject({ decision: 'deny', rule: 'self' });
+  });
+  it.each([
+    // rr5-self A rows, globs that cannot stand for .claude, and git's `~N` refs (no 8.3 name)
+    B('cp a.json fixtures/.claude/settings.json'), B(`cp a.json ${W('fixtures/.claude/settings.json')}`), B('cat .claude/settings.json'), B('rm -rf *.log'), B('rm -rf build/* dist/*.map'),
+    B("sed -i 's/a/b/g' src/*.ts"), B('cp -r src/* dst'), P('Compress-Archive -Path dist\\* -DestinationPath dist.zip'), B('rm -rf fixtures/.cl*de'),
+    B('git reset --soft HEAD~1'), B('git checkout HEAD~2 -- src/a.ts'), B('git restore --source=main~1 src/a.ts'), B('git reset --hard origin/main'), B('mv a~1 b'),
+  ])('allows %s', (_, input) => expect(selfOrFiles(input)).toBeNull());
+
+  const tmp = useTempDirs();
+  it('a link to .claude that already exists inside the worktree is read through its real path (skipped where links cannot be made)', (t) => {
+    const root = tmp('t4-link');
+    fs.mkdirSync(path.join(root, '.claude'));
+    try { fs.symlinkSync(path.join(root, '.claude'), path.join(root, 'cfg'), 'junction'); } catch { t.skip(); return; }
+    const ctx = withAuto({ worktree: root, roots: [root, TMP] });
+    expect(selfRule.check(edit(path.join(root, 'cfg', 'settings.json')), ctx)).toMatchObject({ decision: 'deny', rule: 'self' });
+    expect(selfRule.check(bash('cp evil.json cfg/settings.local.json', root), ctx)).toMatchObject({ decision: 'deny', rule: 'self' });
+    expect(selfRule.check(bash(`cp evil.json ${sh(path.join(root, 'cfg', 'settings.json'))}`, root), ctx)).toMatchObject({ decision: 'deny', rule: 'self' });
+    expect(selfRule.check(edit(path.join(root, 'src', 'a.ts')), ctx)).toBeNull();
+    expect(selfRule.check(bash('cp a.json other/settings.json', root), ctx)).toBeNull();
   });
 });
