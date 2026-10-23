@@ -1,5 +1,5 @@
 import type { NoteDecision, NoteDoc, NoteType } from './types.js';
-import { DECISION_POINTS, LIMITS, clean, type DecisionPoint } from './decisions.js';
+import { DECISION_POINTS, LIMITS, clean, normalizeAlternative, type Alternative, type DecisionPoint } from './decisions.js';
 
 export const NOTE_TYPES: NoteType[] = ['decision', 'idea', 'debt', 'question'];
 export const MAX_NOTE = 2000;
@@ -51,8 +51,10 @@ export function normalizeNoteDecision(x: unknown): NoteDecision | null {
   if (!what || !chosen || !why) return null;
   const out: NoteDecision = { point: o.point as DecisionPoint, what, chosen, why, auto: o.auto === true };
   const alternatives = Array.isArray(o.alternatives)
-    ? o.alternatives.map(a => line(a, LIMITS.alternative)).filter(Boolean).slice(0, LIMITS.alternatives) : [];
+    ? o.alternatives.map(normalizeAlternative).filter((a): a is Alternative => a !== null).slice(0, LIMITS.alternatives) : [];
   if (alternatives.length) out.alternatives = alternatives;
+  const tradeoffs = line(o.tradeoffs, LIMITS.tradeoffs);
+  if (tradeoffs) out.tradeoffs = tradeoffs;
   const revert = line(o.revert, LIMITS.revert);
   if (revert) out.revert = revert;
   return out;

@@ -498,7 +498,7 @@ describe('notes view', () => {
     expect(renderApp({ ...base(), notes, profiles: {} }, ui({ view: 'talk' }))).toContain('usuario');
   });
   it('marks an automatic decision with what was chosen, why and how to undo it, escaped', () => {
-    const dec = note({ id: 'd1', type: 'decision', text: 'diseño aprobado', decision: { point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', alternatives: ['another round'], why: 'sin critical', revert: '/forge:decisions revert 7', auto: true } });
+    const dec = note({ id: 'd1', type: 'decision', text: 'diseño aprobado', decision: { point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', alternatives: [{ option: 'another round' }], why: 'sin critical', revert: '/forge:decisions revert 7', auto: true } });
     const html = renderApp({ ...base(), notes: [dec] }, ui({ view: 'talk' }));
     expect(html).toContain('<span class="nauto">auto</span>');
     expect(html).toContain('Elegido:</span> approve');
@@ -516,7 +516,7 @@ describe('notes view', () => {
       note({ id: 'h"><script>', type: 'question', author: HOSTILE, text: HOSTILE, taskId: 'T001' }),
       note({ id: 'h2', author: `session:${HOSTILE}`, text: HOSTILE, answer: HOSTILE, type: 'question', taskId: 'T001' }),
       note({ id: 'h3', author: 'user:x"><script>', text: HOSTILE, taskId: '"><script>' }),
-      note({ id: 'h4', type: 'decision', text: HOSTILE, taskId: 'T001', decision: { point: 'other', what: HOSTILE, chosen: HOSTILE, alternatives: [HOSTILE], why: HOSTILE, revert: HOSTILE, auto: true } }),
+      note({ id: 'h4', type: 'decision', text: HOSTILE, taskId: 'T001', decision: { point: 'other', what: HOSTILE, chosen: HOSTILE, alternatives: [{ option: HOSTILE, whyNot: HOSTILE, tradeoffs: HOSTILE }], tradeoffs: HOSTILE, why: HOSTILE, revert: HOSTILE, auto: true } }),
     ];
     for (const view of ['summary', 'plan', 'sessions', 'talk'] as const) {
       clean(renderApp({ ...base(), notes: bad, me: 'user:u1', profiles: { 'x"><script>': HOSTILE } }, ui({ view, modal: 'T001', draft: { type: 'idea', text: HOSTILE }, answering: 'h"><script>', answerDraft: HOSTILE })));
@@ -1700,7 +1700,7 @@ describe('the task detail in four tabs (§4.7)', () => {
     const m = base();
     m.notes = [
       note({ id: 'q1', type: 'question', text: '¿`A` o B?', taskId: 'T002' }),
-      note({ id: 'd1', type: 'decision', taskId: 'T002', text: 'elegido A', decision: { point: 'other', what: 'w', chosen: 'A', alternatives: ['B'], why: 'más simple', revert: 'cambiar a B', auto: false } }),
+      note({ id: 'd1', type: 'decision', taskId: 'T002', text: 'elegido A', decision: { point: 'other', what: 'w', chosen: 'A', alternatives: [{ option: 'B' }], why: 'más simple', revert: 'cambiar a B', auto: false } }),
       note({ id: 'c1', type: 'idea', taskId: 'T002', text: 'comentario de propuesta', proposalId: 'p1' }),
     ];
     m.proposals = [P({ id: 'p1', status: 'done', taskId: 'T002', title: 'Origen de T002' })];
@@ -2164,7 +2164,7 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     note({ id: 'q1', ts: '2026-10-11T11:40:00Z', type: 'question', text: '¿apple pay?' }),
     note({ id: 'q2', ts: '2026-10-11T11:41:00Z', type: 'question', text: '¿stripe o adyen?', answer: 'stripe', answeredBy: 'session:main', answeredAt: '2026-10-11T11:52:00Z', answeredByNote: 'd1' }),
     note({ id: 'd1', ts: '2026-10-11T11:50:00Z', type: 'decision', author: 'session:main', text: 'Usamos stripe',
-      decision: { point: 'other', what: 'pasarela', chosen: 'stripe', alternatives: ['adyen'], why: 'ya integrado', revert: 'cambiar la clave', auto: false } }),
+      decision: { point: 'other', what: 'pasarela', chosen: 'stripe', alternatives: [{ option: 'adyen' }], why: 'ya integrado', revert: 'cambiar la clave', auto: false } }),
     note({ id: 'i1', ts: '2026-10-11T11:20:00Z', type: 'idea', author: 'user:u1', text: 'cachear' }),
     note({ id: 'b1', ts: '2026-10-11T11:10:00Z', type: 'debt', text: 'deuda' }),
     note({ id: 'c1', ts: '2026-10-11T11:05:00Z', type: 'idea', author: 'user:u2', text: 'comentario de la propuesta', proposalId: 'p1' }),

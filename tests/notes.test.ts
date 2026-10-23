@@ -38,7 +38,7 @@ describe('normalizeNote · decision', () => {
   const DEC = { point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', alternatives: ['another round'], why: 'sin critical', revert: '/forge:decisions revert 7', auto: true };
   it('keeps a valid automatic decision, cleaned', () => {
     const x = normalizeNote({ ts: 't', type: 'decision', author: 'session:S', text: 'd', decision: { ...DEC, what: 'a\u0007b', auto: 'no' } });
-    expect(x?.decision).toEqual({ ...DEC, what: 'a b', auto: false });
+    expect(x?.decision).toEqual({ ...DEC, alternatives: [{ option: 'another round' }], what: 'a b', auto: false });
   });
   it('keeps auto: true only when it is exactly true; any other decision is the person\'s (H-05)', () => {
     const autoOf = (auto: unknown) => normalizeNoteDecision({ ...DEC, auto })?.auto;
@@ -58,6 +58,12 @@ describe('normalizeNote · decision', () => {
     expect(d.alternatives).toHaveLength(10);
     expect(d).not.toHaveProperty('revert');
     expect(normalizeNoteDecision({ ...DEC, alternatives: [] })).not.toHaveProperty('alternatives');
+  });
+  it('accepts structured alternatives and the chosen trade-offs, and drops what is not one (6b-1)', () => {
+    const d = normalizeNoteDecision({ ...DEC, alternatives: [{ option: 'redis', whyNot: 'one more service', tradeoffs: 'faster', extra: 1 }, { nope: 1 }, 'plain'], tradeoffs: 'simple' })!;
+    expect(d.alternatives).toEqual([{ option: 'redis', whyNot: 'one more service', tradeoffs: 'faster' }, { option: 'plain' }]);
+    expect(d.tradeoffs).toBe('simple');
+    expect(normalizeNoteDecision({ ...DEC, tradeoffs: ' ' })).not.toHaveProperty('tradeoffs');
   });
 });
 

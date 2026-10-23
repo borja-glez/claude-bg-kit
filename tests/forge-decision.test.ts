@@ -315,3 +315,25 @@ describe('undo.shas: the exact commits a revert undoes (K2-19)', () => {
     expect(() => addDecision(root, { ...INPUT, point: 'design-apply', undo: { type: 'git-revert', base: 'abc1234', head: 'def5678', shas } }, { ts: at(0) })).toThrow(DecisionInputError);
   });
 });
+
+describe('decisions with why not and trade-offs (6b-1)', () => {
+  const ALT = { option: 'redis', whyNot: 'one more service to run', tradeoffs: 'faster reads; another process' };
+  it('decision add takes plain and structured alternatives and the chosen trade-offs, and publishes them', () => {
+    writeFileSync(path.join(root, 'd.json'), JSON.stringify({ ...INPUT, alternatives: ['wait', ALT], tradeoffs: 'nothing new to run; slower' }));
+    const r = JSON.parse(run(['decision', 'add', '--data-file', 'd.json', '--session', 'main'], { cwd: root, now: () => new Date(at(0)), env: {} }).stdout);
+    expect(r.publish[0].data.decision).toMatchObject({ alternatives: ['wait', ALT], tradeoffs: 'nothing new to run; slower' });
+    expect(JSON.parse(run(['decision', 'show', '1'], { cwd: root, now: () => new Date(at(0)), env: {} }).stdout)).toMatchObject({ alternatives: [{ option: 'wait' }, ALT] });
+  });
+  it('refuses an alternative object without option or with another key', () => {
+    for (const alt of [{ whyNot: 'x' }, { option: 'a', cost: 3 }, { option: '' }]) {
+      expect(() => addDecision(root, { ...INPUT, alternatives: [alt] }, { ts: at(0) }), JSON.stringify(alt)).toThrow(DecisionInputError);
+    }
+  });
+  it('the decisions file lists each alternative with its why not and trade-offs when any has them', () => {
+    addDecision(root, { ...INPUT, alternatives: ['wait', ALT], tradeoffs: 'simple' }, { ts: at(0), task: 'reparto' });
+    const es = renderDecisionsMd(allDecisions(root), 'reparto', 'es');
+    expect(es).toContain('- **Alternativas:**\n  - wait\n  - redis · Por qué no: one more service to run · Qué se gana y qué se pierde: faster reads; another process');
+    expect(es).toContain('- **Qué se gana y qué se pierde:** simple');
+    expect(renderDecisionsMd(allDecisions(root), 'reparto', 'en')).toContain('  - redis · Why not: one more service to run · Trade-offs: faster reads; another process');
+  });
+});

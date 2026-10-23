@@ -30,11 +30,17 @@ const Undo = z.discriminatedUnion('type', [
   z.object({ type: z.literal('branch-discard'), branch: z.string().regex(BRANCH).refine(s => !s.includes('..'), 'invalid branch') }).strict(),
   z.object({ type: z.literal('none'), reason: line(LIMITS.reason) }).strict(),
 ]);
+// An alternative is a plain text or { option, whyNot?, tradeoffs? } (6b-1).
+const Alt = z.union([
+  line(LIMITS.alternative),
+  z.object({ option: line(LIMITS.alternative), whyNot: line(LIMITS.whyNot).optional(), tradeoffs: line(LIMITS.tradeoffs).optional() }).strict(),
+]);
 const Input = z.object({
   point: z.enum(DECISION_POINTS),
   what: line(LIMITS.what),
   chosen: line(LIMITS.chosen),
-  alternatives: z.array(line(LIMITS.alternative)).max(LIMITS.alternatives).optional(),
+  alternatives: z.array(Alt).max(LIMITS.alternatives).optional(),
+  tradeoffs: line(LIMITS.tradeoffs).optional(),
   why: line(LIMITS.why),
   by: z.enum(DECISION_BY),
   weight: z.enum(['major', 'minor']).optional(),
@@ -161,11 +167,11 @@ export function listDecisions(root: string, f: DecisionFilter): Numbered[] {
 const MD = {
   es: {
     title: 'Decisiones automáticas', intro: 'forge tomó estas decisiones sin preguntar. Para deshacer una: `/forge:decisions revert <n>`.',
-    chosen: 'Elegido', alternatives: 'Alternativas', why: 'Por qué', revert: 'Cómo revertir', when: 'Cuándo', noRevert: 'no se puede revertir de forma automática',
+    chosen: 'Elegido', alternatives: 'Alternativas', whyNot: 'Por qué no', tradeoffs: 'Qué se gana y qué se pierde', why: 'Por qué', revert: 'Cómo revertir', when: 'Cuándo', noRevert: 'no se puede revertir de forma automática',
   },
   en: {
     title: 'Automatic decisions', intro: 'forge took these decisions without asking. To undo one: `/forge:decisions revert <n>`.',
-    chosen: 'Chosen', alternatives: 'Alternatives', why: 'Why', revert: 'How to undo', when: 'When', noRevert: 'cannot be undone automatically',
+    chosen: 'Chosen', alternatives: 'Alternatives', whyNot: 'Why not', tradeoffs: 'Trade-offs', why: 'Why', revert: 'How to undo', when: 'When', noRevert: 'cannot be undone automatically',
   },
 } as const;
 
@@ -175,7 +181,13 @@ export function renderDecisionsMd(list: Numbered[], scope: string, locale: strin
   const out = [`# ${t.title} · ${scope}`, '', t.intro, ''];
   for (const d of list) {
     out.push(`## ${d.n}. ${d.what}`, '', `- **${t.chosen}:** ${d.chosen}`);
-    if (d.alternatives.length) out.push(`- **${t.alternatives}:** ${d.alternatives.join(', ')}`);
+    if (d.tradeoffs) out.push(`- **${t.tradeoffs}:** ${d.tradeoffs}`);
+    if (d.alternatives.some(a => a.whyNot || a.tradeoffs)) {
+      out.push(`- **${t.alternatives}:**`);
+      for (const a of d.alternatives) {
+        out.push(`  - ${[a.option, a.whyNot && `${t.whyNot}: ${a.whyNot}`, a.tradeoffs && `${t.tradeoffs}: ${a.tradeoffs}`].filter(Boolean).join(' · ')}`);
+      }
+    } else if (d.alternatives.length) out.push(`- **${t.alternatives}:** ${d.alternatives.map(a => a.option).join(', ')}`);
     const howTo = d.revert ?? (d.undo?.type === 'none' ? `${t.noRevert}: ${d.undo.reason}` : t.noRevert);
     out.push(`- **${t.why}:** ${d.why || '—'}`, `- **${t.revert}:** ${howTo}`, `- **${t.when}:** ${d.ts} · ${d.by} · ${d.weight}`, '');
   }
@@ -208,7 +220,10 @@ export function decisionWrites(i: { event: LedgerEvent; session: string; eid: st
     data: {
       ts: d.ts, type: 'decision', author, text, ...(task ? { taskId: task } : {}),
       decision: {
-        point: d.point, what: d.what, chosen: d.chosen, ...(d.alternatives.length ? { alternatives: d.alternatives } : {}), why: d.why,
+        point: d.point, what: d.what, chosen: d.chosen,
+        // M14: a plain alternative stays text, so a page published before this version still shows it.
+        ...(d.alternatives.length ? { alternatives: d.alternatives.map(a => (a.whyNot || a.tradeoffs ? a : a.option)) } : {}),
+        ...(d.tradeoffs ? { tradeoffs: d.tradeoffs } : {}), why: d.why,
         ...(d.revert ? { revert: d.revert } : {}), auto: d.by !== 'user',
       },
     },

@@ -1,4 +1,4 @@
-import type { DecisionPoint } from './decisions.js';
+import type { Alternative, DecisionPoint } from './decisions.js';
 import type { ForgeDocV2 } from './roadmap-doc.js';
 
 export type TaskStatus = 'free' | 'claimed' | 'in_progress' | 'blocked' | 'done' | 'orphaned';
@@ -166,7 +166,7 @@ export interface PhaseDoc { id: string; name: string; plan_status: PlanStatus; g
 export type NoteType = 'decision' | 'idea' | 'debt' | 'question';
 /** The structured part of a decision note: `auto: true` when forge took it without asking, false when the person did. */
 export interface NoteDecision {
-  point: DecisionPoint; what: string; chosen: string; alternatives?: string[]; why: string; revert?: string; auto: boolean;
+  point: DecisionPoint; what: string; chosen: string; alternatives?: Alternative[]; tradeoffs?: string; why: string; revert?: string; auto: boolean;
 }
 export interface NoteDoc {
   ts: string;

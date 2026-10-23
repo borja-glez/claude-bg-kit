@@ -2,14 +2,14 @@
 // answered) and .forge/decisions.json, the small summary lens and the waypoint band read. Pure (no node:*, no zod):
 // the forge CLI, lens, the waypoint mod and the roadmap page all bundle it.
 
-export const DECISION_POINTS = ['route', 'triage', 'design-apply', 'design-approve', 'plan-confirm', 'mode', 'ruling', 'safe-path', 'takeover', 'revert', 'other'] as const;
+export const DECISION_POINTS = ['route', 'triage', 'design-apply', 'design-approve', 'plan-confirm', 'mode', 'ruling', 'safe-path', 'takeover', 'revert', 'blocked', 'other'] as const;
 export type DecisionPoint = (typeof DECISION_POINTS)[number];
 export const DECISION_BY = ['auto', 'unattended', 'user'] as const;
 export type DecisionBy = (typeof DECISION_BY)[number];
 export type DecisionWeight = 'major' | 'minor';
 /** Points that change the scope of the work or skip a person's gate: lens and the band name the last one. */
 export const MAJOR_POINTS: readonly DecisionPoint[] = ['route', 'design-approve', 'plan-confirm', 'mode'];
-export const LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300 } as const;
+export const LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300, whyNot: 300, tradeoffs: 300 } as const;
 /** lens and the band read no decisions.json above this, and show none older than the window. */
 export const DECISIONS_MAX = 16 * 1024;
 export const DECISIONS_WINDOW_MS = 24 * 3600_000;
@@ -34,8 +34,11 @@ export type DecisionUndo =
   | { type: 'branch-discard'; branch: string }
   | { type: 'none'; reason: string };
 
+/** An option not taken: why not, and what it would have gained and lost. A plain text is `{ option }`. */
+export interface Alternative { option: string; whyNot?: string; tradeoffs?: string }
+
 export interface Decision {
-  ts: string; point: DecisionPoint; what: string; chosen: string; alternatives: string[]; why: string;
+  ts: string; point: DecisionPoint; what: string; chosen: string; alternatives: Alternative[]; tradeoffs: string | null; why: string;
   by: DecisionBy; weight: DecisionWeight; revert: string | null; undo: DecisionUndo | null;
   task: string | null; runId: string | null; safePath: string | null; revertOf: number | null;
 }
@@ -61,6 +64,20 @@ const text = (x: unknown, max: number): string | null => (str(x) ? clean(x, max)
 const ident = (x: unknown, re: RegExp): string | null => (str(x) && re.test(x) && notDots(x) ? x : null);
 
 export const weightOf = (point: DecisionPoint): DecisionWeight => (MAJOR_POINTS.includes(point) ? 'major' : 'minor');
+
+/** An alternative from untrusted JSON, plain text or an object: null when it has no usable option. Shared by the ledger reader and the note normalizer. */
+export function normalizeAlternative(x: unknown): Alternative | null {
+  if (str(x)) {
+    const option = clean(x, LIMITS.alternative);
+    return option ? { option } : null;
+  }
+  if (!isObj(x)) return null;
+  const option = text(x.option, LIMITS.alternative);
+  if (!option) return null;
+  const whyNot = text(x.whyNot, LIMITS.whyNot);
+  const tradeoffs = text(x.tradeoffs, LIMITS.tradeoffs);
+  return { option, ...(whyNot ? { whyNot } : {}), ...(tradeoffs ? { tradeoffs } : {}) };
+}
 
 /** The structured way to undo a decision, from untrusted JSON: null when its kind is unknown or an id is unsafe. */
 export function normalizeUndo(x: unknown): DecisionUndo | null {
@@ -112,12 +129,13 @@ export function normalizeDecision(x: unknown): Decision | null {
   const safePath = text(x.safePath, LIMITS.safePath);
   const point = oneOf(DECISION_POINTS, x.point) ?? (safePath ? 'safe-path' : what === 'takeover' ? 'takeover' : 'other');
   const alternatives = Array.isArray(x.alternatives)
-    ? x.alternatives.map(a => text(a, LIMITS.alternative)).filter((a): a is string => a !== null).slice(0, LIMITS.alternatives)
+    ? x.alternatives.map(normalizeAlternative).filter((a): a is Alternative => a !== null).slice(0, LIMITS.alternatives)
     : [];
   return {
     ts, point, what,
     chosen: text(x.chosen, LIMITS.chosen) ?? safePath ?? what,
     alternatives,
+    tradeoffs: text(x.tradeoffs, LIMITS.tradeoffs),
     why: text(x.why, LIMITS.why) ?? '',
     // The old takeover wrote a session id in `by`: the user asked that session to go on, so it is the user's decision.
     by: oneOf(DECISION_BY, x.by) ?? (point === 'takeover' ? 'user' : 'unattended'),

@@ -100,7 +100,7 @@ function noteCard(m: Model, d: Dict, ui: UiState, loc: string, n: Note): string 
   const dec = n.decision;
   const decHtml = dec ? `<div class="ndec">
       <div><span class="k">${esc(d.talk.point)}</span> ${esc(dec.point)}</div>
-      <div><span class="k">${esc(d.decisionChosen)}</span> ${esc(dec.chosen)}${dec.alternatives?.length ? ` <span class="k">(${esc(dec.alternatives.join(', '))})</span>` : ''}</div>
+      <div><span class="k">${esc(d.decisionChosen)}</span> ${esc(dec.chosen)}${dec.alternatives?.length ? ` <span class="k">(${esc(dec.alternatives.map(a => a.option).join(', '))})</span>` : ''}</div>
       <div><span class="k">${esc(d.decisionWhy)}</span> ${esc(dec.why)}</div>
       ${dec.revert ? `<div><span class="k">${esc(d.decisionRevert)}</span> ${esc(dec.revert)}</div>` : ''}
     </div>` : '';

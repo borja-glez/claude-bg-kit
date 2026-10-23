@@ -210,7 +210,7 @@ function talkTab(m: Model, d: Dict, ui: UiState, talk: ReturnType<typeof talkOf>
     const open = type === 'question' && !n.answer && !n.answeredByNote;
     const dec = n.decision;
     const when = fmt(n.ts, loc);
-    const decHtml = dec ? `<div class="ndec"><div><span class="k">${esc(d.decisionChosen)}</span> ${esc(dec.chosen)}${dec.alternatives?.length ? ` <span class="k">(${esc(dec.alternatives.join(', '))})</span>` : ''}</div>`
+    const decHtml = dec ? `<div class="ndec"><div><span class="k">${esc(d.decisionChosen)}</span> ${esc(dec.chosen)}${dec.alternatives?.length ? ` <span class="k">(${esc(dec.alternatives.map(a => a.option).join(', '))})</span>` : ''}</div>`
       + `<div><span class="k">${esc(d.decisionWhy)}</span> ${esc(dec.why)}</div>${dec.revert ? `<div><span class="k">${esc(d.decisionRevert)}</span> ${esc(dec.revert)}</div>` : ''}</div>` : '';
     const reply = !open || m.readOnly ? '' : ui.answering === n.id
       ? `<div class="areply"><textarea name="answer" data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" aria-label="${esc(d.answerPlaceholder)}" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea><button type="button" class="btn pri" data-action="answer-send" data-id="${esc(n.id)}">${esc(d.send)}</button></div>`

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  DECISIONS_MAX, clean, decisionScope, decisionsSummary, nextDecisionsDoc, normalizeDecision, normalizeDecisionsDoc,
-  normalizeUndo, scopeFileName, type Decision,
+  DECISIONS_MAX, LIMITS, clean, decisionScope, decisionsSummary, nextDecisionsDoc, normalizeAlternative, normalizeDecision, normalizeDecisionsDoc,
+  normalizeUndo, scopeFileName, weightOf, type Decision,
 } from '../src/lib/decisions.js';
 
 const TS = '2026-10-13T10:00:00.000Z';
@@ -15,7 +15,7 @@ const dec = (o: Partial<Decision> = {}): Decision => ({ ...normalizeDecision(NEW
 describe('normalizeDecision', () => {
   it('reads a new event and gives a major point its weight', () => {
     expect(normalizeDecision(NEW)).toEqual({
-      ts: TS, point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', alternatives: ['another round'],
+      ts: TS, point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', alternatives: [{ option: 'another round' }], tradeoffs: null,
       why: 'ronda 2 sin critical', by: 'auto', weight: 'major', revert: '/forge:decisions revert 7',
       undo: { type: 'design-reopen', project: 'reparto' }, task: 'reparto', runId: null, safePath: null, revertOf: null,
     });
@@ -111,5 +111,24 @@ describe('decisions.json', () => {
   });
   it('clean makes one line', () => {
     expect(clean(` a\n\tb${String.fromCharCode(0x202e)} c `, 10)).toBe('a b c');
+  });
+});
+
+describe('alternatives with why not and trade-offs (6b-1)', () => {
+  it('reads plain and structured alternatives alike, and the chosen option\'s trade-offs', () => {
+    const d = normalizeDecision({ ...NEW, alternatives: ['plain', { option: 'redis', whyNot: 'one more service', tradeoffs: 'faster; one more thing to run' }, { option: ' ' }, { whyNot: 'x' }, 3], tradeoffs: 'simple; slower' })!;
+    expect(d.alternatives).toEqual([{ option: 'plain' }, { option: 'redis', whyNot: 'one more service', tradeoffs: 'faster; one more thing to run' }]);
+    expect(d.tradeoffs).toBe('simple; slower');
+  });
+  it('cleans and clips each field to its limit, and leaves out the empty ones', () => {
+    expect(normalizeAlternative({ option: 'a\u0007b', whyNot: 'x'.repeat(400), tradeoffs: ' ' }))
+      .toEqual({ option: 'a b', whyNot: 'x'.repeat(LIMITS.whyNot) });
+  });
+  it('blocked is a minor point', () => {
+    expect(weightOf('blocked')).toBe('minor');
+  });
+  it('lens reads the summary of a decision with structured alternatives', () => {
+    const doc = nextDecisionsDoc(null, normalizeDecision({ ...NEW, alternatives: [{ option: 'redis', whyNot: 'w' }] })!, 1);
+    expect(decisionsSummary(JSON.stringify(doc), Date.parse(TS))).toEqual({ count: 1, autonomy: 'auto', lastMajor: 'diseño aprobado (v4)' });
   });
 });
