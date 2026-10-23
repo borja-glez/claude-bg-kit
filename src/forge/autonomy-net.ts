@@ -1,6 +1,7 @@
 // Plan 6b-1, Task 5 (fix round 1): the three rules that keep an autonomous run from writing OFF the machine — `network`
 // (HTTP writes to a host that is not local, publishing, and copies to another host, by Bash or PowerShell), `cloud` (the
-// cloud and deploy CLIs read by their SHAPE, T5-CLOUD-SHAPE) and `mcp-write` (an MCP tool whose name says it writes, plus
+// cloud and deploy CLIs read by their SHAPE, T5-CLOUD-SHAPE-2: only a read or local word at the shape's verb position allows,
+// and an unknown global option before it cancels the allow) and `mcp-write` (an MCP tool whose name says it writes, plus
 // the person's signed-in browser tools, T5-BROWSER). Built fail-closed from the start (T5-LESSONS): a client option a tool's
 // table does not know, a dynamic/unreadable URL, or a runner option the hook cannot read cancels the «this only reads»
 // answer; a runner (npx, pnpm dlx, uvx, python -m, …) counts as the CLI it runs, its package spec mapped to the bin; a write
@@ -23,8 +24,9 @@ const BROWSER_INSTEAD = "drive an isolated browser (Playwright, chrome-devtools)
 const CLOUD_CLIS = new Set(['aws', 'gcloud', 'gsutil', 'az', 'kubectl', 'helm', 'terraform', 'tofu', 'pulumi', 'vercel', 'netlify',
   'fly', 'flyctl', 'heroku', 'firebase', 'wrangler', 'doctl', 'railway', 'serverless', 'sls', 'eas', 'supabase', 'stripe', 'gh',
   'glab', 'cdk', 'sam', 'amplify', 'oc', 'argocd', 'ansible', 'ansible-playbook', 'nomad', 'vault', 'consul', 'eb', 'copilot', 'hcloud']);
+// The brief's read verbs, fix 2 (T5-CLOUD-SHAPE-2): `init` leaves (a local verb of terraform/tofu/cdk/sam/supabase only), `tail` and `read` join.
 const READ_VERBS = new Set(['list', 'ls', 'get', 'describe', 'show', 'view', 'status', 'plan', 'whoami', 'version', 'help', 'logs',
-  'log', 'diff', 'search', 'inspect', 'info', 'explain', 'validate', 'fmt', 'output', 'top', 'init', 'checks']);
+  'log', 'diff', 'search', 'inspect', 'info', 'explain', 'validate', 'fmt', 'output', 'top', 'checks', 'tail', 'read']);
 const CLOUD_WRITE_VERBS = new Set(['deploy', 'delete', 'destroy', 'rm', 'remove', 'create', 'apply', 'put', 'update', 'set',
   'terminate', 'run', 'scale', 'push', 'publish', 'start', 'stop', 'restart', 'cp', 'mv', 'sync', 'invoke', 'exec', 'import',
   'attach', 'detach', 'enable', 'disable', 'rollback', 'promote']);
@@ -87,31 +89,58 @@ const PKG_BUILTINS = new Set(['install', 'i', 'add', 'remove', 'rm', 'update', '
   'rebuild', 'prune', 'start', 'create', 'init', 'patch', 'version', 'workspace', 'workspaces', 'global', 'node', 'bin', 'cache', 'set', 'info']);
 const PUBLISHER_NAMES = new Set(['twine', 'cargo', 'gem', 'vsce', 'ovsx', 'mvn', 'gradle', 'podman', 'docker']);
 
-/** The bin a package spec installs: strip `@version` (keep the scope), then map known packages; else the package's own name. */
+/** CLI aliases (fix 2): `vc` is vercel and `ntl` is netlify, as a direct command and as a runner operand. */
+const CLI_ALIAS: Record<string, string> = { vc: 'vercel', ntl: 'netlify' };
+const alias = (n: string): string => CLI_ALIAS[n] ?? n;
+
+/** The bin a package spec installs: strip `@version` (keep the scope), then map known packages and aliases; else the package's own name. */
 function pkgToBin(spec: string): string {
   let s = spec;
   if (s.startsWith('@')) { const slash = s.indexOf('/'); const at = s.indexOf('@', slash + 1); if (at > 0) s = s.slice(0, at); }
   else { const at = s.indexOf('@'); if (at > 0) s = s.slice(0, at); }
-  return PKG_BIN[s] ?? commandName({ text: s, dynamic: false, glob: false });
+  return alias(PKG_BIN[s] ?? commandName({ text: s, dynamic: false, glob: false }));
 }
-/** Skip a runner's own flags to its package operand; 'cancel' when an option the hook does not know comes before the package. */
-function runnerRest(args: Word[]): Word[] | 'cancel' {
+/** A runner line the hook cannot read: the reason becomes the network rule's `unknown target`. */
+type Cancel = { cancel: string };
+const UNKNOWN_RUNNER_OPT: Cancel = { cancel: 'a runner option the hook does not know hides the command it runs' };
+/** Skip a runner's own flags to its package operand, collecting the `-p`/`--package` values; a Cancel when an unknown option comes before the package. */
+function runnerRest(args: Word[]): { rest: Word[]; pkgs: Word[] } | Cancel {
+  const pkgs: Word[] = [];
   let i = 0;
   while (i < args.length) {
     const t = args[i].text;
     if (t === '--') { i++; break; }
     if (!t.startsWith('-')) break;
-    const key = t.includes('=') ? t.slice(0, t.indexOf('=')) : t;
-    if (RUNNER_VALUED.has(key)) { i += t.includes('=') ? 1 : 2; continue; }
+    const eq = t.indexOf('='), key = eq > 0 ? t.slice(0, eq) : t;
+    if (RUNNER_VALUED.has(key)) {
+      const v = eq > 0 ? { text: t.slice(eq + 1), dynamic: args[i].dynamic, glob: false } : args[i + 1];
+      if ((key === '-p' || key === '--package') && v) pkgs.push(v);
+      i += eq > 0 ? 1 : 2; continue;
+    }
     if (RUNNER_SWITCHES.has(key)) { i++; continue; }
-    return 'cancel';
+    return UNKNOWN_RUNNER_OPT;
   }
-  return args.slice(i);
+  return { rest: args.slice(i), pkgs };
 }
-const innerOf = (rest: Word[] | 'cancel'): Eff | 'cancel' | null =>
-  rest === 'cancel' ? 'cancel' : !rest.length || rest[0].dynamic ? null : { name: pkgToBin(rest[0].text.toLowerCase()), args: rest.slice(1) };
+const isCloudOrPublisher = (bin: string): boolean => CLOUD_CLIS.has(bin) || PUBLISHER_NAMES.has(bin);
+/**
+ * The command a runner runs. T5-PKG-FLAG: a `-p`/`--package` value is read with PKG_BIN; when it names a cloud or publisher
+ * package and the operand is not that package's bin (or an alias of it), the line is unreadable (unknown target); when it is,
+ * the cloud/publisher reading judges it. A dynamic `-p` value is unreadable too.
+ */
+function innerOf(r: { rest: Word[]; pkgs: Word[] } | Cancel): Eff | Cancel | null {
+  if ('cancel' in r) return r;
+  const { rest, pkgs } = r;
+  if (pkgs.some(p => p.dynamic)) return { cancel: 'a runner package the shell hides' };
+  const named = pkgs.map(p => pkgToBin(p.text.toLowerCase())).filter(isCloudOrPublisher);
+  if (!rest.length) return named.length ? { name: named[0], args: [] } : null;
+  if (rest[0].dynamic) return named.length ? { cancel: 'a runner command the shell hides' } : null;
+  const bin = pkgToBin(rest[0].text.toLowerCase());
+  if (named.some(n => n !== bin)) return { cancel: `the runner installs ${named.find(n => n !== bin)} but runs ${bin}` };
+  return { name: bin, args: rest.slice(1) };
+}
 
-function unwrapRunner(name: string, args: Word[]): Eff | 'cancel' | null {
+function unwrapRunner(name: string, args: Word[]): Eff | Cancel | null {
   if (name === 'npx' || name === 'bunx' || name === 'uvx') return innerOf(runnerRest(args));
   if (name === 'bun' && args[0]?.text === 'x') return innerOf(runnerRest(args.slice(1)));
   if ((name === 'pnpm' && (args[0]?.text === 'dlx' || args[0]?.text === 'exec')) || (name === 'yarn' && args[0]?.text === 'dlx')) return innerOf(runnerRest(args.slice(1)));
@@ -125,13 +154,13 @@ function unwrapRunner(name: string, args: Word[]): Eff | 'cancel' | null {
   // pnpm <bin> / yarn <bin> that is not a manager command: unwrap only when the bin is a cloud or publisher CLI (bounded).
   if ((name === 'pnpm' || name === 'yarn') && args[0] && !args[0].text.startsWith('-') && !args[0].dynamic && !PKG_BUILTINS.has(args[0].text.toLowerCase())) {
     const bin = pkgToBin(args[0].text.toLowerCase());
-    if (CLOUD_CLIS.has(bin) || PUBLISHER_NAMES.has(bin)) return { name: bin, args: args.slice(1) };
+    if (isCloudOrPublisher(bin)) return { name: bin, args: args.slice(1) };
   }
   return null;
 }
-function effectiveCommand(seg: Segment): Eff | 'cancel' | null {
+function effectiveCommand(seg: Segment): Eff | Cancel | null {
   if (!seg.argv.length || seg.argv[0].dynamic) return null;
-  const name = commandName(seg.argv[0]), args = seg.argv.slice(1);
+  const name = alias(commandName(seg.argv[0])), args = seg.argv.slice(1);
   return unwrapRunner(name, args) ?? { name, args };
 }
 
@@ -300,60 +329,166 @@ function webVerdict(req: WebReq | null, label: string, aliasOnly: boolean): Guar
   return null;
 }
 
-// ---- cloud (T5-CLOUD-SHAPE) -----------------------------------------------------------------------------------------
+// ---- cloud (T5-CLOUD-SHAPE-2: verb-first, two-level, topic-colon and group shapes) ----------------------------------
 
+type Shape = 'verb' | 'two' | 'topic' | 'group';
 const VERB_FIRST = new Set(['kubectl', 'oc', 'helm', 'terraform', 'tofu', 'pulumi', 'cdk', 'vercel', 'netlify', 'fly', 'flyctl',
   'sam', 'serverless', 'sls', 'eas', 'eb', 'ansible', 'ansible-playbook']);
+const TWO_LEVEL = new Set(['aws', 'gh', 'glab', 'hcloud', 'argocd']);
+const TOPIC_COLON = new Set(['heroku', 'firebase']);
+const shapeOf = (cli: string): Shape => (VERB_FIRST.has(cli) ? 'verb' : TWO_LEVEL.has(cli) ? 'two' : TOPIC_COLON.has(cli) ? 'topic' : 'group');
 const TF_DENY = new Set(['apply', 'destroy', 'import', 'state', 'taint']);
 const KUBE_DENY = new Set(['apply', 'delete', 'patch', 'edit', 'scale', 'rollout', 'create', 'replace', 'exec']);
 const ALWAYS_DENY: Record<string, Set<string>> = { terraform: TF_DENY, tofu: TF_DENY, kubectl: KUBE_DENY, oc: KUBE_DENY };
-const KUBE_VALUED = new Set(['-n', '--namespace', '--context', '--kubeconfig', '-l', '--selector', '-o', '--output', '--cluster', '--user']);
-const GLOBAL_VALUED: Record<string, Set<string>> = {
-  aws: new Set(['--region', '--profile', '--output', '--query', '--endpoint-url']),
-  gcloud: new Set(['--project', '--region', '--zone', '--format', '--verbosity', '--account', '--configuration']),
-  gsutil: new Set(['-h', '-o']), az: new Set(['--subscription', '-o', '--output', '--query', '-g', '--resource-group', '-n', '--name']),
-  kubectl: KUBE_VALUED, oc: KUBE_VALUED, helm: new Set(['-n', '--namespace', '--kube-context', '--kubeconfig']),
-  gh: new Set(['-R', '--repo']), glab: new Set(['-R', '--repo']), terraform: new Set(['-chdir']), tofu: new Set(['-chdir']),
+
+// Each CLI's global options: the ones that take a value and its common switches. An option in neither, before the decisive word, cancels the allow.
+interface CliOpts { valued: Set<string>; switches: Set<string> }
+const O = (valued: string, switches = ''): CliOpts =>
+  ({ valued: new Set(valued.split(/\s+/).filter(Boolean)), switches: new Set(switches.split(/\s+/).filter(Boolean)) });
+const NO_OPTS = O('');
+const KUBE = O(`-n --namespace --context --kubeconfig -l --selector -o --output --cluster --user -s --server --token --as --as-group --as-uid
+  --certificate-authority --client-certificate --client-key --request-timeout --tls-server-name --cache-dir -v --v --vmodule --log-file --password --username
+  --profile --profile-output`, '--insecure-skip-tls-verify --match-server-version --warnings-as-errors --disable-compression -A --all-namespaces');
+const FLY = O('-a --app -c --config -t --access-token -o --org', '--debug --verbose -j --json');
+const SLS = O('--stage -s --region -r --config -c --aws-profile --param --org --app', '--verbose --debug');
+const CLI_OPTS: Record<string, CliOpts> = {
+  aws: O('--region --profile --output --query --endpoint-url --cli-read-timeout --cli-connect-timeout --ca-bundle --color --cli-binary-format',
+    '--debug --no-cli-pager --no-verify-ssl --no-paginate --no-sign-request --cli-auto-prompt --no-cli-auto-prompt'),
+  gcloud: O(`--project --region --zone --format --verbosity --account --configuration --billing-project --impersonate-service-account --flags-file
+    --flatten --trace-token --access-token-file`, '--quiet -q --log-http --user-output-enabled --no-user-output-enabled'),
+  gsutil: O('-h -o -u -i', '-m -q -d -D -DD'),
+  az: O('--subscription -o --output --query -g --resource-group -n --name', '--debug --verbose --only-show-errors --yes -y'),
+  kubectl: KUBE, oc: KUBE,
+  helm: O(`-n --namespace --kube-context --kubeconfig --kube-apiserver --kube-as-group --kube-as-user --kube-ca-file --kube-token --kube-tls-server-name
+    --registry-config --repository-cache --repository-config --burst-limit --qps --content-cache`, '--debug --kube-insecure-skip-tls-verify'),
+  terraform: O('-chdir'), tofu: O('-chdir'),
+  pulumi: O('-C --cwd --color -v --verbose --tracing --profiling --memprofilerate',
+    '--emoji -e --logtostderr --non-interactive --disable-integrity-checking --logflow --fully-qualify-stack-names'),
+  cdk: O('-a --app -c --context -p --plugin --profile --proxy --ca-bundle-path -o --output --role-arn -r --toolkit-stack-name --build --notices',
+    '--debug -v --verbose --trace --strict --ignore-errors -j --json --no-color --ci --lookups --version-reporting --path-metadata --asset-metadata --staging'),
+  vercel: O('-t --token -S --scope -A --local-config -Q --global-config --cwd -T --team', '-d --debug --no-color -y --yes --prod --prebuilt -f --force'),
+  netlify: O('--auth --filter', '--debug'), fly: FLY, flyctl: FLY,
+  sam: O('--profile --region --config-file --config-env -t --template --template-file', '--debug --beta-features'),
+  serverless: SLS, sls: SLS, eas: O('', '--non-interactive --json'), eb: O('--profile --region -r --endpoint-url', '--debug --verbose --quiet --no-verify-ssl'),
+  gh: O('-R --repo'), glab: O('-R --repo'), hcloud: O('--context --config --endpoint --poll-interval -o --output', '--debug --quiet'),
+  argocd: O(`--server --auth-token --config --context --grpc-web-root-path --header -H --loglevel --logformat --port-forward-namespace --kube-context
+    --redis-name --repo-server-name --server-name --http-retry-max --client-crt --client-crt-key --controller-name`, '--insecure --grpc-web --plaintext --port-forward --core'),
+  heroku: O('-a --app -r --remote'), firebase: O('-P --project --account --token -c --config', '--json -j --debug --non-interactive --interactive'),
+  wrangler: O('-c --config -e --env --cwd', '--experimental-json-config'), supabase: O('--workdir --profile', '--debug --experimental --yes --create-ticket'),
+  stripe: O('--api-key --color --config --device-name --log-level -p --project-name'),
+  doctl: O('-t --access-token -c --config --context -u --api-url -o --output', '--trace -v --verbose --interactive'),
+  railway: O('-s --service -e --environment'), vault: O('-address -namespace -ns -format', '-tls-skip-verify'), consul: O('-http-addr -token -datacenter'),
+  nomad: O('-address -region -namespace -token', '-tls-skip-verify'), copilot: O('-a --app -e --env -n --name'),
 };
-const GROUP_EXC: Record<string, Set<string>> = { gh: new Set(['run']), gcloud: new Set(['run', 'deploy']), aws: new Set(['deploy']) };
-const LOCAL_VERBS: Record<string, (c: string[]) => boolean> = {
-  wrangler: c => ['dev', 'types'].includes(c[0]), vercel: c => ['dev', 'build'].includes(c[0]), netlify: c => ['dev', 'build'].includes(c[0]),
-  supabase: c => ['start', 'stop', 'status', 'gen'].includes(c[0]) || (c[0] === 'db' && ['reset', 'diff'].includes(c[1])),
-  firebase: c => c[0] === 'serve' || c[0] === 'emulators' || /^emulators:/.test(c[0] ?? ''),
-  sam: c => ['local', 'build', 'validate'].includes(c[0]), helm: c => ['template', 'lint', 'package', 'dependency'].includes(c[0]),
-  stripe: c => c[0] === 'listen', kubectl: c => c[0] === 'port-forward', oc: c => c[0] === 'port-forward',
-  cdk: c => ['synth', 'diff', 'ls'].includes(c[0]), pulumi: c => c[0] === 'preview', serverless: c => c[0] === 'offline', sls: c => c[0] === 'offline',
-  gh: c => c.slice(0, 3).some(w => ['clone', 'watch'].includes(w)),
+
+// Local verbs (the run's own machine), position-specific: each returns the index of the decisive word, or -1.
+const at0 = (...ws: string[]) => (c: string[]): number => (ws.includes(c[0] ?? '') ? 0 : -1);
+const LOCAL: Record<string, (c: string[]) => number> = {
+  wrangler: at0('dev', 'types'), vercel: at0('dev', 'build'), netlify: at0('dev', 'build'),
+  supabase: c => (['start', 'stop', 'status', 'gen', 'init'].includes(c[0] ?? '') ? 0 : c[0] === 'db' && ['reset', 'diff'].includes(c[1] ?? '') ? 1 : -1),
+  firebase: c => (c[0] === 'serve' || c[0] === 'emulators' || /^emulators:/.test(c[0] ?? '') ? 0 : -1),
+  sam: at0('local', 'build', 'validate', 'init'), helm: at0('template', 'lint', 'package', 'dependency'), stripe: at0('listen'),
+  kubectl: at0('port-forward'), oc: at0('port-forward'), cdk: at0('synth', 'diff', 'ls', 'init'), pulumi: at0('preview'),
+  serverless: at0('offline'), sls: at0('offline'), terraform: at0('init'), tofu: at0('init'),
+  gh: c => ((c[0] === 'repo' && c[1] === 'clone') || (c[0] === 'run' && c[1] === 'watch') ? 1 : -1),
 };
-const isReadVerb = (w: string): boolean => READ_VERBS.has(w) || /^(?:describe|list|get|head)-/.test(w);
-function isWriteWord(w: string): boolean {
-  if (CLOUD_WRITE_VERBS.has(w)) return true;
-  const d = w.indexOf('-'); if (d > 0 && CLOUD_WRITE_VERBS.has(w.slice(0, d))) return true;
-  const c = w.lastIndexOf(':'); if (c >= 0 && CLOUD_WRITE_VERBS.has(w.slice(c + 1))) return true;
-  return false;
+// A remote-target option defeats a local verb (`supabase db reset --linked` acts on the linked project).
+const REMOTE_TARGET: Record<string, string[]> = { supabase: ['--linked', '--db-url', '--project-ref'], wrangler: ['--remote'] };
+const remoteTarget = (cli: string, args: Word[]): boolean =>
+  (REMOTE_TARGET[cli] ?? []).some(o => args.some(w => w.text === o || w.text.startsWith(o + '=')));
+
+// Group shape: the write vocabulary (the brief's verbs plus fix 2's), and the position-1 words that name a group, not a verb.
+const GROUP_WRITE = new Set([...CLOUD_WRITE_VERBS, 'add', 'assign', 'unassign', 'approve', 'reject', 'associate', 'disassociate', 'authorize',
+  'revoke', 'grant', 'cancel', 'close', 'reopen', 'comment', 'review', 'merge', 'fork', 'edit', 'patch', 'replace', 'rename', 'move', 'copy',
+  'upload', 'write', 'post', 'send', 'submit', 'trigger', 'resume', 'pause', 'suspend', 'reboot', 'resize', 'reset', 'restore', 'purge',
+  'invalidate', 'flush', 'wipe', 'rotate', 'renew', 'install', 'uninstall', 'upgrade', 'register', 'deregister', 'unregister', 'provision',
+  'link', 'unlink', 'connect', 'disconnect', 'mount', 'unmount', 'drain', 'cordon', 'uncordon', 'taint', 'untaint', 'label', 'tag', 'untag',
+  'annotate', 'expose', 'lock', 'unlock', 'archive', 'unarchive', 'transfer', 'login', 'logout', 'mb', 'rb', 'rsync', 'config', 'configure',
+  'modify', 'change', 'allocate', 'release', 'request', 'subscribe', 'unsubscribe', 'poweroff', 'poweron', 'shutdown', 'power']);
+const POS1_NOUNS = new Set(['config', 'configure', 'label', 'tag', 'release']);
+const POS1_GROUPS: Record<string, Set<string>> = { gcloud: new Set(['run', 'deploy']) };
+const AZ_GROUP_WORDS = new Set(['log', 'logs', 'search']);
+const HEROKU_TOPICS = new Set(['apps', 'addons', 'releases', 'ps', 'config', 'domains', 'buildpacks', 'regions', 'stacks']);
+const GH_TOP_READ = new Set(['status', 'search', 'version', 'help']);
+const AWS_READ_PREFIX = /^(?:describe|list|get|head|filter|search|lookup|batch-get)-/;
+
+const isReadVerb = (w: string): boolean => READ_VERBS.has(w) || (/^(?:describe|list|get|head|show)-/.test(w) && w !== 'get-credentials');
+const awsRead = (w: string): boolean => isReadVerb(w) || (AWS_READ_PREFIX.test(w) && w !== 'get-credentials') || w === 'scan' || w === 'query';
+/** A group-shape write: a vocabulary word, a `<verb>-…` or `…:<verb>` form, or `get-credentials` (it rewrites ~/.kube/config). */
+function isGroupWrite(w: string): boolean {
+  if (w === 'get-credentials' || GROUP_WRITE.has(w)) return true;
+  const d = w.indexOf('-'); if (d > 0 && GROUP_WRITE.has(w.slice(0, d))) return true;
+  const c = w.lastIndexOf(':'); return c >= 0 && GROUP_WRITE.has(w.slice(c + 1));
 }
-/** The command words (the subcommand sequence) and the help/version flags, a known valued flag's value skipped, stopping at `--`. */
-function cloudParse(args: Word[], valued: Set<string>, cli: string): { cmd: string[]; help: boolean; versionFlag: boolean } {
-  const cmd: string[] = []; let help = false, versionFlag = false;
+
+interface CloudWords { cmd: string[]; toks: { t: string; i: number }[]; help: boolean; versionFlag: boolean; unknownAt: number }
+/**
+ * Read a cloud CLI's words before `--`: the command words (a known valued option's value skipped), every non-flag word with
+ * its command index (-1 for an option value: the group write scan includes them), help/version (case-sensitive), and how
+ * many command words came before the first option the CLI's table does not know (`unknownAt`).
+ */
+function cloudParse(args: Word[], cli: string): CloudWords {
+  const o = CLI_OPTS[cli] ?? NO_OPTS, tf = cli === 'terraform' || cli === 'tofu';
+  const cmd: string[] = [], toks: { t: string; i: number }[] = [];
+  let help = false, versionFlag = false, unknownAt = Infinity;
   for (let k = 0; k < args.length; k++) {
     const t = args[k].text;
     if (t === '--') break;
-    if (t.startsWith('-')) {
-      const key = t.includes('=') ? t.slice(0, t.indexOf('=')) : t;
-      if (t === '--help') help = true; else if (t === '-h' && cli !== 'gsutil') help = true; else if (t === '--version') versionFlag = true;
-      if (valued.has(key) && !t.includes('=')) k++;
+    if (t.length > 1 && t.startsWith('-')) {
+      const eq = t.indexOf('='), key = eq > 0 ? t.slice(0, eq) : t;
+      if (t === '--help' || (t === '-h' && cli !== 'gsutil') || (tf && t === '-help')) { help = true; continue; }
+      if (t === '--version' || (tf && t === '-version')) { versionFlag = true; continue; }
+      if (o.valued.has(key)) { if (eq < 0 && k + 1 < args.length) { toks.push({ t: args[k + 1].text.toLowerCase(), i: -1 }); k++; } continue; }
+      if (o.switches.has(key) || (key.startsWith('--no-') && o.switches.has('--' + key.slice(5)))) continue;
+      if (!t.startsWith('--') && t.length > 2 && o.valued.has(t.slice(0, 2))) continue; // a glued short value: -nprod
+      if (unknownAt === Infinity) unknownAt = cmd.length;
       continue;
     }
+    toks.push({ t: t.toLowerCase(), i: cmd.length });
     cmd.push(t.toLowerCase());
   }
-  return { cmd, help, versionFlag };
+  return { cmd, toks, help, versionFlag, unknownAt };
 }
-/** The non-flag words before `--`, flag values included (the write-verb scan runs over these). */
-const opsBeforeDashDash = (args: Word[]): string[] => {
-  const out: string[] = [];
-  for (const w of args) { if (w.text === '--') break; if (!w.text.startsWith('-')) out.push(w.text.toLowerCase()); }
-  return out;
-};
+
+/** The index of the command word whose read (or local) meaning allows the line, or -1: the shape decides where that word sits. */
+function decisive(cli: string, p: CloudWords, args: Word[]): number {
+  const { cmd } = p, c0 = cmd[0] ?? '', c1 = cmd[1] ?? '';
+  const loc = LOCAL[cli] && !remoteTarget(cli, args) ? LOCAL[cli](cmd) : -1;
+  switch (shapeOf(cli)) {
+    case 'verb':
+      if (ALWAYS_DENY[cli]?.has(c0)) return -1;
+      return loc === 0 || (c0 !== '' && isReadVerb(c0)) ? 0 : -1;
+    case 'two':
+      if (cli === 'gh' || cli === 'glab') {
+        if (GH_TOP_READ.has(c0)) return 0;
+        if (loc >= 0) return loc;
+        return c1 !== '' && (isReadVerb(c1) || c1 === 'watch' || c1 === 'checks') ? 1 : -1;
+      }
+      if (cli === 'aws') {
+        if (c0 === 'help') return 0;
+        if (c0 === 's3') return c1 === 'ls' ? 1 : -1;
+        if (c0 === 'configure') return c1 === 'list' || c1 === 'get' ? 1 : -1;
+        return c1 !== '' && awsRead(c1) ? 1 : -1;
+      }
+      return c1 !== '' && isReadVerb(c1) ? 1 : -1; // hcloud, argocd
+    case 'topic': {
+      if (loc === 0) return 0;
+      const colon = c0.lastIndexOf(':');
+      if (colon >= 0) return isReadVerb(c0.slice(colon + 1)) ? 0 : -1;
+      return isReadVerb(c0) || (cli === 'heroku' && HEROKU_TOPICS.has(c0)) ? 0 : -1;
+    }
+    default: {
+      if (loc >= 0) return loc;
+      const pos1 = POS1_GROUPS[cli];
+      if (p.toks.some(({ t, i }) => isGroupWrite(t) && !(i === 0 && (POS1_NOUNS.has(t) || pos1?.has(t))))) return -1;
+      for (let i = 0; i < Math.min(4, cmd.length); i++) {
+        if (cli === 'az' && AZ_GROUP_WORDS.has(cmd[i])) continue;
+        if (isReadVerb(cmd[i])) return i;
+      }
+      return -1;
+    }
+  }
+}
 // gh/glab api: a pflag option table (glued, `=`, bundles); an unknown option, a non-GET method or any field/input is a write.
 const GH_API_TABLE: OptTable = { opts: {
   '-X': 'v', '--method': 'v', '-f': 'v', '--raw-field': 'v', '-F': 'v', '--field': 'v', '--input': 'v', '-H': 'v', '--header': 'v',
@@ -378,29 +513,18 @@ function ghApiWrites(args: Word[]): boolean {
 }
 function cloudSeg(seg: Segment): GuardVerdict | null {
   const eff = effectiveCommand(seg);
-  if (eff === null || eff === 'cancel') return null; // a cancelled runner is network's to deny
+  if (eff === null || 'cancel' in eff) return null; // an unreadable runner is network's to deny
   const { name, args } = eff;
   if (!CLOUD_CLIS.has(name)) return null;
-  const { cmd, help, versionFlag } = cloudParse(args, GLOBAL_VALUED[name] ?? new Set<string>(), name);
+  const p = cloudParse(args, name);
   const D = (): GuardVerdict => deny('cloud', `${name} changes a service off this machine`, CLOUD_INSTEAD);
-  if (help) return null;
-  if (versionFlag && cmd.length === 0) return null;
+  if (p.help || (p.versionFlag && p.cmd.length === 0)) return null;
   if (name === 'ansible' || name === 'ansible-playbook') {
     return args.some(w => ['--syntax-check', '--list-hosts', '--list-tasks', '--version', '--help'].includes(w.text)) ? null : D();
   }
-  if ((name === 'gh' || name === 'glab') && cmd[0] === 'api') return ghApiWrites(args) ? D() : null;
-  const local = LOCAL_VERBS[name];
-  if (VERB_FIRST.has(name)) {
-    const verb = cmd[0] ?? '';
-    if (ALWAYS_DENY[name]?.has(verb)) return D();
-    if (local && local(cmd)) return null;
-    return verb && isReadVerb(verb) ? null : D();
-  }
-  if (local && local(cmd)) return null;
-  if (ALWAYS_DENY[name]?.has(cmd[0] ?? '')) return D();
-  const exc = GROUP_EXC[name];
-  if (opsBeforeDashDash(args).some(w => isWriteWord(w) && !exc?.has(w))) return D();
-  return cmd.slice(0, 3).some(isReadVerb) ? null : D();
+  if ((name === 'gh' || name === 'glab') && p.cmd[0] === 'api') return p.unknownAt === 0 || ghApiWrites(args) ? D() : null;
+  const d = decisive(name, p, args);
+  return d >= 0 && d < p.unknownAt ? null : D(); // an unknown global option before the decisive word cancels the allow
 }
 
 // ---- network dispatch -----------------------------------------------------------------------------------------------
@@ -408,7 +532,7 @@ function cloudSeg(seg: Segment): GuardVerdict | null {
 function networkSeg(seg: Segment): GuardVerdict | null {
   const eff = effectiveCommand(seg);
   if (eff === null) return null;
-  if (eff === 'cancel') return netUnknown('a runner option the hook does not know hides the command it runs');
+  if ('cancel' in eff) return netUnknown(eff.cancel);
   const { name, args } = eff;
   const pub = publisherDeny(name, args);
   if (pub) return pub;

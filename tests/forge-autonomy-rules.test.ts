@@ -681,8 +681,8 @@ describe('fix round 1 · cloud (T5-CLOUD-SHAPE)', () => {
     B('gsutil -h "Cache-Control:no-cache" cp a.html gs://b/'), B('kubectl run tmp --image=busybox -- df -h'), B('aws logs delete-log-group --log-group-name /x'),
     B('npx vercel@latest --prod'), B('npx netlify-cli deploy --prod'), B('npx firebase-tools deploy'), B('npx aws-cdk deploy'), B('npx eas-cli@latest build'),
     B('gh run rerun 123'), B('gh workflow run ci.yml'), B('kubectl -n prod rollout undo deploy/x'), B('supabase db push'), B('gh release upload v1 a.zip'),
-    // T5-CLOUD-SHAPE accepted cost: a flag value that is a write verb denies
-    B('gh issue list --label deploy'),
+    // fix 2 (T5-CLOUD-SHAPE-2): a write whose verb is a plain word behind an az group word that looks like a read (C-D10)
+    B('az webapp log config -n x -g y --application-logging filesystem'),
   ])('denies a write by a cloud CLI: %s', (_, input) => expect(cloudRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'cloud' }));
   it.each([
     // nouns that are also write verbs read; group CLIs read to the third word; local-dev commands; global switches before a read verb
@@ -691,9 +691,42 @@ describe('fix round 1 · cloud (T5-CLOUD-SHAPE)', () => {
     B('wrangler dev'), B('vercel dev'), B('netlify dev'), B('supabase start'), B('firebase emulators:start'), B('sam local start-api'), B('helm template web ./chart'),
     B('stripe listen --forward-to localhost:3000/webhook'), B('kubectl port-forward svc/web 8080:80'), B('cdk synth'), B('pulumi preview'), B('gh repo clone o/r'), B('supabase db reset'),
     B('npx wrangler dev'), B('gh auth status'), B('aws logs tail /aws/lambda/x --follow'), B('kubectl logs deploy/web'),
-    // T5-CLOUD-SHAPE accepted limit: a write whose verb is a plain word (config) behind a read-verb group word (log) is not caught
-    B('az webapp log config -n x -g y --application-logging filesystem'),
+    // fix 2 (T5-CLOUD-SHAPE-2): gh is two-level, so only the verb position decides (C-A10)
+    B('gh issue list --label deploy'),
   ])('allows a read or local-dev command: %s', (_, input) => expect(cloudRule.check(input, CTX)).toBeNull());
+});
+
+// ---- fix round 2: the controller's ctl1 rows and the three shapes (T5-CLOUD-SHAPE-2), unknown global options, -p names the bin ----
+
+describe('fix round 2 · cloud and runners', () => {
+  const verdict2 = (input: Parameters<typeof cloudRule.check>[0]) => cloudRule.check(input, CTX) ?? networkRule.check(input, CTX);
+  it.each([
+    // ctl1 D1–D10
+    B('az webapp log config --name a -g b --application-logging filesystem'), B('aws logs associate-kms-key --log-group-name g --kms-key-id k'), B('vault operator init'),
+    B('supabase db reset --linked'), B('gcloud run deploy list --image x'), B('helm --foo get upgrade x ./chart'), B('gh pr create --title watch --body x'),
+    B('gcloud container clusters get-credentials prod'), B('npx -p netlify-cli ntl deploy --prod'), B('amplify init --yes'),
+    // init creates things off this machine outside terraform/tofu/cdk/sam/supabase; aliases; local verbs defeated by a remote target
+    B('eb init'), B('copilot init'), B('railway init'), B('netlify init'), B('vc --prod'), B('ntl deploy --prod'), B('wrangler dev --remote'), B('wrangler --config dev deploy'),
+    // two-level verb positions, topic-colon verbs, group writes in the broader vocabulary
+    B('aws s3 cp a.txt s3://b/'), B('aws configure set region eu-west-1'), B('heroku pg:reset DATABASE'), B('heroku config:set A=1'), B('firebase deploy'),
+    B('gcloud config set project p'), B('gsutil -m cp a gs://b/'), B('argocd app sync web'), B('hcloud server create --name x'), B('stripe customers create'),
+    // an unknown global option before the decisive word
+    B('kubectl --foo get pods'), B('gcloud --foo compute instances list'),
+  ])('denies %s', (_, input) => expect(verdict2(input)).toMatchObject({ decision: 'deny' }));
+  it.each([
+    // ctl1 A1–A6
+    B('aws logs tail /aws/lambda/f'), B('gh issue list --label deploy'), B('heroku pg:info'), B('gcloud iam service-accounts keys list --iam-account a'), B('terraform init'), B('gh run watch 123'),
+    // depth four, position-1 nouns, known global switches, two-level reads, heroku topics, local init
+    B('gcloud alpha compute instances list'), B('gcloud config list'), B('gsutil label get gs://b'), B('gcloud -q compute instances list'), B('aws --debug s3 ls'),
+    B('gsutil -m ls gs://b'), B('aws configure list'), B('aws dynamodb scan --table-name t'), B('aws logs filter-log-events --log-group-name g'), B('heroku apps'),
+    B('firebase projects:list'), B('argocd app get web'), B('hcloud server list'), B('cdk init app'), B('supabase init'), B('az webapp log tail -n x'), B('gh search repos x'),
+    B('vc ls'), B('npx -p netlify-cli ntl status'), B('npx -p typescript tsc --noEmit'), B('kubectl -nprod get pods'),
+  ])('allows %s', (_, input) => expect(verdict2(input)).toBeNull());
+  it('denies a -p cloud package whose operand is another command as an unknown target (T5-PKG-FLAG)', () => {
+    const v = networkRule.check(bash('npx -p vercel@latest node deploy.js'), CTX);
+    expect(v).toMatchObject({ decision: 'deny', rule: 'network' });
+    expect((v as { reason: string }).reason).toMatch(/^forge autonomy · network: unknown target/);
+  });
 });
 
 describe('fix round 1 · mcp-write (T5-BROWSER, more write words)', () => {
