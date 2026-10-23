@@ -16,7 +16,7 @@ const CWD = word('.'); // a write into the segment's own directory
 // ---- bash / cmd ------------------------------------------------------------------------------------------------------
 
 // Writers whose every non-option operand is a target (delete, move, in-place metadata, create-empty).
-const ALL = new Set(['rm', 'rmdir', 'unlink', 'shred', 'truncate', 'del', 'erase', 'rd', 'mv', 'move', 'ren', 'chmod', 'chown', 'attrib', 'touch', 'mkdir', 'tee']);
+const ALL = new Set(['rm', 'rmdir', 'unlink', 'shred', 'truncate', 'del', 'erase', 'rd', 'mv', 'move', 'ren', 'chmod', 'chown', 'chgrp', 'attrib', 'touch', 'mkdir', 'tee']);
 const COPY = new Set(['cp', 'copy', 'xcopy', 'install']); // sources read, the destination (last operand or -t) written
 const SLASH_SWITCH = new Set(['del', 'erase', 'rd', 'copy', 'xcopy', 'robocopy', 'move', 'attrib']);
 const RSYNC_VALUED = new Set(['--exclude', '--include', '--exclude-from', '--include-from', '--files-from', '--filter', '-f', '-e', '--rsh', '--chmod', '--chown', '--log-file',
@@ -74,71 +74,88 @@ function tarParse(args: Word[]): { mode: 'x' | 'c' | 'a' | 'other'; archive: Wor
   return { mode, archive, dir };
 }
 
-/** The script slots and file operands of a sed/perl/ruby in-place edit: `inPlace` whether -i is set, `files` the non-script operands. */
+/**
+ * The in-place flag and file operands of a sed/perl/ruby edit, one letter parser driving both (FC2). sed: `e`,`f` are scripts
+ * and `l` takes a value (all consume the glued rest or the next word); `i` is in-place and the rest of the bundle is its
+ * suffix. perl: `e`,`E` are scripts; `i` is in-place (rest is the suffix); `l`,`0` take only glued octal digits.
+ */
 function sedParse(args: Word[], perl: boolean): { inPlace: boolean; files: Word[] } {
-  let inPlace = false; const files: Word[] = []; const skipNext = new Set<number>();
-  const valueLetters = perl ? 'eE' : 'ef';      // take a value (a script or a script file)
-  const gluedLetters = perl ? 'MmI0Fl' : 'l';   // take only a glued value
+  let inPlace = false, sawScript = false; const files: Word[] = []; const skipNext = new Set<number>();
+  const scriptLetters = perl ? 'eE' : 'ef', valueLetters = perl ? 'eE' : 'efl';
   for (let k = 0; k < args.length; k++) {
     if (skipNext.has(k)) continue;
     const t = args[k].text;
     if (t === '--') { for (const w of args.slice(k + 1)) files.push(w); break; }
     if (t === '--in-place' || t.startsWith('--in-place=')) { inPlace = true; continue; }
-    if (t === '--expression' || t === '--file') { skipNext.add(k + 1); continue; }
-    if (t.startsWith('--expression=') || t.startsWith('--file=')) continue;
+    if (t === '--expression' || t === '--file') { sawScript = true; skipNext.add(k + 1); continue; }
+    if (/^--(?:expression|file)=/.test(t)) { sawScript = true; continue; }
     if (t.startsWith('--')) continue;
     if (t.startsWith('-') && t.length > 1) {
       const letters = t.slice(1);
       for (let j = 0; j < letters.length; j++) {
         const c = letters[j];
-        if (c === 'i') { inPlace = true; if (!perl) break; } // sed: -i consumes the rest as a suffix; perl: -i suffix is the rest too
-        else if (valueLetters.includes(c)) { if (j === letters.length - 1) skipNext.add(k + 1); break; } // value is the glued rest or the next word (a script)
-        else if (gluedLetters.includes(c)) break; // glued value, consumed
+        if (c === 'i') { inPlace = true; break; } // the rest of the bundle is the suffix
+        if (perl && (c === 'l' || c === '0')) { let m = j + 1; while (m < letters.length && /[0-7]/.test(letters[m])) m++; j = m - 1; continue; } // glued octal only
+        if (valueLetters.includes(c)) { if (scriptLetters.includes(c)) sawScript = true; if (j === letters.length - 1) skipNext.add(k + 1); break; } // value = glued rest or next word
       }
       continue;
     }
     files.push(args[k]);
   }
-  // with no -e/-f the first operand is the script
-  const hasScriptFlag = args.some(w => /^(--expression|--file)(=|$)/.test(w.text) || (/^-[A-Za-z]*[ef]/.test(w.text) && !w.text.startsWith('--')));
-  if (!hasScriptFlag && files.length) files.shift();
+  if (!sawScript && files.length) files.shift(); // with no -e/-f the first operand is the script
   return { inPlace, files };
 }
+
+// curl's options that name a file it writes (FC5); -O/-J/--output-dir write into the segment's directory.
+const CURL_FILE = new Set(['-o', '--output', '-D', '--dump-header', '-c', '--cookie-jar', '--trace', '--trace-ascii', '--stderr', '--libcurl', '--etag-save', '--hsts', '--alt-svc']);
+const CURL_FILE_EQ = ['--output', '--dump-header', '--cookie-jar', '--trace', '--trace-ascii', '--stderr', '--libcurl', '--etag-save', '--hsts', '--alt-svc'];
 
 /** curl writes only with an output option; its target is the named file or, for -O/-J/--output-dir, the directory it writes into. */
 function curlTargets(args: Word[]): Word[] | null {
   const out: Word[] = []; let writer = false;
   for (let k = 0; k < args.length; k++) {
     const t = args[k].text;
-    if (t === '-o' || t === '--output') { writer = true; if (args[k + 1]) out.push(args[k + 1]); }
-    else if (t.startsWith('--output=')) { writer = true; out.push(val(args[k], 9)); }
+    if (CURL_FILE.has(t)) { writer = true; if (args[k + 1]) out.push(args[k + 1]); }
+    else if (CURL_FILE_EQ.some(f => t.startsWith(f + '='))) { writer = true; out.push(val(args[k], t.indexOf('=') + 1)); }
     else if (t === '--output-dir') { writer = true; if (args[k + 1]) out.push(args[k + 1]); out.push(CWD); }
     else if (t.startsWith('--output-dir=')) { writer = true; out.push(val(args[k], 13)); out.push(CWD); }
     else if (t === '--remote-name' || t === '--remote-header-name') { writer = true; out.push(CWD); }
-    else if (t === '-D' || t === '--dump-header' || t === '-c' || t === '--cookie-jar') { writer = true; if (args[k + 1]) out.push(args[k + 1]); }
     else if (t.startsWith('-') && /^[A-Za-z]/.test(t[1] ?? '')) { const g = /^-([A-Za-z]*)o(.*)$/.exec(t); if (g) { writer = true; out.push(g[2] ? val(args[k], t.length - g[2].length) : args[k + 1] ?? CWD); } else if (/^-[A-Za-z]*[OJ]/.test(t)) { writer = true; out.push(CWD); } }
   }
   return writer ? out : null;
 }
 
-/** The target of wget (always a writer): its -O/-P value, else the segment's cwd. */
+/** The targets of wget (always a writer): its download (-O/-P else cwd) and its log file (-o/-a) (FC5). */
 function wgetTargets(args: Word[]): Word[] {
+  const out: Word[] = []; let download: Word | null = CWD;
   for (let k = 0; k < args.length; k++) {
     const t = args[k].text;
-    if (t === '-O' || t === '--output-document') { const v = args[k + 1]; return v && v.text !== '-' ? [v] : []; }
-    if (t.startsWith('--output-document=')) { const v = val(args[k], 18); return v.text !== '-' ? [v] : []; }
-    if (t === '-P' || t === '--directory-prefix') return args[k + 1] ? [args[k + 1]] : [CWD];
-    if (t.startsWith('--directory-prefix=')) return [val(args[k], 19)];
-    const g = t.startsWith('-') && /^[A-Za-z]/.test(t[1] ?? '') ? /^-([A-Za-z]*)O(.*)$/.exec(t) : null;
-    if (g) { if (g[2]) return g[2] !== '-' ? [val(args[k], t.length - g[2].length)] : []; const nx = args[k + 1]; return nx && nx.text !== '-' ? [nx] : []; }
+    if (t === '-O' || t === '--output-document') { const v = args[k + 1]; download = v && v.text !== '-' ? v : null; }
+    else if (t.startsWith('--output-document=')) { const v = val(args[k], 18); download = v.text !== '-' ? v : null; }
+    else if (t === '-P' || t === '--directory-prefix') download = args[k + 1] ?? CWD;
+    else if (t.startsWith('--directory-prefix=')) download = val(args[k], 19);
+    else if (t === '-o' || t === '--output-file' || t === '-a' || t === '--append-output') { if (args[k + 1]) out.push(args[k + 1]); }
+    else if (t.startsWith('--output-file=') || t.startsWith('--append-output=')) out.push(val(args[k], t.indexOf('=') + 1));
+    else { const g = t.startsWith('-') && /^[A-Za-z]/.test(t[1] ?? '') ? /^-([A-Za-z]*)O(.*)$/.exec(t) : null; if (g) download = g[2] ? (g[2] !== '-' ? val(args[k], t.length - g[2].length) : null) : (args[k + 1] && args[k + 1].text !== '-' ? args[k + 1] : null); }
   }
-  return [CWD];
+  if (download) out.push(download);
+  return out;
+}
+
+// Every command bashWrite knows (so a known downloader/archiver with no write option is not mistaken for an unknown command).
+const KNOWN_BASH = new Set([...ALL, ...COPY, 'robocopy', 'rsync', 'tar', 'unzip', '7z', 'dd', 'sort', 'curl', 'wget', 'patch', 'sed', 'gsed', 'perl', 'ruby', 'find', 'icacls', 'ln', 'mklink', 'fsutil']);
+
+/** Whether a segment's command is one the write-target parser knows (a writer table or a PowerShell cmdlet), even if this call writes nothing. */
+export function knownWriteCommand(seg: Segment): boolean {
+  if (!seg.argv.length) return false;
+  const name = commandName(seg.argv[0]);
+  return seg.dialect === 'powershell' ? isPsCmdlet(name) : KNOWN_BASH.has(name);
 }
 
 function bashWrite(seg: Segment): WriteInfo {
   const name = commandName(seg.argv[0]), args = seg.argv.slice(1), d = seg.dialect;
   const none: WriteInfo = { writer: false, targets: [] };
-  if (ALL.has(name)) { const targets = operandsOf(args, name, d); if (name === 'mv' || name === 'move') { const td = targetDir(args); if (td) targets.push(td); } return { writer: true, targets }; }
+  if (ALL.has(name)) { let targets = operandsOf(args, name, d); if ((name === 'chown' || name === 'chgrp') && targets.length) targets = targets.slice(1); if (name === 'mv' || name === 'move') { const td = targetDir(args); if (td) targets.push(td); } return { writer: true, targets }; }
   if (name === 'icacls') { const op = operandsOf(args, name, d)[0]; return { writer: true, targets: op ? [op] : [] }; }
   if (name === 'ln' || name === 'mklink') {
     const ops = operandsOf(args, name, d), targets = [...ops];
@@ -150,19 +167,37 @@ function bashWrite(seg: Segment): WriteInfo {
     return { writer: true, targets };
   }
   if (name === 'fsutil') { if (seg.argv[1]?.text.toLowerCase() !== 'hardlink') return none; return { writer: true, targets: operandsOf(args.slice(1), name, d).filter(w => w.text.toLowerCase() !== 'create') }; }
-  if (COPY.has(name)) { const td = targetDir(args); if (td) return { writer: true, targets: [td] }; const ops = operandsOf(args, name, d); return { writer: true, targets: ops.length ? [ops[ops.length - 1]] : [] }; }
-  if (name === 'robocopy') { const ops = operandsOf(args, name, d); return { writer: true, targets: ops[1] ? [ops[1]] : [] }; }
-  if (name === 'rsync') { const ops: Word[] = []; for (let k = 0; k < args.length; k++) { if (RSYNC_VALUED.has(args[k].text)) { k++; continue; } if (!isSwitch(args[k], name, d)) ops.push(args[k]); } return { writer: true, targets: ops.length ? [ops[ops.length - 1]] : [] }; }
+  if (COPY.has(name)) {
+    const ops = operandsOf(args, name, d), td = targetDir(args);
+    const link = args.some(w => /^-[A-Za-z]*[ls]/.test(w.text) && !w.text.startsWith('--')) || args.some(w => w.text === '--link' || w.text === '--symbolic-link'); // a copy through a link reaches the sources
+    if (link) return { writer: true, targets: td ? [td, ...ops] : ops };
+    if (td) return { writer: true, targets: [td] };
+    return { writer: true, targets: ops.length ? [ops[ops.length - 1]] : [] };
+  }
+  if (name === 'robocopy') { const ops = operandsOf(args, name, d); const move = args.some(w => /^\/MOVE?$/i.test(w.text)); const t: Word[] = []; if (ops[1]) t.push(ops[1]); if (move && ops[0]) t.push(ops[0]); return { writer: true, targets: t }; }
+  if (name === 'rsync') {
+    const ops: Word[] = []; for (let k = 0; k < args.length; k++) { if (RSYNC_VALUED.has(args[k].text)) { k++; continue; } if (!isSwitch(args[k], name, d)) ops.push(args[k]); }
+    const move = args.some(w => w.text === '--remove-source-files');
+    return { writer: true, targets: move ? ops : ops.length ? [ops[ops.length - 1]] : [] };
+  }
   if (name === 'tar') { const { mode, archive, dir } = tarParse(args); if (mode === 'x') return { writer: true, targets: dir ? [dir] : [] }; if (mode === 'c' || mode === 'a') return { writer: true, targets: archive ? [archive] : [] }; return none; }
   if (name === 'unzip') { for (let k = 0; k < args.length; k++) { if (args[k].text === '-d') return { writer: true, targets: args[k + 1] ? [args[k + 1]] : [] }; if (args[k].text.startsWith('-d') && args[k].text.length > 2) return { writer: true, targets: [val(args[k], 2)] }; } return { writer: true, targets: [] }; }
   if (name === '7z') { const sub = (args[0]?.text ?? '').toLowerCase(); if (/^x|^e/.test(sub)) { const o = args.find(w => /^-o./.test(w.text)); return { writer: true, targets: o ? [val(o, 2)] : [] }; } if (/^(a|u|d)/.test(sub)) { const op = operandsOf(args.slice(1), name, d)[0]; return { writer: true, targets: op ? [op] : [] }; } return none; }
   if (name === 'dd') { for (const w of args) if (/^of=/.test(w.text)) return { writer: true, targets: [val(w, 3)] }; return none; }
-  if (name === 'sort') { for (let k = 0; k < args.length; k++) { const t = args[k].text; if (t === '-o' || t === '--output') return { writer: true, targets: args[k + 1] ? [args[k + 1]] : [] }; if (t.startsWith('--output=')) return { writer: true, targets: [val(args[k], 9)] }; if (/^-o./.test(t)) return { writer: true, targets: [val(args[k], 2)] }; } return none; }
+  if (name === 'sort') { for (let k = 0; k < args.length; k++) { const t = args[k].text; if (t === '-o' || t === '--output') return { writer: true, targets: args[k + 1] ? [args[k + 1]] : [] }; if (t.startsWith('--output=')) return { writer: true, targets: [val(args[k], 9)] }; const g = /^-([a-z]*)o(.*)$/.exec(t); if (g && !t.startsWith('--')) return { writer: true, targets: g[2] ? [val(args[k], t.length - g[2].length)] : args[k + 1] ? [args[k + 1]] : [] }; } return none; }
   if (name === 'curl') { const t = curlTargets(args); return t ? { writer: true, targets: t } : none; }
   if (name === 'wget') return { writer: true, targets: wgetTargets(args) };
-  if (name === 'patch') { const t: Word[] = []; for (let k = 0; k < args.length; k++) { const w = args[k].text; if (w === '-o' || w === '-d' || w === '--output' || w === '--directory') { if (args[k + 1]) t.push(args[k + 1]); } else if (/^(--output=|--directory=)/.test(w)) t.push(val(args[k], w.indexOf('=') + 1)); } const op = operandsOf(args, name, d)[0]; if (op) t.push(op); return { writer: true, targets: t }; }
+  if (name === 'patch') { const t: Word[] = []; for (let k = 0; k < args.length; k++) { const w = args[k].text; if (w === '-o' || w === '-d' || w === '--output' || w === '--directory') { if (args[k + 1]) t.push(args[k + 1]); } else if (/^(--output=|--directory=)/.test(w)) t.push(val(args[k], w.indexOf('=') + 1)); else if (/^-[od]./.test(w)) t.push(val(args[k], 2)); } const op = operandsOf(args, name, d)[0]; if (op) t.push(op); return { writer: true, targets: t }; }
   if (name === 'sed' || name === 'gsed' || name === 'perl' || name === 'ruby') { const { inPlace, files } = sedParse(args, name === 'perl' || name === 'ruby'); return inPlace ? { writer: true, targets: files } : none; }
-  if (name === 'find') { if (!args.some(w => w.text === '-delete')) return none; let k = 0; while (k < args.length && /^-[HLPOD]/.test(args[k].text)) k += /^-[OD]$/.test(args[k].text) ? 2 : 1; const paths: Word[] = []; for (; k < args.length; k++) { const t = args[k].text; if (t.startsWith('-') || t.startsWith('(') || t === '!') break; paths.push(args[k]); } return { writer: true, targets: paths }; }
+  if (name === 'find') {
+    const fpAt = args.findIndex(w => /^-(?:fprint0?|fprintf|fls)$/.test(w.text));
+    if (!args.some(w => w.text === '-delete') && fpAt < 0) return none;
+    const targets: Word[] = [];
+    if (fpAt >= 0 && args[fpAt + 1]) targets.push(args[fpAt + 1]);
+    let k = 0; while (k < args.length && /^-[HLPOD]/.test(args[k].text)) k += /^-[OD]$/.test(args[k].text) ? 2 : 1;
+    for (; k < args.length; k++) { const t = args[k].text; if (t.startsWith('-') || t.startsWith('(') || t === '!') break; targets.push(args[k]); }
+    return { writer: true, targets };
+  }
   return none;
 }
 
@@ -172,7 +207,7 @@ type PK = 'p' | 's' | 'c' | 'v' | 'w'; // path target, source, content, valued (
 // Common parameters every cmdlet accepts; a valued one consumes its value, a switch does not.
 const COMMON: Record<string, PK> = {
   erroraction: 'v', ea: 'v', warningaction: 'v', wa: 'v', informationaction: 'v', infa: 'v', errorvariable: 'v', ev: 'v', warningvariable: 'v', wv: 'v',
-  informationvariable: 'v', iv: 'v', outvariable: 'v', ov: 'v', outbuffer: 'v', ob: 'v', pipelinevariable: 'v', pv: 'v', verbose: 'w', debug: 'w', whatif: 'w', confirm: 'w',
+  informationvariable: 'v', iv: 'v', outvariable: 'v', ov: 'v', outbuffer: 'v', ob: 'v', pipelinevariable: 'v', pv: 'v', progressaction: 'v', proga: 'v', verbose: 'w', debug: 'w', whatif: 'w', confirm: 'w',
 };
 const PS_ALIAS: Record<string, string> = {
   rm: 'remove-item', rmdir: 'remove-item', del: 'remove-item', erase: 'remove-item', ri: 'remove-item', rd: 'remove-item',
@@ -186,8 +221,8 @@ const pathP: Record<string, PK> = { path: 'p', literalpath: 'p', pspath: 'p', lp
 const PS_CMDLETS: Record<string, Spec> = {
   'remove-item': P({ ...pathP, filter: 'v', include: 'v', exclude: 'v', recurse: 'w', force: 'w', stream: 'v', credential: 'v', progress: 'w' }, ['p']),
   'clear-content': P({ ...pathP, filter: 'v', include: 'v', exclude: 'v', force: 'w', stream: 'v', credential: 'v' }, ['p']),
-  'set-content': P({ ...pathP, value: 'c', encoding: 'v', filter: 'v', include: 'v', exclude: 'v', force: 'w', nonewline: 'w', stream: 'v', credential: 'v', asbytearray: 'w' }, ['p', 'c']),
-  'add-content': P({ ...pathP, value: 'c', encoding: 'v', filter: 'v', include: 'v', exclude: 'v', force: 'w', nonewline: 'w', stream: 'v', credential: 'v' }, ['p', 'c']),
+  'set-content': P({ ...pathP, value: 'c', encoding: 'v', filter: 'v', include: 'v', exclude: 'v', force: 'w', nonewline: 'w', stream: 'v', credential: 'v', asbytearray: 'w', asbytestream: 'w', passthru: 'w', raw: 'w', readcount: 'v', usetransaction: 'w' }, ['p', 'c']),
+  'add-content': P({ ...pathP, value: 'c', encoding: 'v', filter: 'v', include: 'v', exclude: 'v', force: 'w', nonewline: 'w', stream: 'v', credential: 'v', asbytestream: 'w', passthru: 'w', usetransaction: 'w' }, ['p', 'c']),
   'set-item': P({ ...pathP, value: 'c', force: 'w', filter: 'v', include: 'v', exclude: 'v', credential: 'v' }, ['p', 'c']),
   'out-file': P({ filepath: 'p', literalpath: 'p', path: 'p', inputobject: 'c', encoding: 'v', width: 'v', append: 'w', force: 'w', nonewline: 'w', noclobber: 'w' }, ['p']),
   'tee-object': P({ filepath: 'p', literalpath: 'p', inputobject: 'c', append: 'w' }, ['p']),
@@ -277,12 +312,26 @@ export function copyEnds(seg: Segment): { dest: Word; sources: Word[] } | null {
     return dest ? { dest, sources: seg.argv.slice(1).filter(w => !w.text.startsWith('-') && w !== dest) } : null;
   }
   if (name === 'ln') { const ops = operandsOf(args, name, d); return ops.length >= 2 ? { dest: ops[ops.length - 1], sources: ops.slice(0, -1) } : null; }
+  if (name === 'robocopy') { const ops = operandsOf(args, name, d); return ops[1] ? { dest: ops[1], sources: [ops[0]] } : null; }
+  if (name === 'rsync') { const ops: Word[] = []; for (let k = 0; k < args.length; k++) { if (RSYNC_VALUED.has(args[k].text)) { k++; continue; } if (!isSwitch(args[k], name, d)) ops.push(args[k]); } return ops.length ? { dest: ops[ops.length - 1], sources: ops.slice(0, -1) } : null; }
   if (COPY.has(name) || name === 'mv' || name === 'move') {
     const td = targetDir(args), ops = operandsOf(args, name, d);
     const dest = td ?? (ops.length ? ops[ops.length - 1] : null);
     return dest ? { dest, sources: td ? ops : ops.slice(0, -1) } : null;
   }
   return null;
+}
+
+/** The non-flag, non-dynamic operand words of a segment (what T4-UNKNOWN-CMD judges for a command in no table). */
+export function plainOperands(seg: Segment): Word[] {
+  const name = commandName(seg.argv[0]);
+  return seg.argv.slice(1).filter(w => !isSwitch(w, name, seg.dialect) && !w.dynamic);
+}
+
+// PowerShell cmdlets whose pipeline input is the items (paths) they act on (deleted, moved, renamed) — not content (T4-PIPE-FED).
+const PS_PIPE_ITEM = new Set(['remove-item', 'move-item', 'rename-item', 'clear-content', 'set-item']);
+export function isPsPipeItem(seg: Segment): boolean {
+  return seg.dialect === 'powershell' && seg.argv.length > 0 && PS_PIPE_ITEM.has(PS_ALIAS[commandName(seg.argv[0])] ?? commandName(seg.argv[0]));
 }
 
 /** New-Item's -Path joined to -Name, for the self rule (so `-Path .claude -Name settings.local.json` is seen). */

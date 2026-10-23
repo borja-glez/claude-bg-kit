@@ -28,7 +28,15 @@ export interface Segment {
   dynamicArgs: boolean;
 }
 
-export const NULL_SINKS: readonly string[] = ['/dev/null', 'NUL', 'nul', '$null'];
+/** T4-SINKS: the devices a write lands in without touching a file (plus /dev/fd/<n>); `$null` only in powershell. */
+export const NULL_SINKS: readonly string[] = ['/dev/null', '/dev/stdout', '/dev/stderr', '/dev/tty', 'NUL', 'nul', 'CON', 'con', '$null'];
+
+/** Whether a word's text is a null sink or a standard stream in its dialect (never a file target). */
+export function isNullSink(text: string, d: Dialect): boolean {
+  if (/^\/dev\/fd\/\d+$/.test(text)) return true;
+  if (text === '$null') return d === 'powershell';
+  return NULL_SINKS.some(x => (d === 'bash' ? x === text : x.toLowerCase() === text.toLowerCase()));
+}
 
 /** H6: the name of a command for comparing: its basename, without a leading `\` or an .exe/.cmd/.bat/.ps1 extension, lower-cased. */
 export function commandName(w: Word): string {
@@ -77,8 +85,7 @@ const plain = (w: Raw): boolean => !w.dyn && !/[^u]/.test(w.mask);
 const pub = (w: Raw): Word => ({ text: w.text, dynamic: isDyn(w), glob: w.glob });
 const nameOf = (w: Raw): string => commandName(pub(w));
 const cut = (w: Raw, a: number, b?: number): Raw => ({ ...w, text: w.text.slice(a, b), mask: w.mask.slice(a, b) });
-const isSink = (w: Raw, d: Dialect): boolean =>
-  !isDyn(w) && NULL_SINKS.some(x => (d === 'bash' ? x === w.text : x.toLowerCase() === w.text.toLowerCase()));
+const isSink = (w: Raw, d: Dialect): boolean => !isDyn(w) && isNullSink(w.text, d);
 
 // PowerShell takes the typographic quotes as quotes too.
 const SQ = "'‘’‚‛", DQ = '"“”„';
