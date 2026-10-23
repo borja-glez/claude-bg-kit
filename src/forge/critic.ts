@@ -11,7 +11,8 @@ export interface CriticVerdict {
 /** Free text from the critic: control characters out, trimmed, cut to CRITIC_TEXT_MAX; '' when it is not text. */
 function clean(x: unknown): string {
   // eslint-disable-next-line no-control-regex
-  return typeof x === 'string' ? x.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ').trim().slice(0, CRITIC_TEXT_MAX) : '';
+  // Cut by code points, so a surrogate pair is never split.
+  return typeof x === 'string' ? Array.from(x.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ').trim()).slice(0, CRITIC_TEXT_MAX).join('') : '';
 }
 
 /**
@@ -31,6 +32,8 @@ export function readVerdicts(text: string): CriticVerdict[] {
     const o = e as Record<string, unknown>;
     const verdict = (CRITIC_VERDICTS as readonly unknown[]).includes(o.verdict) ? o.verdict as CriticVerdict['verdict'] : null;
     if (typeof o.id !== 'string' || !PROPOSAL_ID.test(o.id) || seen.has(o.id)) continue;
+    // The first entry for an id is the one that counts, valid or not: a critic that contradicts itself never passes.
+    seen.add(o.id);
     if (typeof o.digest !== 'string' || !/^[0-9a-f]{64}$/.test(o.digest) || !verdict) continue;
     const why = clean(o.why);
     if (!why) continue;
@@ -38,7 +41,6 @@ export function readVerdicts(text: string): CriticVerdict[] {
     const loses = clean(o.loses);
     if (verdict === 'adapt' && !changes) continue;
     if (verdict === 'clash' && !loses) continue;
-    seen.add(o.id);
     out.push({ id: o.id, digest: o.digest, verdict, why, ...(verdict === 'adapt' ? { changes } : {}), ...(verdict === 'clash' ? { loses } : {}) });
   }
   return out;
@@ -49,7 +51,7 @@ export function proposalBatch(root: string, ids: string[]): { proposals: { id: s
   const byId = new Map(loadProposals(root).map(({ id, ...doc }) => [id, doc as ProposalDoc]));
   const proposals: { id: string; digest: string; doc: ProposalDoc }[] = [];
   const missing: string[] = [];
-  for (const id of ids) {
+  for (const id of new Set(ids)) {
     const doc = byId.get(id);
     if (doc) proposals.push({ id, digest: proposalDigest(id, doc), doc }); else missing.push(id);
   }

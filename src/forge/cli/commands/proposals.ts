@@ -1,6 +1,5 @@
 import type { Command } from '../context.js';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { proposalBatch } from '../../critic.js';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir } from '../../ledger.js';
 import { parsePlan, PlanError } from '../../../lib/plan.js';
@@ -14,6 +13,7 @@ import {
 } from '../../../lib/proposals.js';
 import { PAGE_RULES } from '../../../lib/publish.js';
 import { autoApprovable } from '../../policy.js';
+import { proposalBatch } from '../../critic.js';
 import { proposalToTask, proposalOfIncludes, proposalsOfIncludes } from '../../to-task.js';
 import type { PlanTask } from '../../../lib/types.js';
 import { parseDocument } from 'yaml';
@@ -343,10 +343,13 @@ export const command: Command = (args, ctx) => {
       return json({ id, taskId: task.id, write: { taskId: task.id } });
     }
     case 'batch': {
-      // The ids are the positional arguments up to the first flag.
-      const ids = rest.slice(0, rest.findIndex(a => a.startsWith('--')) < 0 ? rest.length : rest.findIndex(a => a.startsWith('--')));
+      // The ids are every argument but --out and its value: an id after a flag still counts, and any other flag is refused.
       const out = subFlag('out');
       if (!out) throw new UsageError('proposals batch: --out is required');
+      const at = rest.indexOf('--out');
+      const ids = rest.filter((_, i) => i !== at && i !== at + 1);
+      const flag = ids.find(a => a.startsWith('--'));
+      if (flag) throw new UsageError(`proposals batch: unknown option ${flag}`);
       if (ids.length === 0) throw new UsageError('proposals batch: at least one proposal id is required');
       for (const id of ids) if (!PROPOSAL_ID.test(id)) throw new UsageError(`proposals batch: ${id} is not a proposal id (p + 14 digits + 4 letters/digits)`);
       const batch = proposalBatch(io.cwd, ids);

@@ -27,7 +27,22 @@ describe('readVerdicts', () => {
     expect(v[0].changes).toHaveLength(CRITIC_TEXT_MAX);
     expect(readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: D, verdict: 'clash', why: 'w', loses: 'the solo focus' }] }))[0]).toMatchObject({ verdict: 'clash', loses: 'the solo focus' });
   });
+  it('counts the first entry of an id even when it is malformed, so a contradicting critic never passes', () => {
+    const text = JSON.stringify({ verdicts: [{ id: ID, digest: D, verdict: 'drop', why: ' ' }, { id: ID, digest: D, verdict: 'keep', why: 'fine' }] });
+    expect(readVerdicts(text)).toEqual([]);
+  });
+  it('ignores extra keys, cleans control characters, takes only lowercase hex digests and cuts by code points', () => {
+    const ctl = String.fromCharCode(7);
+    const v = readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: D, verdict: 'keep', why: `a${ctl}b`, extra: 1 }] }));
+    expect(v).toEqual([{ id: ID, digest: D, verdict: 'keep', why: 'a b' }]);
+    expect(readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: 'A'.repeat(64), verdict: 'keep', why: 'x' }] }))).toEqual([]);
+    const long = readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: D, verdict: 'keep', why: '\u{1F600}'.repeat(1500) }] }));
+    expect(Array.from(long[0].why)).toHaveLength(CRITIC_TEXT_MAX);
+    expect(long[0].why.endsWith('\u{1F600}')).toBe(true);
+  });
   it('is empty for text that is not a verdicts file', () => {
+    expect(readVerdicts('[]')).toEqual([]);
+    expect(readVerdicts('3')).toEqual([]);
     expect(readVerdicts('nope')).toEqual([]);
     expect(readVerdicts('{"verdicts": 3}')).toEqual([]);
   });
@@ -44,6 +59,13 @@ describe('proposals batch', () => {
     expect(b.proposals[0]).toMatchObject({ id, digest: proposalDigest(id, b.proposals[0].doc) });
     expect(proposalBatch(root, [id]).proposals).toHaveLength(1);
     expect(run(['proposals', 'batch', '../x', '--out', 'b.json'], { cwd: root, now: () => new Date(), env: {} }).code).toBe(2);
+  });
+  it('lists a repeated id once, reads an id after --out, and refuses another flag', () => {
+    const root = tmp('batch-ids-');
+    const r = run(['proposals', 'batch', '--out', 'b.json', 'p20261022100000none', 'p20261022100000none'], { cwd: root, now: () => new Date(), env: {} });
+    expect(JSON.parse(r.stdout)).toMatchObject({ count: 0, missing: ['p20261022100000none'] });
+    expect(run(['proposals', 'batch', 'p20261022100000none', '--out', 'b.json', '--x'], { cwd: root, now: () => new Date(), env: {} }).code).toBe(2);
+    expect(run(['proposals', 'batch', '--out', 'b.json', '../y'], { cwd: root, now: () => new Date(), env: {} }).code).toBe(2);
   });
   it('creates the folder of --out', () => {
     const root = tmp('batch-dir-');
