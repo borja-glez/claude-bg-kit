@@ -3,7 +3,7 @@ import { UsageError } from '../errors.js';
 import { mainCheckout } from '../../local.js';
 import { parseRun, readRunText } from '../../run.js';
 import { blockedDecision, markNoted, notedCount, readBlocked } from '../../autonomous.js';
-import { addDecision, decisionNoteId, decisionWrites, DecisionInputError } from '../../decisions.js';
+import { addDecision, decisionNoteId, decisionWrites, markPublished, DecisionInputError } from '../../decisions.js';
 
 export const command: Command = (args, ctx) => {
   const { io, flag, has, json } = ctx;
@@ -42,6 +42,8 @@ export const command: Command = (args, ctx) => {
         }
       }
       if (all.length > start) markNoted(main, auto.runId, all.length);
+      // 6b-2: the notes it prints are these decisions' publication: decision publish does not print them again.
+      if (session && decisions.length) markPublished(main, decisions);
       return json({ noted: decisions.length, decisions, skipped, ...(session ? { publish } : {}) });
     }
     default:

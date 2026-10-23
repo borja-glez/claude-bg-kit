@@ -8,6 +8,9 @@ import type { ExecutionState } from '../src/lib/execution-state.js';
 import { seedExecution } from './helpers/execution.js';
 import { useTempDirs } from './helpers/tmp.js';
 
+// The setup file loads trust.ts, which (6b-2) imports execution.ts through autonomous.ts: drop that cached copy so this
+// file's own import of it meets the node:fs mock below (vitest does not mock a module a setup file imported).
+vi.hoisted(() => { vi.resetModules(); });
 const refuse = vi.hoisted(() => ({ left: 0, code: 'EPERM', calls: 0 }));
 vi.mock('node:fs', async importOriginal => {
   const fs = await importOriginal<typeof import('node:fs')>();

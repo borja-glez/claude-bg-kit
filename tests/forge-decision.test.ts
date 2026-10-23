@@ -337,3 +337,29 @@ describe('decisions with why not and trade-offs (6b-1)', () => {
     expect(renderDecisionsMd(allDecisions(root), 'reparto', 'en')).toContain('  - redis · Why not: one more service to run · Trade-offs: faster reads; another process');
   });
 });
+
+describe('decision publish (6b-2)', () => {
+  const cli = (args: string[]) => JSON.parse(run(args, { cwd: root, now: () => new Date(at(5)), env: {} }).stdout);
+  it('prints the notes of the automatic decisions not published yet, once', () => {
+    addDecision(root, INPUT, { ts: at(0) });
+    addDecision(root, { ...INPUT, what: 'otra', by: 'user' }, { ts: at(1) });
+    writeFileSync(path.join(root, 'd.json'), JSON.stringify({ ...INPUT, what: 'tercera' }));
+    cli(['decision', 'add', '--data-file', 'd.json', '--session', 'main']);
+    const r = cli(['decision', 'publish', '--session', 'main', '--since', at(0)]);
+    expect(r.published).toBe(1);
+    expect(r.publish.map((w: { data: { decision: { what: string } } }) => w.data.decision.what)).toEqual(['diseño aprobado (v4)']);
+    expect(cli(['decision', 'publish', '--session', 'main', '--since', at(0)])).toEqual({ published: 0, publish: [] });
+  });
+  it('needs --session and a date', () => {
+    expect(run(['decision', 'publish', '--since', at(0)], { cwd: root, now: () => new Date(at(5)), env: {} }).code).toBe(2);
+    expect(run(['decision', 'publish', '--session', 'main'], { cwd: root, now: () => new Date(at(5)), env: {} }).code).toBe(2);
+  });
+  it('--run publishes only the decisions of that run, and leaves the others for later (M-8)', () => {
+    addDecision(root, INPUT, { ts: at(0), runId: 'spike-x' });
+    addDecision(root, { ...INPUT, what: 'attended' }, { ts: at(1), runId: 'r1' });
+    const r = cli(['decision', 'publish', '--session', 'main', '--since', at(0), '--run', 'spike-x']);
+    expect(r.publish.map((w: { data: { decision: { what: string } } }) => w.data.decision.what)).toEqual(['diseño aprobado (v4)']);
+    expect(cli(['decision', 'publish', '--session', 'main', '--since', at(0)]).publish.map((w: { data: { decision: { what: string } } }) => w.data.decision.what)).toEqual(['attended']);
+    expect(run(['decision', 'publish', '--session', 'main', '--since', at(0), '--run', '../x'], { cwd: root, now: () => new Date(at(5)), env: {} }).code).toBe(2);
+  });
+});

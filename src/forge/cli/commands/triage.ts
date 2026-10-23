@@ -4,7 +4,7 @@ import { isSafeId } from '../../../lib/execution-state.js';
 import { loadConfig } from '../../config.js';
 import { workRel } from '../../task-ref.js';
 import { readLocal, updateLocal } from '../../local.js';
-import { noteOnce, trustIn, trustOutput } from '../../trust.js';
+import { noteOnce, trustFor, trustOutput } from '../../trust.js';
 import { defaultGit } from '../exec.js';
 import { triageCore } from '../shared.js';
 
@@ -23,8 +23,9 @@ export const command: Command = (args, ctx) => {
   // D-08: the task's work folder, by project for a plan task (.forge/work/<project>/<id>).
   const work = t.task && isSafeId(t.task) ? { work: workRel({ project: t.project, task: t.task }) } : {};
   // I-03: the commands of the config (of the code checked, --cwd) need the person's trust before forge runs them:
-  // `trust`, with its question in the announcement's language and `note` the first time this hash is asked.
-  const trust = trustIn(repoDir, loadConfig(repoDir));
+  // `trust`, with its question in the announcement's language and `note` the first time this hash is asked. 6b-2: inside
+  // an active autonomous run, the run trusts its own (trustFor).
+  const trust = trustFor(repoDir, loadConfig(repoDir), ts());
   const asked = trust.state === 'ask' || trust.state === 'changed'
     ? { trust: trustOutput(trust, t.locale === 'es', repoDir, noteOnce(repoDir, trust.hash!)) } : {};
   return json({ ...t.output, ...work, ...untracked, ...asked });

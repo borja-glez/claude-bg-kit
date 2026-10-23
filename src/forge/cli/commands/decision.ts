@@ -4,10 +4,15 @@ import path from 'node:path';
 import { readExecution } from '../../execution.js';
 import { UsageError } from '../errors.js';
 import { mainCheckout } from '../../local.js';
-import { addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionNoteId, decisionWrites, shasOutside, shaCommits, NOTE_ID, DecisionInputError } from '../../decisions.js';
+import {
+  addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionNoteId, decisionWrites, markPublished, publishedNs, shasOutside, shaCommits, NOTE_ID, DecisionInputError,
+} from '../../decisions.js';
+import { readEvents } from '../../ledger.js';
 import { defaultGit } from '../exec.js';
 import { normalizeNote } from '../../../lib/notes.js';
-import { SHA, TASK_ID, decisionScope, scopeFileName } from '../../../lib/decisions.js';
+import { RUN_ID, SHA, TASK_ID, decisionScope, scopeFileName } from '../../../lib/decisions.js';
+
+const SESSION = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
 
 export const command: Command = (args, ctx) => {
   const { io, repoDir, flag, has, json, ts } = ctx;
@@ -24,7 +29,7 @@ export const command: Command = (args, ctx) => {
     // H-17: `--session` (this session's waypoint id) makes it print the roadmap writes; `resolves` (the question note
     // the decision answers) is not part of the decision itself.
     const session = flag('session');
-    if (has('session') && (!session || !/^[A-Za-z0-9_\-.~:@+]{1,80}$/.test(session))) throw new UsageError('decision add: --session needs the waypoint session id');
+    if (has('session') && (!session || !SESSION.test(session))) throw new UsageError('decision add: --session needs the waypoint session id');
     const { resolves, ...decision } = raw as Record<string, unknown>;
     if (resolves !== undefined && (typeof resolves !== 'string' || !NOTE_ID.test(resolves))) throw new UsageError('decision add: resolves must be the id of a note');
     // Carry 6: only --session prints the update that closes the question; without it nothing would close it.
@@ -66,6 +71,8 @@ export const command: Command = (args, ctx) => {
       const { n, event } = addDecision(root, decision, { ts: ts(), ...(task ? { task } : {}), runId: exec?.active ? exec.runId : null });
       const closes = typeof resolves === 'string' && !resolvesRefused ? resolves : null;
       const publish = session ? decisionWrites({ event, session, eid: decisionNoteId(event, session), resolves: closes }) : null;
+      // 6b-2: the note it prints is this decision's publication: decision publish does not print it again.
+      if (publish) markPublished(root, [n]);
       return json({ n, ...event, ...(publish ? { publish } : {}), ...(resolvesRefused ? { resolvesRefused } : {}) });
     } catch (e) {
       if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
@@ -77,6 +84,23 @@ export const command: Command = (args, ctx) => {
     if (since !== undefined && !Number.isFinite(Date.parse(since))) throw new UsageError(`decision list: --since must be a date, got ${since}`);
     // Carry 4: --task is that task of its project (--project, else the ledger's), never another plan's of the same id.
     return json(listDecisions(root, { task: flag('task'), ...(flag('project') !== undefined ? { project: flag('project') } : {}), run: flag('run'), since, all: has('all'), auto: has('auto') }));
+  }
+  if (sub === 'publish') {
+    // 6b-2: the roadmap notes of the decisions forge took on its own (by !== user) since --since that no command published
+    // yet, in order, for the skill to send in one batch; they count as published once printed. M-8: --run keeps that run's.
+    const session = flag('session');
+    if (!session || !SESSION.test(session)) throw new UsageError('decision publish: --session needs the waypoint session id');
+    const since = flag('since');
+    if (since === undefined || !Number.isFinite(Date.parse(since))) throw new UsageError(`decision publish: --since must be a date, got ${since ?? 'nothing'}`);
+    const runId = flag('run');
+    if (has('run') && (!runId || !RUN_ID.test(runId) || runId === '.' || runId === '..')) throw new UsageError('decision publish: --run needs a run id');
+    const done = publishedNs(root);
+    const todo = listDecisions(root, { since, ...(runId ? { run: runId } : {}), auto: true }).filter(d => !done.has(d.n));
+    // n is the decision's position among the ledger's decision events (1-based), and the ledger only grows.
+    const events = readEvents(root).filter(e => e.kind === 'decision');
+    const publish = todo.flatMap(d => decisionWrites({ event: events[d.n - 1], session, eid: decisionNoteId(events[d.n - 1], session) }));
+    if (todo.length) markPublished(root, todo.map(d => d.n));
+    return json({ published: todo.length, publish });
   }
   if (sub === 'show') {
     const n = Number(arg);
@@ -98,5 +122,5 @@ export const command: Command = (args, ctx) => {
     writeFileSync(out, renderDecisionsMd(list, scope, flag('locale') ?? 'en'));
     return json({ written: true, scope, count: list.length, path: out });
   }
-  throw new UsageError('usage: forge decision add --data-file f [--task id] [--session SID] | list [--task id] [--run id] [--since iso] [--all] [--auto] | show <n> | md --scope s [--out f] [--locale es|en]');
+  throw new UsageError('usage: forge decision add --data-file f [--task id] [--session SID] | list [--task id] [--run id] [--since iso] [--all] [--auto] | publish --session SID --since iso [--run id] | show <n> | md --scope s [--out f] [--locale es|en]');
 };

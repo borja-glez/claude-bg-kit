@@ -2,7 +2,7 @@
 // answered) and .forge/decisions.json, the small summary lens and the waypoint band read. Pure (no node:*, no zod):
 // the forge CLI, lens, the waypoint mod and the roadmap page all bundle it.
 
-export const DECISION_POINTS = ['route', 'triage', 'design-apply', 'design-approve', 'plan-confirm', 'mode', 'ruling', 'safe-path', 'takeover', 'revert', 'blocked', 'other'] as const;
+export const DECISION_POINTS = ['route', 'triage', 'design-apply', 'design-approve', 'plan-confirm', 'mode', 'ruling', 'safe-path', 'takeover', 'revert', 'blocked', 'trust', 'other'] as const;
 export type DecisionPoint = (typeof DECISION_POINTS)[number];
 export const DECISION_BY = ['auto', 'unattended', 'user'] as const;
 export type DecisionBy = (typeof DECISION_BY)[number];

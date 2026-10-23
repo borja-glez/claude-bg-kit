@@ -194,6 +194,27 @@ export function renderDecisionsMd(list: Numbered[], scope: string, locale: strin
   return out.join('\n');
 }
 
+/** 6b-2: which decisions already went to the roadmap as notes, `{ ns: number[] }`: the 2000 highest numbers marked. */
+export const publishedFile = (root: string) => path.join(root, '.forge', 'decisions-published.json');
+const PUBLISHED_MAX = 2000;
+
+/** The numbers of the decisions already published; none when the file is missing or does not read. */
+export function publishedNs(root: string): Set<number> {
+  try {
+    const ns: unknown = (JSON.parse(readFileSync(publishedFile(root), 'utf8')) as { ns?: unknown }).ns;
+    return new Set(Array.isArray(ns) ? ns.filter((n): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0) : []);
+  } catch { return new Set(); }
+}
+
+/** Marks decisions as published (a number again changes nothing), written atomically; the numbers only grow, so the oldest go first. */
+export function markPublished(root: string, ns: number[]): void {
+  const all = [...new Set([...publishedNs(root), ...ns])].sort((a, b) => a - b).slice(-PUBLISHED_MAX);
+  forgeDir(root);
+  const file = publishedFile(root);
+  const tmp = `${file}.${process.pid}.tmp`;
+  try { writeFileSync(tmp, JSON.stringify({ ns: all }) + '\n'); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
+}
+
 /** H-17: a note id of the roadmap: the same rule as the page's (carry 6, one regex). */
 export { NOTE_ID };
 

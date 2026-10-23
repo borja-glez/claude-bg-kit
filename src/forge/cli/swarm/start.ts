@@ -15,7 +15,7 @@ import { planOfLoose, writeLoose, readLoose, type LooseTask } from '../../loose.
 import { startAnnounce } from '../../swarm.js';
 // auth's isForgeBranch (any forge/… branch: merging into it needs no answer) is not cleanup's (task/* and forge/run-*).
 import { checkMofAuth, isForgeBranch as isForgeTarget, readAuths, useAuth, type MofReason } from '../../auth.js';
-import { noteOnce, trustIn, trustOutput } from '../../trust.js';
+import { noteOnce, trustFor, trustOutput } from '../../trust.js';
 import { pruneRunState } from '../../cleanup.js';
 import { type SetupResult, runSetup, unionLearned, LOCAL_STATE } from './setup.js';
 import { ID, worktreeHolding, loadPlanArg, checkPlanProject, loadTasksArg, boundLiveness, boundElsewhere, personLocaleArg, spanish } from './shared.js';
@@ -56,7 +56,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   const locale = personLocaleArg(rest);
   // I-03: a run runs the config's commands (swarm.setup, the validators). Without the person's trust for them nothing
   // moves: exit 3 with `trust`, whose question the coordinator asks before it starts again.
-  const trust = trustIn(io.cwd, config);
+  const trust = trustFor(io.cwd, config, iso);
   if (trust.state === 'ask' || trust.state === 'changed') {
     const out = { started: false, trust: trustOutput(trust, spanish(locale, io.cwd, project), io.cwd, noteOnce(io.cwd, trust.hash!)) };
     return { code: 3, stdout: `${JSON.stringify(out, null, 2)}\n`, stderr: '' };

@@ -20,7 +20,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   // worktree's, those of the task worktrees not integrated yet), nothing of it runs: the run stalls here, and the
   // first stall over those commands says so (`note`: leave one question note).
   const untrusted = untrustedFor([io.cwd, ...(e.kind === 'plan' ? [runWorktree(io.cwd)] : []),
-    ...Object.values(e.tasks).filter(t => t.status !== 'integrated' && t.worktree).map(t => t.worktree)]);
+    ...Object.values(e.tasks).filter(t => t.status !== 'integrated' && t.worktree).map(t => t.worktree)], iso);
   if (untrusted) {
     const note = noteOnce(io.cwd, untrusted.trust.hash!);
     // Only the run this tick read, still active: one stopped or closed meanwhile stays as it is (K2-02).

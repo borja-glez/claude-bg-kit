@@ -7,13 +7,22 @@
 // checkout, clone or archive of the repository writes it, so a repository cannot ship its own answer, and the worktrees of
 // a clone share it. Outside a git repository forge keeps no answer and asks every time. A hand edit of that file (or the
 // model answering for the person) still gets past it: it stops a command that changed unseen, not a forgery on this machine.
+// 6b-2: starting an autonomous profile delegates that trust for its run. Inside the run's worktrees, a new or changed set of
+// commands is trusted by forge itself (trustFor, never the model), only for that run, once each command passes the rules the
+// guard would apply to it as a Bash call of the run; it is recorded with the trust and noted as a `trust` decision.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { RUN_ID } from '../lib/decisions.js';
 import { samePath } from '../lib/worktree.js';
+import { appendBlocked, autonomousRun, guardRulesFor, judgeGuard, redactSecrets } from './autonomous.js';
 import { loadConfig, type ForgeConfig } from './config.js';
-import { gitEnv, gitFailure } from './local.js';
+import { addDecision } from './decisions.js';
+import { confinedIn, type GuardCtx, type GuardVerdict } from './guard.js';
+import { gitEnv, gitFailure, mainCheckout } from './local.js';
+import { parseRun, readRunText } from './run.js';
+import type { Dialect } from './shell-words.js';
 
 export interface ConfigCommand { name: string; cmd: string }
 export interface CommandChange { name: string; before: string | null; after: string | null }
@@ -25,8 +34,11 @@ export interface TrustOutput {
 }
 /** The person's last answer with its hash and its commands (to show what changed next time), and every set allowed so far. */
 export interface CommandsTrust { state: 'allowed' | 'denied'; hash: string; list: ConfigCommand[]; at: string; allowed: string[] }
-/** trust.json: the answer, and the hashes already asked about (one question note per hash). */
-export interface TrustRecord { commands?: CommandsTrust; commandsAsked?: string[] }
+/** 6b-2: what an autonomous run trusted on its own: the hashes it trusted (`list`: the commands of the last one, to say what
+ *  changed next time), those the guard's rules refused (each noted once), and when the entry last changed. */
+export interface Delegation { runId: string; hashes: string[]; refused: string[]; at: string; list: ConfigCommand[] }
+/** trust.json: the answer, the hashes already asked about (one question note per hash) and the runs' delegations (6b-2). */
+export interface TrustRecord { commands?: CommandsTrust; commandsAsked?: string[]; delegated?: Delegation[] }
 
 /** The label of the yes of the trust question. */
 export const TRUST_YES = { es: 'Sí, confío', en: 'Yes, I trust them' } as const;
@@ -80,17 +92,22 @@ function diff(before: ConfigCommand[], after: ConfigCommand[]): CommandChange[] 
   return names.map(n => ({ name: n, before: of(before, n), after: of(after, n) })).filter(c => c.before !== c.after);
 }
 
+/** The delegation of a run in a record (the first, should a hand edit repeat it). */
+const delegationOf = (record: Pick<TrustRecord, 'delegated'>, runId: string): Delegation | undefined => record.delegated?.find(d => d.runId === runId);
+
 /**
  * The person's trust in the commands of a config: free (none), allowed, denied, ask (never answered) or changed. A hash
  * the last answer denied is never allowed, whatever `allowed` holds. `changed` lists what changed only from a set the
- * person allowed: after a No there is nothing to compare with, and the question lists every command.
+ * person allowed: after a No there is nothing to compare with, and the question lists every command. 6b-2: with
+ * `delegatedTo`, the autonomous run whose worktree the config is in, a hash that run delegated counts as allowed.
  */
-export function trustOf(config: Pick<ForgeConfig, 'validators' | 'swarm'>, record: Pick<TrustRecord, 'commands'>): Trust {
+export function trustOf(config: Pick<ForgeConfig, 'validators' | 'swarm'>, record: Pick<TrustRecord, 'commands' | 'delegated'>, delegatedTo?: string): Trust {
   const commands = configCommands(config);
   if (!commands.length) return { state: 'free', hash: null, commands, changed: [] };
   const hash = commandsHash(commands);
   const rec = record.commands;
   let state: TrustState = !rec ? 'ask' : rec.state === 'denied' && rec.hash === hash ? 'denied' : rec.allowed.includes(hash) ? 'allowed' : 'changed';
+  if ((state === 'ask' || state === 'changed') && delegatedTo !== undefined && delegationOf(record, delegatedTo)?.hashes.includes(hash)) state = 'allowed';
   if (assumeTrusted && (state === 'ask' || state === 'changed')) state = 'allowed';
   return { state, hash, commands, changed: state === 'changed' && rec?.state === 'allowed' ? diff(rec.list, commands) : [] };
 }
@@ -183,18 +200,32 @@ export function trustPlace(dir: string): TrustPlace {
 /** trustPlace's file: null outside a git repository or when git cannot say. */
 export const trustFile = (dir: string): string | null => trustPlace(dir).file;
 
+/** A list of commands as written: entries that are not { name, cmd } strings are dropped, the rest clipped. */
+const commandListOf = (x: unknown): ConfigCommand[] => (Array.isArray(x) ? x : [])
+  .filter((c): c is ConfigCommand => !!c && typeof c === 'object' && typeof (c as { name?: unknown }).name === 'string' && typeof (c as { cmd?: unknown }).cmd === 'string')
+  .slice(0, 100).map(c => ({ name: c.name.slice(0, 200), cmd: c.cmd.slice(0, 4000) }));
+
 /** A commands record as written; anything malformed counts as no answer (forge asks again). A denied hash is never in
  *  `allowed`; an allowed one always is. */
 function commandsTrustOf(x: unknown): CommandsTrust | undefined {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return undefined;
   const o = x as Record<string, unknown>;
   if ((o.state !== 'allowed' && o.state !== 'denied') || typeof o.hash !== 'string' || !HASH.test(o.hash)) return undefined;
-  const list = (Array.isArray(o.list) ? o.list : [])
-    .filter((c): c is ConfigCommand => !!c && typeof c === 'object' && typeof (c as { name?: unknown }).name === 'string' && typeof (c as { cmd?: unknown }).cmd === 'string')
-    .slice(0, 100).map(c => ({ name: c.name.slice(0, 200), cmd: c.cmd.slice(0, 4000) }));
+  const list = commandListOf(o.list);
   const allowed = [...new Set((Array.isArray(o.allowed) ? o.allowed : []).filter((h): h is string => typeof h === 'string' && HASH.test(h) && (o.state === 'allowed' || h !== o.hash)))];
   if (o.state === 'allowed' && !allowed.includes(o.hash)) allowed.push(o.hash);
   return { state: o.state, hash: o.hash, list, at: typeof o.at === 'string' ? o.at : '', allowed: allowed.slice(-MAX_KEPT) };
+}
+
+/** Distinct well-formed hashes, the last MAX_KEPT. */
+const hashesOf = (x: unknown): string[] => [...new Set((Array.isArray(x) ? x : []).filter((h): h is string => typeof h === 'string' && HASH.test(h)))].slice(-MAX_KEPT);
+
+/** A delegation as written; null without a run id forge could have written (it is no trust then). */
+function delegationRecordOf(x: unknown): Delegation | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const o = x as Record<string, unknown>;
+  if (typeof o.runId !== 'string' || !RUN_ID.test(o.runId) || o.runId === '.' || o.runId === '..') return null;
+  return { runId: o.runId, hashes: hashesOf(o.hashes), refused: hashesOf(o.refused), at: typeof o.at === 'string' ? o.at : '', list: commandListOf(o.list) };
 }
 
 function readAt(file: string | null): TrustRecord {
@@ -205,7 +236,8 @@ function readAt(file: string | null): TrustRecord {
   const o = raw as Record<string, unknown>;
   const commands = commandsTrustOf(o.commands);
   const asked = Array.isArray(o.commandsAsked) ? o.commandsAsked.filter((h): h is string => typeof h === 'string' && HASH.test(h)).slice(-MAX_KEPT) : [];
-  return { ...(commands ? { commands } : {}), ...(asked.length ? { commandsAsked: asked } : {}) };
+  const delegated = (Array.isArray(o.delegated) ? o.delegated : []).map(delegationRecordOf).filter((d): d is Delegation => d !== null).slice(-MAX_KEPT);
+  return { ...(commands ? { commands } : {}), ...(asked.length ? { commandsAsked: asked } : {}), ...(delegated.length ? { delegated } : {}) };
 }
 
 /** The answer kept for the repository `dir` is in (trustFile); nothing outside a git repository. */
@@ -225,13 +257,129 @@ export function updateTrust(dir: string, fn: (r: TrustRecord) => TrustRecord): {
   return { ok: true };
 }
 
-/** The trust in a config of `dir`; the answer is read only when the config has commands. */
-export const trustIn = (dir: string, config: ForgeConfig): Trust => trustOf(config, configCommands(config).length ? readTrust(dir) : {});
+type ActiveRun = NonNullable<ReturnType<typeof autonomousRun>>;
+
+/** The active autonomous run of `dir`'s main checkout when one of its dirs holds `dir` (confinedIn, H-2: a spelling never
+ *  folds toward inside), with that main checkout; null otherwise. Reads only. */
+function runOf(dir: string): { main: string; run: ActiveRun } | null {
+  const main = mainCheckout(dir);
+  const run = autonomousRun(main);
+  return run && run.dirs.some(d => confinedIn(dir, d)) ? { main, run } : null;
+}
+
+/** The trust in a config of `dir`; the answer is read only when the config has commands. It only reads (6a's hook answer
+ *  calls it): a hash the active autonomous run of `dir` delegated is allowed, and the run is looked for only when the answer
+ *  alone does not trust the commands and the record holds a delegation. */
+export function trustIn(dir: string, config: ForgeConfig): Trust {
+  if (!configCommands(config).length) return trustOf(config, {});
+  const record = readTrust(dir);
+  const t = trustOf(config, record);
+  if ((t.state !== 'ask' && t.state !== 'changed') || !record.delegated?.length) return t;
+  const found = runOf(dir);
+  return found ? trustOf(config, record, found.run.ctx.runId) : t;
+}
+
+/** The dialect forge's own runs of the config's commands are read in: they run with `shell: true`, cmd.exe on win32 (H-3). */
+const CONFIG_DIALECT: Dialect = process.platform === 'win32' ? 'cmd' : 'bash';
+
+/**
+ * 6b-2: the config's commands the guard would deny if the model ran them by Bash in that run, in order. Each is judged
+ * (judgeGuard, L-1: a rule that throws denies) with the rules and a plain context (L-2) the guard gives that run's session:
+ * its main checkout, the git common dir of `dir` and the run. `dialect` is for tests.
+ */
+export function configGuardDenials(dir: string, commands: ConfigCommand[], run: ActiveRun, sessionId: string | null,
+  dialect: Dialect = CONFIG_DIALECT): { command: ConfigCommand; verdict: Extract<GuardVerdict, { decision: 'deny' }> }[] {
+  const file = trustPlace(dir).file;
+  const ctx: GuardCtx = { main: run.ctx.main, gitCommonDir: file ? path.dirname(path.dirname(file)) : null, autonomous: run.ctx };
+  const rules = guardRulesFor(ctx);
+  const out: { command: ConfigCommand; verdict: Extract<GuardVerdict, { decision: 'deny' }> }[] = [];
+  for (const command of commands) {
+    const verdict = judgeGuard({ tool_name: 'Bash', tool_input: { command: command.cmd }, ...(sessionId ? { session_id: sessionId } : {}), cwd: dir, dialect }, ctx, rules);
+    if (verdict.decision === 'deny') out.push({ command, verdict });
+  }
+  return out;
+}
+
+const cut = (s: string, max: number): string => Array.from(s).slice(0, max).join('');
+
+/**
+ * The `addDecision` input of a delegated trust: `before` is the commands the run trusted last (null the first time), and
+ * `why` each change from them (`—` for what was not there), or every command the first time; a command shows as the
+ * trust question shows it.
+ */
+export function trustDecision(before: ConfigCommand[] | null, after: ConfigCommand[], runId: string, es: boolean): Record<string, unknown> {
+  const show = (cmd: string | null) => (cmd === null ? '—' : shown(cmd).text);
+  const moved = before ? diff(before, after).map(c => `${c.name}: ${show(c.before)} → ${show(c.after)}`) : [];
+  // A name repeated in either list leaves no pairs to compare: every command then.
+  const lines = moved.length ? moved : after.map(c => `${c.name}: ${show(c.cmd)}`);
+  return {
+    point: 'trust',
+    what: es ? 'comandos de .forge/config.yaml' : 'commands of .forge/config.yaml',
+    chosen: es ? `confiar en ellos durante la ejecución ${runId}` : `trust them during run ${runId}`,
+    alternatives: [{
+      option: es ? 'preguntar a la persona' : 'ask the person',
+      whyNot: es ? 'arrancar el perfil autónomo delegó esta confianza' : 'starting the autonomous profile delegated this trust',
+    }],
+    why: cut(lines.join('; '), 500),
+    by: 'auto',
+    undo: { type: 'none', reason: es ? 'la confianza acaba con la ejecución' : 'the trust ends with the run' },
+  };
+}
+
+/** The record with the run's delegation changed by `fn` (a new one when it has none), moved last; the last MAX_KEPT runs. */
+function withDelegation(r: TrustRecord, runId: string, at: string, fn: (d: Delegation) => Omit<Delegation, 'runId' | 'at'>): TrustRecord {
+  const prev = delegationOf(r, runId) ?? { runId, hashes: [], refused: [], at, list: [] };
+  const next = fn(prev);
+  const d: Delegation = { runId, hashes: next.hashes.slice(-MAX_KEPT), refused: next.refused.slice(-MAX_KEPT), at, list: next.list };
+  return { ...r, delegated: [...(r.delegated ?? []).filter(x => x.runId !== runId), d].slice(-MAX_KEPT) };
+}
+
+/**
+ * 6b-2: `t` once the active autonomous run whose dirs hold `dir` has trusted it. A set the person must answer (ask or
+ * changed) is trusted by forge for that run, unless the guard would deny one of its commands: each denial is then a blocked
+ * action of the run and the hash is refused, noted once. Anywhere else, in any other state, or on any failure: `t` as it is.
+ */
+export function delegatedTrust(dir: string, t: Trust, at: string): Trust {
+  if ((t.state !== 'ask' && t.state !== 'changed') || t.hash === null) return t;
+  const hash = t.hash;
+  try {
+    const found = runOf(dir);
+    if (!found) return t;
+    const { main, run } = found;
+    const runId = run.ctx.runId;
+    const mine = delegationOf(readTrust(dir), runId);
+    if (mine?.refused.includes(hash)) return t;
+    // The run's session judges them, and its locale is the decision's.
+    const runState = parseRun(readRunText(main));
+    const denials = configGuardDenials(dir, t.commands, run, runState?.sessionId ?? null);
+    if (denials.length) {
+      for (const { command, verdict } of denials) {
+        // redacted before it is cut, as the hook's targets: a cut never leaves half a secret no pattern matches
+        const target = cut(redactSecrets(`${command.name}: ${command.cmd}`), 300);
+        appendBlocked(main, runId, { ts: at, rule: verdict.rule, tool: 'config', target, reason: verdict.reason, session: null });
+      }
+      updateTrust(dir, r => withDelegation(r, runId, at, d => ({ ...d, refused: [...d.refused.filter(h => h !== hash), hash] })));
+      return t;
+    }
+    // Noted before it is recorded, so no trust is ever kept without its note: a failure in between asks again (and a re-run
+    // within addDecision's window is the same decision).
+    const es = (runState?.locale ?? '').toLowerCase().startsWith('es');
+    addDecision(main, trustDecision(mine?.hashes.length ? mine.list : null, t.commands, runId, es), { ts: at, runId });
+    const saved = updateTrust(dir, r => withDelegation(r, runId, at, d => ({
+      hashes: [...d.hashes.filter(h => h !== hash), hash], refused: d.refused, list: t.commands,
+    })));
+    // Outside a git repository nothing is kept, so nothing is trusted (an autonomous run's worktree always is in one).
+    return saved.ok ? { ...t, state: 'allowed', changed: [] } : t;
+  } catch { return t; }
+}
+
+/** trustIn, then delegatedTrust: what a command that runs the config's commands uses (trustIn alone never writes). */
+export const trustFor = (dir: string, config: ForgeConfig, at: string): Trust => delegatedTrust(dir, trustIn(dir, config), at);
 
 /** loadConfig for a command that runs the config's commands: the config of `dir` as it may run (withTrust), and its state. */
-export function loadTrusted(dir: string): { config: ForgeConfig; state: TrustState } {
+export function loadTrusted(dir: string, at = new Date().toISOString()): { config: ForgeConfig; state: TrustState } {
   const config = loadConfig(dir);
-  const t = trustIn(dir, config);
+  const t = trustFor(dir, config, at);
   return { config: withTrust(config, t), state: t.state };
 }
 
@@ -239,15 +387,17 @@ export function loadTrusted(dir: string): { config: ForgeConfig; state: TrustSta
 export const loadTrustedConfig = (dir: string): ForgeConfig => loadTrusted(dir).config;
 
 /** The first of `dirs` whose config has commands without the person's trust (a config that does not parse is skipped:
- *  nothing runs with it). `dirs` are a main checkout and worktrees of it, which share one answer (that of `dirs[0]`). */
-export function untrustedFor(dirs: string[]): { dir: string; trust: Trust } | null {
+ *  nothing runs with it). `dirs` are a main checkout and worktrees of it, which share one answer (that of `dirs[0]`); a
+ *  set the answer does not trust goes through trustFor, so the active autonomous run trusts its own. */
+export function untrustedFor(dirs: string[], at: string): { dir: string; trust: Trust } | null {
   let record: TrustRecord | undefined;
   for (const dir of dirs) {
     let config: ForgeConfig;
     try { config = loadConfig(dir); } catch { continue; }
     if (!configCommands(config).length) continue;
     record ??= readTrust(dirs[0]);
-    const t = trustOf(config, record);
+    if (!['ask', 'changed'].includes(trustOf(config, record).state)) continue;
+    const t = trustFor(dir, config, at);
     if (t.state === 'ask' || t.state === 'changed') return { dir, trust: t };
   }
   return null;

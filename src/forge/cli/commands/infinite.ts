@@ -10,6 +10,8 @@ import { infinitePublish } from '../../infinite-doc.js';
 import { mainCheckout } from '../../local.js';
 import { activeProfileAt, prepareProfile, profileArgs, profileBlock, readableRun } from '../../profile.js';
 import { autonomousFor, recordSessions } from '../../autonomous.js';
+import { loadConfig, type ForgeConfig } from '../../config.js';
+import { trustFor, type TrustState } from '../../trust.js';
 import { stopContext, unownedOf, runRootOf, runReply } from '../shared.js';
 
 export const command: Command = (args, ctx) => {
@@ -77,7 +79,16 @@ export const command: Command = (args, ctx) => {
     // H-1: the session ids are on disk before run.json names them, so a run.json that does not read still guards them.
     if (autonomous) recordSessions(main, autonomous.runId, [session], autonomous.worktree);
     saveRun(main, run);
-    return json({ ...run, publish: { infinite: infinitePublish(main, run, io.now()) } });
+    // 6b-2 M-1: once the run is on disk, it trusts its worktree's commands (trustFor) and prints that `trust`; a config
+    // that does not load runs nothing, and one without commands needs no trust: no `trust` then.
+    let trust: { state: TrustState; hash: string } | null = null;
+    if (autonomous) {
+      let config: ForgeConfig | null = null;
+      try { config = loadConfig(autonomous.worktree); } catch { config = null; }
+      const t = config ? trustFor(autonomous.worktree, config, ts()) : null;
+      if (t?.hash) trust = { state: t.state, hash: t.hash };
+    }
+    return json({ ...run, publish: { infinite: infinitePublish(main, run, io.now()) }, ...(trust ? { trust } : {}) });
   }
   if (sub === 'status') {
     const runRoot = runRootOf(io.cwd);

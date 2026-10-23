@@ -10,7 +10,8 @@ const waypoint = JSON.parse(readFileSync('plugins/waypoint/.claude-plugin/plugin
 // files that start real processes (forge-verify-proc) and those that build git histories for verify (forge-verify-flow);
 // since 6b-1, the guard's tests on a real repository and worktree (forge-guard-autonomy, about 8 s)
 // and forge-blocked, whose M8 test records 1,005 decisions (about 9 s);
-// since 6b-2, forge-profile, whose tests prepare and start profiles on a real repository and its worktrees (about 9 s).
+// since 6b-2, forge-profile, whose tests prepare and start profiles on a real repository and its worktrees (about 9 s),
+// and forge-trust-delegated, which does the same before each delegated-trust test (about 5 s alone).
 export const SLOW = [
   'tests/forge-blocked.test.ts',
   'tests/forge-swarm-integrate.test.ts',
@@ -43,6 +44,7 @@ export const SLOW = [
   'tests/forge-verify-flow.test.ts',
   'tests/forge-guard-autonomy.test.ts',
   'tests/forge-profile.test.ts',
+  'tests/forge-trust-delegated.test.ts',
 ];
 
 // I-17: vitest 5 fails a synchronous test that outran its timeout (vitest 2 let it pass), and the slow suites take 5–20 s under load.
