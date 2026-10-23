@@ -14884,8 +14884,8 @@ var isSymbol = (w) => w.length >= 4 && (/[a-z][A-Z]/.test(w) || /^[A-Za-z]+_[A-Z
 function triage(task, repo, validators, extra, opts = {}) {
   const reasons = [];
   const text3 = String(task).slice(0, MAX_TEXT);
-  const plain2 = stripMentions(text3);
-  const headText = opts.plan ? stripMentions(String(opts.plan.title).slice(0, MAX_TEXT)) : head(plain2);
+  const plain3 = stripMentions(text3);
+  const headText = opts.plan ? stripMentions(String(opts.plan.title).slice(0, MAX_TEXT)) : head(plain3);
   const files = new Set(extra?.files);
   const named = /* @__PURE__ */ new Set();
   for (const tok of text3.match(PATH_TOKEN) ?? []) {
@@ -14904,7 +14904,7 @@ function triage(task, repo, validators, extra, opts = {}) {
     if (hits.length === 1) quoteFiles.add(hits[0]);
   }
   const located = [.../* @__PURE__ */ new Set([...files, ...quoteFiles])].sort().slice(0, MAX_FILES);
-  const zoneText = opts.plan ? headText : plain2;
+  const zoneText = opts.plan ? headText : plain3;
   const sensitive = ZONES.filter((z) => z.text.some((re) => re.test(zoneText)) || extra?.zones.includes(z.zone) || located.some((f) => z.path.test(f))).map((z) => z.zone);
   const greenfield = repo.gitOk && (repo.commits === 0 || repo.files.length < 5);
   if (!repo.gitOk) reasons.push("git unavailable");
@@ -21145,6 +21145,10 @@ function containerSegments(seg) {
   const c = containerCall(seg);
   return !c ? [] : c.unknown ? everyStart(c.inner, seg) : nested(c.inner, c.env, c.envUnk, seg);
 }
+function mountSource(v) {
+  const m = v.key === "--mount" ? /(?:^|,)\s*(?:source|src)=([^,]*)/i.exec(v.w.text) : v.key === "-v" || v.key === "--volume" ? /^((?:[A-Za-z]:)?[^:]*):/.exec(v.w.text) : null;
+  return m && m[1] ? { ...v.w, text: m[1] } : null;
+}
 function containerFiles(seg) {
   const c = containerSub(seg);
   if (c === null || c === "unknown") return null;
@@ -21153,18 +21157,20 @@ function containerFiles(seg) {
     const sc = scan2(c.args, DOCKER_CP, seg.dialect), dest = sc.ops[sc.ops.length - 1];
     if (sc.unknown) return null;
     for (const w of sc.ops) if (w !== dest || /^[^:/\\]{2,}:/.test(w.text)) skip.add(w);
-    return { skip, writes: [] };
+    return { skip, writes: [], mounts: [] };
   }
   const call2 = containerCall(seg);
-  if (!call2) return c.compose ? { skip, writes: [] } : null;
+  if (!call2) return c.compose ? { skip, writes: [], mounts: [] } : null;
   if (call2.unknown) return null;
-  const writes = [];
+  const writes = [], mounts2 = [];
   for (const w of call2.inner) skip.add(w);
   for (const v of call2.opts) {
     if (v.key === "--cidfile") writes.push(v.w);
     else skip.add(v.w);
+    const src = mountSource(v);
+    if (src) mounts2.push(src);
   }
-  return { skip, writes };
+  return { skip, writes, mounts: mounts2 };
 }
 function withContainers(seg, depth = 0) {
   return [seg, ...depth < 3 ? containerSegments(seg).flatMap((s2) => withContainers(s2, depth + 1)) : []];
@@ -22240,6 +22246,7 @@ function publisherDeny(name0, args) {
     return rem.every((w) => !w.dynamic && isLocalHost(hostToken(w.text))) ? null : netWrite("rsync copies to another host");
   }
   if (name === "git" && o0 === "send-email") return netWrite("git send-email sends patches off this machine");
+  if (name === "git" && o0 === "svn" && ["dcommit", "branch", "tag"].includes(words4[1] ?? "")) return netWrite(`git svn ${words4[1]} sends commits off this machine`);
   if ((name === "npm" || name === "pnpm" || name === "yarn" || name === "bun") && !RUN_SUBS.has(o0) && has(NPM_PUBLISH)) return netWrite(`${name} publishes a package off this machine`);
   if (name === "cargo" && has(/* @__PURE__ */ new Set(["publish", "yank", "owner"]))) return netWrite("cargo reaches the registry");
   if (name === "twine" && words4.includes("upload")) return netWrite("twine upload reaches the registry");
@@ -23205,9 +23212,28 @@ function mount(word2, seg, ctx) {
   const ro = ["readonly", "ro"].some((k) => kv.has(k) && !/^(?:false|0)$/i.test(kv.get(k)));
   return source(src, ro && type !== "volume", seg, ctx);
 }
+var HOST_CAPS = /* @__PURE__ */ new Set(["all", "sys_admin", "sys_ptrace", "sys_module", "sys_rawio", "dac_read_search"]);
+var HOST_NAMESPACES = /* @__PURE__ */ new Set(["--pid", "--ipc", "--uts", "--userns", "--cgroupns"]);
+var UNCONFINED = /* @__PURE__ */ new Set(["seccomp=unconfined", "apparmor=unconfined", "label=disable", "systempaths=unconfined"]);
+function runOptions2(args, table, seg) {
+  const h = head2(args, table, seg.dialect);
+  return h.unknown ? scan2(args, DOCKER_RUN, seg.dialect) : h.sc;
+}
+function hostAccess(sc) {
+  const host = (what) => ({ what: `${what} hands the container this machine past its mounts`, unknown: false, hint: "host" });
+  if (sc.flags.has("--privileged")) return host("--privileged");
+  for (const { key, w } of sc.vals) {
+    const v = w.text.trim().toLowerCase();
+    if (key === "--device") return host(`--device ${w.text}`);
+    if (w.dynamic && (key === "--cap-add" || key === "--security-opt" || HOST_NAMESPACES.has(key))) return unk(`a ${key} value only the shell names`, "host");
+    if (key === "--cap-add" && v.split(",").some((c) => HOST_CAPS.has(c.trim().replace(/^cap_/, ""))) || HOST_NAMESPACES.has(key) && v === "host" || key === "--security-opt" && UNCONFINED.has(v.replace(":", "="))) return host(`${key} ${w.text}`);
+  }
+  return null;
+}
 function mounts(args, seg, ctx) {
-  const h = head2(args, DOCKER_RUN, seg.dialect);
-  const sc = h.unknown ? scan2(args, DOCKER_RUN, seg.dialect) : h.sc;
+  const sc = runOptions2(args, DOCKER_RUN, seg);
+  const host = hostAccess(sc);
+  if (host) return host;
   for (const v of sc.vals) {
     const r2 = v.key === "-v" || v.key === "--volume" ? volume(v.w, seg, ctx) : v.key === "--mount" ? mount(v.w, seg, ctx) : v.key === "--volumes-from" ? names2([{ ...v.w, text: v.w.text.replace(/:(?:ro|rw)$/, "") }], "container", "run --volumes-from", ctx) : null;
     if (r2) return r2;
@@ -23217,6 +23243,10 @@ function mounts(args, seg, ctx) {
 function compose(args, seg, ctx) {
   const h = head2(args, COMPOSE_GLOBAL, seg.dialect), sub = lower(args[h.at]), rest = args.slice(h.at + 1);
   if (h.unknown) return args.some((w) => COMPOSE_DESTROYERS.has(lower(w)) || lower(w) === "up") ? unk("compose has an option the hook does not know") : null;
+  if (sub === "run") {
+    const host = hostAccess(runOptions2(rest, COMPOSE_RUN, seg));
+    if (host) return host;
+  }
   const renew = sub === "up" && rest.some((w) => w.text === "--renew-anon-volumes" || /^-[A-Za-z]*V[A-Za-z]*$/.test(w.text));
   if (!COMPOSE_DESTROYERS.has(sub) && !renew) return null;
   if (sub === "down" && rest.some((w) => w.text === "-v" || /^--volumes(?:=(?!false$).*)?$/.test(w.text))) {
@@ -23390,6 +23420,8 @@ var HINTS = {
   // T6-H8-COST and T6-SCRIPT-TARGET: run the tool itself, its target visible
   script: `run the tool directly when the script only generates or inspects, and with its target visible on the command when it writes: ${MIGRATOR_FORMS}`,
   volumes: "remove the run's volumes by name with docker volume rm",
+  // final fix I2 (T6-PRIVILEGED)
+  host: "run the container without host access: no --privileged or --device, no host --pid, --ipc, --uts, --userns or --cgroupns, no --cap-add of ALL, SYS_ADMIN, SYS_PTRACE, SYS_MODULE, SYS_RAWIO or DAC_READ_SEARCH, and no unconfined --security-opt",
   migrator: MIGRATOR_FORMS
 };
 var instead = (ctx, hint) => {
@@ -24029,6 +24061,249 @@ var databaseRule = {
   }
 };
 
+// src/forge/autonomy-machine.ts
+var INSTEAD = "this reaches processes, services or settings outside the run; stop what the run started by its pid, and keep settings inside the worktree";
+var lower2 = (w) => w?.text.toLowerCase() ?? "";
+var plain2 = (args) => args.filter((w) => !/^[-/]/.test(w.text)).map((w) => w.text.toLowerCase());
+var psParam = (w, names3) => {
+  const m = /^-([A-Za-z]+)(?::|$)/.exec(w.text);
+  return !!m && names3.some((n) => n.startsWith(m[1].toLowerCase()));
+};
+var KILL_BY_NAME = /* @__PURE__ */ new Set(["pkill", "killall", "killall5", "skill"]);
+var STOP_PROCESS = /* @__PURE__ */ new Set(["stop-process", "spps"]);
+var LISTERS = /* @__PURE__ */ new Set(["pgrep", "pidof", "ps", "get-process", "gps", "tasklist"]);
+var LISTER_IN = /(?:^|[\s(|;&`])(?:pgrep|pidof|ps|get-process|gps|tasklist)(?=[\s|;&)`]|$)/i;
+function fedByLister(segs, i) {
+  for (let j = i; j > 0 && segs[j].after === "|"; j--) if (segs[j - 1].argv.length && LISTERS.has(commandName(segs[j - 1].argv[0]))) return true;
+  return false;
+}
+function killTargets(args) {
+  const t0 = args[0]?.text ?? "";
+  if (t0 === "-l" || t0 === "-L") return null;
+  let i = t0 === "-s" || t0 === "-n" ? 2 : t0.length > 1 && t0.startsWith("-") && t0 !== "--" ? 1 : 0;
+  if (args[i]?.text === "--") i++;
+  return args.slice(i);
+}
+function kill(seg, segs, i) {
+  const targets = killTargets(seg.argv.slice(1));
+  if (!targets) return null;
+  if (seg.dynamicArgs && fedByLister(segs, i)) return "kill is given the pids of a search by name, which may be the person's processes";
+  for (const w of targets) {
+    if (w.dynamic) {
+      if (LISTER_IN.test(w.text)) return "kill is given the pids of a search by name, which may be the person's processes";
+      continue;
+    }
+    if (/^-\d+$/.test(w.text) || w.text === "0") return `kill ${w.text} signals a whole process group or every process of the person`;
+    if (!/^\d+$/.test(w.text) && !w.text.startsWith("%")) return `kill ${w.text} signals processes by name, which may be the person's`;
+  }
+  return null;
+}
+function stopProcess(seg) {
+  if (seg.after === "|") return "Stop-Process fed by a pipeline stops the processes it is handed, which may be the person's";
+  for (const w of seg.argv.slice(1)) {
+    if (psParam(w, ["name", "processname", "inputobject"])) return `Stop-Process ${w.text} stops processes by name, which may be the person's`;
+    if (w.dynamic && LISTER_IN.test(w.text)) return "Stop-Process is given the ids of a search by name, which may be the person's processes";
+  }
+  return null;
+}
+var SYSTEMCTL = T(`-H= --host= -M= --machine= -C= --capsule= -t= --type= --state= -p= --property= -P= -a --all -r --recursive --reverse --after --before
+  --with-dependencies -l --full --value --show-types --job-mode= -T --show-transaction -i --ignore-inhibitors -s= --signal= --kill-whom= --kill-value= --what= -f --force
+  --message= --now --root= --image= --image-policy= --runtime --preset-mode= -n= --lines= -o= --output= --firmware-setup --plain --timestamp= --mkdir --marked --read-only
+  --drop-in= --when= --user --system --global -q --quiet --no-block --wait --no-wall --no-reload --no-ask-password --no-pager --no-legend --legend= --check-inhibitors=
+  --failed --dry-run -h --help --version`);
+var SYSTEMCTL_OK = /* @__PURE__ */ new Set([
+  "status",
+  "show",
+  "cat",
+  "help",
+  "list-units",
+  "list-unit-files",
+  "list-sockets",
+  "list-timers",
+  "list-jobs",
+  "list-dependencies",
+  "list-machines",
+  "list-automounts",
+  "list-paths",
+  "is-active",
+  "is-enabled",
+  "is-failed",
+  "is-system-running",
+  "get-default",
+  "show-environment",
+  "start",
+  "reload",
+  "daemon-reload",
+  "reset-failed",
+  "whoami"
+]);
+var SERVICE_OK = /* @__PURE__ */ new Set(["status", "start", "reload", "help"]);
+var PG_STOP = /* @__PURE__ */ new Set(["stop", "restart", "kill", "register", "unregister"]);
+var SC_WRITES = /* @__PURE__ */ new Set(["stop", "pause", "config", "delete", "create", "failure", "control", "sdset"]);
+var LAUNCHCTL_WRITES = /* @__PURE__ */ new Set(["unload", "bootout", "load", "bootstrap", "remove", "stop", "kill", "disable", "enable", "submit"]);
+var PS_SERVICES = /* @__PURE__ */ new Set(["stop-service", "spsv", "restart-service", "set-service", "suspend-service", "remove-service", "new-service"]);
+var POWER = /* @__PURE__ */ new Set(["shutdown", "reboot", "poweroff", "halt", "stop-computer", "restart-computer"]);
+function service(name, seg) {
+  const args = seg.argv.slice(1), ws = plain2(args);
+  if (POWER.has(name)) return `${name} powers off or restarts this machine`;
+  if (PS_SERVICES.has(name)) return `${seg.argv[0].text} changes a service of this machine`;
+  if (name === "systemctl") {
+    const sc = scan2(args, SYSTEMCTL, seg.dialect), verb = sc.ops[0];
+    if (sc.unknown) return "systemctl has an option the hook does not know, so the verb it runs cannot be read";
+    return verb && (verb.dynamic || !SYSTEMCTL_OK.has(lower2(verb))) ? `systemctl ${verb.text} changes a service of this machine, or the machine` : null;
+  }
+  if (name === "service" && ws[1] !== void 0 && !SERVICE_OK.has(ws[1])) return `service ${ws[0]} ${ws[1]} changes a service of this machine`;
+  if ((name === "pg_ctl" || name === "pg_ctlcluster") && ws.some((w) => PG_STOP.has(w))) return `${name} ${ws.find((w) => PG_STOP.has(w))} acts on a database server of this machine`;
+  if ((name === "net" || name === "net1") && (ws[0] === "stop" || ws[0] === "pause")) return `net ${ws[0]} changes a service of this machine`;
+  const scExe = seg.dialect !== "powershell" || /\.exe$/i.test(seg.argv[0].text);
+  if (name === "sc" && scExe && SC_WRITES.has(ws[0] ?? "")) return `sc ${ws[0]} changes a service of this machine`;
+  if (name === "launchctl" && LAUNCHCTL_WRITES.has(ws[0] ?? "")) return `launchctl ${ws[0]} changes a service of this machine`;
+  if (name === "brew" && ws[0] === "services" && ["stop", "restart", "kill"].includes(ws[1] ?? "")) return `brew services ${ws[1]} changes a service of this machine`;
+  return null;
+}
+var CRONTAB = T("-u= -l -r -e -i -s -n= -c -T -V --help --version");
+var REG_WRITES = /* @__PURE__ */ new Set(["add", "delete", "import", "copy", "restore", "load", "unload"]);
+var SCHTASKS_WRITES = /^[/-](?:create|delete|change|run|end)$/i;
+var PS_TASKS = /* @__PURE__ */ new Set([
+  "register-scheduledtask",
+  "unregister-scheduledtask",
+  "set-scheduledtask",
+  "start-scheduledtask",
+  "stop-scheduledtask",
+  "enable-scheduledtask",
+  "disable-scheduledtask"
+]);
+var PMS = /* @__PURE__ */ new Set(["npm", "pnpm", "yarn", "bun"]);
+var CONFIG_WRITES = /* @__PURE__ */ new Set(["set", "delete", "rm", "del", "unset", "edit", "fix"]);
+var PM_VALUED = /* @__PURE__ */ new Set([
+  "--location",
+  "-L",
+  "--userconfig",
+  "--globalconfig",
+  "--prefix",
+  "-C",
+  "--dir",
+  "--cwd",
+  "-w",
+  "--workspace",
+  "--filter",
+  "-F",
+  "--registry",
+  "--cache",
+  "--loglevel"
+]);
+var SET_ENV = /\[(?:system\.)?environment\]::setenvironmentvariable\s*\(([\s\S]*)\)/i;
+function callArgs(inner) {
+  const out = [];
+  let depth = 0, quote2 = "", cur = "";
+  for (const c of inner) {
+    if (quote2) {
+      if (c === quote2) quote2 = "";
+      cur += c;
+      continue;
+    }
+    if (c === "'" || c === '"') quote2 = c;
+    else if (c === "(" || c === "[") depth++;
+    else if (c === ")" || c === "]") depth--;
+    else if (c === "," && depth === 0) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+function setsUserEnv(seg) {
+  return seg.argv.some((w) => {
+    const m = SET_ENV.exec(w.text);
+    if (!m) return false;
+    const target = callArgs(m[1])[2];
+    return target !== void 0 && !/^(?:['"]process['"]|\[(?:system\.)?environmentvariabletarget\]::process)$/i.test(target);
+  });
+}
+function pmWords(args) {
+  const out = [];
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k].text;
+    if (PM_VALUED.has(t)) {
+      k++;
+      continue;
+    }
+    if (!t.startsWith("-")) out.push(t.toLowerCase());
+  }
+  return out;
+}
+var projectScoped = (args) => args.some((w, k) => w.text === "--local" || /^--location=project$/i.test(w.text) || (w.text === "--location" || w.text === "-L") && lower2(args[k + 1]) === "project");
+function pipArgs(name, args) {
+  if (/^pip[0-9.]*$/.test(name)) return args;
+  if (!/^(?:python[0-9.]*|py)$/.test(name)) return null;
+  const m = args.findIndex((w) => w.text === "-m" || /^-mpip[0-9.]*$/.test(w.text));
+  if (m < 0) return null;
+  if (args[m].text !== "-m") return args.slice(m + 1);
+  return /^pip[0-9.]*$/.test(lower2(args[m + 1])) ? args.slice(m + 2) : null;
+}
+function setting(name, seg) {
+  const args = seg.argv.slice(1), ws = plain2(args);
+  if (name === "setx") return "setx sets an environment variable of the person that outlives the run";
+  if (name === "crontab") {
+    const sc = scan2(args, CRONTAB, seg.dialect);
+    return sc.unknown || !sc.flags.has("-l") || sc.ops.length ? "crontab changes the person's scheduled jobs" : null;
+  }
+  if (name === "reg" && REG_WRITES.has(ws[0] ?? "")) return `reg ${ws[0]} changes the registry`;
+  if (name === "schtasks") {
+    const w = args.find((x) => SCHTASKS_WRITES.test(x.text));
+    if (w) return `schtasks ${w.text} changes the person's scheduled tasks`;
+  }
+  if (PS_TASKS.has(name)) return `${seg.argv[0].text} changes the person's scheduled tasks`;
+  if (PMS.has(name)) {
+    const pw = pmWords(args);
+    const writes = (pw[0] === "config" || pw[0] === "c") && CONFIG_WRITES.has(pw[1] ?? "") || name === "npm" && pw[0] === "set";
+    if (writes && !projectScoped(args)) return `${name} config writes the person's ${name} settings`;
+  }
+  const pip = pipArgs(name, args);
+  if (pip) {
+    const pw = plain2(pip), ci = pw.indexOf("config");
+    if (ci >= 0 && ["set", "unset", "edit"].includes(pw[ci + 1] ?? "") && !pip.some((w) => w.text === "--site")) return "pip config writes the person's pip settings";
+  }
+  return null;
+}
+function reach(segs, i) {
+  const seg = segs[i];
+  if (!seg.argv.length) return null;
+  if (seg.dialect === "powershell" && setsUserEnv(seg)) return "SetEnvironmentVariable with a User or Machine target changes the person's environment";
+  if (seg.argv[0].dynamic) return null;
+  const name = commandName(seg.argv[0]), ps = seg.dialect === "powershell";
+  if (KILL_BY_NAME.has(name)) return `${name} stops processes by name, which may be the person's`;
+  if (name === "taskkill") {
+    const w = seg.argv.slice(1).find((x) => /^[/-](?:im|fi)$/i.test(x.text));
+    if (w) return `taskkill ${w.text} stops processes by name or filter, which may be the person's`;
+  }
+  if (STOP_PROCESS.has(name) || ps && name === "kill") {
+    const s2 = stopProcess(seg);
+    if (s2 || STOP_PROCESS.has(name)) return s2;
+  }
+  if (name === "kill") {
+    const k = kill(seg, segs, i);
+    if (k) return k;
+  }
+  return service(name, seg) ?? setting(name, seg);
+}
+var machineRule = {
+  id: "machine",
+  check(input, ctx) {
+    if (!ctx.autonomous) return null;
+    const segs = bashSegments(input, ctx);
+    if (!segs) return null;
+    for (let i = 0; i < segs.length; i++) {
+      const what = reach(segs, i);
+      if (what) return deny("machine", what, INSTEAD);
+    }
+    return null;
+  }
+};
+
 // src/forge/autonomy-rules.ts
 var SETTINGS_FILES = [".claude/settings.json", ".claude/settings.local.json"];
 var SETTINGS_RE = /(?:^|[\\/])settings(?:\.local)?\.json$/i;
@@ -24256,7 +24531,7 @@ var hasSep = (t) => t.includes("/") || t.includes("\\");
 var URL_RE = /^[a-z][a-z0-9+.-]+:\/\//i;
 var PS_DRIVES = /* @__PURE__ */ new Set(["alias", "cert", "env", "function", "hkcu", "hklm", "hkcr", "hku", "hkcc", "variable", "wsman", "temp", "registry", "filesystem", "certificate"]);
 function relativeInside(text3, dialect) {
-  if (!text3 || /^[\\/~]/.test(text3)) return false;
+  if (!text3 || /^[\\/~]/.test(text3) || text3.includes("::")) return false;
   const stream = /^([^\\/:]+):(.*)$/s.exec(text3);
   if (stream) {
     const name = stream[1];
@@ -24364,6 +24639,13 @@ function claudeSwitch(argv) {
   }
   return false;
 }
+function setsClaudeEnv(seg) {
+  if (Object.keys(seg.env).some((k) => /^CLAUDE_/i.test(k))) return true;
+  const a = seg.argv.map((w) => w.text);
+  if (/^\$env:CLAUDE_/i.test(a[0] ?? "")) return true;
+  const name = seg.argv.length ? commandName(seg.argv[0]) : "";
+  return ["export", "declare", "typeset", "set"].includes(name) && a.slice(1).some((t) => /^CLAUDE_\w*=/i.test(t));
+}
 function globMatchesClaude(name) {
   if (!/[*?[]/.test(name)) return false;
   let re = "^";
@@ -24428,7 +24710,23 @@ function projectClaude(p, ctx, platform = process.platform) {
   const real = nearestReal(q);
   return real !== null && real !== q && (under2(fold2(real), roots) || under2(fold2(real), realRoots(roots)));
 }
+function pathParts(text3) {
+  const kv = /^[A-Za-z_]\w*=([\s\S]*)$/.exec(text3);
+  const raw = (kv ? kv[1] : text3).split(":"), parts = [];
+  for (let i = 0; i < raw.length; i++) {
+    if (/^[A-Za-z]$/.test(raw[i]) && /^[\\/]/.test(raw[i + 1] ?? "")) {
+      parts.push(`${raw[i]}:${raw[i + 1]}`);
+      i++;
+    } else parts.push(raw[i]);
+  }
+  return kv || parts.length > 1 ? parts.filter(Boolean) : null;
+}
 function settingsTarget(w, seg, ctx, cwd2 = seg.cwd) {
+  const parts = pathParts(w.text);
+  if (parts) return parts.some((t) => pathSettings({ text: t, dynamic: w.dynamic, glob: w.glob && /[*?[]/.test(t) }, seg, ctx, cwd2));
+  return pathSettings(w, seg, ctx, cwd2);
+}
+function pathSettings(w, seg, ctx, cwd2) {
   const p = !w.dynamic && cwd2 !== null && /[*?[]/.test(w.text) ? shellPath(w.text, cwd2, seg.dialect) : segmentPath(w, { ...seg, cwd: cwd2 });
   if (p !== null) return projectClaude(p, ctx);
   return isClaudeDest(w.text) || endsWithSettings(w.text.replace(/\\/g, "/"));
@@ -24466,10 +24764,13 @@ var selfRule = {
       else if (!isReadCommand(seg) && !knownWriteCommand(seg) && name !== "cmd") {
         let cands = plainOperands(seg);
         if (isInterpreter(name)) cands = cands.slice(1);
-        for (const w of seg.argv.slice(1)) if (!w.dynamic && w.text.startsWith("-") && w.text.includes("=")) cands.push(valWord(w, w.text.indexOf("=") + 1));
+        const box = containerFiles(seg);
+        if (box) cands = [...cands.filter((w) => !box.skip.has(w)), ...box.writes, ...box.mounts];
+        else for (const w of seg.argv.slice(1)) if (!w.dynamic && w.text.startsWith("-") && w.text.includes("=")) cands.push(valWord(w, w.text.indexOf("=") + 1));
         if (cands.some((w) => settingsTarget(w, seg, ctx))) return deny("self", `${name} given the project settings could rewrite them and switch the hook off`, SELF_INSTEAD);
       }
       if (name === "claude" && claudeSwitch(seg.argv)) return deny("self", "this claude command could switch the guard off", SELF_INSTEAD);
+      if (name === "claude" && segs.some(setsClaudeEnv)) return deny("self", "claude with a CLAUDE_* variable set could load its settings and plugins from elsewhere, without the guard", SELF_INSTEAD);
     }
     const command45 = shellCommand(input);
     if (command45 !== null) for (const call2 of forgeCalls(command45)) {
@@ -24667,6 +24968,8 @@ var installRule = {
     return null;
   }
 };
+var MSG_SUBS = /* @__PURE__ */ new Set(["commit", "tag", "merge", "stash", "notes"]);
+var MSG_VALUED = /* @__PURE__ */ new Set(["-m", "--message", "-F", "--file", "--author", "--date", "--trailer", "--cleanup"]);
 function gitParse(seg) {
   const argv = seg.argv;
   let i = 1, workTree = null, gitDirValue = null, gitDirSet = false, unknownGlobal = false;
@@ -24710,10 +25013,14 @@ function gitParse(seg) {
   for (const [k, v] of Object.entries(seg.env)) if (/^GIT_CONFIG_KEY_\d+$/.test(k) || k === "GIT_CONFIG_PARAMETERS") cflags.push(v.text);
   const sub = argv[i]?.text.toLowerCase() ?? "";
   const rest = argv.slice(i + 1);
+  const text3 = /* @__PURE__ */ new Set();
+  if (MSG_SUBS.has(sub)) {
+    for (let k = 0; k < rest.length - 1 && rest[k].text !== "--"; k++) if (MSG_VALUED.has(rest[k].text) || /^-[A-Za-z]*[mF]$/.test(rest[k].text)) text3.add(rest[++k]);
+  }
   const sepAt = ["checkout", "switch", "restore", "reset", "stash"].includes(sub) ? rest.findIndex((w) => w.text === "--") : -1;
   const before3 = sepAt >= 0 ? rest.slice(0, sepAt) : rest;
-  const operands = before3.filter((w) => w.text !== "--" && !w.text.startsWith("-"));
-  const allOperands = rest.filter((w) => w.text !== "--" && !w.text.startsWith("-"));
+  const operands = before3.filter((w) => w.text !== "--" && !w.text.startsWith("-") && !text3.has(w));
+  const allOperands = rest.filter((w) => w.text !== "--" && !w.text.startsWith("-") && !text3.has(w));
   let base = seg.cwd;
   for (const c of cDirs) {
     if (base === null) break;
@@ -24924,7 +25231,7 @@ var gitRule = {
     return null;
   }
 };
-var AUTONOMY_RULES = [selfRule, filesRule, installRule, gitRule, networkRule, cloudRule, mcpWriteRule, databaseRule];
+var AUTONOMY_RULES = [selfRule, filesRule, installRule, gitRule, networkRule, cloudRule, mcpWriteRule, databaseRule, machineRule];
 
 // src/forge/autonomous.ts
 var INVALID_RUN = "invalid";
@@ -25253,10 +25560,10 @@ function guardCtx(io, input) {
   };
 }
 function blockedTarget(input, auto) {
-  const plain2 = { main: auto.main, gitCommonDir: null, autonomous: auto };
+  const plain3 = { main: auto.main, gitCommonDir: null, autonomous: auto };
   if (input.tool_name.startsWith("mcp__")) return input.tool_name;
   const command45 = shellCommand(input);
-  return targetPath(input, plain2) ?? (command45 !== null ? redactSecrets(command45).slice(0, 300) : input.tool_name);
+  return targetPath(input, plain3) ?? (command45 !== null ? redactSecrets(command45).slice(0, 300) : input.tool_name);
 }
 function deliver(v, input, auto, io) {
   const out = { stdout: guardOutput(v), stderr: "" };
@@ -25987,7 +26294,11 @@ var command16 = (args, ctx) => {
           const { n, event } = addDecision(main, blockedDecision(all[i], es2), { ts: all[i].ts, runId: auto.runId });
           decisions.push(n);
           if (session) publish.push(...decisionWrites({ event, session, eid: decisionNoteId(event, session) }));
-        } catch {
+        } catch (e) {
+          if (!(e instanceof DecisionInputError)) {
+            if (i > start) markNoted(main, auto.runId, i);
+            throw e;
+          }
           skipped.push(i);
         }
       }
