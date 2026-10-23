@@ -522,7 +522,8 @@ function decisive(cli: string, p: CloudWords, args: Word[]): number {
       if (ALWAYS_DENY[cli]?.has(c0)) return -1;
       if (loc === 0) return 0;
       if (VF_GROUPS[cli]?.has(c0)) return c1 !== '' && vfGroupRead(cli, c0, c1) ? 1 : -1; // T5-VF-GROUPS
-      return c0 !== '' && (isReadVerb(c0) || !!VF_READS[cli]?.has(c0)) ? 0 : -1;
+      // a VF_READS word reads only alone: `cluster-info dump` orders a file write
+      return c0 !== '' && (isReadVerb(c0) || (!!VF_READS[cli]?.has(c0) && cmd.length === 1)) ? 0 : -1;
     case 'two':
       if (cli === 'gh' || cli === 'glab') {
         if (GH_TOP_READ.has(c0)) return 0;

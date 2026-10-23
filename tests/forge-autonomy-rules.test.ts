@@ -768,6 +768,12 @@ describe('fix round 3 · re-review breakage', () => {
     // T5-KNOWN-VALUES: a known global option's value is a name; T5-GLAB-CLONE
     B('gcloud --project deploy-prod compute instances list'), B('glab repo clone o/r'),
   ])('allows %s', (_, input) => expect(verdict3(input)).toBeNull());
+  it('a top-level kubectl/oc listing reads only with no command word after it (fix 4, p4 VR rows)', () => {
+    for (const c of ['kubectl cluster-info dump', 'kubectl cluster-info dump --output-directory=/tmp/x', 'kubectl cluster-info dump --output-directory /tmp/x',
+      'oc cluster-info dump', 'oc cluster-info dump --output-directory=/tmp/x', 'oc cluster-info dump --all-namespaces']) expect(verdict3(bash(c)), c).toMatchObject({ decision: 'deny' });
+    for (const c of ['kubectl cluster-info', 'oc cluster-info', 'kubectl api-resources', 'oc api-resources', 'kubectl api-versions', 'oc api-versions',
+      'kubectl api-resources -o wide', 'kubectl auth whoami']) expect(verdict3(bash(c)), c).toBeNull();
+  });
   it('wrangler d1 without --local, or with --remote, is not local', () => {
     expect(verdict3(bash('wrangler d1 execute db --command "drop table x"'))).toMatchObject({ decision: 'deny' });
     expect(verdict3(bash('wrangler d1 execute db --local --remote --command "select 1"'))).toMatchObject({ decision: 'deny' });
