@@ -296,6 +296,14 @@ export const selfRule: GuardRule = {
         const g = gitParse(seg); // a pathspec is relative to the directory git runs in
         if (GIT_WRITE_TREE.has(g.sub) && g.allOperands.some(w => settingsTarget(w, seg, ctx, g.dir))) return deny('self', 'restoring the project settings would switch the hook off', SELF_INSTEAD);
       } else if (writesSettings(seg, ctx)) return deny('self', 'writing the project settings would switch the hook off', SELF_INSTEAD);
+      else if (!isReadCommand(seg) && !knownWriteCommand(seg) && name !== 'cmd') {
+        // T4-SELF-UNKNOWN: a command in no table and not a reader (an unknown tool, an interpreter past its script, npx and the like, a non-read cmdlet) may write
+        // what it is given: its literal operands and glued flag values are judged against the project .claude. A reader given the settings path passes.
+        let cands = plainOperands(seg);
+        if (isInterpreter(name)) cands = cands.slice(1);
+        for (const w of seg.argv.slice(1)) if (!w.dynamic && w.text.startsWith('-') && w.text.includes('=')) cands.push(valWord(w, w.text.indexOf('=') + 1));
+        if (cands.some(w => settingsTarget(w, seg, ctx))) return deny('self', `${name} given the project settings could rewrite them and switch the hook off`, SELF_INSTEAD);
+      }
       if (name === 'claude' && claudeSwitch(seg.argv)) return deny('self', 'this claude command could switch the guard off', SELF_INSTEAD);
     }
     const command = shellCommand(input);

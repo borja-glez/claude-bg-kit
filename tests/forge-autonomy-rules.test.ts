@@ -552,7 +552,15 @@ describe('post-breaker fix · self (T4-GLOB-SHORT)', () => {
     B('cp a.json fixtures/.claude/settings.json'), B(`cp a.json ${W('fixtures/.claude/settings.json')}`), B('cat .claude/settings.json'), B('rm -rf *.log'), B('rm -rf build/* dist/*.map'),
     B("sed -i 's/a/b/g' src/*.ts"), B('cp -r src/* dst'), P('Compress-Archive -Path dist\\* -DestinationPath dist.zip'), B('rm -rf fixtures/.cl*de'),
     B('git reset --soft HEAD~1'), B('git checkout HEAD~2 -- src/a.ts'), B('git restore --source=main~1 src/a.ts'), B('git reset --hard origin/main'), B('mv a~1 b'),
+    // T4-SELF-UNKNOWN: readers given the settings path, and non-read tools given ordinary paths (rr5-self A4, A5)
+    B('cat .claude/settings.json'), B('jq .hooks .claude/settings.json'), P('Get-Content .claude\\settings.json'), P('gc .claude\\settings.json | ConvertFrom-Json'), B('diff .claude/settings.json x.json'),
+    B('npx prettier --write src/a.ts'), B('python fix.py'), B('node tool.js --config=src/cfg.json'), B('npx eslint --fix src'), P('Set-ItemProperty -Path a.txt -Name IsReadOnly -Value $false'),
   ])('allows %s', (_, input) => expect(selfOrFiles(input)).toBeNull());
+  it.each([
+    // T4-SELF-UNKNOWN (rr5-self D16–D19): a command not on the READ list given the settings path may rewrite them
+    B('sponge .claude/settings.json'), B('npx prettier --write .claude/settings.json'), B('python fix.py .claude/settings.local.json'), P('Set-ItemProperty -Path .claude\\settings.json -Name IsReadOnly -Value $false'),
+    B('node tool.js --out=.claude/settings.json'), B('pnpm dlx json -I -f .claude/settings.json'), B(`bunx prettier --write ${W('.claude/settings.json')}`), B('cd sub && python ../fix.py ../.claude/settings.json'),
+  ])('denies a command it does not know given the project settings: %s', (_, input) => expect(selfRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'self' }));
 
   const tmp = useTempDirs();
   it('a link to .claude that already exists inside the worktree is read through its real path (skipped where links cannot be made)', (t) => {
