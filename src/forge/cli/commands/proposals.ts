@@ -17,7 +17,9 @@ import { NOTE_ID } from '../../../lib/notes.js';
 import { autoApprovable } from '../../policy.js';
 import { proposalBatch, readVerdicts } from '../../critic.js';
 import { judgeProposal, unparkProposal, JudgeError, type Judged, type Unparked } from '../../judge.js';
-import { convertedFrom, ideaLink, ideaNote, ideaOrigin, normalizeOwner, pendingIdeas, roadmapOwner, saveOwner, type RoadmapOwner } from '../../ideas.js';
+import {
+  convertedFrom, ideaLink, ideaNote, ideaOrigin, IDEA_MERGED, normalizeOwner, noteOf, pendingIdeas, roadmapOwner, saveOwner, type RoadmapOwner,
+} from '../../ideas.js';
 import { parseRun, readRunText, type RunState } from '../../run.js';
 import { mainCheckout } from '../../local.js';
 import { addDecision, decisionNoteId, decisionWrites, markPublished } from '../../decisions.js';
@@ -133,16 +135,26 @@ export const command: Command = (args, ctx) => {
         // An idea of this conversation is the owner's (spec «Ideas de la persona»): the session talks with whoever runs it.
         idea = { fields: { source: 'user' }, author: roadmapOwner(io.cwd) ?? 'owner', from: 'chat', owner: true };
       }
-      // L-15: a v2 of a person's idea logs that idea's origin, its original's `from` and `owner`, whatever its flags say.
-      const origin = revises && loadProposal(io.cwd, revises)?.source === 'user' ? ideaOrigin(io.cwd, revises) : idea ? { from: idea.from, owner: idea.owner } : {};
+      // A v2 of a person's idea is still that person's idea, whatever its flags say: L-15, its add event logs the original's
+      // `from` and `owner`; T6B2-V2-AUTHOR, it keeps the original's author and `source: user`.
+      const original = revises ? loadProposal(io.cwd, revises) : null;
+      const ofIdea = revises && original?.source === 'user' ? { author: original.author, origin: ideaOrigin(io.cwd, revises) } : null;
+      const origin = ofIdea ? ofIdea.origin : idea ? { from: idea.from, owner: idea.owner } : {};
+      const author = ofIdea?.author ?? idea?.author ?? subFlag('author') ?? o.author ?? 'session';
       let r: AddOutcome;
       try {
-        r = addProposal(io.cwd, { ...o, ...idea?.fields }, {
-          ts: ts(), author: idea?.author ?? subFlag('author') ?? o.author ?? 'session', now: io.now(), rand: io.rand ?? Math.random, ...(revises ? { revises } : {}), ...origin,
+        r = addProposal(io.cwd, { ...o, ...idea?.fields, ...(ofIdea ? { source: 'user' } : {}) }, {
+          ts: ts(), author, now: io.now(), rand: io.rand ?? Math.random, ...(revises ? { revises } : {}), ...origin,
         });
       } catch (e) {
         if (e instanceof ProposalInputError) throw new UsageError(`proposals add: ${e.message}`);
         throw e;
+      }
+      if (!r.ok && noteId && r.why === 'open') {
+        // I-2: a note that says what an open proposal says joins it, once: the ledger remembers it (so `ideas` lists it no
+        // more) and the note gets that proposal's link. A chat idea close to an open one is still refused below (L-6).
+        appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: IDEA_MERGED, id: r.similar, from: `note:${noteId}` });
+        return json({ merged: r.similar, link: ideaLink(noteId, r.similar) });
       }
       if (!r.ok) {
         // Anti-repetition: a rejected one without new evidence, or one still open whatever its evidence (a chat idea close to
@@ -325,10 +337,13 @@ export const command: Command = (args, ctx) => {
       // one an editor wrote on the page and a pull saved, or whose text changed since, is left to the owner.
       // The policy speaks once and first: a pid already decided, reopened or converted, and a v2 (--revises), are left to the owner.
       // An add `from` a verify defect or a person's idea (6b-2: one logs its digest too) is not forge's own: never the policy's.
+      // T6B2-SOURCE-USER: nor is any `source: user` proposal, now or when it was added, whatever flag added it: it waits for the
+      // owner's mark, attended runs included.
       const events = readEvents(io.cwd).filter(e => e.kind === 'proposal' && e.id === id);
       const decided = doc.status !== 'proposed' || loadApproval(io.cwd, id) !== null
         || events.some(e => e.action === 'decide' || e.action === 'reopen' || e.action === 'to-task');
-      const forgeMade = events.some(e => e.action === 'add' && e.digest === proposalDigest(id, doc) && !e.revises && e.from === undefined);
+      const forgeMade = doc.source !== 'user'
+        && events.some(e => e.action === 'add' && e.digest === proposalDigest(id, doc) && !e.revises && e.from === undefined && e.source !== 'user');
       // Carry 5: a refusal says why, so the infinite skill and the person can tell them apart: already decided (or
       // marked, or converted), not this checkout's own text, or its signals. 6b-2 H-5: while an autonomous run is active,
       // its approvals are `judge`'s, on the critic's verdict, and the policy approves nothing.
@@ -455,8 +470,9 @@ export const command: Command = (args, ctx) => {
       return json({ owner: roadmapOwner(io.cwd), ideas: pendingIdeas(io.cwd, db) });
     }
     case 'unpark': {
-      // 6b-2: the person's answer to a parked idea (src/forge/judge.ts): --insist integrates it, --withdraw rejects it. No active
-      // run is needed, the person may answer after it stopped; only the parked mark. Roots as judge's (T6B2-ROOTS): the
+      // 6b-2: the person's answer to a parked idea (src/forge/judge.ts): --insist integrates it, --withdraw rejects it, and where
+      // the person said it is named. No active run is needed, the person may answer after it stopped; only the parked mark.
+      // Roots as judge's (T6B2-ROOTS): the
       // proposal, its mark and its event are this checkout's, the decision goes to the main checkout's ledger.
       const id = rest[0];
       if (!id || !PROPOSAL_ID.test(id)) throw new UsageError('proposals unpark: a proposal id (p + 14 digits + 4 letters/digits) is required');
@@ -464,6 +480,18 @@ export const command: Command = (args, ctx) => {
       if (insist === has('withdraw')) throw new UsageError('proposals unpark: one answer is required, --insist or --withdraw');
       const session = subFlag('session');
       if (has('session') && (!session || !SESSION_ID.test(session))) throw new UsageError('proposals unpark: --session needs the waypoint session id');
+      // Fix 1: only the person answers a parked idea: in this conversation (--from-chat), or in a note on its thread whose author
+      // is the roadmap's known owner (--from-note <note> --db <DB>). Anyone else's comment is no answer.
+      if (has('from-chat') === has('from-note')) throw new UsageError('proposals unpark: name where the person answered: --from-chat, or --from-note <note> --db <DB>');
+      if (has('from-note')) {
+        const noteId = subFlag('from-note');
+        const db = subFlag('db');
+        if (!noteId || !NOTE_ID.test(noteId) || !db) throw new UsageError('proposals unpark: --from-note needs a note id and --db, the listed roadmap database');
+        const owner = roadmapOwner(io.cwd);
+        if (!owner) throw new UsageError('proposals unpark: the roadmap\'s owner is not known yet (approvals/owner): no note answers for the person');
+        const n = noteOf(io.cwd, db, noteId);
+        if (!n || n.author !== owner || n.proposalId !== id) throw new UsageError(`proposals unpark: note ${noteId} is not a note of the roadmap's owner on the thread of ${id}`);
+      }
       const main = mainCheckout(io.cwd);
       const run = parseRun(readRunText(runRootOf(io.cwd, main)));
       // The answer belongs to the autonomous run that is active when it comes, if any.

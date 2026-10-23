@@ -141,9 +141,11 @@ export type AddOutcome = { ok: true; id: string; doc: ProposalDoc } | { ok: fals
  * one with no decision. Refused (ProposalInputError) when it is not a valid proposal, or is a scout one without a pillar or
  * evidence; not added when it says the same as a rejected one without new evidence, or as one still open (but the one it
  * `revises`). Saved in .forge/proposals/ and logged as a proposal event with the digest of its text, and its `from` when
- * given. 6b-2: a person's idea (`from` a note or the chat) also logs `owner`, whether it is the roadmap owner's, and keeps
- * the digest, so judge's edited-text rule applies to it; a verify defect (`from` without `owner`) carries no digest. Neither
- * ever goes through `proposals policy`, which answers origin to any `from`: only the owner, or a profile's judge, decides it.
+ * given. 6b-2: a person's idea (`from` a note or the chat) also logs `owner`, whether it is the roadmap owner's, with the
+ * author it is the idea of (m-1), and keeps the digest, so judge's edited-text rule applies to it; a verify defect (`from`
+ * without `owner`) carries no digest. T6B2-SOURCE-USER: a `source: user` proposal logs it, so an editor who changes the
+ * source later does not make it forge's. None of them ever goes through `proposals policy`: only the owner, or a profile's
+ * judge on the owner's own idea, decides it.
  */
 export function addProposal(root: string, raw: Record<string, unknown>,
   ctx: { ts: string; author: unknown; now: Date; rand: () => number; revises?: string; from?: string; owner?: boolean }): AddOutcome {
@@ -161,7 +163,8 @@ export function addProposal(root: string, raw: Record<string, unknown>,
   saveProposal(root, id, doc);
   const digest = !ctx.from || ctx.owner !== undefined ? { digest: proposalDigest(id, doc) } : {};
   appendEvent(root, { ts: ctx.ts, kind: 'proposal', action: 'add', id, ...(ctx.from ? { from: ctx.from } : {}),
-    ...(ctx.owner !== undefined ? { owner: ctx.owner } : {}), ...digest, ...(ctx.revises ? { revises: ctx.revises } : {}) });
+    ...(ctx.owner !== undefined ? { owner: ctx.owner, author: doc.author } : {}), ...(doc.source === 'user' ? { source: 'user' } : {}),
+    ...digest, ...(ctx.revises ? { revises: ctx.revises } : {}) });
   return { ok: true, id, doc };
 }
 

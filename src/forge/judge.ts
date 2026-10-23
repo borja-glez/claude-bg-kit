@@ -11,6 +11,7 @@ import { loadApproval, loadProposal, saveApproval, saveProposal } from './propos
 import { checkDecision, DecisionInputError } from './decisions.js';
 import { normalizeParked, proposalDigest, type ApprovalDoc, type ProposalDoc, type ProposalParked } from '../lib/proposals.js';
 import type { CriticVerdict } from './critic.js';
+import { OWNER_USER, roadmapOwner } from './ideas.js';
 import type { Write } from '../lib/sync.js';
 
 export type JudgeOutcome = 'approved' | 'rejected' | 'parked' | 'adapt' | 'waits-owner';
@@ -99,13 +100,20 @@ function verdictFor(id: string, doc: ProposalDoc, verdicts: readonly CriticVerdi
 }
 
 /**
- * Whether the proposal waits for the owner's mark: a note's idea whose add event does not say it is the owner's; and, failing
- * closed, one with no add event in this ledger (its origin is unknown, as a proposal pulled from the roadmap) or whose text
- * is no longer the one forge added (someone else edited it).
+ * Whether the proposal waits for the owner's mark:
+ * - T6B2-SOURCE-USER: a person's idea (its source is `user` now or was when it was added, or it came from a note or the
+ *   chat) whose add event does not say it is the owner's (`owner: true`, which only `--from-chat`, the owner's `--from-note`
+ *   and their v2s write), whatever flag added it;
+ * - m-1: an owner's idea of someone who is no longer the roadmap's owner (`approvals/owner` now);
+ * - failing closed, one with no add event in this ledger (its origin is unknown, as a proposal pulled from the roadmap) or
+ *   whose text is no longer the one forge added (someone else edited it).
  */
-function waitsOwner(id: string, doc: ProposalDoc, add: LedgerEvent | null): boolean {
+function waitsOwner(root: string, id: string, doc: ProposalDoc, add: LedgerEvent | null): boolean {
   if (!add) return true;
-  if (typeof add.from === 'string' && add.from.startsWith('note:') && add.owner !== true) return true;
+  const from = typeof add.from === 'string' ? add.from : '';
+  const idea = doc.source === 'user' || add.source === 'user' || from.startsWith('note:') || from === 'chat';
+  if (idea && add.owner !== true) return true;
+  if (idea && typeof add.author === 'string' && OWNER_USER.test(add.author) && add.author !== roadmapOwner(root)) return true;
   return typeof add.digest === 'string' && add.digest !== proposalDigest(id, doc);
 }
 
@@ -117,7 +125,7 @@ function waitsOwner(id: string, doc: ProposalDoc, add: LedgerEvent | null): bool
 function originalStanding(root: string, events: readonly LedgerEvent[], id: string, doc: ProposalDoc | null): 'open' | 'parked' | 'waits-owner' {
   if (!doc) return 'waits-owner';
   if (doc.status === 'discussing' && doc.parked) return 'parked';
-  return notJudgeable(root, events, id, doc) === null && !waitsOwner(id, doc, lastAdd(events, id)) ? 'open' : 'waits-owner';
+  return notJudgeable(root, events, id, doc) === null && !waitsOwner(root, id, doc, lastAdd(events, id)) ? 'open' : 'waits-owner';
 }
 
 /** The doc decided by this run (or, `by` forge:decide, by the person's answer), and its roadmap update: a stale reason or
@@ -160,7 +168,7 @@ export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[
   if (refused) throw new JudgeError(refused);
   const add = lastAdd(events, id);
   const verdict = verdictFor(id, doc, verdicts);
-  if (waitsOwner(id, doc, add)) return { outcome: 'waits-owner', write: null, approval: null, decision: null };
+  if (waitsOwner(root, id, doc, add)) return { outcome: 'waits-owner', write: null, approval: null, decision: null };
   // I-2: a v2 is never judged past its original's standing.
   const revises = typeof add?.revises === 'string' ? add.revises : null;
   const origDoc = revises ? loadProposal(root, revises) : null;

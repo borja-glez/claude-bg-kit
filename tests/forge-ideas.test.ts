@@ -5,7 +5,7 @@ import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
 import { startRun, saveRun } from '../src/forge/run.js';
 import { readEvents } from '../src/forge/ledger.js';
-import { loadProposal, saveProposal, loadApproval } from '../src/forge/proposals.js';
+import { loadProposal, loadProposals, saveProposal, loadApproval } from '../src/forge/proposals.js';
 import { proposalDigest } from '../src/lib/proposals.js';
 import { lastDecisions } from '../src/forge/cli/shared.js';
 import { profileNames } from '../src/forge/profile.js';
@@ -94,8 +94,34 @@ describe('ideas into proposals (6b-2)', () => {
     const again = cli(['add', '--file', 'idea.json', '--from-note', 'n1', '--db', db]);
     expect(again.code).toBe(3);
     expect(again.stderr).toContain(r.id);
+    // m-3: until the roadmap has the note's link, the list gives it again with its proposal; once it has it, the note is gone.
+    expect(JSON.parse(cli(['ideas', '--db', db]).stdout).ideas).toEqual([{ note: 'n1', author: 'user:u1', text: 'a combo meter', ts: T0.toISOString(), owner: true,
+      proposal: r.id, link: r.link }]);
+    note('n1', { proposalId: r.id });
     expect(JSON.parse(cli(['ideas', '--db', db]).stdout).ideas).toEqual([]);
     expect(JSON.parse(cli(['policy', r.id]).stdout)).toMatchObject({ status: 'proposed', reason: 'origin' });
+  });
+  it('a note that says what an open proposal says joins it: linked, logged, and gone from the ideas (I-2)', () => {
+    pull(99);
+    const open = added(['--file', file('scout.json', { ...idea, source: 'scout', evidence: 'e' })]);
+    note('n1');
+    const r = cli(['add', '--file', 'idea.json', '--from-note', 'n1', '--db', db]);
+    expect(r.code, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ merged: open, link: { op: 'update', collection: 'notes', doc_id: 'n1', data: { proposalId: open } } });
+    expect(readEvents(root).filter(e => e.action === 'idea-merged')).toMatchObject([{ kind: 'proposal', id: open, from: 'note:n1' }]);
+    expect(loadProposals(root).map(p => p.id)).toEqual([open]);
+    // It leaves the list at once, before the roadmap has its link; a next try names the proposal it joined.
+    expect(JSON.parse(cli(['ideas', '--db', db]).stdout).ideas).toEqual([]);
+    const again = cli(['add', '--file', 'idea.json', '--from-note', 'n1', '--db', db]);
+    expect([again.code, again.stderr.includes(open)]).toEqual([3, true]);
+    // P5: the person said it in the chat first, then left it as a note.
+    const chat = added(['--file', file('dark.json', dark), '--from-chat']);
+    note('n2', { text: 'dark theme' });
+    expect(JSON.parse(cli(['add', '--file', 'dark.json', '--from-note', 'n2', '--db', db]).stdout)).toMatchObject({ merged: chat });
+    // The chat close to an open one stays exit 3 (L-6). Positive control: a note with an idea of its own becomes its own proposal.
+    note('n3', { text: 'ghost replays' });
+    expect(JSON.parse(cli(['add', '--file', file('ghost.json', { ...idea, title: 'Ghost replays', rationale: 'race your best run' }), '--from-note', 'n3', '--db', db]).stdout))
+      .toHaveProperty('id');
   });
   it('the default evidence speaks the run\'s language, and a proposal that brings its own keeps it', () => {
     autonomousRun(root, 'es');
@@ -113,6 +139,20 @@ describe('ideas into proposals (6b-2)', () => {
     expect(JSON.parse(cli(['policy', r.id]).stdout)).toMatchObject({ status: 'proposed', reason: 'origin' });
     // Positive control: the same kind of proposal, added by forge, is auto-approved by the policy.
     const own = added(['--file', file('tidy.json', { category: 'quality', risk: 'low', title: 'Tidy the parser helpers', rationale: 'r', path: 'src/parser.ts', source: 'scout', pillar: 'p', evidence: 'e' })]);
+    expect(JSON.parse(cli(['policy', own]).stdout)).toMatchObject({ status: 'auto_approved' });
+  });
+  it('a source: user proposal added without a flag is a person\'s idea all the same: the policy leaves it to the owner (T6B2-SOURCE-USER, P1)', () => {
+    pull(99);
+    const small = { category: 'quality', risk: 'low', title: 'Tidy the menu code', rationale: 'r', path: 'src/menu.ts' };
+    const id = added(['--file', file('u.json', { ...small, source: 'user' }), '--author', 'user:u2']);
+    expect(lastAdd(id)).toMatchObject({ source: 'user' });
+    expect(JSON.parse(cli(['policy', id]).stdout)).toMatchObject({ status: 'proposed', reason: 'origin' });
+    expect(loadApproval(root, id)).toBeNull();
+    // An editor who turns its source into scout on the roadmap does not make it forge's: its add event remembers whose it is.
+    saveProposal(root, id, { ...loadProposal(root, id)!, source: 'scout' });
+    expect(JSON.parse(cli(['policy', id]).stdout)).toMatchObject({ status: 'proposed', reason: 'origin' });
+    // Positive control: the same kind of proposal, forge's own, is auto-approved.
+    const own = added(['--file', file('s.json', { ...small, title: 'Tidy the parser helpers', path: 'src/parser.ts', source: 'scout', pillar: 'p', evidence: 'e' })]);
     expect(JSON.parse(cli(['policy', own]).stdout)).toMatchObject({ status: 'auto_approved' });
   });
   it('a chat idea with no owner known is still the owner\'s, by name', () => {
@@ -166,6 +206,34 @@ describe('a person\'s idea before the judge (6b-2)', () => {
     verdicts({ id: own, verdict: 'keep', why: 'fits the vision' });
     expect(judge(own)).toMatchObject({ outcome: 'approved' });
   });
+  it('a source: user proposal added without a flag waits for the owner, whoever wrote it (T6B2-SOURCE-USER, P2)', () => {
+    pull(99);
+    const id = added(['--file', file('u.json', { ...dark, source: 'user', evidence: 'Idea by user:u2' }), '--author', 'user:u2']);
+    verdicts({ id, verdict: 'keep', why: 'fits' });
+    expect(judge(id)).toMatchObject({ outcome: 'waits-owner', write: null, approval: null });
+    // An editor who turns its source into scout does not let it through either.
+    const flip = added(['--file', file('g.json', { ...idea, title: 'Ghost replays', rationale: 'race your best run', source: 'user' })]);
+    saveProposal(root, flip, { ...loadProposal(root, flip)!, source: 'scout' });
+    verdicts({ id: flip, verdict: 'keep', why: 'fits' });
+    expect(judge(flip)).toMatchObject({ outcome: 'waits-owner' });
+    expect([loadProposal(root, id)?.status, loadProposal(root, flip)?.status]).toEqual(['proposed', 'proposed']);
+    // Positive control: an idea from the chat is the owner's, and is approved on its keep.
+    const own = added(['--file', file('c.json', { ...idea, title: 'Split screen', rationale: 'two players on one couch' }), '--from-chat']);
+    verdicts({ id: own, verdict: 'keep', why: 'fits' });
+    expect(judge(own)).toMatchObject({ outcome: 'approved' });
+  });
+  it('judge asks for the owner again: an idea of someone who is no longer the owner waits (m-1, P3)', () => {
+    pull(99);
+    note('n1');
+    const id = added(['--file', 'idea.json', '--from-note', 'n1', '--db', db]);
+    expect(lastAdd(id)).toMatchObject({ owner: true, author: 'user:u1' });
+    pull(99, { user: 'user:u2', decidedAt: T0.toISOString() });
+    verdicts({ id, verdict: 'keep', why: 'fits' });
+    expect(judge(id)).toMatchObject({ outcome: 'waits-owner' });
+    // Positive control: with u1 the owner again, the same idea and verdict are approved.
+    pull(99);
+    expect(judge(id)).toMatchObject({ outcome: 'approved' });
+  });
   it('an idea edited after forge added it waits for the owner, as its add event has the digest of its text', () => {
     pull(99);
     const id = added(['--file', 'idea.json', '--from-chat']);
@@ -184,6 +252,8 @@ describe('a person\'s idea before the judge (6b-2)', () => {
     const theirs = added(['--file', file('dark.json', dark), '--from-note', 'n2', '--db', db]);
     const v2 = added(['--file', file('v2.json', { ...dark, title: 'Dark menu', rationale: 'only the menu' }), '--revises', theirs, '--from-chat']);
     expect(lastAdd(v2)).toMatchObject({ revises: theirs, from: 'note:n2', owner: false });
+    // T6B2-V2-AUTHOR: the v2 is still u2's idea, whatever its flag.
+    expect(loadProposal(root, v2)).toMatchObject({ source: 'user', author: 'user:u2' });
     // The note is still the original's: it became one proposal.
     expect(convertedFrom(root, 'n2')).toBe(theirs);
     verdicts({ id: v2, verdict: 'keep', why: 'fits' });
@@ -205,7 +275,7 @@ describe('proposals unpark (6b-2)', () => {
   beforeEach(() => autonomousRun(path.join(root, 'wt')));
   it('insisting integrates it with the owner\'s mark and a decision that is the person\'s', () => {
     parked('p20261022100000aaaa');
-    const r = JSON.parse(cli(['unpark', 'p20261022100000aaaa', '--insist', '--session', 'main']).stdout);
+    const r = JSON.parse(cli(['unpark', 'p20261022100000aaaa', '--insist', '--from-chat', '--session', 'main']).stdout);
     // L-7: the roadmap's parked mark is deleted.
     expect(r).toMatchObject({ outcome: 'integrated', write: { status: 'approved', decidedBy: 'forge:decide', parked: { __delete__: true } } });
     expect(r.approval).toMatchObject({ op: 'set', collection: 'approvals', doc_id: 'p20261022100000aaaa', data: { status: 'approved', by: 'forge:decide' } });
@@ -218,38 +288,58 @@ describe('proposals unpark (6b-2)', () => {
     expect(readEvents(root).filter(e => e.action === 'unpark')).toMatchObject([{ id: 'p20261022100000aaaa', status: 'approved' }]);
     expect(lastDecisions(root).p20261022100000aaaa).toEqual({ status: 'approved', ts: T0.toISOString() });
   });
-  it('withdrawing rejects it; one that is not parked is exit 2', () => {
+  it('withdrawing, in the owner\'s note on its thread, rejects it; one that is not parked is exit 2', () => {
+    pull(99);
     parked('p20261022100000bbbb');
-    expect(JSON.parse(cli(['unpark', 'p20261022100000bbbb', '--withdraw']).stdout)).toMatchObject({ outcome: 'withdrawn', write: { status: 'rejected', reason: 'withdrawn by the person' } });
+    note('a1', { proposalId: 'p20261022100000bbbb', text: 'forget it' });
+    expect(JSON.parse(cli(['unpark', 'p20261022100000bbbb', '--withdraw', '--from-note', 'a1', '--db', db]).stdout))
+      .toMatchObject({ outcome: 'withdrawn', write: { status: 'rejected', reason: 'withdrawn by the person' } });
     expect(loadApproval(root, 'p20261022100000bbbb')).toMatchObject({ status: 'rejected', by: 'forge:decide' });
-    expect(cli(['unpark', 'p20261022100000bbbb', '--insist']).code).toBe(2);
+    expect(cli(['unpark', 'p20261022100000bbbb', '--insist', '--from-chat']).code).toBe(2);
   });
   it('speaks the run\'s language, and answers with no run at all', () => {
     autonomousRun(path.join(root, 'wt'), 'es');
     parked('p20261022100000cccc');
-    expect(JSON.parse(cli(['unpark', 'p20261022100000cccc', '--withdraw']).stdout)).toMatchObject({ write: { reason: 'retirada por la persona' } });
+    expect(JSON.parse(cli(['unpark', 'p20261022100000cccc', '--withdraw', '--from-chat']).stdout)).toMatchObject({ write: { reason: 'retirada por la persona' } });
     saveRun(root, { ...startRun(T0, { hours: 1 }, 10, 'coord-1', 'en'), active: false });
     parked('p20261022100000dddd', 'Split screen');
-    expect(JSON.parse(cli(['unpark', 'p20261022100000dddd', '--insist']).stdout)).toMatchObject({ outcome: 'integrated' });
+    expect(JSON.parse(cli(['unpark', 'p20261022100000dddd', '--insist', '--from-chat']).stdout)).toMatchObject({ outcome: 'integrated' });
     expect(decisions().at(-1)).not.toHaveProperty('runId');
   });
   it('a decision the record refuses writes nothing (T6B2-DECISION-FIRST)', () => {
     parked('p20261022100000eeee', String.fromCharCode(0x202e));
-    const r = cli(['unpark', 'p20261022100000eeee', '--insist']);
+    const r = cli(['unpark', 'p20261022100000eeee', '--insist', '--from-chat']);
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/what/);
     expect(loadProposal(root, 'p20261022100000eeee')).toMatchObject({ status: 'discussing', parked: { why: 'solo game' } });
     expect([loadApproval(root, 'p20261022100000eeee'), readEvents(root)]).toEqual([null, []]);
     // Positive control: a parked idea with a title is integrated.
     parked('p20261022100000ffff');
-    expect(cli(['unpark', 'p20261022100000ffff', '--insist']).code).toBe(0);
+    expect(cli(['unpark', 'p20261022100000ffff', '--insist', '--from-chat']).code).toBe(0);
   });
   it('takes one answer: --insist or --withdraw, of a proposal id', () => {
     parked('p20261022100000gggg');
     for (const args of [['p20261022100000gggg'], ['p20261022100000gggg', '--insist', '--withdraw'], ['--insist'], ['p20261022100000zzzz', '--insist'],
-      ['p20261022100000gggg', '--insist', '--session']]) expect(cli(['unpark', ...args]).code, args.join(' ')).toBe(2);
+      ['p20261022100000gggg', '--insist', '--session']]) expect(cli(['unpark', ...args, '--from-chat']).code, args.join(' ')).toBe(2);
     expect(readEvents(root)).toEqual([]);
-    expect(cli(['unpark', 'p20261022100000gggg', '--withdraw']).code).toBe(0);
+    expect(cli(['unpark', 'p20261022100000gggg', '--withdraw', '--from-chat']).code).toBe(0);
+  });
+  it('answers only the person: in this conversation, or in a note of the known owner on its thread (fix 1)', () => {
+    const id = 'p20261022100000hhhh';
+    parked(id);
+    note('mine', { proposalId: id, text: 'keep it' });
+    note('theirs', { proposalId: id, author: 'user:u2', text: 'drop it' });
+    note('elsewhere', { proposalId: 'p20261022100000iiii', text: 'keep it' });
+    const answer = (...a: string[]) => cli(['unpark', id, '--insist', ...a]).code;
+    // With no owner known, no note answers.
+    expect(answer('--from-note', 'mine', '--db', db)).toBe(2);
+    pull(99);
+    for (const a of [[], ['--from-chat', '--from-note', 'mine', '--db', db], ['--from-note', 'mine'], ['--from-note', '--db', db], ['--from-note', 'theirs', '--db', db],
+      ['--from-note', 'elsewhere', '--db', db], ['--from-note', 'missing', '--db', db]]) expect(answer(...a), a.join(' ')).toBe(2);
+    expect([loadProposal(root, id)?.status, loadApproval(root, id), readEvents(root)]).toEqual(['discussing', null, []]);
+    // Positive control: the owner's note on its thread answers.
+    expect(answer('--from-note', 'mine', '--db', db)).toBe(0);
+    expect(loadProposal(root, id)?.status).toBe('approved');
   });
 });
 
@@ -272,7 +362,7 @@ describe('ideas and unpark in a profile worktree (T6B2-ROOTS)', () => {
     const id = added(['--file', file('idea.json', idea), '--from-note', 'n1', '--db', db]);
     verdicts({ id, verdict: 'clash', why: 'the vision is a solo game', loses: 'the focus on solo play' });
     expect(judge(id)).toMatchObject({ outcome: 'parked' });
-    const r = JSON.parse(cli(['unpark', id, '--insist', '--session', 'main']).stdout);
+    const r = JSON.parse(cli(['unpark', id, '--insist', '--from-chat', '--session', 'main']).stdout);
     expect(r.outcome).toBe('integrated');
     expect([loadProposal(root, id)?.status, loadApproval(root, id)?.status, loadProposal(main, id), loadApproval(main, id)]).toEqual(['approved', 'approved', null, null]);
     const all = readEvents(main).filter(e => e.kind === 'decision');

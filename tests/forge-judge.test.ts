@@ -25,7 +25,8 @@ const verdicts = (...v: { id: string; verdict: string; why: string; changes?: st
 };
 const judge = (id: string, extra: string[] = []) => run(['proposals', 'judge', id, '--critic', 'v.json', ...extra], io());
 const outcome = (id: string) => JSON.parse(judge(id).stdout).outcome as string;
-// A chat idea is the owner's: proposals add --from-chat (Task 5) logs owner: true; until then, the last add event says so.
+// A chat idea is the owner's: `proposals add --from-chat` logs owner: true. These tests write that add event by hand, as the
+// last one judge reads; tests/forge-ideas.test.ts runs the command itself.
 const fromChat = (id: string) => appendEvent(root, { ts: T0.toISOString(), kind: 'proposal', action: 'add', id, from: 'chat', owner: true });
 const decisions = () => readEvents(root).filter(e => e.kind === 'decision');
 const judged = () => readEvents(root).filter(e => e.kind === 'proposal' && e.action === 'judge');
@@ -159,7 +160,8 @@ describe('proposals judge: what it never approves', () => {
     expect(judged()).toHaveLength(1);
   });
   it('the verdict must be of the text the proposal has now, a v2\'s included', () => {
-    // A chat idea's add event carries no digest, so its edited text reaches the verdict's digest.
+    // The hand-written chat add event carries no digest (`add --from-chat` logs one), so here the verdict's digest is the one
+    // that catches the edited text.
     const id = add({ title: 'Ghost replays', source: 'user' });
     fromChat(id);
     verdicts({ id, verdict: 'keep', why: 'fun' });
