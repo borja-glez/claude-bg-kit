@@ -9,9 +9,9 @@
 // process. T5-FILE: re-exported from autonomy-rules.ts; this file never imports it.
 import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
 import { isLocalHost } from './resources.js';
-import { commandName, GIT_VALUED, type Segment, type Word } from './shell-words.js';
-import { bashSegments, deny, mcpWords, withContainers } from './autonomy-shared.js';
-import { BASH_TABLES, scan, type OptTable } from './autonomy-tables.js';
+import { commandName, GIT_VALUED, isNullSink, type Segment, type Word } from './shell-words.js';
+import { bashSegments, deny, insideRoots, mcpWords, segmentPath, withContainers } from './autonomy-shared.js';
+import { BASH_TABLES, head, scan, T, type OptTable, type Scan } from './autonomy-tables.js';
 import { readWebRequest, type WebReq } from './autonomy-parse.js';
 
 const NET_INSTEAD = 'only local services may be written; record the action as not done';
@@ -352,38 +352,82 @@ const SSH_O_ALLOW = new Set(['stricthostkeychecking', 'userknownhostsfile', 'bat
   'identityfile', 'identitiesonly', 'loglevel', 'serveraliveinterval', 'serveralivecountmax', 'compression', 'addkeystoagent', 'hostkeyalias',
   'preferredauthentications', 'passwordauthentication']);
 
-/** An ssh/scp/sftp `-o key=val` whose key is off the allow-list, or a `-F <file>` config the guard cannot read, is an unknown target. */
-function sshOptionsDeny(name: string, args: Word[]): GuardVerdict | null {
-  const valued = SSH_VALUED[name] ?? SSH_VALUED.ssh;
-  for (let k = 0; k < args.length; k++) {
-    const t = args[k].text;
-    if (!t.startsWith('-')) continue;
-    if (t === '-F' || /^-F./.test(t)) return netUnknown(`${name} -F reads a config file the hook cannot read`);
-    if (t === '-o' || /^-o./.test(t)) {
-      const spec = t === '-o' ? (args[++k]?.text ?? '') : t.slice(2);
-      const key = spec.split('=')[0].trim().toLowerCase();
-      if (!SSH_O_ALLOW.has(key)) return netUnknown(`${name} -o ${spec} sets or runs something the hook cannot read`);
-      continue;
-    }
-    if (valued.has(t) && !t.includes('=')) k++; // skip a valued option's value
+// fix 2 (T6B2-SSH-FAILCLOSED): read the ssh family with Task 4's `scan`, a full option table per tool from its OpenSSH man
+// page. Every option is a switch that allows, a valued option that allows when its value checks out, or an unknown target;
+// an option the table does not have is an unknown target too. `deny` holds the options that run or reach outside the run
+// (forwards, control/program paths, config files); `-o`, `-J` and `-E` carry their own value checks.
+const SSH_OPTS = T('-4 -6 -A -a -C -f -G -g -K -k -N -n -q -T -t -V -v -X -x -Y -y -s -B= -b= -c= -D= -E= -e= -F= -I= -i= -J= -L= -l= -m= -O= -o= -p= -Q= -R= -S= -W= -w=');
+const SCP_OPTS = T('-3 -4 -6 -A -B -C -O -p -q -r -T -v -d -c= -F= -i= -J= -l= -o= -P= -S= -X=');
+const SFTP_OPTS = T('-4 -6 -a -f -N -p -q -r -v -A -C -c= -B= -b= -D= -F= -i= -J= -l= -o= -P= -R= -S= -X=');
+const SSH_FAMILY: Record<string, { table: OptTable; deny: ReadonlySet<string> }> = {
+  ssh: { table: SSH_OPTS, deny: new Set(['-F', '-S', '-L', '-R', '-D', '-w', '-W', '-s']) },
+  scp: { table: SCP_OPTS, deny: new Set(['-F', '-S']) },
+  sftp: { table: SFTP_OPTS, deny: new Set(['-F', '-S', '-D']) },
+};
+
+/** A value word that resolves to `/dev/null` or a literal path inside the run's roots (for `-E`, `-o UserKnownHostsFile/IdentityFile`). */
+function insidePath(w: Word, seg: Segment, ctx: GuardCtx): boolean {
+  if (w.dynamic) return false;
+  if (isNullSink(w.text, seg.dialect)) return true;
+  const p = segmentPath(w, seg);
+  return p !== null && insideRoots(p, ctx);
+}
+
+/** An `-o Key[=| ]value`: Key must be on the allow-list; UserKnownHostsFile and IdentityFile also need a value inside the roots. */
+function sshOValueDeny(tool: string, w: Word, seg: Segment, ctx: GuardCtx): GuardVerdict | null {
+  if (w.dynamic) return netUnknown(`${tool} -o value the shell hides`);
+  const spec = w.text, sep = spec.search(/[=\s]/), key = (sep >= 0 ? spec.slice(0, sep) : spec).toLowerCase();
+  if (!SSH_O_ALLOW.has(key)) return netUnknown(`${tool} -o ${spec} sets or runs something the hook cannot read`);
+  if (key === 'userknownhostsfile' || key === 'identityfile') {
+    const val = sep >= 0 ? spec.slice(sep + 1).trim() : '';
+    if (!insidePath({ text: val, dynamic: false, glob: false }, seg, ctx)) return netUnknown(`${tool} -o ${key} points outside the run's roots`);
   }
   return null;
 }
 
-/** rsync's remote shell (`-e`/`--rsh`): allowed only when it is `ssh` with allowed options; anything else is an unknown target. */
-function rsyncRemoteShellDeny(args: Word[]): GuardVerdict | null {
-  let val: Word | null = null;
-  for (let k = 0; k < args.length; k++) {
-    const t = args[k].text;
-    if (t === '-e' || t === '--rsh') { val = args[k + 1] ?? { text: '', dynamic: false, glob: false }; break; }
-    const m = /^(?:--rsh=|-e)(.+)$/.exec(t); if (m && t !== '-e') { val = { text: m[1], dynamic: args[k].dynamic, glob: false }; break; }
+/** `-J <hosts>` (ProxyJump): every jump host must be local, else the line reaches a host that is not local. */
+function sshJDeny(tool: string, w: Word): GuardVerdict | null {
+  if (w.dynamic) return netUnknown(`${tool} -J names a jump host the shell hides`);
+  for (const h of w.text.split(',')) { const host = hostToken(h); if (!host || !isLocalHost(host)) return netWrite(`${tool} -J reaches a host that is not local`); }
+  return null;
+}
+
+/** The three-way verdict on an ssh-family option scan: an unknown option, a forbidden one, or a value that fails its check is an unknown target (`-J` to a remote host denies as non-local). */
+function sshFamilyDeny(tool: string, sc: Scan, unknown: boolean, seg: Segment, ctx: GuardCtx): GuardVerdict | null {
+  if (unknown) return netUnknown(`${tool} has an option the hook does not know`);
+  const deny = SSH_FAMILY[tool].deny;
+  for (const key of sc.flags) if (deny.has(key)) return netUnknown(`${tool} ${key} runs or reaches something the hook cannot read`);
+  for (const { key, w } of sc.vals) {
+    if (key === '-o') { const v = sshOValueDeny(tool, w, seg, ctx); if (v) return v; }
+    else if (key === '-J') { const v = sshJDeny(tool, w); if (v) return v; }
+    else if (key === '-E' && !insidePath(w, seg, ctx)) return netUnknown(`${tool} -E writes a log the hook cannot place inside the roots`);
   }
-  if (val === null) return null;
-  if (val.dynamic) return netUnknown('rsync -e runs a remote shell only the shell names');
-  const words = val.text.split(/\s+/).filter(Boolean);
+  return null;
+}
+
+/** An ssh/scp/sftp call, judged by its own option table; ssh/scp/sftp stop option reading at the first operand (OpenSSH getopt). */
+function sshFamilyOptionsDeny(tool: string, args: Word[], seg: Segment, ctx: GuardCtx): GuardVerdict | null {
+  const h = head(args, SSH_FAMILY[tool].table, seg.dialect);
+  return sshFamilyDeny(tool, h.sc, h.unknown, seg, ctx);
+}
+
+/** rsync's remote shell: an `ssh` command line read by the same table (anything else is unknown); `--rsync-path` runs a remote command. */
+function rshDeny(w: Word, seg: Segment, ctx: GuardCtx): GuardVerdict | null {
+  if (w.dynamic) return netUnknown('rsync runs a remote shell only the shell names');
+  const words = w.text.split(/\s+/).filter(Boolean);
   if (!words.length) return null;
-  if (commandName({ text: words[0], dynamic: false, glob: false }) !== 'ssh') return netUnknown(`rsync -e ${words[0]} runs a remote shell the hook cannot read`);
-  return sshOptionsDeny('ssh', words.slice(1).map(w => ({ text: w, dynamic: false, glob: false })));
+  if (commandName({ text: words[0], dynamic: false, glob: false }) !== 'ssh') return netUnknown(`rsync's remote shell ${words[0]} is not ssh`);
+  return sshFamilyOptionsDeny('ssh', words.slice(1).map(x => ({ text: x, dynamic: false, glob: false })), seg, ctx);
+}
+
+/** rsync's remote shell by `-e`/`--rsh` (anywhere, bundles included) or the `RSYNC_RSH` env, and `--rsync-path` which runs a command remotely. */
+function rsyncRemoteShellDeny(args: Word[], seg: Segment, ctx: GuardCtx): GuardVerdict | null {
+  if (args.some(w => /^--rsync-path(=|$)/.test(w.text))) return netUnknown('rsync --rsync-path runs a command on the remote side');
+  const sc = scan(args, BASH_TABLES['rsync'], seg.dialect);
+  let rsh: Word | null = null;
+  for (const { key, w } of sc.vals) if (key === '-e' || key === '--rsh') rsh = w;
+  if (!rsh && seg.env.RSYNC_RSH) rsh = seg.env.RSYNC_RSH;
+  return rsh ? rshDeny(rsh, seg, ctx) : null;
 }
 
 /** Every host an ssh-like command would reach is local (Minor 3). */
@@ -413,17 +457,17 @@ function dockerPublish(args: Word[], ops: string[]): GuardVerdict | null {
   return null;
 }
 /** A command that sends something off this machine whatever its (missing) URL: PUBLISHERS. Null when the command is not one. */
-function publisherDeny(name0: string, args: Word[]): GuardVerdict | null {
+function publisherDeny(name0: string, args: Word[], seg: Segment, ctx: GuardCtx): GuardVerdict | null {
   const name = name0 === 'mvnw' ? 'mvn' : name0 === 'gradlew' ? 'gradle' : name0;
   const ops = args.filter(w => !w.text.startsWith('-') && !w.text.startsWith('/'));
   const words = ops.map(w => w.text.toLowerCase());
   const o0 = words[0] ?? '';
   const has = (set: Set<string>): boolean => words.some(w => set.has(w));
   if (SSH_LIKE.has(name)) {
-    if (name === 'ssh' || name === 'scp' || name === 'sftp') { const od = sshOptionsDeny(name, args); if (od) return od; } // fix 1: an ssh option that runs a local command
+    if (SSH_FAMILY[name]) { const od = sshFamilyOptionsDeny(name, args, seg, ctx); if (od) return od; } // fix 2: read ssh/scp/sftp options fail-closed
     return sshAllLocal(name, args) ? null : netWrite(`${name} connects to another host`);
   }
-  if (name === 'rsync') { const e = rsyncRemoteShellDeny(args); if (e) return e; const rem = ops.filter(w => rsyncRemote(w.text)); if (!rem.length) return null; return rem.every(w => !w.dynamic && isLocalHost(hostToken(w.text))) ? null : netWrite('rsync copies to another host'); }
+  if (name === 'rsync') { const e = rsyncRemoteShellDeny(args, seg, ctx); if (e) return e; const rem = ops.filter(w => rsyncRemote(w.text)); if (!rem.length) return null; return rem.every(w => !w.dynamic && isLocalHost(hostToken(w.text))) ? null : netWrite('rsync copies to another host'); }
   if (name === 'git') {
     // 6b-2 Task 0: find the subcommand past git's global options (`git -C <dir> svn dcommit`, `git -c k=v svn dcommit`)
     let gi = 0;
@@ -771,12 +815,12 @@ function cloudSeg(seg: Segment): GuardVerdict | null {
 
 // ---- network dispatch -----------------------------------------------------------------------------------------------
 
-function networkSeg(seg: Segment): GuardVerdict | null {
+function networkSeg(seg: Segment, ctx: GuardCtx): GuardVerdict | null {
   const eff = effectiveCommand(seg);
   if (eff === null) return null;
   if ('cancel' in eff) return netUnknown(eff.cancel);
   const { name, args } = eff;
-  const pub = publisherDeny(name, args);
+  const pub = publisherDeny(name, args, seg, ctx);
   if (pub) return pub;
   if (seg.dialect === 'powershell' && PS_WEB.has(name)) return webVerdict(readWebRequest(seg), name, false);
   if (seg.dialect === 'powershell' && (name === 'curl' || name === 'wget')) {
@@ -797,7 +841,7 @@ export const networkRule: GuardRule = {
     const segs = bashSegments(input, ctx);
     if (!segs) return null;
     // T6-CONTAINER-INNER: the commands a container runs are judged too
-    for (const seg of segs) for (const s of withContainers(seg)) { const v = networkSeg(s); if (v) return v; }
+    for (const seg of segs) for (const s of withContainers(seg)) { const v = networkSeg(s, ctx); if (v) return v; }
     return null;
   },
 };

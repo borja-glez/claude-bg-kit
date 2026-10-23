@@ -112,14 +112,31 @@ describe('6b-2 Task 0 fix 1 · ssh, scp and rsync options; GIT_TRACE values', ()
   };
   it.each<Row>([
     ['ssh-proxycmd', bash('ssh -o ProxyCommand="rm -rf /x" localhost true')], ['ssh-localcmd', bash('ssh -o LocalCommand="x" -o PermitLocalCommand=yes localhost true')],
-    ['glued -o', bash('ssh -oProxyCommand=x localhost')], ['-o with a space', bash('ssh -o "ProxyJump h" localhost')], ['-o after the host', bash('ssh localhost -o ProxyCommand=x true')],
+    ['glued -o', bash('ssh -oProxyCommand=x localhost')], ['-o with a space', bash('ssh -o "ProxyJump h" localhost')],
     ['-F', bash(`ssh -F cfg localhost ls ${W('')}`)], ['scp -o', bash(`scp -o ProxyCommand=x a.txt localhost:${W('b.txt')}`)], ['scp -F', bash(`scp -F cfg a.txt localhost:${W('b.txt')}`)],
     ['rsync -e ssh -o', bash(`rsync -e "ssh -o ProxyCommand=x" src/ localhost:${W('dst')}/`)], ['rsync -e not ssh', bash('rsync -e mysh src/ dst/')],
     ['rsync --rsh=', bash('rsync --rsh=mysh src/ dst/')],
+    // fix round 2 (T6B2-SSH-FAILCLOSED): the ssh family is read with a full option table; an unknown option, a program option or a failed value check is an unknown target
+    ['G2 -vo bundled', bash('ssh -vo "ProxyCommand=x@localhost" true')], ['G4 scp -S prog', bash(`scp -S x a.txt localhost:${W('b.txt')}`)],
+    ['G5 sftp -D prog', bash('sftp -D x localhost')], ['G6 rsync -avze', bash(`rsync -avze "ssh -o ProxyCommand=x" src/ localhost:${W('dst')}/`)],
+    ['G7 RSYNC_RSH', bash(`RSYNC_RSH="ssh -o ProxyCommand=x" rsync -a src/ localhost:${W('dst')}/`)], ['G9 UKHF outside', bash('ssh -o UserKnownHostsFile=/outside/kh localhost true')],
+    ['ssh -L forward', bash('ssh -L 8080:localhost:80 localhost true')], ['ssh -w tunnel', bash('ssh -w 0:0 localhost true')], ['ssh -s subsystem', bash('ssh -s localhost sftp')],
+    ['ssh unknown opt', bash('ssh -Z localhost ls')], ['rsync --rsync-path', bash(`rsync --rsync-path=/usr/bin/x -a src/ localhost:${W('dst')}/`)],
   ])('network: an ssh option the allow-list does not hold, a config file or a remote shell that is not ssh is an unknown target: %s', (_, input) => {
     unknownBy('network', networkRule.check(input, CTX));
     expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toMatchObject({ decision: 'deny' });
   });
+  // fix round 2: -J (ProxyJump) to a non-local host reaches another host (denied as a non-local host, not unknown)
+  it('network: ssh -J to a non-local host denies as a non-local host', () => {
+    const v = networkRule.check(bash('ssh -J remote.example.com localhost true'), CTX);
+    expect(v).toMatchObject({ decision: 'deny', rule: 'network' });
+    expect((v as { reason: string }).reason).not.toMatch(/unknown target/);
+    expect(evaluateGuard(bash('ssh -J remote.example.com localhost true'), CTX, AUTONOMY_RULES)).toMatchObject({ decision: 'deny', rule: 'network' });
+  });
+  // fix round 2: option reading stops at the destination, so the remote command's own options are not ssh's (OD4, OD5)
+  it.each<Row>([B('ssh localhost ps -o pid'), B(`ssh localhost grep -F x ${W('a.txt')}`), B(`ssh -o "StrictHostKeyChecking no" localhost ls ${W('')}`),
+    B(`ssh -J localhost -o BatchMode=yes localhost ls ${W('')}`)])(
+    'every rule allows a remote command with its own options, the space form, and a local -J: %s', (_, input) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
   it.each<Row>([
     B(`ssh -o StrictHostKeyChecking=no -o BatchMode=yes localhost ls ${W('')}`), B(`ssh -o ConnectTimeout=5 -o UserKnownHostsFile=/dev/null localhost ls ${W('')}`),
     B(`scp -o BatchMode=yes a.txt localhost:${W('b.txt')}`), B(`rsync -e ssh src/ localhost:${W('dst')}/`),

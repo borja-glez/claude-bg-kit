@@ -854,9 +854,11 @@ describe('6b-2 Task 0 · ssh, scp and rsync to this machine (m3)', () => {
     ['a remote ssh that only reads stays network\'s', bash("ssh host 'ls -la'"), 'network'], ['scp to a remote host', bash('scp x host:/etc/x'), 'network'],
   ] as const)('the rule that denies: %s', (_, input, rule) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toMatchObject({ decision: 'deny', rule }));
   it.each([
-    B(`ssh localhost ls ${W('')}`), B(`ssh localhost cat ${W('a.txt')}`), B('ssh -N -L 5432:localhost:5432 localhost'), B(`scp a.txt localhost:${W('b.txt')}`),
+    B(`ssh localhost ls ${W('')}`), B(`ssh localhost cat ${W('a.txt')}`), B('ssh -N localhost'), B(`scp a.txt localhost:${W('b.txt')}`),
     B(`rsync -a src/ localhost:${W('dst')}/`), B('rsync -a localhost:/etc/hosts ./hosts'), B('rsync -a src/ dst/'),
   ])('allows what stays inside the roots: %s', (_, input) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
+  // fix round 2: a port-forward (-L/-R/-D) opens a listener and is an unknown target now
+  it('denies an ssh port-forward (-L) even to a local host', () => expect(evaluateGuard(bash('ssh -N -L 5432:localhost:5432 localhost'), CTX, AUTONOMY_RULES)).toMatchObject({ decision: 'deny', rule: 'network' }));
 });
 
 describe('fix round 1 · mcp-write (T5-BROWSER, more write words)', () => {

@@ -558,7 +558,8 @@ describe('6b-2 Task 0 · docker context use|create|rm|update changes the daemon 
     expect(v).toMatchObject({ decision: 'deny', rule: 'database' });
     expect((v as { reason: string }).reason).toMatch(/docker context/);
   });
-  it.each<Row>([B('docker context ls'), B('docker context list'), B('docker context inspect default'), B('docker context show'), B('docker --context default ps')])(
+  it.each<Row>([B('docker context ls'), B('docker context list'), B('docker context inspect default'), B('docker context show'), B('docker --context default ps'),
+    B('docker context --help'), B('docker context -h')])(
     'allows %s', (_, input) => expect(databaseRule.check(input, MORE)).toBeNull());
 });
 
