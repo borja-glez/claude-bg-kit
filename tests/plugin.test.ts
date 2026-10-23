@@ -14,12 +14,18 @@ const tmp = useTempDirs();
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 // A reference of forge:run (plugins/forge/skills/run/references/<name>.md).
 const runRef = (name: string) => read(`plugins/forge/skills/run/references/${name}.md`);
+const INFINITE_REFS = new URL('../plugins/forge/skills/infinite/references/', import.meta.url);
+/** forge:infinite as a session reads it: the core and the references it points to (6b-1 moved its tails there). */
+const infiniteText = () => [read('plugins/forge/skills/infinite/SKILL.md'),
+  ...(existsSync(INFINITE_REFS) ? readdirSync(INFINITE_REFS).sort().map(f => read(`plugins/forge/skills/infinite/references/${f}`)) : [])].join('\n');
 // J-12: what /waypoint:work can read: its core and the multi-session protocol it reads when next says multi.
 const workText = () => `${read('plugins/waypoint/skills/work/SKILL.md')}\n${read('plugins/waypoint/skills/work/references/multisession.md')}`;
 // J-12: 60 % of waypoint:work as wave 5c found it (35 073 bytes): the cap only goes down.
 const WORK_CAP = 21043;
 // J-12: 80 % of forge:run as wave 5c found it (22 479 bytes): the cap only goes down.
 const RUN_CAP = 17983;
+// 6b-1: the core of forge:infinite stays under what compaction re-attaches (5,000 tokens per skill; ≈ 3.5 characters per token here); its tails live in references/.
+const INFINITE_CAP = 13500;
 /** I-17: the floor of a dependency range (`^5.0.5`, `~5.0.5`, `5.0.5`) is `min` or later. */
 const floorAtLeast = (range: string | undefined, min: string): boolean => {
   const m = /^[\^~]?(\d+)\.(\d+)\.(\d+)$/.exec(range ?? '');
@@ -357,7 +363,7 @@ describe('plugin layout', () => {
     for (const w of ['approve [--auto]', 'waypoint design-gate DESIGN', 'canAutoApprove', '**Auto.**']) expect(design).toContain(w);
     const planner = read('plugins/forge/agents/forge-planner.md');
     for (const w of ['**Extend mode.**', 'closing task', 'never renumber', 'new: <ids>']) expect(planner).toContain(w);
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const inf = infiniteText();
     for (const w of ['autonomy: auto', '`forge-planner` in extend mode', '`plan-confirm`', 'blocked-large']) expect(inf).toContain(w);
   });
   it('forge:route skill: first, steps aside for small work, one question, hands over', () => {
@@ -372,7 +378,7 @@ describe('plugin layout', () => {
     expect(md.split(/\r?\n/).find(l => l.startsWith('description:'))).toContain('Never in a subagent');
     for (const w of ['--build-spec', '`off`', '--session ${CLAUDE_SESSION_ID}', 'FORGE route stage --stage done', '**In a subagent**']) expect(md).toContain(w);
     expect(md).not.toContain('forge local set workflow <option>');
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const inf = infiniteText();
     // Re-review m5: the release of T is waypoint's printed one, the seat kept.
     expect(inf).toContain('release <plan> --seat <SID> --free <T> --state-version <TV> --session-version <SV> --keep-seat');
     expect(inf).not.toContain('leave `T` `pending`');
@@ -498,7 +504,7 @@ describe('plugin layout', () => {
     for (const w of ['pillar', 'evidence', 'never edit code']) expect(md).toContain(w);
   });
   it('forge infinite and stop skills drive the CLI', () => {
-    const md = read('plugins/forge/skills/infinite/SKILL.md');
+    const md = infiniteText();
     expect(md).toMatch(/^---\r?\nname: infinite\r?\n/);
     for (const w of ['FORGE infinite start', 'meta/infinite', 'proposals to-task', 'proposals policy', 'forge-scout', 'FORGE cycle', '.forge/stop', 'Never merge into `main` or push', 'forge/infinite-', 'stopReason', 'if_version: PV', 'seen.json', 'never sent through `proposals policy`', 'event-id <SID>', 'MAIN_REPO', 'git merge-base --is-ancestor forge/infinite-', 'blocked-large', 'type: "question"', '--revises', 'no-cycle']) expect(md).toContain(w);
     // The Stop hook's block that ends a run (src/forge/hook.ts), which the skill tells the session to recognise.
@@ -650,8 +656,8 @@ describe('plugin layout', () => {
       expect(s).not.toContain('Then continue `/waypoint:work` at §4');
     }
     for (const w of ['FORGE swarm propose --plan', 'git -C .claude/worktrees/run diff', '--no-merged forge/run-', '--cwd .claude/worktrees/run']) expect(runRef('large')).toContain(w);
-    expect(read('plugins/forge/skills/infinite/SKILL.md')).not.toContain("the tick's `progress`");
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    expect(infiniteText()).not.toContain("the tick's `progress`");
+    const inf = infiniteText();
     // Citations point to where the text lives now: the references of forge:run.
     expect(inf).toContain('`references/execution.md` step');
     const stop = read('plugins/forge/skills/stop/SKILL.md');
@@ -663,14 +669,14 @@ describe('plugin layout', () => {
     expect(stop).toContain('meta/run');
   });
   it('infinite mode runs its execution on forge/run-<project> from the infinite branch and merges it back', () => {
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const inf = infiniteText();
     expect(inf).not.toContain('--branch <the run branch');
     expect(inf).toContain('without `--branch` and with `--merge-on-finish`');
     expect(inf).toContain('run `FORGE swarm merge`');
   });
   it('execution skills: wait 0 only after an integration, claim races dropped, leases renewed, no task.json', () => {
     const md = runRef('execution');
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const inf = infiniteText();
     for (const s of [md, inf]) expect(s).toContain('any other `wait 0` is treated as `wait 300`');
     expect(read('plugins/forge/skills/run/SKILL.md')).not.toContain('task.json');
     expect(md).toContain('FORGE swarm task <T> --drop');
@@ -704,7 +710,7 @@ describe('plugin layout', () => {
     // Every report that closes work lists them: Medium (core), Large, Execution and Ephemeral execution.
     expect(run).toMatch(/7\. Log the phase `done`[^\n]*automatic decisions/);
     expect(runRef('ephemeral')).toContain('automatic decisions');
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const inf = infiniteText();
     expect(inf).toContain('FORGE decision add --data-file <f>');
     expect(inf).toContain('FORGE decision list --auto --since');
     expect(inf).not.toContain('FORGE log --kind decision');
@@ -940,7 +946,7 @@ describe('plugin layout', () => {
     // forge:infinite matches the words of FORGE swarm start's error on a run branch that conflicts with its base.
     const diverged = /swarm start: \$\{branch\} ([a-z ]+) \$\{base\}/.exec(read('src/forge/cli/swarm/start.ts'))?.[1];
     expect(diverged).toBeDefined();
-    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain(`"${diverged}"`);
+    expect(infiniteText()).toContain(`"${diverged}"`);
   });
   it('READMEs describe the model by size, ephemeral executions and the member conflict fix round', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
@@ -979,7 +985,7 @@ describe('plugin layout', () => {
     expect(runRef('manual-member')).toContain('FORGE swarm join --session <SID> --role manual --hook-session <CSID>');
   });
   it('forge:infinite binds its run at start with the Claude id (K5-03)', () => {
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const inf = infiniteText();
     expect(inf).toContain('`CSID` = `${CLAUDE_SESSION_ID}`');
     expect(inf).toContain('FORGE infinite start --cycles N --hours H --session <CSID>');
   });
@@ -1016,7 +1022,7 @@ describe('plugin layout', () => {
   it('a merged run sends the publish swarm merge printed, so integration.merged reaches the roadmap (final review I2)', () => {
     const merged = (text: string) => text.slice(text.indexOf('`merged`'), text.indexOf('`needs-authorization`') > text.indexOf('`merged`') ? text.indexOf('`needs-authorization`') : undefined);
     const step7 = runRef('execution').split('\n').find(l => l.startsWith('7. **End.**'))!;
-    const finish = read('plugins/forge/skills/infinite/SKILL.md').split('\n').find(l => l.trimStart().startsWith('- `finish` or `stalled`'))!;
+    const finish = infiniteText().split('\n').find(l => l.trimStart().startsWith('- `finish` or `stalled`'))!;
     for (const [name, text] of [['execution step 7', merged(step7)], ['infinite finish', finish.slice(finish.indexOf('FORGE swarm merge'))]] as const) {
       for (const w of ['`publish`', '`publishErrors`', 'roadmap-writes.md']) expect(text, `${name}: ${w}`).toContain(w);
     }
@@ -1191,8 +1197,8 @@ describe('plugin layout', () => {
     const review = read('plugins/forge/skills/review/SKILL.md');
     expect(review).toContain('FORGE setup --cwd <WT>');
     expect(review).not.toContain('npm ci');
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
-    expect(inf).toContain('skills/run/references/decisions.md');
+    const inf = infiniteText();
+    expect(inf).toContain("forge:run `references/decisions.md`");
     expect(inf).not.toContain('"what": "execution not started"');
     expect(inf).toContain('`### Unattended` in forge:run `references/execution.md`');
     const row = runRef('execution').split('\n').find(l => l.startsWith('| A Large task |'))!;
@@ -1259,7 +1265,7 @@ describe('plugin layout', () => {
     for (const w of ['`validatorsCmd`', '`review-plan.json`', 'FORGE swarm stop']) expect(step, w).toContain(w);
     const decide = lines.find(l => l.startsWith('3. **Decide.**'))!;
     for (const w of ['/forge:infinite', 'no `swarm step`', 'timeout: 600000']) expect(decide, w).toContain(w);
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const inf = infiniteText();
     expect(inf).toContain('no `swarm step`');
   });
   it('the coordinator gives the person\'s answers to the step, which also waits for verify, runs one at a time and reviews an adopted task (W1c final fix wave, group A)', () => {
@@ -1277,7 +1283,7 @@ describe('plugin layout', () => {
     expect(exec).toContain('`busy`');
     expect(runRef('step')).toContain('attended, ask the person whether to stop the run');
     expect(runRef('step')).toContain('give the ruling again, corrected, on the next step');
-    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('`busy` → an integration is still merging');
+    expect(infiniteText()).toContain('`busy` → an integration is still merging');
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) expect(read(f), f).toContain('[--why-file f]');
   });
   it('the step\'s fallback runs in the foreground, a twin is collected, launch.json outlives a failed start and --execute skips triage (W1c final fix wave, group E)', () => {
@@ -1316,7 +1322,7 @@ describe('plugin layout', () => {
     for (const w of ['bind DESIGN --via design --claude ${CLAUDE_SESSION_ID}', '--second-seat', '## park', 'design-park DESIGN', 'release DESIGN --claude ${CLAUDE_SESSION_ID}']) expect(design, w).toContain(w);
     expect(runRef('execution')).toContain('bind <plan> --via forge-run --claude <CSID>');
     expect(read('plugins/forge/skills/member/SKILL.md')).toContain('bind <plan> --via forge-member --claude ${CLAUDE_SESSION_ID}');
-    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('bind <plan> --via forge-infinite --claude <CSID>');
+    expect(infiniteText()).toContain('bind <plan> --via forge-infinite --claude <CSID>');
   });
   it('the coordinator and the infinite run bind before they start, so a held seat never becomes the SID of a run (I4)', () => {
     const ex = runRef('execution');
@@ -1329,7 +1335,7 @@ describe('plugin layout', () => {
     expect(heldTask).toBeDefined();
     const exBind = ex.slice(bindAt, ex.indexOf('FORGE swarm start --project <project>'));
     for (const w of ['--second-seat', '--takeover', 'AskUserQuestion', `Exit ${heldTask}`, '--resume']) expect(exBind, w).toContain(w);
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const inf = infiniteText();
     const infBind = inf.indexOf('bind <plan> --via forge-infinite --claude <CSID>');
     expect(infBind).toBeGreaterThan(-1);
     expect(infBind).toBeLessThan(inf.indexOf('FORGE infinite start --cycles'));
@@ -1380,7 +1386,7 @@ describe('plugin layout', () => {
     const skills = ['plugins/forge/skills', 'plugins/waypoint/skills'].flatMap(d => walk(path.join(repo, d))).filter(f => f.endsWith('.md'));
     expect(skills.length).toBeGreaterThan(10);
     for (const f of skills) expect(readFileSync(f, 'utf8'), path.relative(repo, f)).not.toContain('status: "free"');
-    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('--keep-seat');
+    expect(infiniteText()).toContain('--keep-seat');
     expect(workText(), 'waypoint:work and its multisession.md').toContain('--keep-seat');
   });
   it('the ephemeral run says its tick closes it when it finishes (wave 0 handoff)', () => {
@@ -1498,7 +1504,7 @@ describe('plugin layout', () => {
     expect(decisions).not.toContain('decision: {point, what');
     expect(runRef('manual-member')).toContain('--claim');
     expect(runRef('resuming')).not.toContain('exec: {by: SID}');
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const inf = infiniteText();
     for (const w of ['`publish.infinite`', '--approvals DB/approvals --page DB/meta/page.json', '--roadmap <project>', '`ownerRule`', '`approval`', '`unowned`', 'block <plan> --db DB', '--why-file']) expect(inf, w).toContain(w);
     for (const w of ['{active: true, cycle: 0', '{cycle, lastCycleAt: NOW}', '`meta/infinite` `{active: false}`']) expect(inf, w).not.toContain(w);
     const member = read('plugins/forge/skills/member/SKILL.md');
@@ -1620,7 +1626,7 @@ describe('plugin layout', () => {
     // infinite cycle; with nobody to answer, nothing is published and no meta/page is sent.
     expect(step(1)).toContain('--page .waypoint/<project>/dbcache/meta/page.json');
     for (const w of ['`capabilitiesChanged: true`', 'AskUserQuestion', '`ask`', '`republish: true`', '/forge:infinite', 'do not send `meta/page`']) expect(step(3), w).toContain(w);
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const inf = infiniteText();
     const approved = inf.split('\n').find(l => l.startsWith('2. **Approved to tasks.**'))!;
     expect(approved).toContain('`capabilitiesChanged: true`');
   });
@@ -1725,11 +1731,11 @@ describe('plugin layout', () => {
     const auto = runRef('autonomy');
     for (const w of ['/waypoint:design round --auto', '/waypoint:design round --verify --auto', 'verdict: ready', 'verdict: changes', '--reason-file .forge/work/<project>/dismiss-reason.txt',
       'auto: minor', '/waypoint:design approve --auto', 'waypoint design-gate']) expect(auto, w).toContain(w);
-    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const inf = infiniteText();
     for (const w of ['/waypoint:design reopen --auto', '`design_ref`', '`design_version`', '`round --verify`']) expect(inf, w).toContain(w);
     expect(inf).not.toContain('apply the approved-design rule without asking (`status: draft`)');
     // Final review I2: one reopen per task, and a pass that stops leaves T blocked, never built without an approved design.
-    const step = (n: number) => inf.split('\n').find(l => l.trimStart().startsWith(`${n}. `) && l.includes('design'))!;
+    const step = (n: number) => read('plugins/forge/skills/infinite/references/large-triage.md').split('\n').find(l => l.trimStart().startsWith(`${n}. `) && l.includes('design'))!;
     // (a) step 2: a loop that stops without approval blocks T as the «Otherwise» branch does, the design a draft.
     for (const w of ['--why-file .forge/work/infinite/blocked-<T>.txt', '"action": "blocked-large"']) expect(step(2), w).toContain(w);
     // (b) step 1: T closes only with an approved design and plan tasks whose design_ref is the slug of `## <T>:`.
@@ -1917,7 +1923,7 @@ describe('plugin layout', () => {
     expect(runRef('autonomy')).toContain('--project <project>');
     const design = runRef('large').split('\n').find(l => l.startsWith('1. **Design.**'))!;
     for (const w of ['`references/autonomy.md`', '/waypoint:design new', '`other project`', '`needs-authorization`']) expect(design.slice(design.indexOf('**In auto**')), w).toContain(w);
-    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('`needs-authorization`');
+    expect(infiniteText()).toContain('`needs-authorization`');
     for (const f of ['large', 'execution', 'autonomy']) expect(runRef(f), f).not.toContain('«Sí, intégrala en');
   });
 
@@ -1946,7 +1952,8 @@ describe('plugin layout', () => {
     const unattended = exec.slice(exec.indexOf('### Unattended'));
     expect(unattended).toContain('`untrusted-commands`');
     expect(runRef('autonomy')).toContain('references/trust.md');
-    for (const f of ['review', 'infinite']) expect(read(`plugins/forge/skills/${f}/SKILL.md`), f).toContain('references/trust.md');
+    expect(read('plugins/forge/skills/review/SKILL.md'), 'review').toContain('references/trust.md');
+    expect(infiniteText(), 'infinite').toContain('references/trust.md');
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       for (const w of ['local get commands | set commands allowed --expect', 'authorize merge-on-finish', 'hook answer', '`affected_cmd`', 'settings.local.json', 'Bash(*forge.cjs* hook *)']) expect(read(f), `${f}: ${w}`).toContain(w);
     }
@@ -2104,7 +2111,7 @@ describe('plugin layout', () => {
   });
   it('a git-revert undo names its exact commits in shas, in every skill that records or reverts one (K2-19)', () => {
     expect(runRef('decisions')).toContain('"shas"');
-    for (const f of ['decisions/SKILL.md', 'run/references/autonomy.md', 'member/SKILL.md', 'infinite/SKILL.md']) {
+    for (const f of ['decisions/SKILL.md', 'run/references/autonomy.md', 'member/SKILL.md', 'infinite/references/large-triage.md']) {
       expect(read(`plugins/forge/skills/${f}`), f).toContain('shas');
     }
   });
@@ -2198,5 +2205,14 @@ describe('plugin layout', () => {
     expect(read('plugins/forge/README.md')).toContain('## Security');
     expect(read('plugins/forge/README.es.md')).toContain('## Seguridad');
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) expect(read(f), f).toContain('reflog');
+  });
+
+  it('the core of forge:infinite stays under what compaction re-attaches, and points to its tails (6b-1)', () => {
+    const core = read('plugins/forge/skills/infinite/SKILL.md');
+    expect(Buffer.byteLength(core, 'utf8')).toBeLessThanOrEqual(INFINITE_CAP);
+    for (const r of ['with-execution', 'large-triage', 'stop']) {
+      expect(core, r).toContain(`references/${r}.md`);
+      expect(existsSync(new URL(`${r}.md`, INFINITE_REFS)), r).toBe(true);
+    }
   });
 });
