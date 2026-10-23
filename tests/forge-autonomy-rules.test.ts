@@ -117,7 +117,7 @@ describe('git', () => {
     B('git filter-branch -- --all'), B('echo $(git push)'),
   ])('denies %s', (_, input) => expect(gitRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'git' }));
   it.each([
-    B('git status'), B('git commit -m x'), B('git merge forge/run-x'), B('git reset --hard HEAD'), B('git stash list'), // `git branch -D task/T001` now denies (T4-OWN-BRANCHES: not the run's branch)
+    B('git status'), B('git commit -m x'), B('git merge forge/run-x'), B('git reset --hard HEAD'), B('git branch -D task/T001'), B('git stash list'), // task/T001 is one of ctx.branches (T4-OWN-BRANCHES-AMEND)
     B('git config --get user.name'), B('git config get user.name'), B('git config list'), B('git log --oneline -5'), B(`git -C ${sh(MAIN)} log -1`),
     B('git worktree list'), B('git merge main'), B('git checkout main -- docs/x.md'), B('git commit -m "a; git push"'),
   ])('allows %s', (_, input) => expect(gitRule.check(input, CTX)).toBeNull());
@@ -301,7 +301,7 @@ describe('fix round 2 · git', () => {
   it.each([
     'git commit -am x', 'git checkout -b task/T002', 'git switch -c feat', 'git checkout -- src/a.ts', 'git rebase main', 'git rebase -i HEAD~3', 'git fetch origin main',
     'git restore --staged .', 'git checkout forge/spike-x', 'git commit -m x -- src/a.ts', 'git add -- src/a.ts', 'git log -- src', 'git checkout -b feat main', 'git rebase --onto main HEAD~3',
-    'git diff main -- src', 'git -C ' + sh(MAIN) + ' stash list', // a destructive op on task/T001 moved to the fix-round-3 deny block (T4-OWN-BRANCHES)
+    'git diff main -- src', 'git -C ' + sh(MAIN) + ' stash list', 'git branch -d task/T001', 'git branch -m task/T001 task/T009', 'git switch -C task/T001 HEAD', // task/T001 is the run's (T4-OWN-BRANCHES-AMEND)
   ].map(c => [c, bash(c)] as const))('allows everyday git: %s', (_, input) => expect(gitRule.check(input, CTX)).toBeNull());
 });
 
@@ -361,12 +361,91 @@ describe('fix round 3 · git', () => {
     // FC7: every protected word, refspec destinations, symbolic-ref, a bundle no table knows; FC8: env config
     B('git branch -fm forge/spike-x main'), B('git symbolic-ref HEAD refs/heads/main'), B('git pull origin main:main'),
     B(`GIT_CONFIG_PARAMETERS="'core.hooksPath'='/x'" git commit -m x`), B('GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=$K GIT_CONFIG_VALUE_0=/x git commit -m x'),
-    // T4-OWN-BRANCHES: forced or destructive ops on a branch that is not the run's
-    B('git branch -D task/T001'), B('git branch -d task/T001'), B('git branch -m task/T001 task/T009'), B('git switch -C task/T001 HEAD'),
+    // T4-OWN-BRANCHES: forced or destructive ops on a branch that is not the run's (task/T001 is, by T4-OWN-BRANCHES-AMEND: see fix round 4)
+    B('git branch -D task/T002'), B('git branch -d feature-of-borja'), B('git branch -m feature-of-borja task/T009'), B('git switch -C feature-of-borja HEAD'),
   ])('denies %s', (_, input) => expect(gitRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'git' }));
   it.each([
     'git -C ' + sh(MAIN) + ' worktree list', 'git -C ' + sh(MAIN) + ' stash list', 'git -C ' + sh(MAIN) + ' log --oneline -3', 'git -v', 'git branch -u origin/main', 'git branch --show-current',
     // T4-OWN-BRANCHES: the run may force or delete its own scratch branches
     'git branch -D forge/spike-x', 'git branch -d forge/spike-x/scratch', 'git switch -C forge/spike-x HEAD', 'git branch -m forge/spike-x-old forge/spike-x-new',
+  ].map(c => [c, bash(c)] as const))('allows %s', (_, input) => expect(gitRule.check(input, CTX)).toBeNull());
+});
+
+// ---- fix round 4: bash writers get option tables, the run's own branches and Go patterns pass, shared git state is protected ----
+
+describe('fix round 4 · files', () => {
+  it.each([
+    // FC3: an option outside a bash writer's table cancels every exemption, so a source, an archive, a script or an input is judged too
+    B(`cp --unknown ${OUT('src')} dst`), B(`install --unknown ${OUT('a')} b`), B(`rsync --unknown ${OUT('src')}/ dst/`), B(`tar --unknown -xf ${OUT('a.tgz')}`),
+    B(`unzip --unknown ${OUT('a.zip')}`), B(`7z -zz x ${OUT('a.7z')}`), B(`sed --unknown 's/a/b/' ${OUT('f')}`), B(`perl --unknown -pe 's/a/b/' ${OUT('f')}`),
+    B(`patch --unknown -i ${OUT('x.diff')}`), B(`touch --unknown -r ${OUT('a')} b`), B(`chown --unknown --reference=${OUT('a')} b`), B(`dd --unknown if=${OUT('a')} of=b`),
+    B(`find ${sh(MAIN)} -unknownpred -print`), B(`sort --unknown ${OUT('f')}`), B(`cp -X ${OUT('src')} dst`), B(`robocopy ${PM('src')} dst /ZZ`), B(`xcopy ${PM('src')} dst /ZZ`),
+    // T4-FC5-CATCHALL: an option outside curl's, wget's or sort's table makes the command write-class (its candidates and cwd are judged)
+    B(`cd ${sh(MAIN)} && curl --unknown https://x`), B(`curl --unknown -K ${OUT('rc')} https://x`), B(`cd ${sh(MAIN)} && sort --unknown in.txt`), B(`wget --unknown -i ${OUT('urls')} https://x`),
+    // the tables name write targets the old parsers missed
+    B(`sort -o out.txt -T ${sh(MAIN)} in.txt`), B(`tar -czf out.tgz --listed-incremental=${OUT('snap')} src`), B(`tar -xf a.tgz -C build x -C ${sh(MAIN)} y`), B(`rsync -a --log-file=${OUT('r.log')} src/ dst/`),
+    P(`robocopy src dst /MIR /LOG:${PM('r.log')}`), B(`icacls build /save ${OUT('acl')} /T`), B(`curl --ssl-sessions ${OUT('s')} https://x`), B(`wget --save-cookies ${OUT('c.txt')} https://x`),
+    B(`fsutil file createnew ${OUT('x')} 0`), B(`7z x -w${sh(MAIN)} a.7z`), B(`install -d ${OUT('x')} y`), B(`patch -r ${OUT('rej')} -p1 < x.diff`),
+    // `cmd` is a wrapper whose inner command IS judged
+    B(`cmd /c "rd /s /q ${PM('x')}"`), B(`cmd /c "del /f ${PM('a')}"`), B(`cmd /c "copy a ${PM('b')}"`),
+    // `out` is a read verb only for the cmdlets that never write: Out-File stays a writer
+    P(`Out-File -FilePath ${PM('x')}`), P(`Out-File ${PM('x')} -InputObject $r`), P(`"x" | Out-File -LiteralPath ${PM('x')} -NoClobber`),
+    // `..` means a segment equal to `..`: Go's `...` is no path, but a real `..` is still judged
+    B('go test ../...'),
+  ])('denies a write however it is spelled: %s', (_, input) => expect(filesRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'files' }));
+
+  it.each([
+    // a PowerShell parameter outside the cmdlet's table cancels the exemption of a valued one, as an unknown bash option does
+    P('Remove-Item build -Bogus -Filter $f'), B('sort --unknown "$F"'), B('tar --unknown -xf "$A"'),
+  ])('denies an unknown target: %s', (_, input) => unknown('files', filesRule.check(input, CTX)));
+
+  it.each([
+    // `..` means a segment equal to `..` (Go's package pattern is no path)
+    B('go test ./...'), B('go build ./...'), B('go vet ./...'), B('go test -race -count=1 ./...'), B('go build -o bin/app ./cmd/...'),
+    // every option in the tables is known: everyday lines with their real options keep allowing
+    B('rm -rf --one-file-system build'), B('cp -a --no-preserve=mode src dst'), B('cp -r --parents src/a.ts dst'), B('mkdir -m 755 -p out/x'), B('touch -r a.txt b.txt'), B('truncate -s 0 app.log'),
+    B('tar --strip-components=1 -xzf a.tgz -C vendor'), B('tar -czf out.tgz --exclude=node_modules --exclude-vcs .'), B('tar -tzf a.tgz'), B('tar xzf a.tgz'), B('rsync -a --delete --exclude-from=.rsyncignore src/ dst/'),
+    B('sort -u -k2,2 -t, -o out.csv in.csv'), B('sort -n in.txt'), B('curl -fsSL --retry 3 --connect-timeout 5 -o out.json https://x'), B(`curl -sS -X POST --data-binary @body.json -H 'a: b' https://x`),
+    B('curl --no-progress-meter -o f https://x'), B('wget -q --tries=3 --timeout=10 -O f https://x'), B('wget -nv -N -P vendor https://x/f'), B("find . -name '*.tmp' -type f -mtime +7 -delete"), B('find src -newer stamp -delete'),
+    B("find . -name '*.log' -print"), B("sed -i.bak -E 's/a/b/' f"), B("sed -n -e '/x/p' f"), B("perl -i.bak -pe 's/a/b/' f"), B("perl -MJSON -0777 -ne 'print' f"), B("ruby -I lib -r yaml -e 'puts 1'"),
+    B('chmod -R u+rwX dist'), B('chmod -x scripts/x.sh'), B('chown --reference=a.txt b.txt'), B('ln -sfn lib/x link'), B('install -Dm755 a bin/a'), B('install -d -m 755 out'), B('patch -p1 -i fix.diff'),
+    B("unzip -o -q a.zip -d out -x '*.md'"), B('7z x -oout -y a.7z'), B('7z a -mx9 -r out.7z src'), B('dd if=/dev/zero of=blank bs=1M count=1 status=none'), B('shred -u -n 3 secret'), B('tee -a log.txt'),
+    B('xcopy src dst /E /I /Y'), B('cmd /c "del /f /q build\\x"'), B('cmd /c "attrib +r -a a.txt"'), B('icacls build /grant x:F /T'), B('cmd /c "copy /y a b"'), B('cmd /c "mklink /J link src"'),
+    P('robocopy src dst /MIR /XD node_modules .git /LOG:build.log /R:1 /W:1'), B('curl -s https://x | sort --parallel=2 -u'), B(`curl -o f https://x -K ${OUT('rc')}`), B(`sort ${OUT('f')}`), B(`unzip ${OUT('a.zip')}`),
+    // T4-PS-TABLES: the cmdlet tables completed from the documented parameter sets
+    P('Tee-Object -FilePath log.txt -Variable v -Append -Encoding utf8'), P('Copy-Item -Path a -Destination b -Container -ToSession $s'), P('Out-File -FilePath a.txt -Width 80 -NoClobber'),
+    P('Export-Csv -Path a.csv -UseCulture -QuoteFields a,b -NoHeader'), P('Export-Clixml -Path a.xml -Depth 3 -InputObject $o'), P('Remove-Item -Path build -Recurse -Force -Credential $c'),
+    P('Invoke-WebRequest https://x -OutFile f -SkipCertificateCheck -MaximumRetryCount 3 -Resume'), P('Invoke-RestMethod https://x -OutFile f -FollowRelLink -StatusCodeVariable sc'),
+    P('Start-BitsTransfer -Source https://x -Destination f -Asynchronous -RetryInterval 60'), P('Rename-Item a.txt -NewName b.txt -PassThru'), P('New-Item -Path x -ItemType Directory -Force -Credential $c'),
+    P('Compress-Archive -Path src -DestinationPath a.zip -CompressionLevel Optimal -Update'), P('Set-Item -Path a.txt -Value x -PassThru'),
+    // `out` as a read verb only for Out-Host, Out-String, Out-Null, Out-Default, Out-GridView
+    P('Get-Process | Out-Default'), P('Get-Process | Out-GridView'), P(`Get-Content ${PM('a')} | Out-String`), P('Get-Process | Out-Host -Paging'),
+  ])('allows everyday work inside the worktree: %s', (_, input) => expect(filesRule.check(input, CTX)).toBeNull());
+});
+
+describe('fix round 4 · self', () => {
+  it.each([P('Out-File -FilePath .claude\\settings.json'), B(`cmd /c "copy x.json .claude\\settings.json"`)])(
+    'denies reaching the project settings however spelled: %s', (_, input) => expect(selfRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'self' }));
+});
+
+describe('fix round 4 · git', () => {
+  it.each([
+    // T4-GIT-SHARED: config, remotes, worktree admin, the object store, the reflog and replace refs are shared with the person's checkout
+    B('git config user.name x'), B('git config --unset user.name'), B('git config --add x.y z'), B('git config set user.name x'), B('git config --replace-all x.y z'),
+    B('git config --rename-section a b'), B('git config --remove-section a'), B('git config -e'), B('git config --edit'), B('git config unset user.name'),
+    B('git remote add origin https://x'), B('git remote remove origin'), B('git remote rm origin'), B('git remote rename origin upstream'), B('git remote set-url origin https://x'),
+    B('git remote set-head origin -a'), B('git remote set-branches origin main'), B('git remote prune origin'), B('git remote update'),
+    B('git worktree prune'), B('git worktree lock .tools/m'), B('git worktree unlock .tools/m'), B('git worktree move .tools/m .tools/n'), B('git worktree repair'), B('git worktree remove ../other'),
+    B('git gc --prune=now'), B('git prune'), B('git repack -ad'), B('git maintenance run'), B('git maintenance start'), B('git reflog expire --expire=now --all'), B('git reflog delete HEAD@{1}'),
+    B('git replace a b'), B('git filter-repo --path x'), B(`git -C ${sh(MAIN)} reflog expire --all`),
+  ])('denies a change to git state the clone shares: %s', (_, input) => expect(gitRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'git' }));
+  it.each([
+    // the read forms stay allowed
+    'git config --get user.name', 'git config user.name', 'git config --global user.name', 'git config -l', 'git config --list --show-origin', 'git config --show-scope --list',
+    'git config --get-regexp alias', 'git config get user.name', 'git config list', 'git config --type=bool core.bare', 'git remote', 'git remote -v', 'git remote show origin',
+    'git remote get-url origin', 'git worktree list', 'git reflog', 'git reflog show HEAD', 'git reflog exists refs/heads/x', 'git fetch --all --prune',
+    // T4-OWN-BRANCHES-AMEND: the run's own branches are ctx.branches too
+    'git branch -D task/T001', 'git branch -d task/T001', 'git branch -m task/T001 task/T009', 'git switch -C task/T001 HEAD', 'git checkout -B forge/run-x HEAD',
+    'git update-ref refs/heads/task/T001 HEAD', 'git branch -f forge/run-x HEAD',
   ].map(c => [c, bash(c)] as const))('allows %s', (_, input) => expect(gitRule.check(input, CTX)).toBeNull());
 });

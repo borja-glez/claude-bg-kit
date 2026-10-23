@@ -1,28 +1,35 @@
 // Plan 6b-1, Task 4 (fix 2, T4-FAILCLOSED): the write-target parser the `files` and `self` rules use. The direction is
 // fail-closed: a write-class segment's words are all candidate targets, and a word is EXEMPTED only when the command's own
 // option table positively identifies it as a source, content or script. An option the table does not know cancels every
-// exemption, so a parsing miss becomes a deny with a clear reason, not a hole. Pure: reads no file, starts no process.
+// exemption (FC3: the bash tables live in autonomy-tables.ts, the cmdlet tables below), so a parsing miss becomes a deny
+// with a clear reason, not a hole. Pure: reads no file, starts no process.
 import path from 'node:path';
 import { commandName, type Dialect, type Segment, type Word } from './shell-words.js';
 import { segmentPath } from './autonomy-shared.js';
+import { BASH_TABLES, DD_KEYS, scan, type Scan } from './autonomy-tables.js';
 
 /** What a write-class segment would write: the words to judge as targets. `writer` is false when the segment is no writer. */
 export interface WriteInfo { writer: boolean; targets: Word[] }
 
 const word = (text: string, dynamic = false): Word => ({ text, dynamic, glob: false });
 const val = (w: Word, from: number): Word => ({ text: w.text.slice(from), dynamic: w.dynamic, glob: false });
-const CWD = word('.'); // a write into the segment's own directory
+const NONE: WriteInfo = { writer: false, targets: [] };
 
 // ---- bash / cmd ------------------------------------------------------------------------------------------------------
 
-// Writers whose every non-option operand is a target (delete, move, in-place metadata, create-empty).
-const ALL = new Set(['rm', 'rmdir', 'unlink', 'shred', 'truncate', 'del', 'erase', 'rd', 'mv', 'move', 'ren', 'chmod', 'chown', 'chgrp', 'attrib', 'touch', 'mkdir', 'tee']);
-const COPY = new Set(['cp', 'copy', 'xcopy', 'install']); // sources read, the destination (last operand or -t) written
-const SLASH_SWITCH = new Set(['del', 'erase', 'rd', 'copy', 'xcopy', 'robocopy', 'move', 'attrib']);
-const RSYNC_VALUED = new Set(['--exclude', '--include', '--exclude-from', '--include-from', '--files-from', '--filter', '-f', '-e', '--rsh', '--chmod', '--chown', '--log-file',
-  '--out-format', '--compare-dest', '--copy-dest', '--link-dest', '--backup-dir', '--suffix', '--temp-dir', '-T', '--partial-dir', '--bwlimit', '--timeout', '--port', '--max-size', '--min-size', '--block-size', '-B']);
+// Commands whose `/x` words are switches in every dialect (an unknown command's `/x` in bash is a path: plainOperands).
+const SLASH_SWITCH = new Set(Object.keys(BASH_TABLES).filter(n => Object.keys(BASH_TABLES[n].opts).some(k => k.startsWith('/'))));
+// Writers whose every operand is a target (delete, move, in-place metadata, create-empty, link).
+const ALL_OPERANDS = new Set(['rm', 'rmdir', 'unlink', 'shred', 'truncate', 'del', 'erase', 'rd', 'mv', 'move', 'ren', 'rename', 'attrib', 'touch', 'mkdir', 'md', 'tee', 'mklink']);
+// curl's options that name a file it writes (FC5); -O/-J/--remote-name-all and --output-dir write into a directory.
+const CURL_OUT = ['-o', '--output', '-D', '--dump-header', '-c', '--cookie-jar', '--trace', '--trace-ascii', '--stderr', '--libcurl', '--etag-save', '--hsts', '--alt-svc', '--ssl-sessions'];
+const CURL_CWD = ['-O', '--remote-name', '-J', '--remote-header-name', '--remote-name-all'];
+const WGET_OUT = ['-o', '--output-file', '-a', '--append-output', '--rejected-log', '--save-cookies', '--hsts-file', '--warc-file', '--warc-tempdir'];
+const TAR_OUT = ['-g', '--listed-incremental', '--index-file'];
+const RSYNC_OUT = ['--log-file', '--backup-dir', '--partial-dir', '--temp-dir', '-T', '--write-batch', '--only-write-batch'];
+const ROBOCOPY_OUT = ['/log:', '/log+:', '/unilog:', '/unilog+:', '/save:'];
 
-/** A switch, not an operand: a `-flag`, or a single-segment `/switch` in cmd or after a cmd builtin (in Bash `/c/x` keeps its path). */
+/** A switch, not an operand: a `-flag`, or a single-segment `/switch` in cmd or after a command that takes them (in Bash `/c/x` keeps its path). */
 function isSwitch(w: Word, name: string, d: Dialect): boolean {
   const t = w.text;
   if (t.startsWith('-')) return true;
@@ -31,174 +38,104 @@ function isSwitch(w: Word, name: string, d: Dialect): boolean {
   return SLASH_SWITCH.has(name) && !t.slice(1).includes('/');
 }
 
-const operandsOf = (args: Word[], name: string, d: Dialect): Word[] => args.filter(w => !isSwitch(w, name, d));
-
-/** The -t/--target-directory value of a cp/install/mv (space, `=`, glued, or at the end of a short bundle; any case). */
-function targetDir(args: Word[]): Word | null {
-  for (let k = 0; k < args.length; k++) {
-    const t = args[k].text;
-    if (t === '-t' || t === '--target-directory') return args[k + 1] ?? null;
-    if (t.startsWith('--target-directory=')) return val(args[k], '--target-directory='.length);
-    const g = /^-([A-Za-z]*)t(.*)$/.exec(t);
-    if (g && !t.startsWith('--')) return g[2] ? val(args[k], t.length - g[2].length) : args[k + 1] ?? null;
-  }
-  return null;
-}
-
-/** tar's mode and its `-f` archive and `-C` directory, read from bundles (`-zxvf`), `xzf`, long forms and glued values. */
-function tarParse(args: Word[]): { mode: 'x' | 'c' | 'a' | 'other'; archive: Word | null; dir: Word | null } {
-  let mode: 'x' | 'c' | 'a' | 'other' = 'other', archive: Word | null = null, dir: Word | null = null;
-  for (let k = 0; k < args.length; k++) {
-    const t = args[k].text;
-    if (t === '--extract' || t === '--get') mode = mode === 'other' ? 'x' : mode;
-    else if (t === '--create') mode = mode === 'other' ? 'c' : mode;
-    else if (/^(--append|--update|--concatenate)$/.test(t)) mode = mode === 'other' ? 'a' : mode;
-    else if (t.startsWith('--file=')) archive = val(args[k], 7);
-    else if (t === '--file') archive = args[k + 1] ?? null;
-    else if (t.startsWith('--directory=')) dir = val(args[k], 12);
-    else if (t === '--directory' || t === '-C') dir = args[k + 1] ?? null;
-    else if (/^-C/.test(t)) dir = val(args[k], 2); // -C<dir> glued
-    else {
-      // a mode bundle, dashed (-zxvf) or bare first word (xzf); `f`/`C` take the rest of the bundle or the next word as value
-      const body = t.startsWith('-') ? t.slice(1) : (k === 0 && /^[a-zA-Z]/.test(t) ? t : null);
-      if (body === null) continue;
-      let vi = -1, which = '';
-      for (let j = 0; j < body.length; j++) { if (body[j] === 'f' || body[j] === 'C') { vi = j; which = body[j]; break; } if (!/[a-zA-Z]/.test(body[j])) { vi = -2; break; } }
-      if (vi === -2) continue; // not a mode bundle (a real operand)
-      const letters = vi >= 0 ? body.slice(0, vi + 1) : body, rest = vi >= 0 ? body.slice(vi + 1) : '';
-      if (mode === 'other') { if (/x/.test(letters)) mode = 'x'; else if (/c/.test(letters)) mode = 'c'; else if (/[ru]/.test(letters)) mode = 'a'; }
-      if (which === 'f') archive = rest ? word(rest, args[k].dynamic) : args[k + 1] ?? null;
-      else if (which === 'C') dir = rest ? word(rest, args[k].dynamic) : args[k + 1] ?? null;
-    }
-  }
-  return { mode, archive, dir };
-}
-
-/**
- * The in-place flag and file operands of a sed/perl/ruby edit, one letter parser driving both (FC2). sed: `e`,`f` are scripts
- * and `l` takes a value (all consume the glued rest or the next word); `i` is in-place and the rest of the bundle is its
- * suffix. perl: `e`,`E` are scripts; `i` is in-place (rest is the suffix); `l`,`0` take only glued octal digits.
- */
-function sedParse(args: Word[], perl: boolean): { inPlace: boolean; files: Word[] } {
-  let inPlace = false, sawScript = false; const files: Word[] = []; const skipNext = new Set<number>();
-  const scriptLetters = perl ? 'eE' : 'ef', valueLetters = perl ? 'eE' : 'efl';
-  for (let k = 0; k < args.length; k++) {
-    if (skipNext.has(k)) continue;
-    const t = args[k].text;
-    if (t === '--') { for (const w of args.slice(k + 1)) files.push(w); break; }
-    if (t === '--in-place' || t.startsWith('--in-place=')) { inPlace = true; continue; }
-    if (t === '--expression' || t === '--file') { sawScript = true; skipNext.add(k + 1); continue; }
-    if (/^--(?:expression|file)=/.test(t)) { sawScript = true; continue; }
-    if (t.startsWith('--')) continue;
-    if (t.startsWith('-') && t.length > 1) {
-      const letters = t.slice(1);
-      for (let j = 0; j < letters.length; j++) {
-        const c = letters[j];
-        if (c === 'i') { inPlace = true; break; } // the rest of the bundle is the suffix
-        if (perl && (c === 'l' || c === '0')) { let m = j + 1; while (m < letters.length && /[0-7]/.test(letters[m])) m++; j = m - 1; continue; } // glued octal only
-        if (valueLetters.includes(c)) { if (scriptLetters.includes(c)) sawScript = true; if (j === letters.length - 1) skipNext.add(k + 1); break; } // value = glued rest or next word
-      }
-      continue;
-    }
-    files.push(args[k]);
-  }
-  if (!sawScript && files.length) files.shift(); // with no -e/-f the first operand is the script
-  return { inPlace, files };
-}
-
-// curl's options that name a file it writes (FC5); -O/-J/--output-dir write into the segment's directory.
-const CURL_FILE = new Set(['-o', '--output', '-D', '--dump-header', '-c', '--cookie-jar', '--trace', '--trace-ascii', '--stderr', '--libcurl', '--etag-save', '--hsts', '--alt-svc']);
-const CURL_FILE_EQ = ['--output', '--dump-header', '--cookie-jar', '--trace', '--trace-ascii', '--stderr', '--libcurl', '--etag-save', '--hsts', '--alt-svc'];
-
-/** curl writes only with an output option; its target is the named file or, for -O/-J/--output-dir, the directory it writes into. */
-function curlTargets(args: Word[]): Word[] | null {
-  const out: Word[] = []; let writer = false;
-  for (let k = 0; k < args.length; k++) {
-    const t = args[k].text;
-    if (CURL_FILE.has(t)) { writer = true; if (args[k + 1]) out.push(args[k + 1]); }
-    else if (CURL_FILE_EQ.some(f => t.startsWith(f + '='))) { writer = true; out.push(val(args[k], t.indexOf('=') + 1)); }
-    else if (t === '--output-dir') { writer = true; if (args[k + 1]) out.push(args[k + 1]); out.push(CWD); }
-    else if (t.startsWith('--output-dir=')) { writer = true; out.push(val(args[k], 13)); out.push(CWD); }
-    else if (t === '--remote-name' || t === '--remote-header-name') { writer = true; out.push(CWD); }
-    else if (t.startsWith('-') && /^[A-Za-z]/.test(t[1] ?? '')) { const g = /^-([A-Za-z]*)o(.*)$/.exec(t); if (g) { writer = true; out.push(g[2] ? val(args[k], t.length - g[2].length) : args[k + 1] ?? CWD); } else if (/^-[A-Za-z]*[OJ]/.test(t)) { writer = true; out.push(CWD); } }
-  }
-  return writer ? out : null;
-}
-
-/** The targets of wget (always a writer): its download (-O/-P else cwd) and its log file (-o/-a) (FC5). */
-function wgetTargets(args: Word[]): Word[] {
-  const out: Word[] = []; let download: Word | null = CWD;
-  for (let k = 0; k < args.length; k++) {
-    const t = args[k].text;
-    if (t === '-O' || t === '--output-document') { const v = args[k + 1]; download = v && v.text !== '-' ? v : null; }
-    else if (t.startsWith('--output-document=')) { const v = val(args[k], 18); download = v.text !== '-' ? v : null; }
-    else if (t === '-P' || t === '--directory-prefix') download = args[k + 1] ?? CWD;
-    else if (t.startsWith('--directory-prefix=')) download = val(args[k], 19);
-    else if (t === '-o' || t === '--output-file' || t === '-a' || t === '--append-output') { if (args[k + 1]) out.push(args[k + 1]); }
-    else if (t.startsWith('--output-file=') || t.startsWith('--append-output=')) out.push(val(args[k], t.indexOf('=') + 1));
-    else { const g = t.startsWith('-') && /^[A-Za-z]/.test(t[1] ?? '') ? /^-([A-Za-z]*)O(.*)$/.exec(t) : null; if (g) download = g[2] ? (g[2] !== '-' ? val(args[k], t.length - g[2].length) : null) : (args[k + 1] && args[k + 1].text !== '-' ? args[k + 1] : null); }
-  }
-  if (download) out.push(download);
-  return out;
-}
-
-// Every command bashWrite knows (so a known downloader/archiver with no write option is not mistaken for an unknown command).
-const KNOWN_BASH = new Set([...ALL, ...COPY, 'robocopy', 'rsync', 'tar', 'unzip', '7z', 'dd', 'sort', 'curl', 'wget', 'patch', 'sed', 'gsed', 'perl', 'ruby', 'find', 'icacls', 'ln', 'mklink', 'fsutil']);
-
 /** Whether a segment's command is one the write-target parser knows (a writer table or a PowerShell cmdlet), even if this call writes nothing. */
 export function knownWriteCommand(seg: Segment): boolean {
   if (!seg.argv.length) return false;
   const name = commandName(seg.argv[0]);
-  return seg.dialect === 'powershell' ? isPsCmdlet(name) : KNOWN_BASH.has(name);
+  return seg.dialect === 'powershell' ? isPsCmdlet(name) : BASH_TABLES[name] !== undefined || name === 'fsutil';
 }
+
+const notStdout = (ws: Word[]): Word[] => ws.filter(w => w.text !== '-');
+const CHMOD_MODE = /^-[rwxXstugo]+$/;
+
+/** The scan of a bash writer's arguments: tar's old-style first word is a bundle, chmod's `-w`-like mode is an operand. */
+function scanArgs(name: string, args: Word[], d: Dialect): { sc: Scan; mode: Word | null } {
+  let mode: Word | null = null;
+  if (name === 'tar' && args.length && /^[A-Za-z]+$/.test(args[0].text)) args = [word('-' + args[0].text, args[0].dynamic), ...args.slice(1)];
+  if (name === 'chmod' && !args.some(w => w.text.startsWith('--reference'))) { const k = args.findIndex(w => CHMOD_MODE.test(w.text)); if (k >= 0) { mode = args[k]; args = [...args.slice(0, k), ...args.slice(k + 1)]; } }
+  return { sc: scan(args, BASH_TABLES[name], d), mode };
+}
+
+/** Every candidate of a scan, no exemption: operands, option values and the words of unknown options (FC3 cancel). */
+const allCandidates = (sc: Scan): Word[] => [...sc.ops, ...sc.vals.map(v => v.w), ...sc.stray];
 
 function bashWrite(seg: Segment): WriteInfo {
   const name = commandName(seg.argv[0]), args = seg.argv.slice(1), d = seg.dialect;
-  const none: WriteInfo = { writer: false, targets: [] };
-  if (ALL.has(name)) { let targets = operandsOf(args, name, d); if ((name === 'chown' || name === 'chgrp') && targets.length) targets = targets.slice(1); if (name === 'mv' || name === 'move') { const td = targetDir(args); if (td) targets.push(td); } return { writer: true, targets }; }
-  if (name === 'icacls') { const op = operandsOf(args, name, d)[0]; return { writer: true, targets: op ? [op] : [] }; }
-  if (name === 'ln' || name === 'mklink') {
-    const ops = operandsOf(args, name, d), targets = [...ops];
+  if (name === 'fsutil') return { writer: true, targets: args.slice(2).filter(w => !isSwitch(w, name, d)) }; // fsutil <object> <verb> <paths…>
+  if (!BASH_TABLES[name]) return NONE;
+  const { sc, mode } = scanArgs(name, args, d);
+  const W = (targets: Word[]): WriteInfo => ({ writer: true, targets });
+  if (name === 'dd') {
+    // dd's `key=value` operands: `of` is written, an unknown key cancels like an unknown option (every value is then judged)
+    const values: Word[] = [], out: Word[] = []; let unknown = sc.unknown;
+    for (const w of sc.ops) { const m = /^([a-z]+)=(.*)$/s.exec(w.text); if (!m || !DD_KEYS.has(m[1])) unknown = true; const v = m ? val(w, m[1].length + 1) : w; values.push(v); if (m?.[1] === 'of') out.push(v); }
+    return unknown ? W([...values, ...sc.vals.map(v => v.w), ...sc.stray]) : out.length ? W(out) : NONE;
+  }
+  if (sc.unknown) return W(allCandidates(sc)); // FC3 / T4-FC5-CATCHALL: an unknown option cancels every exemption
+  const ops = sc.ops;
+  const V = (...keys: string[]): Word[] => sc.vals.filter(v => keys.includes(v.key)).map(v => v.w);
+  const has = (...keys: string[]): boolean => keys.some(k => sc.flags.has(k));
+  const last = (): Word[] => (ops.length ? [ops[ops.length - 1]] : []);
+  if (ALL_OPERANDS.has(name)) return W([...ops, ...V('-t', '--target-directory')]);
+  if (name === 'chmod' || name === 'chown' || name === 'chgrp') return W(has('--reference') || mode ? ops : ops.slice(1)); // the mode / owner operand is no path
+  if (name === 'icacls') return W([...ops.slice(0, 1), ...V('/save')]);
+  if (name === 'ln') {
+    const targets = [...ops, ...V('-t', '--target-directory')];
     // a symlink's target is relative to the link's own folder, not the segment cwd (judge it there too)
-    if (name === 'ln' && ops.length >= 2 && !ops[0].dynamic && !ops[ops.length - 1].dynamic) {
+    if (ops.length >= 2 && !ops[0].dynamic && !ops[ops.length - 1].dynamic) {
       const lp = segmentPath(ops[ops.length - 1], seg);
       if (lp) { const abs = segmentPath(ops[0], { ...seg, cwd: path.dirname(lp) }); if (abs) targets.push(word(abs)); }
     }
-    return { writer: true, targets };
+    return W(targets);
   }
-  if (name === 'fsutil') { if (seg.argv[1]?.text.toLowerCase() !== 'hardlink') return none; return { writer: true, targets: operandsOf(args.slice(1), name, d).filter(w => w.text.toLowerCase() !== 'create') }; }
-  if (COPY.has(name)) {
-    const ops = operandsOf(args, name, d), td = targetDir(args);
-    const link = args.some(w => /^-[A-Za-z]*[ls]/.test(w.text) && !w.text.startsWith('--')) || args.some(w => w.text === '--link' || w.text === '--symbolic-link'); // a copy through a link reaches the sources
-    if (link) return { writer: true, targets: td ? [td, ...ops] : ops };
-    if (td) return { writer: true, targets: [td] };
-    return { writer: true, targets: ops.length ? [ops[ops.length - 1]] : [] };
+  if (name === 'cp' || name === 'install') {
+    const td = V('-t', '--target-directory');
+    const link = name === 'cp' && has('-l', '--link', '-s', '--symbolic-link'); // a copy through a link reaches the sources
+    if (link || (name === 'install' && has('-d', '--directory'))) return W([...td, ...ops]);
+    return W(td.length ? td : last());
   }
-  if (name === 'robocopy') { const ops = operandsOf(args, name, d); const move = args.some(w => /^\/MOVE?$/i.test(w.text)); const t: Word[] = []; if (ops[1]) t.push(ops[1]); if (move && ops[0]) t.push(ops[0]); return { writer: true, targets: t }; }
-  if (name === 'rsync') {
-    const ops: Word[] = []; for (let k = 0; k < args.length; k++) { if (RSYNC_VALUED.has(args[k].text)) { k++; continue; } if (!isSwitch(args[k], name, d)) ops.push(args[k]); }
-    const move = args.some(w => w.text === '--remove-source-files');
-    return { writer: true, targets: move ? ops : ops.length ? [ops[ops.length - 1]] : [] };
+  if (name === 'copy' || name === 'xcopy') return W(name === 'xcopy' ? ops.slice(1, 2) : last());
+  if (name === 'robocopy') return W([...ops.slice(1, 2), ...(has('/mov', '/move') ? ops.slice(0, 1) : []), ...V(...ROBOCOPY_OUT)]);
+  if (name === 'rsync') return W([...(has('--remove-source-files') ? ops : last()), ...V(...RSYNC_OUT)]);
+  if (name === 'tar') {
+    const out = V(...TAR_OUT);
+    if (has('-x', '--extract', '--get')) return W([...V('-C', '--directory'), ...out]);
+    if (has('-c', '--create', '-r', '--append', '-u', '--update', '-A', '--catenate', '--concatenate', '--delete')) return W([...notStdout(V('-f', '--file')), ...out]);
+    return out.length ? W(out) : NONE;
   }
-  if (name === 'tar') { const { mode, archive, dir } = tarParse(args); if (mode === 'x') return { writer: true, targets: dir ? [dir] : [] }; if (mode === 'c' || mode === 'a') return { writer: true, targets: archive ? [archive] : [] }; return none; }
-  if (name === 'unzip') { for (let k = 0; k < args.length; k++) { if (args[k].text === '-d') return { writer: true, targets: args[k + 1] ? [args[k + 1]] : [] }; if (args[k].text.startsWith('-d') && args[k].text.length > 2) return { writer: true, targets: [val(args[k], 2)] }; } return { writer: true, targets: [] }; }
-  if (name === '7z') { const sub = (args[0]?.text ?? '').toLowerCase(); if (/^x|^e/.test(sub)) { const o = args.find(w => /^-o./.test(w.text)); return { writer: true, targets: o ? [val(o, 2)] : [] }; } if (/^(a|u|d)/.test(sub)) { const op = operandsOf(args.slice(1), name, d)[0]; return { writer: true, targets: op ? [op] : [] }; } return none; }
-  if (name === 'dd') { for (const w of args) if (/^of=/.test(w.text)) return { writer: true, targets: [val(w, 3)] }; return none; }
-  if (name === 'sort') { for (let k = 0; k < args.length; k++) { const t = args[k].text; if (t === '-o' || t === '--output') return { writer: true, targets: args[k + 1] ? [args[k + 1]] : [] }; if (t.startsWith('--output=')) return { writer: true, targets: [val(args[k], 9)] }; const g = /^-([a-z]*)o(.*)$/.exec(t); if (g && !t.startsWith('--')) return { writer: true, targets: g[2] ? [val(args[k], t.length - g[2].length)] : args[k + 1] ? [args[k + 1]] : [] }; } return none; }
-  if (name === 'curl') { const t = curlTargets(args); return t ? { writer: true, targets: t } : none; }
-  if (name === 'wget') return { writer: true, targets: wgetTargets(args) };
-  if (name === 'patch') { const t: Word[] = []; for (let k = 0; k < args.length; k++) { const w = args[k].text; if (w === '-o' || w === '-d' || w === '--output' || w === '--directory') { if (args[k + 1]) t.push(args[k + 1]); } else if (/^(--output=|--directory=)/.test(w)) t.push(val(args[k], w.indexOf('=') + 1)); else if (/^-[od]./.test(w)) t.push(val(args[k], 2)); } const op = operandsOf(args, name, d)[0]; if (op) t.push(op); return { writer: true, targets: t }; }
-  if (name === 'sed' || name === 'gsed' || name === 'perl' || name === 'ruby') { const { inPlace, files } = sedParse(args, name === 'perl' || name === 'ruby'); return inPlace ? { writer: true, targets: files } : none; }
+  if (name === 'unzip') return W(V('-d'));
+  if (name === '7z') {
+    const sub = (ops[0]?.text ?? '').toLowerCase(), work = V('-w').filter(w => w.text);
+    if (sub === 'x' || sub === 'e') return W([...V('-o'), ...work]);
+    if (['a', 'u', 'd', 'rn'].includes(sub)) return W([...ops.slice(1, 2), ...work]);
+    if (['l', 't', 'h', 'i', 'b'].includes(sub)) return work.length ? W(work) : NONE;
+    return W([...ops, ...work]);
+  }
+  if (name === 'sort') { const t = [...V('-o', '--output'), ...V('-T', '--temporary-directory')]; return t.length ? W(t) : NONE; }
+  if (name === 'curl') {
+    const out = notStdout(V(...CURL_OUT)), dir = V('--output-dir');
+    return out.length || dir.length || has(...CURL_CWD) ? W([...out, ...dir]) : NONE;
+  }
+  if (name === 'wget') {
+    const o = notStdout(V('-O', '--output-document')), p = V('-P', '--directory-prefix');
+    const download = has('-O', '--output-document') ? o : p;
+    return W([...download, ...V(...WGET_OUT)]);
+  }
+  if (name === 'patch') return W([...V('-o', '--output', '-d', '--directory', '-r', '--reject-file'), ...ops.slice(0, 1)]);
+  if (name === 'sed' || name === 'gsed' || name === 'perl' || name === 'ruby') {
+    // sed/perl/ruby -i: the script is the -e/-f value, else the first operand; the other operands are the files edited in place
+    const perl = name === 'perl' || name === 'ruby';
+    if (!has('-i', '--in-place')) return NONE;
+    const script = perl ? has('-e', '-E') : has('-e', '--expression', '-f', '--file');
+    return W(script ? ops : ops.slice(1));
+  }
   if (name === 'find') {
-    const fpAt = args.findIndex(w => /^-(?:fprint0?|fprintf|fls)$/.test(w.text));
-    if (!args.some(w => w.text === '-delete') && fpAt < 0) return none;
-    const targets: Word[] = [];
-    if (fpAt >= 0 && args[fpAt + 1]) targets.push(args[fpAt + 1]);
-    let k = 0; while (k < args.length && /^-[HLPOD]/.test(args[k].text)) k += /^-[OD]$/.test(args[k].text) ? 2 : 1;
-    for (; k < args.length; k++) { const t = args[k].text; if (t.startsWith('-') || t.startsWith('(') || t === '!') break; targets.push(args[k]); }
-    return { writer: true, targets };
+    const starts = ops.filter(w => !/^[()!,]$/.test(w.text));
+    const out = [...V('-fprint', '-fprint0', '-fls'), ...V('-fprintf').slice(0, 1)];
+    if (!has('-delete') && !out.length) return NONE;
+    return W([...(has('-delete') ? starts : []), ...out]);
   }
-  return none;
+  return W(ops);
 }
 
 // ---- PowerShell ------------------------------------------------------------------------------------------------------
@@ -218,25 +155,38 @@ const PS_ALIAS: Record<string, string> = {
 interface Spec { params: Record<string, PK>; pos: PK[]; always: boolean; writerParam?: string; itemType?: boolean }
 const P = (params: Record<string, PK>, pos: PK[], extra: Partial<Spec> = {}): Spec => ({ params, pos, always: true, ...extra });
 const pathP: Record<string, PK> = { path: 'p', literalpath: 'p', pspath: 'p', lp: 'p' };
+const itemP: Record<string, PK> = { filter: 'v', include: 'v', exclude: 'v', force: 'w', credential: 'v', usetransaction: 'w' };
+// The documented parameter sets of PowerShell 7.4 and Windows PowerShell 5.1 (T4-PS-TABLES), provider dynamic parameters included.
+const webP: Record<string, PK> = {
+  uri: 's', outfile: 'p', infile: 's', method: 'v', custommethod: 'v', body: 'v', form: 'v', headers: 'v', contenttype: 'v', credential: 'v', authentication: 'v', token: 'v',
+  certificate: 'v', certificatethumbprint: 'v', sslprotocol: 'v', useragent: 'v', websession: 'v', sessionvariable: 'v', proxy: 'v', proxycredential: 'v', transferencoding: 'v',
+  timeoutsec: 'v', connectiontimeoutseconds: 'v', operationtimeoutseconds: 'v', maximumredirection: 'v', maximumretrycount: 'v', retryintervalsec: 'v', httpversion: 'v', unixsocket: 'v',
+  usebasicparsing: 'w', usedefaultcredentials: 'w', allowunencryptedauthentication: 'w', skipcertificatecheck: 'w', disablekeepalive: 'w', skipheadervalidation: 'w',
+  allowinsecureredirect: 'w', preserveauthorizationonredirect: 'w', preservehttpmethodonredirect: 'w', noproxy: 'w', proxyusedefaultcredentials: 'w', passthru: 'w', resume: 'w', skiphttperrorcheck: 'w',
+};
 const PS_CMDLETS: Record<string, Spec> = {
-  'remove-item': P({ ...pathP, filter: 'v', include: 'v', exclude: 'v', recurse: 'w', force: 'w', stream: 'v', credential: 'v', progress: 'w' }, ['p']),
-  'clear-content': P({ ...pathP, filter: 'v', include: 'v', exclude: 'v', force: 'w', stream: 'v', credential: 'v' }, ['p']),
-  'set-content': P({ ...pathP, value: 'c', encoding: 'v', filter: 'v', include: 'v', exclude: 'v', force: 'w', nonewline: 'w', stream: 'v', credential: 'v', asbytearray: 'w', asbytestream: 'w', passthru: 'w', raw: 'w', readcount: 'v', usetransaction: 'w' }, ['p', 'c']),
-  'add-content': P({ ...pathP, value: 'c', encoding: 'v', filter: 'v', include: 'v', exclude: 'v', force: 'w', nonewline: 'w', stream: 'v', credential: 'v', asbytestream: 'w', passthru: 'w', usetransaction: 'w' }, ['p', 'c']),
-  'set-item': P({ ...pathP, value: 'c', force: 'w', filter: 'v', include: 'v', exclude: 'v', credential: 'v' }, ['p', 'c']),
+  'remove-item': P({ ...pathP, ...itemP, recurse: 'w', stream: 'v' }, ['p']),
+  'clear-content': P({ ...pathP, ...itemP, stream: 'v' }, ['p']),
+  'set-content': P({ ...pathP, ...itemP, value: 'c', encoding: 'v', nonewline: 'w', stream: 'v', asbytestream: 'w', passthru: 'w' }, ['p', 'c']),
+  'add-content': P({ ...pathP, ...itemP, value: 'c', encoding: 'v', nonewline: 'w', stream: 'v', asbytestream: 'w', passthru: 'w' }, ['p', 'c']),
+  'set-item': P({ ...pathP, ...itemP, value: 'c', passthru: 'w', type: 'v', options: 'v' }, ['p', 'c']),
   'out-file': P({ filepath: 'p', literalpath: 'p', path: 'p', inputobject: 'c', encoding: 'v', width: 'v', append: 'w', force: 'w', nonewline: 'w', noclobber: 'w' }, ['p']),
-  'tee-object': P({ filepath: 'p', literalpath: 'p', inputobject: 'c', append: 'w' }, ['p']),
-  'new-item': P({ path: 'p', name: 'p', value: 'c', target: 'c', itemtype: 'v', force: 'w', credential: 'v', type: 'v' }, ['p'], { itemType: true }),
-  'export-csv': P({ ...pathP, inputobject: 'c', delimiter: 'v', encoding: 'v', notypeinformation: 'w', append: 'w', force: 'w', noclobber: 'w', usequotes: 'v', includetypeinformation: 'w', usecultures: 'w' }, ['p']),
+  'tee-object': P({ filepath: 'p', literalpath: 'p', path: 'p', inputobject: 'c', variable: 'v', encoding: 'v', append: 'w' }, ['p']),
+  'new-item': P({ path: 'p', name: 'p', value: 'c', target: 'c', itemtype: 'v', type: 'v', force: 'w', credential: 'v', usetransaction: 'w', options: 'v' }, ['p'], { itemType: true }),
+  'export-csv': P({ ...pathP, inputobject: 'c', delimiter: 'v', encoding: 'v', notypeinformation: 'w', includetypeinformation: 'w', append: 'w', force: 'w', noclobber: 'w', usequotes: 'v', quotefields: 'v', useculture: 'w', noheader: 'w' }, ['p']),
   'export-clixml': P({ ...pathP, inputobject: 'c', depth: 'v', encoding: 'v', force: 'w', noclobber: 'w' }, ['p']),
-  'copy-item': P({ path: 's', literalpath: 's', pspath: 's', lp: 's', destination: 'p', recurse: 'w', force: 'w', filter: 'v', include: 'v', exclude: 'v', container: 'w', passthru: 'w', credential: 'v' }, ['s', 'p']),
-  'move-item': P({ ...pathP, destination: 'p', force: 'w', filter: 'v', include: 'v', exclude: 'v', passthru: 'w', credential: 'v' }, ['p', 'p']),
-  'rename-item': P({ ...pathP, newname: 'v', force: 'w', passthru: 'w', credential: 'v' }, ['p', 'v']),
+  'copy-item': P({ path: 's', literalpath: 's', pspath: 's', lp: 's', destination: 'p', ...itemP, recurse: 'w', container: 'w', passthru: 'w', fromsession: 'v', tosession: 'v' }, ['s', 'p']),
+  'move-item': P({ ...pathP, destination: 'p', ...itemP, passthru: 'w' }, ['p', 'p']),
+  'rename-item': P({ ...pathP, newname: 'v', force: 'w', passthru: 'w', credential: 'v', usetransaction: 'w' }, ['p', 'v']),
   'expand-archive': P({ path: 's', literalpath: 's', destinationpath: 'p', force: 'w', passthru: 'w' }, ['s', 'p']),
-  'compress-archive': P({ path: 's', literalpath: 's', destinationpath: 'p', compressionlevel: 'v', update: 'w', force: 'w' }, ['s', 'p']),
-  'start-bitstransfer': P({ source: 's', destination: 'p', transfertype: 'v', priority: 'v', credential: 'v', displayname: 'v' }, ['s', 'p']),
-  'invoke-webrequest': P({ uri: 's', outfile: 'p', infile: 's', method: 'v', body: 'v', headers: 'v', contenttype: 'v', credential: 'v', form: 'v', sessionvariable: 'v', websession: 'v', useragent: 'v', maximumretrycount: 'v', retryintervalsec: 'v', timeoutsec: 'v', usebasicparsing: 'w', passthru: 'w' }, ['s'], { always: false, writerParam: 'outfile' }),
-  'invoke-restmethod': P({ uri: 's', outfile: 'p', infile: 's', method: 'v', body: 'v', headers: 'v', contenttype: 'v', credential: 'v', form: 'v', timeoutsec: 'v' }, ['s'], { always: false, writerParam: 'outfile' }),
+  'compress-archive': P({ path: 's', literalpath: 's', destinationpath: 'p', compressionlevel: 'v', update: 'w', force: 'w', passthru: 'w' }, ['s', 'p']),
+  'start-bitstransfer': P({
+    source: 's', destination: 'p', transfertype: 'v', priority: 'v', credential: 'v', displayname: 'v', description: 'v', authentication: 'v', customheaders: 'v', httpmethod: 'v',
+    notifycmdline: 'v', notifyflags: 'v', proxyauthentication: 'v', proxybypass: 'v', proxycredential: 'v', proxylist: 'v', proxyusage: 'v', retryinterval: 'v', retrytimeout: 'v',
+    securityflags: 'v', transferpolicy: 'v', certstorelocation: 'v', certstorename: 'v', certhash: 'v', certsubjectname: 'v', asynchronous: 'w', dynamic: 'w', suspended: 'w', usestoredcredential: 'v',
+  }, ['s', 'p']),
+  'invoke-webrequest': P(webP, ['s'], { always: false, writerParam: 'outfile' }),
+  'invoke-restmethod': P({ ...webP, followrellink: 'w', maximumfollowrellink: 'v', responseheadersvariable: 'v', statuscodevariable: 'v' }, ['s'], { always: false, writerParam: 'outfile' }),
 };
 
 /** Resolve a typed PowerShell parameter name (or unambiguous prefix) against this cmdlet's parameters and the common ones. */
@@ -251,7 +201,7 @@ const kindOf = (spec: Spec, p: string): PK => spec.params[p] ?? COMMON[p];
 function psWrite(seg: Segment): WriteInfo {
   const canon = PS_ALIAS[commandName(seg.argv[0])] ?? commandName(seg.argv[0]);
   const spec = PS_CMDLETS[canon];
-  if (!spec) return { writer: false, targets: [] };
+  if (!spec) return NONE;
   const args = seg.argv.slice(1);
   const named: Record<string, Word> = {};
   const positionals: Word[] = [];
@@ -273,7 +223,7 @@ function psWrite(seg: Segment): WriteInfo {
     positionals.push(w);
   }
   const writer = spec.always || hasWriterParam || (spec.writerParam !== undefined && cancel);
-  if (!writer) return { writer: false, targets: [] };
+  if (!writer) return NONE;
   const itemTypeTarget = spec.itemType ? itemLinks(named) : false;
   const targets: Word[] = [];
   const take = (kind: PK, w: Word) => { if (cancel || kind === 'p' || (itemTypeTarget && kind === 'c')) targets.push(w); };
@@ -297,7 +247,7 @@ const isPsCmdlet = (name: string): boolean => PS_CMDLETS[PS_ALIAS[name] ?? name]
 
 /** What a write-class segment would write. In the powershell dialect a known cmdlet is read by psWrite; an external command (robocopy, tar, …) by bashWrite. */
 export function writeInfo(seg: Segment): WriteInfo {
-  if (!seg.argv.length || seg.argv[0].dynamic) return { writer: false, targets: [] };
+  if (!seg.argv.length || seg.argv[0].dynamic) return NONE;
   return seg.dialect === 'powershell' && isPsCmdlet(commandName(seg.argv[0])) ? psWrite(seg) : bashWrite(seg);
 }
 
@@ -311,15 +261,12 @@ export function copyEnds(seg: Segment): { dest: Word; sources: Word[] } | null {
     const dest = info.targets[info.targets.length - 1];
     return dest ? { dest, sources: seg.argv.slice(1).filter(w => !w.text.startsWith('-') && w !== dest) } : null;
   }
-  if (name === 'ln') { const ops = operandsOf(args, name, d); return ops.length >= 2 ? { dest: ops[ops.length - 1], sources: ops.slice(0, -1) } : null; }
-  if (name === 'robocopy') { const ops = operandsOf(args, name, d); return ops[1] ? { dest: ops[1], sources: [ops[0]] } : null; }
-  if (name === 'rsync') { const ops: Word[] = []; for (let k = 0; k < args.length; k++) { if (RSYNC_VALUED.has(args[k].text)) { k++; continue; } if (!isSwitch(args[k], name, d)) ops.push(args[k]); } return ops.length ? { dest: ops[ops.length - 1], sources: ops.slice(0, -1) } : null; }
-  if (COPY.has(name) || name === 'mv' || name === 'move') {
-    const td = targetDir(args), ops = operandsOf(args, name, d);
-    const dest = td ?? (ops.length ? ops[ops.length - 1] : null);
-    return dest ? { dest, sources: td ? ops : ops.slice(0, -1) } : null;
-  }
-  return null;
+  if (!['ln', 'robocopy', 'rsync', 'cp', 'install', 'mv', 'move', 'copy', 'xcopy'].includes(name)) return null;
+  const { sc } = scanArgs(name, args, d), ops = sc.ops;
+  if (name === 'robocopy' || name === 'xcopy') return ops[1] ? { dest: ops[1], sources: [ops[0]] } : null;
+  const td = sc.vals.find(v => v.key === '-t' || v.key === '--target-directory')?.w ?? null;
+  const dest = td ?? (ops.length ? ops[ops.length - 1] : null);
+  return dest ? { dest, sources: td ? ops : ops.slice(0, -1) } : null;
 }
 
 /** The non-flag, non-dynamic operand words of a segment (what T4-UNKNOWN-CMD judges for a command in no table). */

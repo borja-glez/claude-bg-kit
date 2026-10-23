@@ -2,8 +2,9 @@
 // (Task 7) runs these on every Bash, PowerShell, Edit, Write and NotebookEdit call; an attended session gets null from
 // each. Fix 2 (T4-FAILCLOSED): the rules judge every word that could be a target and exempt only what they understand;
 // an unknown option cancels exemptions; a writer in an outside or unknown cwd denies. The heavy write-target parsing is in
-// autonomy-parse.ts; the readable command lists live here. They deny: switching the guard off (self), writes outside the
-// run's roots or whose target is unknown (files), global installs (install), and dangerous git (git).
+// autonomy-parse.ts (its option tables in autonomy-tables.ts); the readable command lists live here. They deny: switching
+// the guard off (self), writes outside the run's roots or whose target is unknown (files), global installs (install), and
+// dangerous git — refs, the work tree outside the roots, and the config, remotes and object store the clone shares (git).
 import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
 import { CWD_FLAG, FILE_TOOLS, forgeCalls, shellCommand, targetPaths } from './guard.js';
 import { commandName, GIT_VALUED, isNullSink, type Segment, type Word } from './shell-words.js';
@@ -39,10 +40,11 @@ const READ_BASH = new Set(['cat', 'less', 'more', 'head', 'tail', 'ls', 'dir', '
   'nl', 'fold', 'paste', 'rev', 'tac', 'seq', 'man', 'help', 'findstr']);
 // PowerShell verbs that only read; their cmdlets (and the read names below) never write.
 const PS_READ_VERBS = new Set(['get', 'test', 'resolve', 'select', 'measure', 'format', 'compare', 'find', 'search', 'show', 'read', 'join', 'split', 'sort', 'group', 'where', 'foreach',
-  'convertto', 'convertfrom', 'wait', 'out', 'enter', 'exit']);
+  'convertto', 'convertfrom', 'wait', 'enter', 'exit']);
+// `Out-` only for the cmdlets that never write a file: Out-File and Out-Printer stay writers.
 const PS_READ_NAMES = new Set(['write-host', 'write-output', 'write-verbose', 'write-warning', 'write-error', 'write-information', 'write-debug', 'write-progress', 'out-host', 'out-string',
-  'out-null', 'start-sleep', 'push-location', 'pop-location', 'set-location', 'sl', 'cd', 'ls', 'dir', 'gci', 'gc', 'cat', 'gi', 'gp', 'gm', 'select', 'where', 'foreach', 'sort', 'group',
-  'measure', 'ft', 'fl', 'echo', 'write', 'oss', 'gcm', 'gbp', 'gl']);
+  'out-null', 'out-default', 'out-gridview', 'ogv', 'start-sleep', 'push-location', 'pop-location', 'set-location', 'sl', 'cd', 'ls', 'dir', 'gci', 'gc', 'cat', 'gi', 'gp', 'gm', 'select',
+  'where', 'foreach', 'sort', 'group', 'measure', 'ft', 'fl', 'echo', 'write', 'oss', 'gcm', 'gbp', 'gl']);
 
 /** Whether a segment's command only reads (so it is not a fail-closed writer). */
 function isReadCommand(seg: Segment): boolean {
@@ -68,10 +70,20 @@ const hasSep = (t: string): boolean => t.includes('/') || t.includes('\\');
 // A URL's scheme is two or more letters (FC1): a one-letter scheme is a drive, so `E://repo/x` is a path, not a URL.
 const URL_RE = /^[a-z][a-z0-9+.-]+:\/\//i;
 
+/**
+ * A relative word that cannot leave its directory: no root, home, drive, UNC or provider-drive prefix and no segment equal to
+ * `..` (Go's `./...` is no `..`). Under an in-root cwd such a word is inside by construction (T4-FAILCLOSED 1).
+ */
+function relativeInside(text: string): boolean {
+  if (!text || /^[\\/~]/.test(text) || /^[A-Za-z]+:/.test(text)) return false;
+  return !text.split(/[\\/]/).some(s => s === '..');
+}
+
 /** Judge one candidate target word: inside the roots (ok), outside, or a target the hook cannot know (unknown). A URL or a null sink is no path. */
 function judge(w: Word, seg: Segment, ctx: GuardCtx): 'ok' | 'outside' | 'unknown' {
   if (w.dynamic) return 'unknown';
   if (URL_RE.test(w.text) || isNullSink(w.text, seg.dialect)) return 'ok';
+  if (seg.cwd !== null && relativeInside(w.text) && insideRoots(seg.cwd, ctx)) return 'ok';
   const p = segmentPath(w, seg);
   if (p === null) return 'unknown';
   return insideRoots(p, ctx) ? 'ok' : 'outside';
@@ -408,12 +420,27 @@ function destBranch(text: string): string {
   return d.replace(/^refs\/heads\//, '');
 }
 
+// git config's option forms: the read ones, the write ones, and the valued options whose value is not a key.
+const CONFIG_READ = ['--get', '--get-all', '--get-regexp', '--get-urlmatch', '--list', '-l', '--show-origin', '--show-scope', '--show-names'];
+const CONFIG_WRITE = ['--add', '--replace-all', '--unset', '--unset-all', '--rename-section', '--remove-section', '-e', '--edit'];
+const CONFIG_VALUED = ['-f', '--file', '--blob', '--type', '--default', '--comment'];
+
+/** T4-GIT-SHARED: a git config form that writes — anything but --get*, --list/-l, --show-*, the get/list subcommands or a single-key read. */
 function configWrites(rest: Word[]): boolean {
-  const reads = ['--get', '--get-all', '--get-regexp', '--get-urlmatch', '--list', '-l'];
-  if (rest.some(w => reads.includes(w.text))) return false;
-  const first = rest.find(w => !w.text.startsWith('-'))?.text;
-  return !(first && ['get', 'list', 'get-all', 'get-regexp', 'get-urlmatch'].includes(first));
+  const a = rest.map(w => w.text);
+  if (a.some(t => CONFIG_WRITE.includes(t))) return true;
+  if (a.some(t => CONFIG_READ.includes(t) || CONFIG_READ.some(r => t.startsWith(r + '=')))) return false;
+  const operands: Word[] = [];
+  for (let k = 0; k < rest.length; k++) { const t = rest[k].text; if (CONFIG_VALUED.includes(t)) { k++; continue; } if (!t.startsWith('-')) operands.push(rest[k]); }
+  const first = operands[0]?.text;
+  if (first && ['get', 'list', 'get-all', 'get-regexp', 'get-urlmatch'].includes(first)) return false;
+  if (first && ['set', 'unset', 'rename-section', 'remove-section', 'edit'].includes(first)) return true;
+  return operands.length !== 1 || operands[0].dynamic; // one literal key is a read; a key and a value is a write
 }
+// T4-GIT-SHARED: the subcommands and forms that change state the person's checkout shares (config, remotes, worktree admin, the object store, the reflog).
+const REMOTE_WRITE = new Set(['add', 'remove', 'rm', 'rename', 'set-url', 'set-head', 'set-branches', 'prune', 'update']);
+const WORKTREE_ADMIN = new Set(['prune', 'lock', 'unlock', 'move', 'repair']);
+const STORE_WRITE = new Set(['gc', 'prune', 'repack', 'maintenance', 'replace', 'filter-branch', 'filter-repo']);
 
 /** The branch a checkout/switch creates and whether it is a forced create (-B / switch -C / --force-create) (T4-OWN-BRANCHES). */
 function createdBranchFlag(rest: Word[], operands: Word[]): { word: Word | null; force: boolean } | null {
@@ -435,7 +462,9 @@ function gitDirRestricted(sub: string, operands: Word[], rest: Word[]): boolean 
   if (sub === 'stash') return !(operands[0] && (operands[0].text === 'list' || operands[0].text === 'show'));
   if (sub === 'remote') return !(operands.length === 0 || operands[0]?.text === 'show' || operands[0]?.text === 'get-url');
   if (sub === 'config') return configWrites(rest);
-  if (sub === 'branch' || sub === 'tag' || sub === 'symbolic-ref' || sub === 'reflog' || sub === 'notes' || sub === 'fetch' || sub === 'update-ref') return false;
+  if (sub === 'reflog') return !(operands.length === 0 || operands[0].text === 'show' || operands[0].text === 'exists'); // expire / delete deny earlier (T4-GIT-SHARED)
+  // refs are shared by every worktree: the protected and own-branch checks judge these, not the directory
+  if (sub === 'branch' || sub === 'tag' || sub === 'symbolic-ref' || sub === 'notes' || sub === 'fetch' || sub === 'update-ref') return false;
   return true;
 }
 
@@ -450,7 +479,8 @@ function gitSeg(seg: Segment, ctx: GuardCtx): GuardVerdict | null {
   const { sub, rest, operands } = g;
   const prot = auto.protectedBranches.join('/');
   const isProtected = (t: string) => auto.protectedBranches.includes(destBranch(t));
-  const ownsBranch = (t: string) => { const b = destBranch(t); return b === auto.branch || b.startsWith(auto.branch + '/') || b.startsWith(auto.branch + '-'); };
+  // T4-OWN-BRANCHES-AMEND: the run's own branches are ctx.branches (run, execution and task/<T> branches) plus names under `<branch>/` or `<branch>-`.
+  const ownsBranch = (t: string) => { const b = destBranch(t); return b === auto.branch || auto.branches.includes(b) || b.startsWith(auto.branch + '/') || b.startsWith(auto.branch + '-'); };
   const refDyn = (ws: Word[]) => ws.some(w => w.dynamic);
   /** A protected target (deny), a dynamic one (unknown), or one that is not the run's (deny): used by every destructive branch/ref op (T4-OWN-BRANCHES). */
   const ownCheck = (ws: Word[], verb: string): GuardVerdict | null => {
@@ -489,20 +519,31 @@ function gitSeg(seg: Segment, ctx: GuardCtx): GuardVerdict | null {
   }
   if (sub === 'symbolic-ref' && operands.length >= 2) { const v = ownCheck([operands[1]], 'pointing a ref at'); if (v) return v; }
   if (sub === 'branch') {
-    const move = rest.some(w => /^(?:--force|--move|--copy)$/.test(w.text) || (/^-[A-Za-z]*[fmMcC]/.test(w.text) && !w.text.startsWith('--')));
-    const del = rest.some(w => w.text === '--delete' || (/^-[A-Za-z]*[dD]/.test(w.text) && !w.text.startsWith('--')));
-    if (move || del) { const v = ownCheck(operands, move ? 'moving' : 'deleting'); if (v) return v; }
+    const short = (re: RegExp) => rest.some(w => re.test(w.text) && !w.text.startsWith('--'));
+    const del = rest.some(w => w.text === '--delete') || short(/^-[A-Za-z]*[dD]/);
+    const move = rest.some(w => w.text === '--move' || w.text === '--copy') || short(/^-[A-Za-z]*[mMcC]/);
+    const force = rest.some(w => w.text === '--force') || short(/^-[A-Za-z]*[fMCD]/);
+    if (del) { const v = ownCheck(operands, 'deleting'); if (v) return v; }
+    else if (move) {
+      // `branch -m [old] new`: the source is renamed (own it), the destination is a new name unless forced (then it may be overwritten: own it too); never a protected one
+      if (refDyn(operands)) return U('a branch name the hook cannot read');
+      if (operands.some(w => isProtected(w.text))) return D('moving a protected branch');
+      const v = ownCheck(force ? operands : operands.slice(0, -1), 'moving'); if (v) return v;
+    } else if (force) { const v = ownCheck(operands.slice(0, 1), 'moving'); if (v) return v; } // `branch -f name [start]`: the start point is a read
   }
   if (sub === 'tag' && rest.some(w => w.text === '--delete' || w.text === '--force' || (/^-[A-Za-z]*[df]/.test(w.text) && !w.text.startsWith('--')))) return D('git tag -d/-f rewrites a tag');
-  if (sub === 'filter-branch' || sub === 'filter-repo' || sub === 'replace') return D('a history rewrite');
   if (sub === 'stash' && operands[0] && operands[0].text !== 'list' && operands[0].text !== 'show' && ['drop', 'clear', 'pop', 'apply', 'push', 'store', 'create', 'branch'].includes(operands[0].text)) return D('git stash uses the stash the clone shares');
   if (sub === 'stash' && !operands[0]) return D('git stash uses the stash the clone shares');
-  if (sub === 'config' && configWrites(rest)) return D('git config writes settings the clone shares');
-  if (sub === 'remote' && ['add', 'remove', 'rm', 'set-url', 'rename'].includes(operands[0]?.text ?? '')) return D('changing a remote');
-  if (sub === 'gc') return D('git gc rewrites the object store');
-  if (sub === 'reflog' && operands[0]?.text === 'expire') return D('reflog expire drops recovery state');
-  if (sub === 'worktree' && operands[0]?.text === 'remove') { const p = operands[1] ? segmentPath(operands[1], seg) : null; if (p === null) return U('git worktree remove of a path the hook cannot see'); if (!insideRoots(p, ctx)) return D('git worktree remove outside the roots'); }
-  if (sub === 'worktree' && operands[0]?.text === 'prune') { if (!g.dirKnown) return U('git worktree prune where the hook cannot see'); if (!insideRoots(g.dir!, ctx)) return D('git worktree prune outside the roots'); }
+  // T4-GIT-SHARED: the config and the object store are shared with the person's checkout; these change how git behaves for them or drop objects they could still recover.
+  const shared = `commit on ${auto.branch}; the config, remotes and object store are shared with the person's checkout, so record what you needed as not done`;
+  const S = (what: string) => deny('git', what, shared);
+  if (sub === 'config' && configWrites(rest)) return S('git config writes settings the clone shares');
+  if (sub === 'remote' && REMOTE_WRITE.has(operands[0]?.text ?? '')) return S(`git remote ${operands[0].text} changes the remotes the clone shares`);
+  if (sub === 'worktree' && WORKTREE_ADMIN.has(operands[0]?.text ?? '')) return S(`git worktree ${operands[0].text} changes the worktree list the clone shares`);
+  if (sub === 'reflog' && (operands[0]?.text === 'expire' || operands[0]?.text === 'delete')) return S(`reflog ${operands[0].text} drops recovery state`);
+  if (sub === 'filter-branch' || sub === 'filter-repo' || sub === 'replace') return S('a history rewrite');
+  if (STORE_WRITE.has(sub)) return S(`git ${sub} rewrites the object store`);
+  if (sub === 'worktree' && operands[0]?.text === 'remove') { const p = operands[1] ? segmentPath(operands[1], seg) : null; if (p === null) return U('git worktree remove of a path the hook cannot see'); if (!insideRoots(p, ctx)) return S('git worktree remove outside the roots'); }
   // GD1/GD2: a non-read subcommand runs inside the roots, its explicit git dir inside, and its path operands inside.
   if (gitDirRestricted(sub, operands, rest)) {
     if (g.gitDirSet) { if (!g.gitDirValue || g.gitDirValue.dynamic) return U('an explicit git dir the hook cannot read'); const p = segmentPath(g.gitDirValue, seg); if (p === null) return U('an explicit git dir the hook cannot read'); if (!insideRoots(p, ctx)) return D(`${p} is outside the run's roots`); }
