@@ -2234,4 +2234,12 @@ describe('plugin layout', () => {
       expect(tools ? !/\bAgent\b/.test(tools) : /\bAgent\b/.test(denied ?? ''), f).toBe(true);
     }
   });
+
+  it('the forge READMEs describe the autonomy guard, the resource register and decisions with trade-offs (6b-1)', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const w of ['`forge autonomy ·', '`resource add', '`blocked note', 'whyNot', 'tradeoffs', 'PLAYWRIGHT_BROWSERS_PATH', 'fg_', 'disableAllHooks', '`self`']) expect(md, `${f}: ${w}`).toContain(w);
+      expect(md.split('\n').find(l => l.startsWith('- `hook guard`')), f).toContain('MCP');
+    }
+  });
 });

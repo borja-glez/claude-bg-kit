@@ -7,7 +7,7 @@ El modelo y el esfuerzo en uso, el roadmap, las etapas y ejecuciones de forge, l
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.13.8](https://img.shields.io/badge/versi%C3%B3n-0.13.8-b4befe?style=flat-square)
+![versión 0.13.9](https://img.shields.io/badge/versi%C3%B3n-0.13.9-b4befe?style=flat-square)
 ![sin coste en tokens](https://img.shields.io/badge/coste%20en%20tokens-ninguno-a6e3a1?style=flat-square)
 
 </div>

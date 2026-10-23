@@ -13,6 +13,16 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.33.0 — 2026-10-23
+
+#### Added
+- A decision on the roadmap shows each alternative with why it was not taken and what it gains and loses, and what the chosen option gains and loses. Plain alternatives read as before. A page published before this version drops the alternatives that carry a why-not or trade-offs, and shows a `blocked` decision as a plain note: republish it after updating, as `waypoint:plan` says.
+
+#### Fixed
+- `post-commit` keeps the task's pending lines after an amend, a rebase or a reset on git older than 2.24 (it no longer passes `--end-of-options`, which those versions refuse) (6a N1).
+- A session start that records a new base keeps the reflog stat it stored, so the next commit does not read the reflog again (6a N5).
+- The README says which commits a second seat records (its own `git commit`, an amend or a merge commit it concludes, `cherry-pick`, `revert`), and `/waypoint:work` says what a rebase does to the pending lines: they move to the replayed shas, and a replay adds none (6a N2, N7).
+
 ### 0.32.2 — 2026-10-22
 
 #### Changed
@@ -382,6 +392,26 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.28.0 — 2026-10-23
+
+#### Added
+- The guard (`hook guard`) gains eight rules for the sessions of an autonomous infinite run (the coordinator, its execution and its members by their ids, also once the run is inactive, and, while it is active, any session inside its worktrees): `self` (never the project's `.claude/settings*.json`, no `claude` command that switches hooks or permissions off, no `stop` or new run from inside), `files` (no write, overwrite, link or delete outside the run's worktree, its temp folder or the scratchpad), `install` (installs only inside the worktree, no download-and-run installer), `database` (writes only on what the run registered), `network`, `cloud` and `mcp-write` (no write off the machine, by Bash or by an MCP tool whose name says it writes) and `git` (no push, no merge, reset or rebase of main or the start branch however it is spelled, no branch deleted that is not the run's, nothing the clone shares). Cloud CLIs are read by their shape (a read at the verb's position allows), migrations run only with their target on the command, a database script never does, the command inside `docker run|exec` and `compose run|exec` is judged, a container mounts only the run's volumes or folders inside its worktree (read-only mounts are free), and the interaction tools of the person's signed-in browser (Claude in Chrome, the desktop app's browser) are denied. Each command is read as its shell reads it (Bash, PowerShell or cmd). A command whose target cannot be seen in one of the three dangerous classes is denied, and each denial is recorded without its secrets. In such a run the guard fails closed. The autonomous profiles that start such a run come in the next version.
+- `resource add --kind <k> --name <n> [--host h]` and `resource list`: the register of what an autonomous run created (a database named `fg_<run>__…` on a local host, a container, volume or compose project named `fg-<run>--…`, a redis port other than 6379–6381, a new SQLite file inside the worktree).
+- `blocked list` and `blocked note [--session SID]`: what the guard denied becomes a `blocked` decision with its roadmap note.
+
+#### Changed
+- A decision's alternatives may be `{option, whyNot, tradeoffs}` and the chosen option may carry `tradeoffs`; `decision add`, `decision show`, the decisions file and the roadmap note take and print both forms (`decision show` gives every alternative as an object; the roadmap note keeps a plain one as text).
+- The guard's matcher also covers the MCP tools (it already covered Bash, PowerShell, Edit, Write and NotebookEdit): every MCP call of every session now starts the hook's node process, which reads files only and starts no git process when no autonomous run is involved.
+- The trust rules judge a protected file by the repository that holds it, so a `CLAUDE_PROJECT_DIR` outside the session's repository no longer lets the model write the authorizations or `trust.json`.
+- `/forge:infinite` keeps its execution steps, its Large triage and its stop report in references it reads at that step, so its rules survive a compaction (Claude Code re-attaches only the first 5,000 tokens of a skill).
+- `forge-verify` and `forge-verify-heavy` no longer inherit the `Agent` tool (`disallowedTools: Agent`).
+- Depends on waypoint ^0.33.0.
+
+#### Fixed
+- A forge call whose node binary is quoted (`& "node.exe" "…forge.cjs" hook answer`, the usual PowerShell form) no longer gets past the guard (6a N4).
+- The no-roadmap refusal of `proposals to-task` names the proposal in `/forge:decide <id> confirm` (6a N6).
+- The README says which characters after `hook answer` or `local set commands` make a text a call: a space or tab, an end of line, `;`, `|`, `&`, `<`, `>`, `(`, `)` or a backtick (6a N3).
 
 ### 0.27.0 — 2026-10-22
 
@@ -938,6 +968,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.13.9 — 2026-10-23
+
+#### Changed
+- Rebuilt with the code it shares with forge 0.28.0 (decisions with trade-offs, the autonomous block of run.json); nothing lens shows changes.
 
 ### 0.13.8 — 2026-10-22
 
