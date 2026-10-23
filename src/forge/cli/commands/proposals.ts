@@ -13,12 +13,22 @@ import {
 } from '../../../lib/proposals.js';
 import { PAGE_RULES } from '../../../lib/publish.js';
 import { autoApprovable } from '../../policy.js';
-import { proposalBatch } from '../../critic.js';
+import { proposalBatch, readVerdicts } from '../../critic.js';
+import { judgeProposal, JudgeError, type Judged } from '../../judge.js';
+import { parseRun, readRunText, type RunState } from '../../run.js';
+import { mainCheckout } from '../../local.js';
+import { addDecision, decisionNoteId, decisionWrites, markPublished } from '../../decisions.js';
 import { proposalToTask, proposalOfIncludes, proposalsOfIncludes } from '../../to-task.js';
 import type { PlanTask } from '../../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { UsageError } from '../errors.js';
-import { approvalsPageFile, ownerCtx, ownerStanding, unownedReasons } from '../shared.js';
+import { approvalsPageFile, ownerCtx, ownerStanding, runRootOf, unownedReasons } from '../shared.js';
+
+/** The active autonomous run of run.json (found as every command finds it, runRootOf), or null. */
+function activeAutonomous(cwd: string): (RunState & { autonomous: NonNullable<RunState['autonomous']> }) | null {
+  const run = parseRun(readRunText(runRootOf(cwd)));
+  return run?.active && run.autonomous ? { ...run, autonomous: run.autonomous } : null;
+}
 
 /** Why `proposals decide` refused, naming who decided and when, or what blocks the reopen. */
 function decideRefusal(id: string, doc: ProposalDoc, error: DecideError): string {
@@ -277,8 +287,9 @@ export const command: Command = (args, ctx) => {
         || events.some(e => e.action === 'decide' || e.action === 'reopen' || e.action === 'to-task');
       const forgeMade = events.some(e => e.action === 'add' && e.digest === proposalDigest(id, doc) && !e.revises);
       // Carry 5: a refusal says why, so the infinite skill and the person can tell them apart: already decided (or
-      // marked, or converted), not this checkout's own text, or its signals.
-      const reason = decided ? 'decided' : !forgeMade ? 'origin' : !autoApprovable(doc) ? 'signals' : null;
+      // marked, or converted), not this checkout's own text, or its signals. 6b-2 H-5: while an autonomous run is active,
+      // its approvals are `judge`'s, on the critic's verdict, and the policy approves nothing.
+      const reason = activeAutonomous(io.cwd) ? 'autonomous' : decided ? 'decided' : !forgeMade ? 'origin' : !autoApprovable(doc) ? 'signals' : null;
       if (reason) {
         appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'policy', id, status: doc.status });
         return json({ id, status: doc.status, write: null, approval: null, reason });
@@ -358,7 +369,35 @@ export const command: Command = (args, ctx) => {
       writeFileSync(file, JSON.stringify({ proposals: batch.proposals }, null, 2) + '\n');
       return json({ count: batch.proposals.length, missing: batch.missing, out });
     }
+    case 'judge': {
+      // 6b-2: an autonomous run decides a proposal on its own, by the critic's verdict of its present text (src/forge/judge.ts).
+      const id = rest[0];
+      if (!id || !PROPOSAL_ID.test(id)) throw new UsageError('proposals judge: a proposal id (p + 14 digits + 4 letters/digits) is required');
+      const critic = subFlag('critic');
+      if (!critic) throw new UsageError('proposals judge: --critic <verdicts.json> is required');
+      const session = subFlag('session');
+      if (has('session') && (!session || !/^[A-Za-z0-9_\-.~:@+]{1,80}$/.test(session))) throw new UsageError('proposals judge: --session needs the waypoint session id');
+      // T6B2-ROOTS: run.json is found through runRootOf; the proposal and its mark are this checkout's (the profile worktree),
+      // and the decision goes to the main checkout's ledger, with the run's id.
+      const run = activeAutonomous(io.cwd);
+      if (!run) throw new UsageError('proposals judge: no autonomous run is active in .forge/run.json; outside a profile only the owner approves');
+      const verdicts = readVerdicts(readText(critic, '--critic'));
+      const at = ts();
+      let r: Judged;
+      try { r = judgeProposal(io.cwd, id, verdicts, at, (run.locale ?? '').toLowerCase().startsWith('es')); } catch (e) {
+        if (e instanceof JudgeError) throw new UsageError(`proposals judge: ${e.message}`);
+        throw e;
+      }
+      const { decision, ...out } = r;
+      if (!decision) return json({ id, ...out });
+      const main = mainCheckout(io.cwd);
+      const { n, event } = addDecision(main, decision, { ts: at, runId: run.autonomous.runId });
+      const publish = session ? decisionWrites({ event, session, eid: decisionNoteId(event, session) }) : null;
+      // The note it prints is this decision's publication: decision publish does not print it again.
+      if (publish) markPublished(main, [n]);
+      return json({ id, ...out, decision: n, ...(publish ? { publish } : {}) });
+    }
     default:
-      throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task|batch> ...');
+      throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task|batch|judge> ...');
   }
 };

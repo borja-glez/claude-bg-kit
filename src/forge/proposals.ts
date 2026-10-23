@@ -145,8 +145,9 @@ export type AddOutcome = { ok: true; id: string; doc: ProposalDoc } | { ok: fals
  */
 export function addProposal(root: string, raw: Record<string, unknown>,
   ctx: { ts: string; author: unknown; now: Date; rand: () => number; revises?: string; from?: string }): AddOutcome {
+  // A new proposal carries no decision, and no parked mark either (6b-2: only a judge parks, and a parked one fills no queue).
   const doc = normalizeProposal({ ...raw, ts: typeof raw.ts === 'string' ? raw.ts : ctx.ts, status: 'proposed', decidedBy: undefined, decidedAt: undefined,
-    reason: undefined, taskId: undefined, history: undefined, author: ctx.author });
+    reason: undefined, taskId: undefined, history: undefined, parked: undefined, author: ctx.author });
   if (!doc) throw new ProposalInputError('invalid proposal (category, risk, title and source are required and must be valid)');
   if (doc.source === 'scout' && (!doc.pillar?.trim() || !doc.evidence?.trim())) throw new ProposalInputError('a scout proposal needs a pillar and evidence');
   const existing = loadProposals(root);

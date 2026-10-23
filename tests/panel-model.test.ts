@@ -412,6 +412,18 @@ describe('buildPanelModel forge', () => {
     const many = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`p2026101110000${i}aaaa`, doc({ title: `t${i}` })]));
     expect(buildPanelModel({ ...base, proposals: many }).proposals.map(p => p.title)).toEqual(['t7', 't6', 't5', 't4', 't3']);
   });
+  it('leaves out a parked proposal: it waits for the person, as the run\'s queue counts it (6b-2, L-3)', () => {
+    const parked = { why: 'the vision is solo', loses: 'the solo focus', at: '2026-10-22T10:00:00.000Z' };
+    const m = buildPanelModel({
+      ...base,
+      proposals: {
+        p20261011100000aaaa: doc({ title: 'Open' }),
+        p20261011110000bbbb: doc({ status: 'discussing', title: 'Parked', parked }),
+        p20261011120000cccc: doc({ status: 'discussing', title: 'Talk' }),
+      },
+    });
+    expect(m.proposals.map(p => p.title)).toEqual(['Talk', 'Open']);
+  });
 });
 
 describe('buildPanelModel infinite', () => {

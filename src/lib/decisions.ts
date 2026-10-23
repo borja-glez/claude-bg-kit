@@ -2,13 +2,17 @@
 // answered) and .forge/decisions.json, the small summary lens and the waypoint band read. Pure (no node:*, no zod):
 // the forge CLI, lens, the waypoint mod and the roadmap page all bundle it.
 
-export const DECISION_POINTS = ['route', 'triage', 'design-apply', 'design-approve', 'plan-confirm', 'mode', 'ruling', 'safe-path', 'takeover', 'revert', 'blocked', 'trust', 'other'] as const;
+// 6b-2: approve and idea are an autonomous profile's own verdict on a proposal (`proposals judge`): idea for a person's.
+export const DECISION_POINTS = [
+  'route', 'triage', 'design-apply', 'design-approve', 'plan-confirm', 'mode', 'ruling', 'safe-path', 'takeover', 'revert', 'blocked', 'trust', 'approve', 'idea', 'other',
+] as const;
 export type DecisionPoint = (typeof DECISION_POINTS)[number];
 export const DECISION_BY = ['auto', 'unattended', 'user'] as const;
 export type DecisionBy = (typeof DECISION_BY)[number];
 export type DecisionWeight = 'major' | 'minor';
-/** Points that change the scope of the work or skip a person's gate: lens and the band name the last one. */
-export const MAJOR_POINTS: readonly DecisionPoint[] = ['route', 'design-approve', 'plan-confirm', 'mode'];
+/** Points that change the scope of the work or skip a person's gate: lens and the band name the last one. L-12: an
+ *  autonomous approval (`approve`) adds work no person approved; a person's idea parked or decided (`idea`) stays minor. */
+export const MAJOR_POINTS: readonly DecisionPoint[] = ['route', 'design-approve', 'plan-confirm', 'mode', 'approve'];
 export const LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300, whyNot: 300, tradeoffs: 300 } as const;
 /** lens and the band read no decisions.json above this, and show none older than the window. */
 export const DECISIONS_MAX = 16 * 1024;

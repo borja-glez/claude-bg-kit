@@ -15,7 +15,12 @@ export interface ProposalDoc {
   ts: string; category: ProposalCategory; risk: ProposalRisk; title: string; rationale: string; evidence: string; pillar: string;
   estimate?: string; path?: string; taskId?: string; status: ProposalStatus; decidedBy?: string; decidedAt?: string; reason?: string;
   source: (typeof PROPOSAL_SOURCES)[number]; author: string; history?: ProposalHistoryEntry[];
+  /** 6b-2: a person's idea that clashes with the vision, parked by an autonomous run until the person answers: why, what
+   *  integrating it would lose, and when. A parked proposal is `discussing` and fills no queue. */
+  parked?: ProposalParked;
 }
+
+export interface ProposalParked { why: string; loses: string; at: string }
 
 /** A decision a reopen replaced: the old status and who decided it, and who reopened it and when. */
 export interface ProposalHistoryEntry {
@@ -63,7 +68,25 @@ export function normalizeProposal(x: unknown): ProposalDoc | null {
     const history = o.history.map(normalizeHistoryEntry).filter((e): e is ProposalHistoryEntry => e !== null).slice(-MAX_PROPOSAL_HISTORY);
     if (history.length) out.history = history;
   }
+  const parked = normalizeParked(o.parked);
+  if (parked) out.parked = parked;
   return out;
+}
+
+/** An ISO time as Date#toISOString writes it, that is a real date. */
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+
+/** A parked mark, or null unless it has a why, what would be lost (each one line, without control characters, cut at a word
+ *  to MAX_PROPOSAL_TEXT) and an ISO time. */
+export function normalizeParked(x: unknown): ProposalParked | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const o = x as Record<string, unknown>;
+  // eslint-disable-next-line no-control-regex
+  const oneLine = (v: unknown) => (str(v) ? clipWords(v.replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, ' ').trim(), MAX_PROPOSAL_TEXT) : '');
+  const why = oneLine(o.why);
+  const loses = oneLine(o.loses);
+  const at = str(o.at) && ISO_TIME.test(o.at) && Number.isFinite(Date.parse(o.at)) ? o.at : '';
+  return why && loses && at ? { why, loses, at } : null;
 }
 
 function normalizeHistoryEntry(x: unknown): ProposalHistoryEntry | null {
@@ -85,7 +108,8 @@ export const isActionable = (p: ProposalDoc): boolean => p.status === 'approved'
  *  the server enforces. A proposal counts as approved for forge only when its mark agrees with it. */
 export const APPROVAL_STATUSES = ['approved', 'rejected', 'auto_approved'] as const;
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
-export const APPROVAL_BY = ['page', 'forge:decide', 'forge:policy'] as const;
+// forge:auto (6b-2): an autonomous profile's own approval or rejection (`proposals judge`), on the critic's verdict.
+export const APPROVAL_BY = ['page', 'forge:decide', 'forge:policy', 'forge:auto'] as const;
 export type ApprovalBy = (typeof APPROVAL_BY)[number];
 export interface ApprovalDoc { status: ApprovalStatus; decidedAt: string; by: ApprovalBy; digest: string }
 

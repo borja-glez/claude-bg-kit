@@ -361,14 +361,15 @@ function forgeTiming(st: { phase: string; taskStartedAt: string | null; stageSin
   };
 }
 
-// Pending proposals (proposed or under discussion), newest id first (ids start with their UTC time), at most 5.
+// Pending proposals (proposed or under discussion), newest id first (ids start with their UTC time), at most 5. A parked
+// one (6b-2) waits for the person, so it is not pending, as the run's queue does not count it either.
 function pendingProposals(texts: Record<string, string> | undefined): PanelModel['proposals'] {
   const out: PanelModel['proposals'] = [];
   if (!texts || typeof texts !== 'object') return out;
   for (const id of Object.keys(texts).filter(k => PROPOSAL_ID.test(k)).sort().reverse()) {
     let doc;
     try { doc = normalizeProposal(JSON.parse(texts[id])); } catch { continue; }
-    if (!doc || (doc.status !== 'proposed' && doc.status !== 'discussing')) continue;
+    if (!doc || doc.parked || (doc.status !== 'proposed' && doc.status !== 'discussing')) continue;
     out.push({ id, title: cleanText(doc.title), category: doc.category, risk: doc.risk });
     if (out.length >= MAX_PROPOSALS) break;
   }

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
-import { readRunText, stopFile, type RunState, type StopContext } from '../run.js';
+import { parseRun, readRunText, stopFile, type RunState, type StopContext } from '../run.js';
 import { readExecution } from '../execution.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
 import { samePath } from '../../lib/worktree.js';
@@ -153,13 +153,16 @@ export function tddFor(io: Io, dir: string) {
   return { tdd, installed: sp.installed, version: sp.version, skill, line: tdd === 'superpowers' && skill ? tddLine(skill) : null };
 }
 
+const DECIDING = new Set(['decide', 'confirm', 'judge', 'unpark']);
 /** The status each proposal's latest decision event in this checkout's ledger left it in, and when: decide, confirm, a reopen
- *  (its `to`) and the policy's auto-approval; a policy that declined decided nothing. A pid with no such event is absent. */
+ *  (its `to`), the policy's auto-approval, and (6b-2, M-2) an autonomous run's judge and unpark; a policy that declined
+ *  decided nothing. A pid with no such event is absent. */
 export function lastDecisions(root: string): Record<string, { status: string; ts: string }> {
   const out: Record<string, { status: string; ts: string }> = {};
   for (const e of readEvents(root)) {
     if (e.kind !== 'proposal' || typeof e.id !== 'string') continue;
-    const status = e.action === 'reopen' ? e.to : e.action === 'decide' || e.action === 'confirm' || (e.action === 'policy' && e.status === 'auto_approved') ? e.status : undefined;
+    const action = String(e.action);
+    const status = action === 'reopen' ? e.to : DECIDING.has(action) || (action === 'policy' && e.status === 'auto_approved') ? e.status : undefined;
     if (typeof status === 'string') out[e.id] = { status, ts: e.ts };
   }
   return out;
@@ -200,12 +203,19 @@ export function ownerStanding(pid: string, p: Parameters<typeof ownerCheck>[1], 
   return c !== 'no-mark' && !ctx.ownerRule && ctx.last[pid] === undefined ? 'no-rule' : c;
 }
 
-// What the stop conditions need from the repository: the stop file and the proposal mirror.
+/** T6B2-ROOTS: the checkout whose proposals, marks and proposal events a run counts: an autonomous run's worktree, where its
+ *  session keeps them, else `runRoot` itself (the directory of run.json). */
+export function proposalsRootOf(runRoot: string): string {
+  return parseRun(readRunText(runRoot))?.autonomous?.worktree ?? runRoot;
+}
+
+// What the stop conditions need from the repository: the stop file (beside run.json) and the run's proposal mirror.
 // Approved work still pending = every approved/auto_approved proposal not yet done, with or without a task.
 export function stopContext(cwd: string, now: Date): StopContext {
-  const proposals = loadProposals(cwd);
-  const marks = loadApprovals(cwd);
-  const octx = ownerCtx(cwd, now);
+  const dir = proposalsRootOf(cwd);
+  const proposals = loadProposals(dir);
+  const marks = loadApprovals(dir);
+  const octx = ownerCtx(dir, now);
   return {
     now,
     stopFile: existsSync(stopFile(cwd)),
@@ -214,7 +224,8 @@ export function stopContext(cwd: string, now: Date): StopContext {
     approvedPending: proposals.filter(p => p.taskId === undefined
       ? ownerStanding(p.id, p, marks[p.id], octx) === 'ok'
       : markMatches(p, marks[p.id])).length,
-    pendingProposals: proposals.filter(p => p.status === 'proposed' || p.status === 'discussing').length,
+    // 6b-2: a parked idea waits for the person, so it does not fill the queue.
+    pendingProposals: proposals.filter(p => (p.status === 'proposed' || p.status === 'discussing') && !p.parked).length,
   };
 }
 
@@ -231,7 +242,8 @@ export function unownedReasons(root: string, now: Date): Record<string, Exclude<
   }
   return out;
 }
-export const unownedOf = (root: string, now: Date): number => Object.keys(unownedReasons(root, now)).length;
+/** How many of the run's approvals (`runRoot`: the directory of run.json; an autonomous run's are in its worktree) are not the owner's. */
+export const unownedOf = (runRoot: string, now: Date): number => Object.keys(unownedReasons(proposalsRootOf(runRoot), now)).length;
 
 /**
  * K2-01: the directory of the infinite run: the main checkout, wherever forge runs from; this directory only when it

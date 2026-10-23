@@ -165,3 +165,24 @@ describe('the owner mark (wave 4, §4.1)', () => {
     expect(proposalDigest(PID, normalizeProposal({ ...base, title: 'Cañón «ñ»' })!)).toMatch(/^[0-9a-f]{64}$/);
   });
 });
+
+describe('parked (6b-2)', () => {
+  const BASE = { ts: 't', category: 'feature', risk: 'medium', title: 'Online mode', rationale: 'r', evidence: '', pillar: '', status: 'discussing', source: 'user', author: 'user:u1' };
+  it('keeps a parked mark with why, what would be lost and when', () => {
+    expect(normalizeProposal({ ...BASE, parked: { why: 'the vision is solo', loses: 'the solo focus', at: '2026-10-22T10:00:00.000Z' } })?.parked)
+      .toEqual({ why: 'the vision is solo', loses: 'the solo focus', at: '2026-10-22T10:00:00.000Z' });
+    expect(normalizeProposal({ ...BASE, parked: { why: 'x' } })).not.toHaveProperty('parked');
+  });
+  it('accepts the autonomous run\'s mark', () => {
+    expect(normalizeApproval({ status: 'auto_approved', by: 'forge:auto', decidedAt: 't', digest: 'b'.repeat(64) })).toMatchObject({ by: 'forge:auto' });
+  });
+  it('cleans and cuts why and what would be lost, and drops a mark whose time is no ISO date or whose text is empty', () => {
+    const at = '2026-10-22T10:00:00.000Z';
+    const p = normalizeProposal({ ...BASE, parked: { why: `  a\u0000b\nc  `, loses: 'y'.repeat(MAX_PROPOSAL_TEXT + 50), at } })!.parked!;
+    expect(p.why).toBe('a b c');
+    expect(Array.from(p.loses).length).toBeLessThanOrEqual(MAX_PROPOSAL_TEXT);
+    for (const bad of [{ why: 'w', loses: 'l', at: 'yesterday' }, { why: ' ', loses: 'l', at }, { why: 'w', loses: 3, at }, 'parked', ['w', 'l', at]]) {
+      expect(normalizeProposal({ ...BASE, parked: bad }), JSON.stringify(bad)).not.toHaveProperty('parked');
+    }
+  });
+});
