@@ -477,7 +477,7 @@ const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
 const CD = new Set(['cd', 'chdir', 'pushd', 'set-location', 'sl', 'push-location']);
 const POPD = new Set(['popd', 'pop-location']);
 /** git's global options that take a value (shared with the autonomy git rule, Task 4). */
-export const GIT_VALUED: readonly string[] = ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--exec-path'];
+export const GIT_VALUED: readonly string[] = ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--exec-path', '--attr-source'];
 const XARGS_VALUED = ['-a', '-d', '-E', '-I', '-J', '-L', '-n', '-P', '-s', '--arg-file', '--delimiter', '--eof', '--max-lines',
   '--max-args', '--max-procs', '--max-chars', '--process-slot-var'];
 const PWSH_VALUED = ['executionpolicy', 'ep', 'windowstyle', 'inputformat', 'outputformat', 'version', 'configurationname',

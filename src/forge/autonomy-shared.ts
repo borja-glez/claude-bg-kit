@@ -63,31 +63,3 @@ export function insideRoots(p: string, ctx: GuardCtx): boolean {
 export function deny(rule: string, what: string, instead: string): GuardVerdict {
   return { decision: 'deny', rule, reason: `forge autonomy · ${rule}: ${what}. Instead: ${instead}` };
 }
-
-// The PowerShell parameters that take a value; every other `-Name` is a switch, so it never swallows the positional path after it (item 4).
-const PS_VALUED: readonly string[] = ['path', 'literalpath', 'filepath', 'destination', 'destinationpath', 'outfile', 'target', 'value', 'inputobject', 'source', 'itemtype',
-  'name', 'newname', 'filter', 'include', 'exclude', 'encoding', 'delimiter', 'stream', 'depth', 'width', 'tail', 'totalcount', 'uri', 'method', 'body', 'headers', 'contenttype', 'infile', 'form'];
-
-/**
- * A PowerShell segment's parameters read by name (M11, item 4): `-Name value` (only when Name is, or abbreviates, a valued
- * parameter), `-Name:value`, and every other `-Name` is a switch that takes no value. `named` keys are lower-cased;
- * `positionals` are the words that are no parameter and no parameter's value. Writer rules read their targets from here.
- */
-export function psParams(args: Word[]): { named: Record<string, Word>; positionals: Word[] } {
-  const named: Record<string, Word> = {};
-  const positionals: Word[] = [];
-  for (let k = 0; k < args.length; k++) {
-    const w = args[k], t = w.text;
-    const glued = /^-([A-Za-z][\w-]*):(.*)$/s.exec(t);
-    if (glued) { named[glued[1].toLowerCase()] = { text: glued[2], dynamic: w.dynamic, glob: false }; continue; }
-    const bare = /^-([A-Za-z][\w-]*)$/.exec(t);
-    if (bare) {
-      const nm = bare[1].toLowerCase(), next = args[k + 1];
-      if (PS_VALUED.some(v => v.startsWith(nm)) && next && !next.text.startsWith('-')) { named[nm] = next; k++; }
-      else named[nm] = { text: '', dynamic: false, glob: false };
-      continue;
-    }
-    positionals.push(w);
-  }
-  return { named, positionals };
-}
