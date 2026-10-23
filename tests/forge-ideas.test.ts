@@ -294,6 +294,8 @@ describe('proposals unpark (6b-2)', () => {
   const parked = (id: string, title = 'Online mode') => saveProposal(root, id, { ts: T0.toISOString(), category: 'feature', risk: 'high', title, rationale: 'r', evidence: 'e', pillar: '',
     status: 'discussing', source: 'user', author: 'user:u1', parked: { why: 'solo game', loses: 'solo focus', at: T0.toISOString() } });
   const decisions = () => readEvents(root).filter(e => e.kind === 'decision');
+  // T6B2-UNPARK-AFTER: an answer on the thread is written after the park (at T0).
+  const LATER = '2026-10-22T11:00:00.000Z';
   // The run's worktree is elsewhere: unpark needs no active run around it, only the parked mark.
   beforeEach(() => autonomousRun(path.join(root, 'wt')));
   it('insisting integrates it with the owner\'s mark and a decision that is the person\'s', () => {
@@ -314,7 +316,7 @@ describe('proposals unpark (6b-2)', () => {
   it('withdrawing, in the owner\'s note on its thread, rejects it; one that is not parked is exit 2', () => {
     pull(99);
     parked('p20261022100000bbbb');
-    note('a1', { proposalId: 'p20261022100000bbbb', text: 'forget it' });
+    note('a1', { proposalId: 'p20261022100000bbbb', text: 'forget it', ts: LATER });
     expect(JSON.parse(cli(['unpark', 'p20261022100000bbbb', '--withdraw', '--from-note', 'a1', '--db', db]).stdout))
       .toMatchObject({ outcome: 'withdrawn', write: { status: 'rejected', reason: 'withdrawn by the person' } });
     expect(loadApproval(root, 'p20261022100000bbbb')).toMatchObject({ status: 'rejected', by: 'forge:decide' });
@@ -350,9 +352,9 @@ describe('proposals unpark (6b-2)', () => {
   it('answers only the person: in this conversation, or in a note of the known owner on its thread (fix 1)', () => {
     const id = 'p20261022100000hhhh';
     parked(id);
-    note('mine', { proposalId: id, text: 'keep it' });
-    note('theirs', { proposalId: id, author: 'user:u2', text: 'drop it' });
-    note('elsewhere', { proposalId: 'p20261022100000iiii', text: 'keep it' });
+    note('mine', { proposalId: id, text: 'keep it', ts: LATER });
+    note('theirs', { proposalId: id, author: 'user:u2', text: 'drop it', ts: LATER });
+    note('elsewhere', { proposalId: 'p20261022100000iiii', text: 'keep it', ts: LATER });
     const answer = (...a: string[]) => cli(['unpark', id, '--insist', ...a]).code;
     // With no owner known, no note answers.
     expect(answer('--from-note', 'mine', '--db', db)).toBe(2);
@@ -362,6 +364,29 @@ describe('proposals unpark (6b-2)', () => {
     expect([loadProposal(root, id)?.status, loadApproval(root, id), readEvents(root)]).toEqual(['discussing', null, []]);
     // Positive control: the owner's note on its thread answers.
     expect(answer('--from-note', 'mine', '--db', db)).toBe(0);
+    expect(loadProposal(root, id)?.status).toBe('approved');
+  });
+  it('a note answers only when written after the park (T6B2-UNPARK-AFTER, P6)', () => {
+    pull(99);
+    const id = 'p20261022100000jjjj';
+    parked(id);
+    // P6: the owner's own idea note, once linked to its proposal, was written before the park; one at the park's own time is
+    // not after it either.
+    note('idea', { proposalId: id, ts: '2026-10-22T09:00:00.000Z' });
+    note('same', { proposalId: id });
+    note('timeless', { proposalId: id, ts: '' });
+    // A park whose time does not read leaves no park to answer after (the proposal reads as not parked).
+    const odd = 'p20261022100000kkkk';
+    saveProposal(root, odd, { ts: T0.toISOString(), category: 'feature', risk: 'high', title: 'Odd park', rationale: 'r', evidence: 'e', pillar: '',
+      status: 'discussing', source: 'user', author: 'user:u1', parked: { why: 'w', loses: 'l', at: 'yesterday' } });
+    note('late-odd', { proposalId: odd, ts: LATER });
+    for (const [pid, n] of [[id, 'idea'], [id, 'same'], [id, 'timeless'], [odd, 'late-odd']]) {
+      expect(cli(['unpark', pid, '--insist', '--from-note', n, '--db', db]).code, n).toBe(2);
+    }
+    expect([loadProposal(root, id)?.status, loadApproval(root, id), loadApproval(root, odd), readEvents(root)]).toEqual(['discussing', null, null, []]);
+    // Positive control: the owner's note written after the park answers it.
+    note('answer', { proposalId: id, ts: LATER });
+    expect(cli(['unpark', id, '--insist', '--from-note', 'answer', '--db', db]).code).toBe(0);
     expect(loadProposal(root, id)?.status).toBe('approved');
   });
 });

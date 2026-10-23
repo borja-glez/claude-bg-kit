@@ -474,8 +474,8 @@ export const command: Command = (args, ctx) => {
     case 'unpark': {
       // 6b-2: the person's answer to a parked idea (src/forge/judge.ts): --insist integrates it, --withdraw rejects it, and where
       // the person said it is named. No active run is needed, the person may answer after it stopped; only the parked mark.
-      // Roots as judge's (T6B2-ROOTS): the
-      // proposal, its mark and its event are this checkout's, the decision goes to the main checkout's ledger.
+      // Roots as judge's (T6B2-ROOTS): the proposal, its mark and its event are this checkout's, the decision goes to the main
+      // checkout's ledger.
       const id = rest[0];
       if (!id || !PROPOSAL_ID.test(id)) throw new UsageError('proposals unpark: a proposal id (p + 14 digits + 4 letters/digits) is required');
       const insist = has('insist');
@@ -493,6 +493,12 @@ export const command: Command = (args, ctx) => {
         if (!owner) throw new UsageError('proposals unpark: the roadmap\'s owner is not known yet (approvals/owner): no note answers for the person');
         const n = noteOf(io.cwd, db, noteId);
         if (!n || n.author !== owner || n.proposalId !== id) throw new UsageError(`proposals unpark: note ${noteId} is not a note of the roadmap's owner on the thread of ${id}`);
+        // T6B2-UNPARK-AFTER: an answer is written after the park; an older note of the thread (the idea's own note, once linked)
+        // answers nothing. A park time that does not read refuses too.
+        const parkedAt = Date.parse(loadProposal(io.cwd, id)?.parked?.at ?? '');
+        if (!Number.isFinite(parkedAt)) throw new UsageError(`proposals unpark: ${id} has no park time to answer after`);
+        const noteAt = Date.parse(n.ts);
+        if (!Number.isFinite(noteAt) || noteAt <= parkedAt) throw new UsageError(`proposals unpark: note ${noteId} was not written after ${id} was parked: it is no answer`);
       }
       const main = mainCheckout(io.cwd);
       const run = parseRun(readRunText(runRootOf(io.cwd, main)));
