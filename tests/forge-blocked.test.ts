@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
-import { startRun, saveRun } from '../src/forge/run.js';
-import { appendBlocked, blockedDecision, type BlockedRecord } from '../src/forge/autonomous.js';
+import { startRun, saveRun, endRun, type RunState } from '../src/forge/run.js';
+import { appendBlocked, blockedDecision, blockedFile, notedFile, type BlockedRecord } from '../src/forge/autonomous.js';
+import { LIMITS } from '../src/lib/decisions.js';
 import { useTempDirs } from './helpers/tmp.js';
 
 const tmp = useTempDirs();
@@ -12,8 +13,9 @@ let main: string;
 const cli = (args: string[]) => run(['blocked', ...args], { cwd: main, now: () => T0, env: {} });
 const rec = (rule: string, target: string, m: number): BlockedRecord => ({ ts: new Date(T0.getTime() + m * 60_000).toISOString(), rule, tool: 'Bash', target,
   reason: `forge autonomy · ${rule}: ${target} is not allowed. Instead: record it as not done`, session: 'coord-1' });
-const autonomous = (locale: string) => saveRun(main, { ...startRun(T0, { hours: 1 }, 10, 'coord-1', locale), autonomous: {
+const state = (locale: string): RunState => ({ ...startRun(T0, { hours: 1 }, 10, 'coord-1', locale), autonomous: {
   profile: 'spike', name: 'x', runId: 'spike-x', worktree: path.join(main, '.claude', 'worktrees', 'spike-x'), branch: 'forge/spike-x', startBranch: 'main', protectedBranches: ['main'] } });
+const autonomous = (locale: string) => saveRun(main, state(locale));
 beforeEach(() => { main = tmp('blocked-'); mkdirSync(path.join(main, '.claude', 'worktrees', 'spike-x'), { recursive: true }); });
 
 describe('forge blocked', () => {
@@ -55,5 +57,39 @@ describe('forge blocked', () => {
   it('a blocked decision carries no secret, whoever wrote the record (M7)', () => {
     const d = blockedDecision({ ...rec('database', 'psql postgres://u:hunter2@db.example.com/x -c "drop table t"', 0), session: null }, false);
     expect(JSON.stringify(d)).not.toContain('hunter2');
+    const r = blockedDecision({ ...rec('network', 'curl x', 0), reason: 'forge autonomy · network: PGPASSWORD=hunter3 psql is not allowed' }, false);
+    expect(JSON.stringify(r)).not.toContain('hunter3');
+  });
+  it('has the undo shape and cuts what to the limit', () => {
+    expect(blockedDecision(rec('git', 'git push', 0), true)).toMatchObject({ by: 'auto', undo: { type: 'none', reason: 'no se hizo nada' } });
+    expect(blockedDecision(rec('git', 'git push', 0), false)).toMatchObject({ undo: { type: 'none', reason: 'nothing was done' } });
+    expect((blockedDecision(rec('git', 'x'.repeat(500), 0), false).what as string).length).toBe(LIMITS.what);
+  });
+  it('a bad record never stops the denials after it from being noted (T10-POISON)', () => {
+    autonomous('en');
+    appendBlocked(main, 'spike-x', { ...rec('git', 'git push', 0), reason: '' });
+    // a line the hook did not write: appendBlocked itself would refuse a target that is not text
+    appendFileSync(blockedFile(main, 'spike-x'), JSON.stringify({ ...rec('git', 'x', 1), target: 42, tool: '' }) + '\n');
+    appendBlocked(main, 'spike-x', rec('network', 'npm publish', 2));
+    const r = JSON.parse(cli(['note']).stdout);
+    expect(r.noted + r.skipped.length).toBe(3);
+    expect(r.decisions).toHaveLength(r.noted);
+    expect(JSON.parse(cli(['list']).stdout).pending).toBe(0);
+    expect(JSON.parse(cli(['note']).stdout)).toMatchObject({ noted: 0, decisions: [], skipped: [] });
+    expect(blockedDecision({ ...rec('git', 'x', 0), reason: '', tool: '' }, false)).toMatchObject({ what: 'unknown: x', why: 'forge autonomy · git: no reason was recorded' });
+  });
+  it('a note interrupted before markNoted reuses the same decisions the next time', () => {
+    autonomous('en');
+    appendBlocked(main, 'spike-x', rec('git', 'git push', 0));
+    const first = JSON.parse(cli(['note']).stdout);
+    rmSync(notedFile(main, 'spike-x'));
+    expect(JSON.parse(cli(['note']).stdout)).toMatchObject({ noted: 1, decisions: first.decisions });
+    expect(JSON.parse(run(['decision', 'list', '--all'], { cwd: main, now: () => T0, env: {} }).stdout)).toHaveLength(1);
+  });
+  it('list and note work on a run that is no longer active', () => {
+    saveRun(main, endRun(state('en'), 'done'));
+    appendBlocked(main, 'spike-x', rec('git', 'git push', 0));
+    expect(JSON.parse(cli(['list']).stdout).pending).toBe(1);
+    expect(JSON.parse(cli(['note']).stdout).noted).toBe(1);
   });
 });

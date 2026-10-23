@@ -285,10 +285,13 @@ const cut = (s: string, max: number): string => Array.from(s).slice(0, max).join
  * redactSecrets again (M7): a record the hook did not write carries no secret to the roadmap either.
  */
 export function blockedDecision(r: BlockedRecord, es: boolean): Record<string, unknown> {
-  const reason = redactSecrets(r.reason);
+  // A record the hook did not write may lack a field: it is coerced, so one bad line never stops the rest being noted.
+  const field = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+  const rule = field(r.rule) || 'unknown';
+  const reason = redactSecrets(field(r.reason) || `forge autonomy · ${rule}: no reason was recorded`);
   return {
     point: 'blocked',
-    what: cut(`${r.tool}: ${redactSecrets(r.target)}`, LIMITS.what),
+    what: cut(`${field(r.tool) || 'unknown'}: ${redactSecrets(field(r.target) || '(unknown)')}`, LIMITS.what),
     chosen: es ? 'no se hizo' : 'not done',
     alternatives: [{ option: es ? 'hacerlo' : 'do it', whyNot: cut(reason, LIMITS.whyNot) }],
     why: cut(reason, LIMITS.why),
