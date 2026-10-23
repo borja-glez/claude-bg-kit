@@ -8,7 +8,7 @@ import type { ForgeDocV2 } from '../../lib/roadmap-doc.js';
 import type { ForgeV1, PlanTask, TaskState } from '../../lib/types.js';
 import { globsOverlap } from '../../lib/zones.js';
 import type { Dict } from '../i18n.js';
-import { authorLabel, esc, execLine, fmt, isOrphan, labelOf, num, oneOf, pastMs, rel, roleOf, safeNote, safeStatus, trackTag } from '../html.js';
+import { authorLabel, decisionBlock, esc, execLine, fmt, isOrphan, labelOf, num, oneOf, pastMs, rel, roleOf, safeNote, safeStatus, trackTag } from '../html.js';
 import { DETAIL_TABS, type DetailTab, type Model, type UiState } from '../model.js';
 
 const sec = (label: string, body: string) => `<div class="sec"><div class="lbl">${esc(label)}</div><div>${body}</div></div>`;
@@ -210,13 +210,11 @@ function talkTab(m: Model, d: Dict, ui: UiState, talk: ReturnType<typeof talkOf>
     const open = type === 'question' && !n.answer && !n.answeredByNote;
     const dec = n.decision;
     const when = fmt(n.ts, loc);
-    const decHtml = dec ? `<div class="ndec"><div><span class="k">${esc(d.decisionChosen)}</span> ${esc(dec.chosen)}${dec.alternatives?.length ? ` <span class="k">(${esc(dec.alternatives.map(a => a.option).join(', '))})</span>` : ''}</div>`
-      + `<div><span class="k">${esc(d.decisionWhy)}</span> ${esc(dec.why)}</div>${dec.revert ? `<div><span class="k">${esc(d.decisionRevert)}</span> ${esc(dec.revert)}</div>` : ''}</div>` : '';
     const reply = !open || m.readOnly ? '' : ui.answering === n.id
       ? `<div class="areply"><textarea name="answer" data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" aria-label="${esc(d.answerPlaceholder)}" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea><button type="button" class="btn pri" data-action="answer-send" data-id="${esc(n.id)}">${esc(d.send)}</button></div>`
       : `<button type="button" class="btn" data-action="answer-open" data-id="${esc(n.id)}">${esc(d.reply)}</button>`;
     return `<div class="mnote nb-${type}"><span class="nt-${type}">${esc(open ? d.openQuestion : d.noteType[type])}</span>${dec ? ` <span class="nauto">${esc(dec.auto ? d.autoTag : d.yoursTag)}</span>` : ''} <span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span>`
-      + `<div>${inlineMd(esc(n.text))}</div>${decHtml}${n.answer ? `<div class="ans">↳ ${esc(n.answer)}</div>` : ''}${reply}</div>`;
+      + `<div>${inlineMd(esc(n.text))}</div>${dec ? decisionBlock(d, dec, false) : ''}${n.answer ? `<div class="ans">↳ ${esc(n.answer)}</div>` : ''}${reply}</div>`;
   }).join('');
   const o = talk.origin;
   const status = o ? oneOf(PROPOSAL_STATUSES, o.status, 'done') : 'done';

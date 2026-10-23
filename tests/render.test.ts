@@ -511,6 +511,16 @@ describe('notes view', () => {
     expect(bad).toContain('&lt;script&gt;x&lt;/script&gt;');
     expect(renderApp({ ...base(), notes: [note({ id: 'p', type: 'decision' })] }, ui({ view: 'talk' }))).not.toContain('class="nauto"');
   });
+  it('lists each alternative with why it was not taken and what it gains and loses, and the chosen trade-offs, in the list and in the task (6b-1)', () => {
+    const dec = note({ id: 'd3', type: 'decision', text: 'cola', taskId: 'T001', decision: { point: 'ruling', what: 'cola de trabajos', chosen: 'sqlite', tradeoffs: 'nada que arrancar; escribe en serie',
+      alternatives: [{ option: 'redis', whyNot: 'un servicio más', tradeoffs: 'más rápido; otro proceso' }, { option: 'memoria' }], why: 'spike local', auto: true } });
+    for (const html of [renderApp({ ...base(), notes: [dec] }, ui({ view: 'talk' })), renderApp({ ...base(), notes: [dec] }, ui({ modal: 'T001' }))]) {
+      expect(html).toContain('<ul class="nalt">');
+      expect(html).toContain('redis <span class="k">Por qué no:</span> un servicio más <span class="k">Qué se gana y qué se pierde:</span> más rápido; otro proceso');
+      expect(html).toContain('<li>memoria</li>');
+      expect(html).toContain('<span class="k">Qué se gana y qué se pierde:</span> nada que arrancar; escribe en serie');
+    }
+  });
   it('escapes hostile notes in every view', () => {
     const bad = [
       note({ id: 'h"><script>', type: 'question', author: HOSTILE, text: HOSTILE, taskId: 'T001' }),

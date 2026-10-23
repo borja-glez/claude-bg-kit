@@ -5,7 +5,7 @@ import type { ForecastEnd } from '../lib/insights.js';
 import type { Metrics } from '../lib/metrics.js';
 import { NOTE_TYPES } from '../lib/notes.js';
 import { ownerCheck, type ApprovalDoc, type ProposalDoc } from '../lib/proposals.js';
-import { TRACK_COLORS, type EventType, type MessageType, type NoteType, type TaskState, type TaskStatus } from '../lib/types.js';
+import { TRACK_COLORS, type EventType, type MessageType, type NoteDecision, type NoteType, type TaskState, type TaskStatus } from '../lib/types.js';
 import type { Dict } from './i18n.js';
 import type { Model } from './model.js';
 
@@ -119,6 +119,19 @@ export function authorLabel(m: Model, d: Dict, author: string): string {
   if (author.startsWith('user:')) { const id = author.slice(5); return (Object.hasOwn(m.profiles, id) ? m.profiles[id] : undefined) || d.someUser; }
   if (author.startsWith('session:')) return `${d.claude} · ${author.slice(8)}`;
   return author;
+}
+
+/** A decision as the conversation and the task draw it: the point (only with `withPoint`), what was chosen with its
+ *  trade-offs, the alternatives (plain ones inline after it; if any carries a why-not or trade-offs, a list with each),
+ *  why, and how to undo it. */
+export function decisionBlock(d: Dict, dec: NoteDecision, withPoint: boolean): string {
+  const line = (label: string, text: string) => `<div><span class="k">${esc(label)}</span> ${esc(text)}</div>`;
+  const alts = dec.alternatives ?? [];
+  const detailed = alts.some(a => a.whyNot || a.tradeoffs);
+  const inline = alts.length && !detailed ? ` <span class="k">(${esc(alts.map(a => a.option).join(', '))})</span>` : '';
+  const list = detailed ? `<ul class="nalt">${alts.map(a => `<li>${esc(a.option)}${a.whyNot ? ` <span class="k">${esc(d.decisionWhyNot)}</span> ${esc(a.whyNot)}` : ''}${a.tradeoffs ? ` <span class="k">${esc(d.decisionTradeoffs)}</span> ${esc(a.tradeoffs)}` : ''}</li>`).join('')}</ul>` : '';
+  return `<div class="ndec">${withPoint ? line(d.talk.point, dec.point) : ''}<div><span class="k">${esc(d.decisionChosen)}</span> ${esc(dec.chosen)}${inline}</div>`
+    + `${dec.tradeoffs ? line(d.decisionTradeoffs, dec.tradeoffs) : ''}${list}${line(d.decisionWhy, dec.why)}${dec.revert ? line(d.decisionRevert, dec.revert) : ''}</div>`;
 }
 
 /** Sessions involved in an unresolved disagreement: escalation candidates or open escalation messages. */

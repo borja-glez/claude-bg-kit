@@ -9,7 +9,7 @@ import { counts, MAX_NOTE, NOTE_TYPES } from '../../lib/notes.js';
 import { inlineMd } from '../../lib/inline-md.js';
 import type { NoteDoc } from '../../lib/types.js';
 import type { Dict } from '../i18n.js';
-import { authorLabel, esc, fmt, labelOf, oneOf, safeNote, safeStatus, unmarkedReason } from '../html.js';
+import { authorLabel, decisionBlock, esc, fmt, labelOf, oneOf, safeNote, safeStatus, unmarkedReason } from '../html.js';
 import { PROPOSAL_FILTERS, TALK_FILTERS, type Model, type ProposalFilter, type ProposalFilterKind, type TalkFilter, type UiState } from '../model.js';
 
 type Note = NoteDoc & { id: string };
@@ -98,12 +98,6 @@ function noteCard(m: Model, d: Dict, ui: UiState, loc: string, n: Note): string 
   const open = isOpenQuestion(n);
   const when = fmt(n.ts, loc);
   const dec = n.decision;
-  const decHtml = dec ? `<div class="ndec">
-      <div><span class="k">${esc(d.talk.point)}</span> ${esc(dec.point)}</div>
-      <div><span class="k">${esc(d.decisionChosen)}</span> ${esc(dec.chosen)}${dec.alternatives?.length ? ` <span class="k">(${esc(dec.alternatives.map(a => a.option).join(', '))})</span>` : ''}</div>
-      <div><span class="k">${esc(d.decisionWhy)}</span> ${esc(dec.why)}</div>
-      ${dec.revert ? `<div><span class="k">${esc(d.decisionRevert)}</span> ${esc(dec.revert)}</div>` : ''}
-    </div>` : '';
   // H-17: a question a decision closed names that decision, and «Ver la decisión» brings it into view. Only a loose
   // decision (not a proposal's comment, not a note of another kind) is one the list shows and the link can reach.
   const by = n.answeredByNote ? m.notes.find(x => x.id === n.answeredByNote && x.type === 'decision' && !x.proposalId) : undefined;
@@ -119,7 +113,7 @@ function noteCard(m: Model, d: Dict, ui: UiState, loc: string, n: Note): string 
   return `<div class="note nb-${t}" data-k="n:${esc(n.id)}" tabindex="-1">
     <div class="nh"><span><span class="nt-${t}">${esc(open ? d.openQuestion : d.noteType[t])}</span>${dec ? ` <span class="nauto">${esc(dec.auto ? d.autoTag : d.yoursTag)}</span>` : ''}</span><span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
     <p>${inlineMd(esc(n.text))}</p>
-    ${decHtml}
+    ${dec ? decisionBlock(d, dec, true) : ''}
     ${n.taskId ? `<button type="button" class="chip" data-action="open-task" data-id="${esc(n.taskId)}" data-k="tk:${esc(n.id)}">${esc(n.taskId)}</button>` : ''}
     ${answer}
     ${reply}

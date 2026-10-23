@@ -173,6 +173,7 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .nauto{font:10px 'JetBrains Mono',monospace;letter-spacing:0;text-transform:none;border:1px solid var(--peach);color:var(--t-peach);border-radius:3px;padding:0 4px;margin-left:4px}
 .ndec{margin-top:6px;font-size:12px;color:var(--sub1);display:flex;flex-direction:column;gap:2px;overflow-wrap:anywhere}
 .ndec .k{margin-right:4px}
+.ndec .nalt{margin:2px 0 0 14px;padding:0;display:flex;flex-direction:column;gap:2px}
 .ans{margin-top:8px;padding:6px 8px;border-radius:5px;background:var(--base);font-size:12px;color:var(--sub1);white-space:pre-wrap;overflow-wrap:anywhere}
 .ans .k{display:block;margin-bottom:2px}
 .areply{display:flex;flex-direction:column;gap:6px;margin-top:8px}
