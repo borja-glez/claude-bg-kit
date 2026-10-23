@@ -713,6 +713,15 @@ function command(seg: Segment, ws: Raw[], depth: number): Segment[] {
       });
     } else if (sc === 'bisect' && rest[0]?.text === 'run') run(rest.slice(1), seg.cwd, false);
     else if (sc === 'submodule') { const f = rest.findIndex(x => x.text === 'foreach'); if (f >= 0) sub(skipOpts(rest.slice(f + 1), []), 'bash'); }
+  } else if (n0 === 'tar' || n0 === 'sort' || n0 === 'rsync') {
+    // T4-NESTED-CMD: the command these options run is split and judged like rebase -x (tar -I/--use-compress-program/--to-command, sort --compress-program, rsync -e/--rsh/--rsync-path).
+    const opts = n0 === 'tar' ? ['-I', '--use-compress-program', '--to-command'] : n0 === 'sort' ? ['--compress-program'] : ['-e', '--rsh', '--rsync-path'];
+    args.forEach((x, k) => {
+      if (opts.includes(x.text)) { if (args[k + 1]) sub([args[k + 1]], 'bash'); return; }
+      const long = opts.find(o => o.startsWith('--') && x.text.startsWith(o + '='));
+      if (long) sub([cut(x, long.length + 1)], 'bash');
+      else if (n0 === 'tar' && /^-I./.test(x.text)) sub([cut(x, 2)], 'bash');
+    });
   } else if (n0 === 'cmd') {
     for (let i = 0; i < args.length; i++) {
       const t = args[i].text;

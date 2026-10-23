@@ -5,9 +5,10 @@
 // autonomy-parse.ts (its option tables in autonomy-tables.ts); the readable command lists live here. They deny: switching
 // the guard off (self), writes outside the run's roots or whose target is unknown (files), global installs (install), and
 // dangerous git — refs, the work tree outside the roots, and the config, remotes and object store the clone shares (git).
+import path from 'node:path';
 import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
-import { CWD_FLAG, FILE_TOOLS, forgeCalls, shellCommand, targetPaths } from './guard.js';
-import { commandName, GIT_VALUED, isNullSink, type Segment, type Word } from './shell-words.js';
+import { confinedIn, CWD_FLAG, FILE_TOOLS, forgeCalls, shellCommand, targetPaths } from './guard.js';
+import { commandName, GIT_VALUED, isNullSink, type Dialect, type Segment, type Word } from './shell-words.js';
 import { bashSegments, deny, insideRoots, segmentPath } from './autonomy-shared.js';
 import { copyEnds, isPsPipeItem, knownWriteCommand, newItemName, plainOperands, writeInfo } from './autonomy-parse.js';
 
@@ -70,12 +71,23 @@ const hasSep = (t: string): boolean => t.includes('/') || t.includes('\\');
 // A URL's scheme is two or more letters (FC1): a one-letter scheme is a drive, so `E://repo/x` is a path, not a URL.
 const URL_RE = /^[a-z][a-z0-9+.-]+:\/\//i;
 
+// PowerShell's own drives: a `<drive>:` word in the powershell dialect is a provider path, judged (T4-FAILCLOSED 1).
+const PS_DRIVES = new Set(['alias', 'cert', 'env', 'function', 'hkcu', 'hklm', 'hkcr', 'hku', 'hkcc', 'variable', 'wsman', 'temp', 'registry', 'filesystem', 'certificate']);
+
 /**
  * A relative word that cannot leave its directory: no root, home, drive, UNC or provider-drive prefix and no segment equal to
  * `..` (Go's `./...` is no `..`). Under an in-root cwd such a word is inside by construction (T4-FAILCLOSED 1).
+ * T4-STREAM-WORD: `name:rest` with no separator before the colon is the relative path `name` (an NTFS stream of a file in
+ * the cwd: `docker run -v data:/app/data`), unless `name` is one letter (a drive) or, in powershell, one of its drives.
  */
-function relativeInside(text: string): boolean {
-  if (!text || /^[\\/~]/.test(text) || /^[A-Za-z]+:/.test(text)) return false;
+function relativeInside(text: string, dialect: Dialect): boolean {
+  if (!text || /^[\\/~]/.test(text)) return false;
+  const stream = /^([^\\/:]+):(.*)$/s.exec(text);
+  if (stream) {
+    const name = stream[1];
+    if (/^[A-Za-z]$/.test(name) || (dialect === 'powershell' && (PS_DRIVES.has(name.toLowerCase()) || stream[2].startsWith(':')))) return false;
+    text = name;
+  }
   return !text.split(/[\\/]/).some(s => s === '..');
 }
 
@@ -83,7 +95,7 @@ function relativeInside(text: string): boolean {
 function judge(w: Word, seg: Segment, ctx: GuardCtx): 'ok' | 'outside' | 'unknown' {
   if (w.dynamic) return 'unknown';
   if (URL_RE.test(w.text) || isNullSink(w.text, seg.dialect)) return 'ok';
-  if (seg.cwd !== null && relativeInside(w.text) && insideRoots(seg.cwd, ctx)) return 'ok';
+  if (seg.cwd !== null && relativeInside(w.text, seg.dialect) && insideRoots(seg.cwd, ctx)) return 'ok';
   const p = segmentPath(w, seg);
   if (p === null) return 'unknown';
   return insideRoots(p, ctx) ? 'ok' : 'outside';
@@ -166,23 +178,43 @@ function claudeSwitch(argv: Word[]): boolean {
   return false;
 }
 
-/** Whether a path names the project's `.claude` directory, or anything under it (FC6). */
+/** Whether a word's text names a `.claude` directory, or anything under it (FC6) — the text form, for a path the shell hides. */
 function isClaudeDest(text: string): boolean {
   const s = text.replace(/\\/g, '/').replace(/\/+$/, '');
   return s === '.claude' || s.endsWith('/.claude') || s.startsWith('.claude/') || s.includes('/.claude/');
 }
 
-/** Whether a write-class segment would create or overwrite the project settings, or write into the `.claude` directory. */
-function writesSettings(seg: Segment): boolean {
-  for (const t of writeInfo(seg).targets) { const txt = t.text.replace(/\\/g, '/'); if (isClaudeDest(txt)) return true; if (endsWithSettings(segmentPath(t, seg) ?? txt)) return true; }
+/**
+ * Fix 5: the `.claude` that counts for `self` is the one Claude Code reads settings from — directly under one of the run's
+ * roots (the worktree, and tmp since a session could start there) — not any `/.claude/` segment: the worktree itself lives
+ * under `<main>/.claude/worktrees/`, and a `.claude` nested deeper in the worktree is ordinary content. `p` is resolved.
+ */
+function projectClaude(p: string, ctx: GuardCtx, platform: NodeJS.Platform = process.platform): boolean {
+  // win32 folds a trailing dot or space and an NTFS stream onto the plain name: fold here too (toward «it is the settings file», the safe direction for self)
+  const q = platform === 'win32' ? p.split(/[\\/]/).map((n, i) => (n === '.' || n === '..' || (i === 0 && /^[A-Za-z]:$/.test(n)) ? n : n.replace(/:.*$/, '').replace(/[. ]+$/, ''))).join('\\') : p;
+  return (ctx.autonomous?.roots ?? []).some(r => confinedIn(q, path.join(r, '.claude')));
+}
+
+/** Whether a word, resolved against `cwd` (the segment's by default), reaches the project `.claude`; the text form when it cannot be resolved. */
+function settingsTarget(w: Word, seg: Segment, ctx: GuardCtx, cwd: string | null = seg.cwd): boolean {
+  const p = segmentPath(w, { ...seg, cwd });
+  if (p !== null) return projectClaude(p, ctx);
+  return isClaudeDest(w.text) || endsWithSettings(w.text.replace(/\\/g, '/'));
+}
+
+/** Whether a write-class segment would create or overwrite the project settings, or write into the project `.claude` directory. */
+function writesSettings(seg: Segment, ctx: GuardCtx): boolean {
+  for (const t of writeInfo(seg).targets) if (settingsTarget(t, seg, ctx)) return true;
   const ce = copyEnds(seg);
   if (ce) {
-    if (isClaudeDest(ce.dest.text)) return true;
-    const destIsDir = /[\\/]$/.test(ce.dest.text) || ce.dest.text === '.' || isClaudeDest(ce.dest.text);
-    if (destIsDir && ce.sources.some(s => /(?:^|[\\/])\.claude$/.test(s.text.replace(/\\/g, '/').replace(/\/+$/, '')) || SETTINGS_RE.test(s.text.replace(/\\/g, '/')))) return true;
+    if (settingsTarget(ce.dest, seg, ctx)) return true;
+    // a `.claude` directory or a settings file copied, moved or extracted into a root (`cp -r /x/.claude .`)
+    const dest = segmentPath(ce.dest, seg);
+    const intoRoot = dest !== null ? (ctx.autonomous?.roots ?? []).some(r => confinedIn(dest, r) && confinedIn(r, dest)) : /[\\/]$/.test(ce.dest.text) || ce.dest.text === '.';
+    if (intoRoot && ce.sources.some(s => /(?:^|[\\/])\.claude$/.test(s.text.replace(/\\/g, '/').replace(/\/+$/, '')) || SETTINGS_RE.test(s.text.replace(/\\/g, '/')))) return true;
   }
   const ni = newItemName(seg);
-  return !!ni && endsWithSettings(ni.text);
+  return !!ni && settingsTarget(ni, seg, ctx);
 }
 
 export const selfRule: GuardRule = {
@@ -190,19 +222,19 @@ export const selfRule: GuardRule = {
   check(input, ctx) {
     if (!ctx.autonomous) return null;
     if (FILE_TOOLS.includes(input.tool_name)) {
-      for (const p of targetPaths(input, ctx)) if (endsWithSettings(p)) return deny('self', `writing the project settings (${p}) would switch the hook off`, SELF_INSTEAD);
+      for (const p of targetPaths(input, ctx)) if (projectClaude(p, ctx)) return deny('self', `writing the project settings (${p}) would switch the hook off`, SELF_INSTEAD);
       return null;
     }
     const segs = bashSegments(input, ctx);
     if (!segs) return null;
     for (const seg of segs) {
-      for (const r of seg.redirects) if (r.op === '>' || r.op === '>>') { const txt = segmentPath(r.target, seg) ?? r.target.text.replace(/\\/g, '/'); if (endsWithSettings(txt) || isClaudeDest(r.target.text)) return deny('self', 'writing the project settings would switch the hook off', SELF_INSTEAD); }
+      for (const r of seg.redirects) if ((r.op === '>' || r.op === '>>') && settingsTarget(r.target, seg, ctx)) return deny('self', 'writing the project settings would switch the hook off', SELF_INSTEAD);
       if (!seg.argv.length || seg.argv[0].dynamic) continue;
       const name = commandName(seg.argv[0]);
       if (name === 'git') {
-        const g = gitParse(seg);
-        if (GIT_WRITE_TREE.has(g.sub) && g.allOperands.some(w => endsWithSettings(w.text.replace(/\\/g, '/')) || isClaudeDest(w.text))) return deny('self', 'restoring the project settings would switch the hook off', SELF_INSTEAD);
-      } else if (writesSettings(seg)) return deny('self', 'writing the project settings would switch the hook off', SELF_INSTEAD);
+        const g = gitParse(seg); // a pathspec is relative to the directory git runs in
+        if (GIT_WRITE_TREE.has(g.sub) && g.allOperands.some(w => settingsTarget(w, seg, ctx, g.dir))) return deny('self', 'restoring the project settings would switch the hook off', SELF_INSTEAD);
+      } else if (writesSettings(seg, ctx)) return deny('self', 'writing the project settings would switch the hook off', SELF_INSTEAD);
       if (name === 'claude' && claudeSwitch(seg.argv)) return deny('self', 'this claude command could switch the guard off', SELF_INSTEAD);
     }
     const command = shellCommand(input);
