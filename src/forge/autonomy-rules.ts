@@ -86,20 +86,23 @@ const URL_RE = /^[a-z][a-z0-9+.-]+:\/\//i;
 
 // PowerShell's own drives: a `<drive>:` word in the powershell dialect is a provider path, judged (T4-FAILCLOSED 1).
 const PS_DRIVES = new Set(['alias', 'cert', 'env', 'function', 'hkcu', 'hklm', 'hkcr', 'hku', 'hkcc', 'variable', 'wsman', 'temp', 'registry', 'filesystem', 'certificate']);
+// Final fix I4, narrowed by fix 2 (re-review N1): a PowerShell provider-qualified path, its module optional
+// (`Microsoft.PowerShell.Core\FileSystem::C:\x`, `Registry::HKEY_…`). Any other `::` is no path syntax (`x.py::test_a`, `foo::bar`).
+const PS_PROVIDER = /^(?:\w[\w.]*[\\/])?(?:filesystem|registry|alias|environment|function|variable|certificate|wsman)::/i;
 
 /**
  * A relative word that cannot leave its directory: no root, home, drive, UNC or provider-drive prefix and no segment equal to
  * `..` (Go's `./...` is no `..`). Under an in-root cwd such a word is inside by construction (T4-FAILCLOSED 1).
  * T4-STREAM-WORD: `name:rest` with no separator before the colon is the relative path `name` (an NTFS stream of a file in
- * the cwd: `docker run -v data:/app/data`), unless `name` is one letter (a drive) or, in powershell, one of its drives.
- * Final fix I4: a `::` anywhere is a PowerShell provider-qualified path (`Microsoft.PowerShell.Core\FileSystem::C:\x`), never relative.
+ * the cwd: `docker run -v data:/app/data`), unless `name` is one letter (a drive; not before a second colon: `a::b`) or, in
+ * powershell, one of its drives. In powershell a provider-qualified path is never relative (PS_PROVIDER).
  */
 function relativeInside(text: string, dialect: Dialect): boolean {
-  if (!text || /^[\\/~]/.test(text) || text.includes('::')) return false;
+  if (!text || /^[\\/~]/.test(text) || (dialect === 'powershell' && PS_PROVIDER.test(text))) return false;
   const stream = /^([^\\/:]+):(.*)$/s.exec(text);
   if (stream) {
     const name = stream[1];
-    if (/^[A-Za-z]$/.test(name) || (dialect === 'powershell' && (PS_DRIVES.has(name.toLowerCase()) || stream[2].startsWith(':')))) return false;
+    if ((/^[A-Za-z]$/.test(name) && !stream[2].startsWith(':')) || (dialect === 'powershell' && PS_DRIVES.has(name.toLowerCase()))) return false;
     text = name;
   }
   return !text.split(/[\\/]/).some(s => s === '..');

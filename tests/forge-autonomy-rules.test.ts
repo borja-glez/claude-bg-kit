@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { selfRule, filesRule, installRule, gitRule, networkRule, cloudRule, mcpWriteRule } from '../src/forge/autonomy-rules.js';
+import { selfRule, filesRule, installRule, gitRule, networkRule, cloudRule, mcpWriteRule, AUTONOMY_RULES } from '../src/forge/autonomy-rules.js';
+import { evaluateGuard } from '../src/forge/guard.js';
 import { mcpWords } from '../src/forge/autonomy-shared.js';
 import { runTmp } from '../src/forge/resources.js';
 import { useTempDirs } from './helpers/tmp.js';
@@ -788,6 +789,13 @@ describe('final fix', () => {
     ['F1', pwsh(`Remove-Item -Recurse '${PS('x\\y')}'`)], ['F6', pwsh(`Remove-Item -LiteralPath ${PS('x\\y')} -Recurse -Force`)], ['F7', pwsh(`Set-Content ${PS('x\\y.txt')} -Value z`)],
     ['inside the worktree too', pwsh(`Remove-Item -Recurse 'Microsoft.PowerShell.Core\\FileSystem::${PW('build')}'`)],
   ] as const)('I4: files reads a provider-qualified path as no relative name: %s', (_, input) => unknown('files', filesRule.check(input, CTX)));
+  it.each([
+    ['R1', bash('pytest tests/test_x.py::test_a')], ['R2', bash('python -m pytest tests/test_x.py::TestA::test_b -x')], ['R3', pwsh('pytest tests\\test_x.py::test_a')],
+    ['R4', bash('cargo test foo::bar')], ['R5', pwsh('cargo test foo::bar -- --nocapture')], ['R6', bash('npx vitest run -t "a::b"')],
+    ['R7', bash('dotnet test --filter "FullyQualifiedName~Ns.Class::M"')], ['R8', bash('uv run pytest tests/x.py::test_a')],
+  ] as const)('final fix 2 (re-review N1): a test id with :: is no path, and every rule allows it: %s', (_, input) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
+  it.each([P('Remove-Item -Recurse FileSystem::src'), P('Remove-Item microsoft.powershell.core/filesystem::src'), P('Set-Content Registry::HKCU\\x -Value 1')])(
+    'final fix 2: the PowerShell providers stay no relative name: %s', (_, input) => unknown('files', filesRule.check(input, CTX)));
   it.each([
     ['E1', bash('git commit -m "/api: add endpoint"')], ['E16', bash('git commit -m "C:\\x style paths"')], ['E27', bash('git commit -m "~tilde"')],
     ['G3', bash('git commit -m "/forge:stop: handle x"')], ['G4', bash('git merge -m "/x" main')], ['G2', bash('git commit -F msg.txt')],
