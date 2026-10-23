@@ -729,6 +729,51 @@ describe('fix round 2 · cloud and runners', () => {
   });
 });
 
+// ---- fix round 3: the re-review's p3 rows, verb-first group words, runner tables, names after the read verb, graphql bodies ----
+
+describe('fix round 3 · re-review breakage', () => {
+  const verdict3 = (input: Parameters<typeof cloudRule.check>[0]) => cloudRule.check(input, CTX) ?? networkRule.check(input, CTX);
+  it.each([
+    // p3 D rows
+    B('npx --loglevel warn vercel deploy --prod'), B('gh api graphql --input q.json'), B('gh api graphql -F query=@q.graphql'), B('gh api graphql -F query=@-'),
+    B('curl -G -X DELETE https://api.example.com/x'),
+    // T5-VF-GROUPS: after a group word, anything but a read denies; ALWAYS_DENY keeps priority
+    B('kubectl config use-context prod'), B('helm repo add x https://charts.example.com'), B('pulumi stack select dev'), B('terraform workspace select dev'),
+    B('vercel env pull'), B('terraform state list'), B('fly secrets set A=1'),
+    // T5-RUNNER-TABLES: package options per runner (T5-PKG-FLAG), an unknown runner option
+    B('uvx --from twine python -c x'), B('pipx run --spec twine python -c x'), B('bunx -p vercel node x.js'), B('npx --made-up vercel ls'),
+    // T5-NAMES-AFTER-READ: the brief's exact write verbs still deny anywhere
+    B('gcloud functions describe deploy'),
+  ])('denies %s', (_, input) => expect(verdict3(input)).toMatchObject({ decision: 'deny' }));
+  it.each([
+    // p3 A rows: verb-first group reads
+    B('kubectl config view'), B('kubectl config get-contexts'), B('kubectl config current-context'), B('helm repo list'), B('pulumi stack ls'), B('pulumi stack output'),
+    B('fly apps list'), B('fly secrets list'), B('vercel env ls'), B('terraform workspace list'), B('kubectl cluster-info'), B('kubectl auth can-i get pods'),
+    // p3 A rows: everyday runner options
+    B('uv run --frozen pytest'), B('uv run --extra dev pytest'), B('bunx --bun vite'), B('npm exec --workspace=a -- vitest'), B('uvx --refresh ruff check .'),
+    B('uv run --locked pytest -q'), B('uv run --directory backend pytest'),
+    // T5-RUNNER-TABLES rows: uv run, uvx, npm exec, pnpm exec, poetry/pdm run, common switches; uv run --package and uvx -p are no package
+    B('uv run --no-sync --all-extras --group test --dev pytest'), B('uv run --project api --with httpx --python 3.12 --env-file .env -m pytest'), B('uv run --no-dev -p 3.12 pytest'),
+    B('uvx --isolated --with rich ruff check .'), B('uvx -p 3.12 ruff check .'), B('npm exec -w a --workspaces -- vitest'), B('pnpm exec --filter a -r vitest'), B('pnpm exec -F a -w tsc'),
+    B('poetry run -C api pytest'), B('poetry run --project api pytest'), B('pdm run -p api pytest'), B('npx -q -v --offline prettier --check .'), B('uv run --package api pytest'),
+    // p3 A rows: names after the read verb, gcloud release tracks, local dev verbs
+    B('gcloud functions describe send-email'), B('gcloud functions logs read resize-image'), B('gcloud run services describe upload-api --region us-central1'),
+    B('wrangler kv key get config --binding X'), B('gcloud beta run services list'), B('supabase functions serve'), B('heroku local web'),
+    B('wrangler d1 execute db --local --command "select 1"'),
+    // p3 sanity rows
+    B('kubectl get pods -w'), B('gcloud compute instances list --filter=name:web'), B('az storage blob list --account-name a --container-name c'),
+    B('aws s3 ls s3://b --recursive --human-readable'), B('gh pr list --state open --limit 5'), B('helm list -A'), B('terraform -chdir=infra plan'),
+    B('kubectl get pods -o wide -n kube-system'), B('gh run view 123 --log-failed'), B('vercel logs my-app.vercel.app'),
+    B('aws ec2 describe-instances --filters Name=tag:env,Values=prod'), B('gcloud logging read "severity>=ERROR" --limit 10'),
+    // T5-KNOWN-VALUES: a known global option's value is a name; T5-GLAB-CLONE
+    B('gcloud --project deploy-prod compute instances list'), B('glab repo clone o/r'),
+  ])('allows %s', (_, input) => expect(verdict3(input)).toBeNull());
+  it('wrangler d1 without --local, or with --remote, is not local', () => {
+    expect(verdict3(bash('wrangler d1 execute db --command "drop table x"'))).toMatchObject({ decision: 'deny' });
+    expect(verdict3(bash('wrangler d1 execute db --local --remote --command "select 1"'))).toMatchObject({ decision: 'deny' });
+  });
+});
+
 describe('fix round 1 · mcp-write (T5-BROWSER, more write words)', () => {
   it.each([
     ['mcp__github__manage_notification_subscription'], ['mcp__github__rerun_failed_jobs'], ['mcp__x__toggleFeatureFlag'], ['mcp__x__acceptInvitation'],

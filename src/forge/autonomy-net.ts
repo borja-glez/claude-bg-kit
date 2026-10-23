@@ -74,11 +74,35 @@ const isWriteMethod = (m: string): boolean => m !== '' && !WRITE_METHODS.include
 // ---- runners --------------------------------------------------------------------------------------------------------
 
 type Eff = { name: string; args: Word[] };
-// A runner's own options that take a value (so the CLI it runs is the next operand), and its boolean switches.
-const RUNNER_VALUED = new Set(['-p', '--package', '--package-spec', '--from', '--with', '--with-requirements', '--python', '--spec',
-  '--pip-args', '--index', '--index-url', '--extra-index-url', '--constraint', '--refresh-package', '-c', '--call', '--userconfig', '--cache', '--shell']);
-const RUNNER_SWITCHES = new Set(['-y', '--yes', '-q', '--quiet', '--no-install', '--install', '--prefer-offline', '--prefer-online',
-  '--offline', '--online', '--ignore-existing', '--silent', '-s', '--loglevel']);
+/**
+ * T5-RUNNER-TABLES: each runner's own options before the package operand — the ones that take a value, its switches, and
+ * the ones that name a package (read with PKG_BIN under T5-PKG-FLAG). An option outside its table cancels (unknown target).
+ */
+interface RunnerTable { valued: Set<string>; switches: Set<string>; pkg: Set<string> }
+const COMMON_RUN = '-q --quiet -v --verbose --offline';
+const RT = (valued: string, switches: string, pkg = ''): RunnerTable => {
+  const set = (s: string) => new Set(s.split(/\s+/).filter(Boolean));
+  return { valued: set(valued), switches: set(`${switches} ${COMMON_RUN}`), pkg: set(pkg) };
+};
+const NPX_T = RT('-p --package -c --call --userconfig --cache --loglevel --registry --prefix -w --workspace --shell --node-options',
+  '-y --yes --no -s --silent --no-install --install --prefer-offline --prefer-online --ignore-existing --workspaces --include-workspace-root --if-present', '-p --package');
+const UVX_T = RT(`--from --with --with-editable --with-requirements -p --python --index --default-index --index-url --extra-index-url --find-links -f
+  --constraint --override --refresh-package --upgrade-package --python-preference --cache-dir --directory --project --config-file --env-file --prerelease`,
+  '--refresh --isolated -n --no-cache --native-tls --upgrade -U --reinstall --no-config --no-progress --no-env-file', '--from');
+const BUNX_T = RT('-p --package', '--bun --silent --no-install', '-p --package');
+const RUNNER_TABLES: Record<string, RunnerTable> = {
+  npx: NPX_T, 'npm exec': NPX_T, bunx: BUNX_T, 'bun x': BUNX_T, uvx: UVX_T, 'uv tool run': UVX_T,
+  'pnpm dlx': RT('--package --allow-build', '-c --shell-mode --silent -s', '--package'),
+  'pnpm exec': RT('--filter -F --resume-from --workspace-concurrency', '-r --recursive -w --workspace-root -c --shell-mode --parallel --report-summary --no-bail --bail --silent -s'),
+  'yarn dlx': RT('-p --package', '', '-p --package'),
+  'uv run': RT(`--with --with-editable --with-requirements -p --python --directory --project --package --extra --group --only-group --no-group --env-file
+    --index --default-index --index-url --extra-index-url --find-links -f --python-preference --cache-dir --config-file --prerelease --resolution --refresh-package`,
+    '--frozen --locked --no-sync --all-extras --dev --no-dev --all-groups --only-dev --no-project --isolated -n --no-cache --refresh --script -s --all-packages --no-env-file --active --no-editable --exact -m --module'),
+  'poetry run': RT('-C --directory -P --project', '-vv -vvv -n --no-interaction --ansi --no-ansi --no-plugins --no-cache'),
+  'pdm run': RT('-p --project', '-l --list -s --site-packages --recreate -g --global'),
+  'hatch run': RT('-e --env -p --project', ''),
+  'pipx run': RT('--spec --python --pip-args --index-url', '--no-cache --fetch-missing-python --system-site-packages --path', '--spec'),
+};
 // Package specs whose installed bin differs from the package name.
 const PKG_BIN: Record<string, string> = {
   'netlify-cli': 'netlify', 'firebase-tools': 'firebase', 'aws-cdk': 'cdk', 'eas-cli': 'eas', 'vercel': 'vercel', 'wrangler': 'wrangler',
@@ -103,21 +127,21 @@ function pkgToBin(spec: string): string {
 /** A runner line the hook cannot read: the reason becomes the network rule's `unknown target`. */
 type Cancel = { cancel: string };
 const UNKNOWN_RUNNER_OPT: Cancel = { cancel: 'a runner option the hook does not know hides the command it runs' };
-/** Skip a runner's own flags to its package operand, collecting the `-p`/`--package` values; a Cancel when an unknown option comes before the package. */
-function runnerRest(args: Word[]): { rest: Word[]; pkgs: Word[] } | Cancel {
+/** Skip a runner's own options (its table) to its package operand, collecting the package-naming values; a Cancel when an option outside the table comes first. */
+function runnerRest(args: Word[], table: RunnerTable): { rest: Word[]; pkgs: Word[] } | Cancel {
   const pkgs: Word[] = [];
   let i = 0;
   while (i < args.length) {
     const t = args[i].text;
     if (t === '--') { i++; break; }
-    if (!t.startsWith('-')) break;
+    if (!t.startsWith('-') || t === '-') break;
     const eq = t.indexOf('='), key = eq > 0 ? t.slice(0, eq) : t;
-    if (RUNNER_VALUED.has(key)) {
+    if (table.valued.has(key)) {
       const v = eq > 0 ? { text: t.slice(eq + 1), dynamic: args[i].dynamic, glob: false } : args[i + 1];
-      if ((key === '-p' || key === '--package') && v) pkgs.push(v);
+      if (table.pkg.has(key) && v) pkgs.push(v);
       i += eq > 0 ? 1 : 2; continue;
     }
-    if (RUNNER_SWITCHES.has(key)) { i++; continue; }
+    if (table.switches.has(key)) { i++; continue; }
     return UNKNOWN_RUNNER_OPT;
   }
   return { rest: args.slice(i), pkgs };
@@ -140,13 +164,21 @@ function innerOf(r: { rest: Word[]; pkgs: Word[] } | Cancel): Eff | Cancel | nul
   return { name: bin, args: rest.slice(1) };
 }
 
+/** Which runner a call is (a RUNNER_TABLES key) and how many of its words name the runner itself; null when it is not one. */
+function runnerOf(name: string, args: Word[]): { key: string; skip: number } | null {
+  const a0 = args[0]?.text, a1 = args[1]?.text;
+  if (name === 'npx' || name === 'bunx' || name === 'uvx') return { key: name, skip: 0 };
+  if (name === 'bun' && a0 === 'x') return { key: 'bun x', skip: 1 };
+  if (name === 'pnpm' && (a0 === 'dlx' || a0 === 'exec')) return { key: `pnpm ${a0}`, skip: 1 };
+  if (name === 'yarn' && a0 === 'dlx') return { key: 'yarn dlx', skip: 1 };
+  if (name === 'npm' && (a0 === 'exec' || a0 === 'x')) return { key: 'npm exec', skip: 1 };
+  if (name === 'uv' && a0 === 'tool' && a1 === 'run') return { key: 'uv tool run', skip: 2 };
+  if (['uv', 'poetry', 'pdm', 'hatch', 'pipx'].includes(name) && a0 === 'run') return { key: `${name} run`, skip: 1 };
+  return null;
+}
 function unwrapRunner(name: string, args: Word[]): Eff | Cancel | null {
-  if (name === 'npx' || name === 'bunx' || name === 'uvx') return innerOf(runnerRest(args));
-  if (name === 'bun' && args[0]?.text === 'x') return innerOf(runnerRest(args.slice(1)));
-  if ((name === 'pnpm' && (args[0]?.text === 'dlx' || args[0]?.text === 'exec')) || (name === 'yarn' && args[0]?.text === 'dlx')) return innerOf(runnerRest(args.slice(1)));
-  if (name === 'npm' && (args[0]?.text === 'exec' || args[0]?.text === 'x')) return innerOf(runnerRest(args.slice(1)));
-  if (name === 'pipx' && args[0]?.text === 'run') return innerOf(runnerRest(args.slice(1)));
-  if (['uv', 'poetry', 'pdm', 'hatch'].includes(name) && args[0]?.text === 'run') return innerOf(runnerRest(args.slice(1)));
+  const r = runnerOf(name, args);
+  if (r) return innerOf(runnerRest(args.slice(r.skip), RUNNER_TABLES[r.key]));
   if (/^(?:python[0-9.]*|py)$/.test(name)) {
     const mi = args.findIndex(w => w.text === '-m');
     if (mi >= 0 && args[mi + 1] && !args[mi + 1].dynamic) return { name: pkgToBin(args[mi + 1].text.toLowerCase()), args: args.slice(mi + 2) };
@@ -158,10 +190,17 @@ function unwrapRunner(name: string, args: Word[]): Eff | Cancel | null {
   }
   return null;
 }
+/** The command a segment runs: its name and arguments, runners unwrapped (up to three deep: `uv run python -m twine`). */
 function effectiveCommand(seg: Segment): Eff | Cancel | null {
   if (!seg.argv.length || seg.argv[0].dynamic) return null;
-  const name = alias(commandName(seg.argv[0])), args = seg.argv.slice(1);
-  return unwrapRunner(name, args) ?? { name, args };
+  let eff: Eff = { name: alias(commandName(seg.argv[0])), args: seg.argv.slice(1) };
+  for (let depth = 0; depth < 3; depth++) {
+    const u = unwrapRunner(eff.name, eff.args);
+    if (u === null) break;
+    if ('cancel' in u) return u;
+    eff = u;
+  }
+  return eff;
 }
 
 // ---- publishers -----------------------------------------------------------------------------------------------------
@@ -241,7 +280,9 @@ function publisherDeny(name0: string, args: Word[]): GuardVerdict | null {
 
 // ---- curl / wget ----------------------------------------------------------------------------------------------------
 
-const CURL_DATA = ['-d', '--data', '--data-ascii', '--data-binary', '--data-raw', '--data-urlencode', '--json', '-F', '--form', '--form-string', '-T', '--upload-file'];
+// The data options (`-G`/`--get` turns these into a query) and the upload/form options (`-G` leaves them a write).
+const CURL_DATA = ['-d', '--data', '--data-ascii', '--data-binary', '--data-raw', '--data-urlencode', '--json'];
+const CURL_UPLOAD = ['-F', '--form', '--form-string', '-T', '--upload-file'];
 
 function curlDeny(args: Word[], seg: Segment): GuardVerdict | null {
   const sc = scan(args, BASH_TABLES['curl'], seg.dialect);
@@ -250,7 +291,8 @@ function curlDeny(args: Word[], seg: Segment): GuardVerdict | null {
   if (!proxied && allLocal(urls)) return null;
   const forceGet = sc.flags.has('-G') || sc.flags.has('--get');
   const method = sc.vals.filter(v => v.key === '-X' || v.key === '--request');
-  const write = !forceGet && (method.some(v => v.w.dynamic || isWriteMethod(v.w.text.toUpperCase())) || CURL_DATA.some(f => sc.flags.has(f)));
+  const write = method.some(v => v.w.dynamic || isWriteMethod(v.w.text.toUpperCase())) || CURL_UPLOAD.some(f => sc.flags.has(f))
+    || (!forceGet && CURL_DATA.some(f => sc.flags.has(f)));
   const configUnknown = sc.flags.has('-K') || sc.flags.has('--config');
   if (write) return knownRemote(urls) && !proxied ? netWrite('curl writes to a host that is not local') : netUnknown('curl writes to a host the hook cannot read');
   if (sc.unknown || configUnknown) return netUnknown('curl has an option the hook does not know, so a write to a remote host cannot be ruled out');
@@ -383,15 +425,35 @@ const CLI_OPTS: Record<string, CliOpts> = {
 
 // Local verbs (the run's own machine), position-specific: each returns the index of the decisive word, or -1.
 const at0 = (...ws: string[]) => (c: string[]): number => (ws.includes(c[0] ?? '') ? 0 : -1);
-const LOCAL: Record<string, (c: string[]) => number> = {
-  wrangler: at0('dev', 'types'), vercel: at0('dev', 'build'), netlify: at0('dev', 'build'),
-  supabase: c => (['start', 'stop', 'status', 'gen', 'init'].includes(c[0] ?? '') ? 0 : c[0] === 'db' && ['reset', 'diff'].includes(c[1] ?? '') ? 1 : -1),
-  firebase: c => (c[0] === 'serve' || c[0] === 'emulators' || /^emulators:/.test(c[0] ?? '') ? 0 : -1),
+const hasOpt = (a: Word[], o: string): boolean => a.some(w => w.text === o || w.text.startsWith(o + '='));
+const repoClone = (c: string[]): boolean => c[0] === 'repo' && c[1] === 'clone';
+const LOCAL: Record<string, (c: string[], a: Word[]) => number> = {
+  // wrangler d1/kv/r2 with --local (and no --remote, REMOTE_TARGET) act on the run's own local store
+  wrangler: (c, a) => (['dev', 'types'].includes(c[0] ?? '') || (['d1', 'kv', 'r2'].includes(c[0] ?? '') && hasOpt(a, '--local')) ? 0 : -1),
+  vercel: at0('dev', 'build'), netlify: at0('dev', 'build'),
+  supabase: c => (['start', 'stop', 'status', 'gen', 'init'].includes(c[0] ?? '') ? 0
+    : (c[0] === 'db' && ['reset', 'diff'].includes(c[1] ?? '')) || (c[0] === 'functions' && c[1] === 'serve') ? 1 : -1),
+  firebase: c => (c[0] === 'serve' || c[0] === 'emulators' || /^emulators:/.test(c[0] ?? '') ? 0 : -1), heroku: at0('local'),
   sam: at0('local', 'build', 'validate', 'init'), helm: at0('template', 'lint', 'package', 'dependency'), stripe: at0('listen'),
   kubectl: at0('port-forward'), oc: at0('port-forward'), cdk: at0('synth', 'diff', 'ls', 'init'), pulumi: at0('preview'),
   serverless: at0('offline'), sls: at0('offline'), terraform: at0('init'), tofu: at0('init'),
-  gh: c => ((c[0] === 'repo' && c[1] === 'clone') || (c[0] === 'run' && c[1] === 'watch') ? 1 : -1),
+  gh: c => (repoClone(c) || (c[0] === 'run' && c[1] === 'watch') ? 1 : -1), glab: c => (repoClone(c) ? 1 : -1), // T5-GLAB-CLONE
 };
+// T5-VF-GROUPS: a verb-first CLI's group words; after one, the next command word decides.
+const VF_GROUPS: Record<string, Set<string>> = {
+  kubectl: new Set(['config', 'auth']), oc: new Set(['config', 'auth']), helm: new Set(['repo', 'plugin', 'registry']),
+  pulumi: new Set(['stack', 'config', 'plugin']), vercel: new Set(['env', 'project', 'projects', 'domains', 'dns', 'alias', 'teams']),
+  fly: new Set(['apps', 'machines', 'machine', 'secrets', 'volumes', 'ips', 'certs', 'config']),
+  flyctl: new Set(['apps', 'machines', 'machine', 'secrets', 'volumes', 'ips', 'certs', 'config']),
+  terraform: new Set(['workspace', 'providers']), tofu: new Set(['workspace', 'providers']),
+};
+// Verb-first top-level words that only read, beyond READ_VERBS (kubectl's cluster and API listings).
+const VF_READS: Record<string, Set<string>> = {
+  kubectl: new Set(['cluster-info', 'api-resources', 'api-versions']), oc: new Set(['cluster-info', 'api-resources', 'api-versions']),
+};
+/** After a verb-first group word: a read verb or a `get-`/`current-` form reads (kubectl `auth can-i` too). */
+const vfGroupRead = (cli: string, group: string, w: string): boolean =>
+  isReadVerb(w) || /^current-/.test(w) || ((cli === 'kubectl' || cli === 'oc') && group === 'auth' && w === 'can-i');
 // A remote-target option defeats a local verb (`supabase db reset --linked` acts on the linked project).
 const REMOTE_TARGET: Record<string, string[]> = { supabase: ['--linked', '--db-url', '--project-ref'], wrangler: ['--remote'] };
 const remoteTarget = (cli: string, args: Word[]): boolean =>
@@ -407,6 +469,8 @@ const GROUP_WRITE = new Set([...CLOUD_WRITE_VERBS, 'add', 'assign', 'unassign', 
   'modify', 'change', 'allocate', 'release', 'request', 'subscribe', 'unsubscribe', 'poweroff', 'poweron', 'shutdown', 'power']);
 const POS1_NOUNS = new Set(['config', 'configure', 'label', 'tag', 'release']);
 const POS1_GROUPS: Record<string, Set<string>> = { gcloud: new Set(['run', 'deploy']) };
+// gcloud's release tracks: the position-1 word is the one after them (GR-A5).
+const RELEASE_TRACKS: Record<string, Set<string>> = { gcloud: new Set(['alpha', 'beta', 'preview']) };
 const AZ_GROUP_WORDS = new Set(['log', 'logs', 'search']);
 const HEROKU_TOPICS = new Set(['apps', 'addons', 'releases', 'ps', 'config', 'domains', 'buildpacks', 'regions', 'stacks']);
 const GH_TOP_READ = new Set(['status', 'search', 'version', 'help']);
@@ -421,15 +485,15 @@ function isGroupWrite(w: string): boolean {
   const c = w.lastIndexOf(':'); return c >= 0 && GROUP_WRITE.has(w.slice(c + 1));
 }
 
-interface CloudWords { cmd: string[]; toks: { t: string; i: number }[]; help: boolean; versionFlag: boolean; unknownAt: number }
+interface CloudWords { cmd: string[]; help: boolean; versionFlag: boolean; unknownAt: number }
 /**
- * Read a cloud CLI's words before `--`: the command words (a known valued option's value skipped), every non-flag word with
- * its command index (-1 for an option value: the group write scan includes them), help/version (case-sensitive), and how
- * many command words came before the first option the CLI's table does not know (`unknownAt`).
+ * Read a cloud CLI's words before `--`: the command words (a known valued option's value skipped: it is a name, T5-KNOWN-VALUES;
+ * an unknown option's value stays a command word, so it is still judged), help/version (case-sensitive), and how many command
+ * words came before the first option the CLI's table does not know (`unknownAt`).
  */
 function cloudParse(args: Word[], cli: string): CloudWords {
   const o = CLI_OPTS[cli] ?? NO_OPTS, tf = cli === 'terraform' || cli === 'tofu';
-  const cmd: string[] = [], toks: { t: string; i: number }[] = [];
+  const cmd: string[] = [];
   let help = false, versionFlag = false, unknownAt = Infinity;
   for (let k = 0; k < args.length; k++) {
     const t = args[k].text;
@@ -438,26 +502,27 @@ function cloudParse(args: Word[], cli: string): CloudWords {
       const eq = t.indexOf('='), key = eq > 0 ? t.slice(0, eq) : t;
       if (t === '--help' || (t === '-h' && cli !== 'gsutil') || (tf && t === '-help')) { help = true; continue; }
       if (t === '--version' || (tf && t === '-version')) { versionFlag = true; continue; }
-      if (o.valued.has(key)) { if (eq < 0 && k + 1 < args.length) { toks.push({ t: args[k + 1].text.toLowerCase(), i: -1 }); k++; } continue; }
+      if (o.valued.has(key)) { if (eq < 0) k++; continue; }
       if (o.switches.has(key) || (key.startsWith('--no-') && o.switches.has('--' + key.slice(5)))) continue;
       if (!t.startsWith('--') && t.length > 2 && o.valued.has(t.slice(0, 2))) continue; // a glued short value: -nprod
       if (unknownAt === Infinity) unknownAt = cmd.length;
       continue;
     }
-    toks.push({ t: t.toLowerCase(), i: cmd.length });
     cmd.push(t.toLowerCase());
   }
-  return { cmd, toks, help, versionFlag, unknownAt };
+  return { cmd, help, versionFlag, unknownAt };
 }
 
 /** The index of the command word whose read (or local) meaning allows the line, or -1: the shape decides where that word sits. */
 function decisive(cli: string, p: CloudWords, args: Word[]): number {
   const { cmd } = p, c0 = cmd[0] ?? '', c1 = cmd[1] ?? '';
-  const loc = LOCAL[cli] && !remoteTarget(cli, args) ? LOCAL[cli](cmd) : -1;
+  const loc = LOCAL[cli] && !remoteTarget(cli, args) ? LOCAL[cli](cmd, args) : -1;
   switch (shapeOf(cli)) {
     case 'verb':
       if (ALWAYS_DENY[cli]?.has(c0)) return -1;
-      return loc === 0 || (c0 !== '' && isReadVerb(c0)) ? 0 : -1;
+      if (loc === 0) return 0;
+      if (VF_GROUPS[cli]?.has(c0)) return c1 !== '' && vfGroupRead(cli, c0, c1) ? 1 : -1; // T5-VF-GROUPS
+      return c0 !== '' && (isReadVerb(c0) || !!VF_READS[cli]?.has(c0)) ? 0 : -1;
     case 'two':
       if (cli === 'gh' || cli === 'glab') {
         if (GH_TOP_READ.has(c0)) return 0;
@@ -479,13 +544,19 @@ function decisive(cli: string, p: CloudWords, args: Word[]): number {
     }
     default: {
       if (loc >= 0) return loc;
-      const pos1 = POS1_GROUPS[cli];
-      if (p.toks.some(({ t, i }) => isGroupWrite(t) && !(i === 0 && (POS1_NOUNS.has(t) || pos1?.has(t))))) return -1;
+      // the position-1 word sits after a release track (gcloud beta run …); a noun or a group word there is no verb
+      const p1 = RELEASE_TRACKS[cli]?.has(c0) ? 1 : 0;
+      const exempt = (w: string, i: number): boolean => i === p1 && (POS1_NOUNS.has(w) || !!POS1_GROUPS[cli]?.has(w));
+      // the brief's exact write verbs deny anywhere (M10's guarantee)
+      if (cmd.some((w, i) => CLOUD_WRITE_VERBS.has(w) && !exempt(w, i))) return -1;
+      // T5-NAMES-AFTER-READ: the read verb is the first within four command words; the forms and fix 2's vocabulary apply before it, the words after it are names
+      let r = -1;
       for (let i = 0; i < Math.min(4, cmd.length); i++) {
         if (cli === 'az' && AZ_GROUP_WORDS.has(cmd[i])) continue;
-        if (isReadVerb(cmd[i])) return i;
+        if (isReadVerb(cmd[i])) { r = i; break; }
       }
-      return -1;
+      if (r < 0) return -1;
+      return cmd.slice(0, r).some((w, i) => isGroupWrite(w) && !exempt(w, i)) ? -1 : r;
     }
   }
 }
@@ -506,7 +577,9 @@ function ghApiWrites(args: Word[]): boolean {
   const fields = sc.vals.filter(v => ['-f', '--raw-field', '-F', '--field', '--input'].includes(v.key));
   if (sc.ops.some(w => w.text === 'graphql')) {
     if (writeMethod && !explicitGet) return true;
-    return fields.some(v => v.w.dynamic || /mutation/i.test(v.w.text)); // T5-GH-GRAPHQL
+    // T5-GH-GRAPHQL + B4: only literal fields read; --input and a typed `-F k=@…` (a file or stdin) are bodies the hook cannot see
+    const fromFile = (v: { key: string; w: Word }): boolean => v.key === '--input' || ((v.key === '-F' || v.key === '--field') && /^[^=]*=@/.test(v.w.text));
+    return fields.some(v => v.w.dynamic || fromFile(v) || /mutation/i.test(v.w.text));
   }
   if (writeMethod) return true;
   return fields.length > 0 && !explicitGet;

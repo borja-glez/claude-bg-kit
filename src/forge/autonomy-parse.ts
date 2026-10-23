@@ -142,7 +142,7 @@ function bashWrite(seg: Segment): WriteInfo {
 
 type PK = 'p' | 's' | 'c' | 'v' | 'w'; // path target, source, content, valued (exempt), switch
 // Common parameters every cmdlet accepts; a valued one consumes its value, a switch does not.
-export const COMMON: Record<string, PK> = {
+const COMMON: Record<string, PK> = {
   erroraction: 'v', ea: 'v', warningaction: 'v', wa: 'v', informationaction: 'v', infa: 'v', errorvariable: 'v', ev: 'v', warningvariable: 'v', wv: 'v',
   informationvariable: 'v', iv: 'v', outvariable: 'v', ov: 'v', outbuffer: 'v', ob: 'v', pipelinevariable: 'v', pv: 'v', progressaction: 'v', proga: 'v', verbose: 'w', debug: 'w', whatif: 'w', confirm: 'w',
 };
@@ -190,7 +190,7 @@ const PS_CMDLETS: Record<string, Spec> = {
 };
 
 /** Resolve a typed PowerShell parameter name (or unambiguous prefix) against this cmdlet's parameters and the common ones. */
-export function resolveParam(spec: Spec, nm: string): string | null {
+function resolveParam(spec: Spec, nm: string): string | null {
   if (spec.params[nm] !== undefined) return nm;
   if (COMMON[nm] !== undefined) return nm;
   const keys = [...Object.keys(spec.params), ...Object.keys(COMMON)].filter(k => k.startsWith(nm));
@@ -198,30 +198,50 @@ export function resolveParam(spec: Spec, nm: string): string | null {
 }
 const kindOf = (spec: Spec, p: string): PK => spec.params[p] ?? COMMON[p];
 
+/** One positional of a bound cmdlet call: a plain argument, a splat (`@name`), or the glued value of a parameter the cmdlet does not have. */
+interface PsPositional { w: Word; from: 'arg' | 'splat' | 'unknown' }
+/** A cmdlet call bound to its parameters: the last value of each, every binding in order, the parameters seen, the positionals, and whether one was unknown. */
+interface PsBound { named: Record<string, Word>; pairs: { p: string; v: Word }[]; seen: Set<string>; positionals: PsPositional[]; unknown: boolean }
+/**
+ * The one PowerShell parameter binder (M3: psWrite and readWebRequest share it). `-Name value` and `-Name:value`, the name
+ * case-folded and resolved as an unambiguous prefix of this cmdlet's parameters or the common ones; a switch takes no value;
+ * an unknown parameter is read as a switch (its glued value kept as a positional) and marks the call `unknown`.
+ */
+function bindParams(spec: Spec, args: Word[]): PsBound {
+  const named: Record<string, Word> = {}, pairs: { p: string; v: Word }[] = [], seen = new Set<string>(), positionals: PsPositional[] = [];
+  let unknown = false;
+  const bind = (p: string, v: Word) => { named[p] = v; pairs.push({ p, v }); };
+  for (let k = 0; k < args.length; k++) {
+    const w = args[k], t = w.text;
+    if (w.dynamic && /^@/.test(t)) { positionals.push({ w, from: 'splat' }); continue; } // a splat @name hides parameters
+    const glued = /^-([A-Za-z][\w-]*):(.*)$/s.exec(t);
+    if (glued) {
+      const p = resolveParam(spec, glued[1].toLowerCase()), v = word(glued[2], w.dynamic);
+      if (p) { seen.add(p); bind(p, v); } else { unknown = true; positionals.push({ w: v, from: 'unknown' }); }
+      continue;
+    }
+    const bare = /^-([A-Za-z][\w-]*)$/.exec(t);
+    if (bare) {
+      const p = resolveParam(spec, bare[1].toLowerCase());
+      if (!p) { unknown = true; continue; } // an unknown parameter is read as a switch and cancels exemptions
+      seen.add(p);
+      if (kindOf(spec, p) === 'w') continue;
+      const nx = args[k + 1];
+      if (nx && !nx.text.startsWith('-')) { bind(p, nx); k++; }
+      continue;
+    }
+    positionals.push({ w, from: 'arg' });
+  }
+  return { named, pairs, seen, positionals, unknown };
+}
+
 function psWrite(seg: Segment): WriteInfo {
   const canon = PS_ALIAS[commandName(seg.argv[0])] ?? commandName(seg.argv[0]);
   const spec = PS_CMDLETS[canon];
   if (!spec) return NONE;
-  const args = seg.argv.slice(1);
-  const named: Record<string, Word> = {};
-  const positionals: Word[] = [];
-  let cancel = false, hasWriterParam = false;
-  for (let k = 0; k < args.length; k++) {
-    const w = args[k], t = w.text;
-    const glued = /^-([A-Za-z][\w-]*):(.*)$/s.exec(t);
-    if (glued) { const p = resolveParam(spec, glued[1].toLowerCase()); if (p) { named[p] = word(glued[2], w.dynamic); if (p === spec.writerParam) hasWriterParam = true; } else { cancel = true; positionals.push(word(glued[2], w.dynamic)); } continue; }
-    const bare = /^-([A-Za-z][\w-]*)$/.exec(t);
-    if (bare) {
-      const p = resolveParam(spec, bare[1].toLowerCase());
-      if (!p) { cancel = true; continue; } // an unknown parameter is read as a switch and cancels exemptions
-      if (p === spec.writerParam) hasWriterParam = true;
-      if (kindOf(spec, p) === 'w') continue;
-      const nx = args[k + 1];
-      if (nx && !nx.text.startsWith('-')) { named[p] = nx; k++; }
-      continue;
-    }
-    positionals.push(w);
-  }
+  const b = bindParams(spec, seg.argv.slice(1));
+  const named = b.named, positionals = b.positionals.map(x => x.w), cancel = b.unknown;
+  const hasWriterParam = spec.writerParam !== undefined && b.seen.has(spec.writerParam);
   const writer = spec.always || hasWriterParam || (spec.writerParam !== undefined && cancel);
   if (!writer) return NONE;
   const itemTypeTarget = spec.itemType ? itemLinks(named) : false;
@@ -253,34 +273,18 @@ export function readWebRequest(seg: Segment): WebReq | null {
   if (!seg.argv.length) return null;
   const canon = PS_ALIAS[commandName(seg.argv[0])] ?? commandName(seg.argv[0]);
   if (!WEB_CMDLETS.has(canon)) return null;
-  const spec = PS_CMDLETS[canon];
-  const args = seg.argv.slice(1);
-  let uri: Word | null = null, method = '', methodDynamic = false, hasBody = false, dynamicOther = false, unknownParam = false;
-  const positionals: Word[] = [];
-  const apply = (p: string, v: Word) => {
+  const b = bindParams(PS_CMDLETS[canon], seg.argv.slice(1));
+  let uri: Word | null = null, method = '', methodDynamic = false, hasBody = false;
+  for (const { p, v } of b.pairs) {
     if (p === 'method' || p === 'custommethod') { if (v.dynamic) methodDynamic = true; else method = v.text.toUpperCase(); }
     else if (p === 'body' || p === 'form' || p === 'infile') hasBody = true;
     else if (p === 'uri') uri = v;
-  };
-  for (let k = 0; k < args.length; k++) {
-    const w = args[k], t = w.text;
-    if (w.dynamic && /^@/.test(t)) { dynamicOther = true; continue; } // a splat @name hides the parameters
-    const glued = /^-([A-Za-z][\w-]*):(.*)$/s.exec(t);
-    if (glued) { const p = resolveParam(spec, glued[1].toLowerCase()); if (p) apply(p, word(glued[2], w.dynamic)); else unknownParam = true; continue; }
-    const bare = /^-([A-Za-z][\w-]*)$/.exec(t);
-    if (bare) {
-      const p = resolveParam(spec, bare[1].toLowerCase());
-      if (!p) { unknownParam = true; continue; }
-      if (kindOf(spec, p) === 'w') continue;
-      const nx = args[k + 1];
-      if (nx && !nx.text.startsWith('-')) { apply(p, nx); k++; }
-      continue;
-    }
-    positionals.push(w);
   }
-  if (!uri && positionals.length) uri = positionals[0];
-  for (const p of positionals) if (p !== uri && p.dynamic) dynamicOther = true;
-  return { uri, method, methodDynamic, hasBody, dynamicOther, unknownParam };
+  const args = b.positionals.filter(x => x.from === 'arg').map(x => x.w);
+  if (!uri && args.length) uri = args[0];
+  // a splat, or a dynamic positional other than the URI, hides what the call sends
+  const dynamicOther = b.positionals.some(x => x.from === 'splat') || args.some(w => w !== uri && w.dynamic);
+  return { uri, method, methodDynamic, hasBody, dynamicOther, unknownParam: b.unknown };
 }
 
 /** What a write-class segment would write. In the powershell dialect a known cmdlet is read by psWrite; an external command (robocopy, tar, …) by bashWrite. */
