@@ -24530,12 +24530,13 @@ var valWord = (w, from) => ({ text: w.text.slice(from), dynamic: w.dynamic, glob
 var hasSep = (t) => t.includes("/") || t.includes("\\");
 var URL_RE = /^[a-z][a-z0-9+.-]+:\/\//i;
 var PS_DRIVES = /* @__PURE__ */ new Set(["alias", "cert", "env", "function", "hkcu", "hklm", "hkcr", "hku", "hkcc", "variable", "wsman", "temp", "registry", "filesystem", "certificate"]);
+var PS_PROVIDER = /^(?:\w[\w.]*[\\/])?(?:filesystem|registry|alias|environment|function|variable|certificate|wsman)::/i;
 function relativeInside(text3, dialect) {
-  if (!text3 || /^[\\/~]/.test(text3) || text3.includes("::")) return false;
+  if (!text3 || /^[\\/~]/.test(text3) || dialect === "powershell" && PS_PROVIDER.test(text3)) return false;
   const stream = /^([^\\/:]+):(.*)$/s.exec(text3);
   if (stream) {
     const name = stream[1];
-    if (/^[A-Za-z]$/.test(name) || dialect === "powershell" && (PS_DRIVES.has(name.toLowerCase()) || stream[2].startsWith(":"))) return false;
+    if (/^[A-Za-z]$/.test(name) && !stream[2].startsWith(":") || dialect === "powershell" && PS_DRIVES.has(name.toLowerCase())) return false;
     text3 = name;
   }
   return !text3.split(/[\\/]/).some((s2) => s2 === "..");
