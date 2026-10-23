@@ -29,7 +29,7 @@ export { findWaypointCli } from './commands/waypoint-cli.js';
 export { roundDecision } from '../round.js';
 export { cleanProbe } from './commands/route.js';
 
-const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|begin|route|verify-env|verify-plan|verify-preflight|verify-result|verify-cleanup|verify-close|verify-spawn|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|authorize|swarm|setup|stop|hook|resource|roadmap-doc|roadmap-run> ...';
+const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|begin|route|verify-env|verify-plan|verify-preflight|verify-result|verify-cleanup|verify-close|verify-spawn|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|authorize|swarm|setup|stop|hook|resource|blocked|roadmap-doc|roadmap-run> ...';
 
 /** C-03: the commands that run as a job with --out, and the task each works on. */
 function jobOf(argv: string[]): { cmd: string; task: string | null } | null {

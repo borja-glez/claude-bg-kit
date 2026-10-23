@@ -2,7 +2,8 @@
 // The guard rules of an autonomous run apply only to the sessions this module names; an attended session gets null.
 // Only files are read here (run.json and, when it has an autonomous block, the execution and its members): never git.
 // Each read that fails says in a comment which way it errs (M17): roots toward fewer, ids and dirs toward more sessions under the rules.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { LIMITS } from '../lib/decisions.js';
 import path from 'node:path';
 import { parseRun, runFile, type RunState } from './run.js';
 import { executionFile, runWorktree } from './execution.js';
@@ -275,4 +276,38 @@ export function readBlocked(main: string, runId: string, limit = 1000): BlockedR
     } catch { /* a torn line: skipped */ }
   }
   return Number.isFinite(limit) ? records.slice(Math.max(0, records.length - limit)) : records;
+}
+
+const cut = (s: string, max: number): string => Array.from(s).slice(0, max).join('');
+
+/**
+ * The `addDecision` input of a denial: what the run wanted to do, that it was not done, and why. Target and reason go through
+ * redactSecrets again (M7): a record the hook did not write carries no secret to the roadmap either.
+ */
+export function blockedDecision(r: BlockedRecord, es: boolean): Record<string, unknown> {
+  const reason = redactSecrets(r.reason);
+  return {
+    point: 'blocked',
+    what: cut(`${r.tool}: ${redactSecrets(r.target)}`, LIMITS.what),
+    chosen: es ? 'no se hizo' : 'not done',
+    alternatives: [{ option: es ? 'hacerlo' : 'do it', whyNot: cut(reason, LIMITS.whyNot) }],
+    why: cut(reason, LIMITS.why),
+    by: 'auto',
+    undo: { type: 'none', reason: es ? 'no se hizo nada' : 'nothing was done' },
+  };
+}
+
+/** How many lines of blocked.jsonl are already decisions: `{count}` in blocked-noted.json. */
+export const notedFile = (main: string, runId: string): string => path.join(autonomousDir(main, runId), 'blocked-noted.json');
+
+export function notedCount(main: string, runId: string): number {
+  try {
+    const n: unknown = (JSON.parse(readFileSync(notedFile(main, runId), 'utf8')) as { count?: unknown }).count;
+    return typeof n === 'number' && Number.isInteger(n) && n > 0 ? n : 0;
+  } catch { return 0; }
+}
+
+export function markNoted(main: string, runId: string, count: number): void {
+  mkdirSync(autonomousDir(main, runId), { recursive: true });
+  writeFileSync(notedFile(main, runId), JSON.stringify({ count }));
 }

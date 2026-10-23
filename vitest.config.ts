@@ -10,6 +10,7 @@ const waypoint = JSON.parse(readFileSync('plugins/waypoint/.claude-plugin/plugin
 // files that start real processes (forge-verify-proc) and those that build git histories for verify (forge-verify-flow);
 // since 6b-1, the guard's tests on a real repository and worktree (forge-guard-autonomy, about 8 s).
 export const SLOW = [
+  'tests/forge-blocked.test.ts',
   'tests/forge-swarm-integrate.test.ts',
   'tests/forge-execution-lock.test.ts',
   'tests/forge-swarm-step.test.ts',
