@@ -24,9 +24,10 @@ export const command: Command = (args, ctx) => {
   const work = t.task && isSafeId(t.task) ? { work: workRel({ project: t.project, task: t.task }) } : {};
   // I-03: the commands of the config (of the code checked, --cwd) need the person's trust before forge runs them:
   // `trust`, with its question in the announcement's language and `note` the first time this hash is asked. 6b-2: inside
-  // an active autonomous run, the run trusts its own (trustFor).
+  // an active autonomous run, the run trusts its own (trustFor); a set its guard refused is `blocked`, with no note: nobody
+  // is asked, the run rewrites it from FORGE blocked list (H-4).
   const trust = trustFor(repoDir, loadConfig(repoDir), ts());
   const asked = trust.state === 'ask' || trust.state === 'changed'
-    ? { trust: trustOutput(trust, t.locale === 'es', repoDir, noteOnce(repoDir, trust.hash!)) } : {};
+    ? { trust: trustOutput(trust, t.locale === 'es', repoDir, trust.blocked ? false : noteOnce(repoDir, trust.hash!)) } : {};
   return json({ ...t.output, ...work, ...untracked, ...asked });
 };

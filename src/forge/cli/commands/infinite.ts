@@ -11,7 +11,7 @@ import { mainCheckout } from '../../local.js';
 import { activeProfileAt, prepareProfile, profileArgs, profileBlock, readableRun } from '../../profile.js';
 import { autonomousFor, recordSessions } from '../../autonomous.js';
 import { loadConfig, type ForgeConfig } from '../../config.js';
-import { trustFor, type TrustState } from '../../trust.js';
+import { resetDelegation, trustFor, type TrustState } from '../../trust.js';
 import { stopContext, unownedOf, runRootOf, runReply } from '../shared.js';
 
 export const command: Command = (args, ctx) => {
@@ -78,6 +78,8 @@ export const command: Command = (args, ctx) => {
     rmSync(stopFile(main), { force: true });
     // H-1: the session ids are on disk before run.json names them, so a run.json that does not read still guards them.
     if (autonomous) recordSessions(main, autonomous.runId, [session], autonomous.worktree);
+    // T6B2-TRUST-RESET: before the run is active, so no earlier run of this id lends it a trust or a refusal.
+    if (autonomous) resetDelegation(autonomous.worktree, autonomous.runId);
     saveRun(main, run);
     // 6b-2 M-1: once the run is on disk, it trusts its worktree's commands (trustFor) and prints that `trust`; a config
     // that does not load runs nothing, and one without commands needs no trust: no `trust` then.

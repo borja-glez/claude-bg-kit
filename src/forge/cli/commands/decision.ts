@@ -5,9 +5,11 @@ import { readExecution } from '../../execution.js';
 import { UsageError } from '../errors.js';
 import { mainCheckout } from '../../local.js';
 import {
-  addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionNoteId, decisionWrites, markPublished, publishedNs, shasOutside, shaCommits, NOTE_ID, DecisionInputError,
+  addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionNoteId, decisionWrites, markPublished, takeUnpublished, shasOutside, shaCommits, NOTE_ID, DecisionInputError,
 } from '../../decisions.js';
-import { readEvents } from '../../ledger.js';
+import { autonomousRun } from '../../autonomous.js';
+import { confinedIn } from '../../guard.js';
+import { claudeSessionId } from '../../../lib/claude-session.js';
 import { defaultGit } from '../exec.js';
 import { normalizeNote } from '../../../lib/notes.js';
 import { RUN_ID, SHA, TASK_ID, decisionScope, scopeFileName } from '../../../lib/decisions.js';
@@ -65,10 +67,14 @@ export const command: Command = (args, ctx) => {
       if (outside.length) throw new UsageError(`decision add: undo.shas: ${outside.join(', ')} not in ${undo.base}..${undo.head}`);
       if (new Set(shaCommits(named, range)).size < named.length) throw new UsageError('decision add: undo.shas names one commit twice (a full sha and its short form)');
     }
-    // An active execution names the run the decision belongs to (its scope), unless the data names one.
+    // An active execution names the run the decision belongs to (its scope), unless the data names one. 6b-2: before it, the
+    // active autonomous run when this runs in its profile worktree or from one of its sessions, so publish --run prints it.
     const exec = readExecution(root);
+    const auto = autonomousRun(root);
+    const sid = claudeSessionId(undefined, io.env ?? process.env);
+    const autoRun = auto && (confinedIn(io.cwd, auto.ctx.worktree) || (sid !== null && auto.ids.includes(sid))) ? auto.ctx.runId : null;
     try {
-      const { n, event } = addDecision(root, decision, { ts: ts(), ...(task ? { task } : {}), runId: exec?.active ? exec.runId : null });
+      const { n, event } = addDecision(root, decision, { ts: ts(), ...(task ? { task } : {}), runId: autoRun ?? (exec?.active ? exec.runId : null) });
       const closes = typeof resolves === 'string' && !resolvesRefused ? resolves : null;
       const publish = session ? decisionWrites({ event, session, eid: decisionNoteId(event, session), resolves: closes }) : null;
       // 6b-2: the note it prints is this decision's publication: decision publish does not print it again.
@@ -94,12 +100,8 @@ export const command: Command = (args, ctx) => {
     if (since === undefined || !Number.isFinite(Date.parse(since))) throw new UsageError(`decision publish: --since must be a date, got ${since ?? 'nothing'}`);
     const runId = flag('run');
     if (has('run') && (!runId || !RUN_ID.test(runId) || runId === '.' || runId === '..')) throw new UsageError('decision publish: --run needs a run id');
-    const done = publishedNs(root);
-    const todo = listDecisions(root, { since, ...(runId ? { run: runId } : {}), auto: true }).filter(d => !done.has(d.n));
-    // n is the decision's position among the ledger's decision events (1-based), and the ledger only grows.
-    const events = readEvents(root).filter(e => e.kind === 'decision');
-    const publish = todo.flatMap(d => decisionWrites({ event: events[d.n - 1], session, eid: decisionNoteId(events[d.n - 1], session) }));
-    if (todo.length) markPublished(root, todo.map(d => d.n));
+    const todo = takeUnpublished(root, { since, ...(runId ? { run: runId } : {}) });
+    const publish = todo.flatMap(({ e }) => decisionWrites({ event: e, session, eid: decisionNoteId(e, session) }));
     return json({ published: todo.length, publish });
   }
   if (sub === 'show') {

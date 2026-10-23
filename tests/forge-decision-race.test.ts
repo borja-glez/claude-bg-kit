@@ -3,9 +3,6 @@ import { addDecision, allDecisions } from '../src/forge/decisions.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
 
-// The setup file loads trust.ts, which (6b-2) imports decisions.ts: drop that cached copy so this file's own import of it
-// meets the mock below (vitest does not mock a module a setup file imported).
-vi.hoisted(() => { vi.resetModules(); });
 // Another session appends its own decision right after ours, before addDecision reads the ledger back.
 vi.mock('../src/forge/ledger.js', async importOriginal => {
   const real = await importOriginal<typeof import('../src/forge/ledger.js')>();

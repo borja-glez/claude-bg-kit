@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync, appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, appendFileSync, existsSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { addDecision, allDecisions, decisionsFile, listDecisions, readDecisionsDoc, renderDecisionsMd, shasOutside, DecisionInputError } from '../src/forge/decisions.js';
+import {
+  addDecision, allDecisions, decisionsFile, listDecisions, markPublished, publishedFile, publishedNs, readDecisionsDoc, renderDecisionsMd, shasOutside, DecisionInputError,
+} from '../src/forge/decisions.js';
 import { appendEvent, readEvents, withEventContext } from '../src/forge/ledger.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
@@ -361,5 +363,17 @@ describe('decision publish (6b-2)', () => {
     expect(r.publish.map((w: { data: { decision: { what: string } } }) => w.data.decision.what)).toEqual(['diseño aprobado (v4)']);
     expect(cli(['decision', 'publish', '--session', 'main', '--since', at(0)]).publish.map((w: { data: { decision: { what: string } } }) => w.data.decision.what)).toEqual(['attended']);
     expect(run(['decision', 'publish', '--session', 'main', '--since', at(0), '--run', '../x'], { cwd: root, now: () => new Date(at(5)), env: {} }).code).toBe(2);
+  });
+  it('marks under their own lock: one a dead command left is taken over, and none stays after (m-7)', () => {
+    addDecision(root, INPUT, { ts: at(0) });
+    const lock = `${publishedFile(root)}.lock`;
+    writeFileSync(lock, '');
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lock, old, old);
+    expect(cli(['decision', 'publish', '--session', 'main', '--since', at(0)]).published).toBe(1);
+    expect(existsSync(lock)).toBe(false);
+    markPublished(root, [7]);
+    expect([...publishedNs(root)]).toEqual([1, 7]);
+    expect(existsSync(lock)).toBe(false);
   });
 });

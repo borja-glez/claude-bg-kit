@@ -1,6 +1,6 @@
 // forge's decision records: the strict input of `forge decision add`, the ledger events, .forge/decisions.json and the
 // docs/forge/decisions/<scope>.md file of a project without a roadmap. Never runs git and never deletes anything.
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { appendEvent, forgeDir, readEvents, type LedgerEvent } from './ledger.js';
@@ -144,24 +144,27 @@ const ownTask = (task: string, t: string | null): boolean =>
  * ledger attributes its events (attribute).
  */
 export function listDecisions(root: string, f: DecisionFilter): Numbered[] {
-  const events = readEvents(root);
+  return selectDecisions(root, readEvents(root), f).map(x => x.d);
+}
+
+/** listDecisions' filters over events already read, each decision with its event. */
+function selectDecisions(root: string, events: readonly LedgerEvent[], f: DecisionFilter): { d: Numbered; e: LedgerEvent }[] {
   const rows = numbered(events);
-  const all = rows.map(x => x.d);
-  let out = all;
+  let out = rows;
   if (f.task) {
     const task = f.task;
     const project = f.project !== undefined ? f.project : projectOf(events, task);
     const owner = attribute(events);
-    out = rows.filter(x => ownTask(task, x.d.task) && owner(x.e) === project).map(x => x.d);
+    out = rows.filter(x => ownTask(task, x.d.task) && owner(x.e) === project);
   }
-  if (f.run) out = out.filter(d => d.runId === f.run);
-  if (f.since) { const s = Date.parse(f.since); out = out.filter(d => Date.parse(d.ts) >= s); }
+  if (f.run) out = out.filter(x => x.d.runId === f.run);
+  if (f.since) { const s = Date.parse(f.since); out = out.filter(x => Date.parse(x.d.ts) >= s); }
   if (!f.task && !f.run && !f.since && !f.all) {
-    const latest = [...all].reverse().find(d => d.by !== 'user');
+    const latest = [...rows].reverse().find(x => x.d.by !== 'user')?.d;
     const scope = readDecisionsDoc(root)?.scope ?? (latest ? decisionScope(latest) ?? 'forge' : null);
-    out = scope ? out.filter(d => (decisionScope(d) ?? 'forge') === scope) : [];
+    out = scope ? out.filter(x => (decisionScope(x.d) ?? 'forge') === scope) : [];
   }
-  return f.auto ? out.filter(d => d.by !== 'user') : out;
+  return f.auto ? out.filter(x => x.d.by !== 'user') : out;
 }
 
 const MD = {
@@ -206,13 +209,57 @@ export function publishedNs(root: string): Set<number> {
   } catch { return new Set(); }
 }
 
-/** Marks decisions as published (a number again changes nothing), written atomically; the numbers only grow, so the oldest go first. */
-export function markPublished(root: string, ns: number[]): void {
-  const all = [...new Set([...publishedNs(root), ...ns])].sort((a, b) => a - b).slice(-PUBLISHED_MAX);
+const PUBLISH_LOCK_RETRY_MS = 25;
+const PUBLISH_LOCK_WAIT_MS = 5000;
+/** A lock older than this was left by a command that died: it is taken over. */
+const PUBLISH_LOCK_STALE_MS = 30_000;
+/** A create refused while another process holds the lock or removes it (EPERM, EACCES, EBUSY on Windows): it is busy. */
+const LOCK_BUSY = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
+
+/**
+ * m-7: one reader-writer of decisions-published.json at a time: decisions-published.json.lock, created with 'wx' and
+ * removed after. The ledger itself takes no lock (each event is one O_APPEND line), so the marks have their own. Throws
+ * after PUBLISH_LOCK_WAIT_MS; nothing is marked then, so the next command prints those notes.
+ */
+function withPublishLock<T>(root: string, fn: () => T): T {
   forgeDir(root);
+  const lock = `${publishedFile(root)}.lock`;
+  const stale = () => { try { return Date.now() - statSync(lock).mtimeMs >= PUBLISH_LOCK_STALE_MS; } catch { return false; } };
+  for (let waited = 0; ; waited += PUBLISH_LOCK_RETRY_MS) {
+    try { closeSync(openSync(lock, 'wx')); break; } catch (e) {
+      if (!LOCK_BUSY.has((e as NodeJS.ErrnoException).code ?? '')) throw e;
+      if (stale()) { rmSync(lock, { force: true }); continue; }
+      if (waited >= PUBLISH_LOCK_WAIT_MS) throw new Error(`forge: ${lock} is held by another forge command; run this again`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, PUBLISH_LOCK_RETRY_MS);
+    }
+  }
+  try { return fn(); } finally { rmSync(lock, { force: true }); }
+}
+
+/** Writes the marks, atomically; the numbers only grow, so the oldest go first. The caller holds the lock. */
+function writePublished(root: string, ns: Iterable<number>): void {
+  const all = [...new Set(ns)].sort((a, b) => a - b).slice(-PUBLISHED_MAX);
   const file = publishedFile(root);
   const tmp = `${file}.${process.pid}.tmp`;
   try { writeFileSync(tmp, JSON.stringify({ ns: all }) + '\n'); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
+}
+
+/** Marks decisions as published (a number again changes nothing), under the marks' lock. */
+export function markPublished(root: string, ns: number[]): void {
+  withPublishLock(root, () => writePublished(root, [...publishedNs(root), ...ns]));
+}
+
+/**
+ * `decision publish`'s decisions: by !== user since `since` (of `run` when given), not published yet, in order, each with
+ * its event, read from the ledger once (m-7) and marked as published under the same lock, so two publishes never print one.
+ */
+export function takeUnpublished(root: string, f: { since: string; run?: string }): { d: Numbered; e: LedgerEvent }[] {
+  return withPublishLock(root, () => {
+    const done = publishedNs(root);
+    const rows = selectDecisions(root, readEvents(root), { since: f.since, ...(f.run ? { run: f.run } : {}), auto: true }).filter(x => !done.has(x.d.n));
+    if (rows.length) writePublished(root, [...done, ...rows.map(x => x.d.n)]);
+    return rows;
+  });
 }
 
 /** H-17: a note id of the roadmap: the same rule as the page's (carry 6, one regex). */

@@ -7,7 +7,8 @@ import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { authDir, readAuths, writeAuth, type AuthRecord } from '../src/forge/auth.js';
 import { parseConfig } from '../src/forge/config.js';
 import { readExecution, runWorktree, taskWorktree } from '../src/forge/execution.js';
-import { assumeTrustedForTests, commandsHash, configCommands, oneHashOnly, readTrust, trustAsk, trustFile, trustOf, trustPlace, type TrustAsk } from '../src/forge/trust.js';
+import { commandsHash, configCommands, oneHashOnly, readTrust, trustAsk, trustFile, trustOf, trustPlace, type TrustAsk } from '../src/forge/trust.js';
+import { assumeTrustedForTests } from '../src/forge/trust-flag.js';
 import type { ExecTask } from '../src/lib/execution-state.js';
 import { mainWorktreeFrom, worktreeDirs } from '../src/lib/worktree.js';
 import { walk } from './helpers/files.js';
@@ -531,10 +532,10 @@ describe('the person answers the trust question, and only that records it (D9)',
 });
 
 describe('the test switch (I-03)', () => {
-  it('only src/forge/trust.ts names assumeTrustedForTests, and only to define it', () => {
+  it('only src/forge/trust-flag.ts names assumeTrustedForTests, and only to define it (T6B2-TRUST-LEAF)', () => {
     const src = fileURLToPath(new URL('../src', import.meta.url));
     const naming = walk(src).filter(f => /\.tsx?$/.test(f) && readFileSync(f, 'utf8').includes('assumeTrustedForTests'));
-    expect(naming.map(f => path.relative(src, f).split(path.sep).join('/'))).toEqual(['forge/trust.ts']);
+    expect(naming.map(f => path.relative(src, f).split(path.sep).join('/'))).toEqual(['forge/trust-flag.ts']);
     expect(readFileSync(naming[0], 'utf8').match(/assumeTrustedForTests\(/g)).toHaveLength(1);
   });
 });
