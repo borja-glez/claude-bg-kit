@@ -551,12 +551,14 @@ describe('6b-2 Task 0 · docker context use|create|rm|update changes the daemon 
   it.each<Row>([
     B('docker context use remote'), B('docker context create x --docker host=ssh://h'), B('docker context rm x'), B('docker context update x --description y'),
     B('docker --debug context use x'), B('podman context use remote'),
+    // fix round 1: only ls|list|inspect|show read; import, export and any other verb deny
+    B('docker context import x ctx.tar'), B('docker context export x ctx.tar'), B('docker context wrongverb x'),
   ])('denies %s', (_, input) => {
     const v = databaseRule.check(input, MORE);
     expect(v).toMatchObject({ decision: 'deny', rule: 'database' });
     expect((v as { reason: string }).reason).toMatch(/docker context/);
   });
-  it.each<Row>([B('docker context ls'), B('docker context inspect default'), B('docker context show'), B('docker --context default ps')])(
+  it.each<Row>([B('docker context ls'), B('docker context list'), B('docker context inspect default'), B('docker context show'), B('docker --context default ps')])(
     'allows %s', (_, input) => expect(databaseRule.check(input, MORE)).toBeNull());
 });
 

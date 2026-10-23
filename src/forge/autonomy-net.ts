@@ -346,6 +346,46 @@ function hostToken(spec: string): string {
   const at = s.indexOf('@'); if (at >= 0) s = s.slice(at + 1);
   return s.split(/[:/\s]/)[0];
 }
+// fix 1 (m3 ruling): the ssh `-o` keys the run may set. Any other key — ProxyCommand, LocalCommand, PermitLocalCommand,
+// ProxyJump, `Match exec`, … — runs or changes a command on this machine whatever the host, so it is an unknown target.
+const SSH_O_ALLOW = new Set(['stricthostkeychecking', 'userknownhostsfile', 'batchmode', 'connecttimeout', 'connectionattempts', 'port', 'user',
+  'identityfile', 'identitiesonly', 'loglevel', 'serveraliveinterval', 'serveralivecountmax', 'compression', 'addkeystoagent', 'hostkeyalias',
+  'preferredauthentications', 'passwordauthentication']);
+
+/** An ssh/scp/sftp `-o key=val` whose key is off the allow-list, or a `-F <file>` config the guard cannot read, is an unknown target. */
+function sshOptionsDeny(name: string, args: Word[]): GuardVerdict | null {
+  const valued = SSH_VALUED[name] ?? SSH_VALUED.ssh;
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k].text;
+    if (!t.startsWith('-')) continue;
+    if (t === '-F' || /^-F./.test(t)) return netUnknown(`${name} -F reads a config file the hook cannot read`);
+    if (t === '-o' || /^-o./.test(t)) {
+      const spec = t === '-o' ? (args[++k]?.text ?? '') : t.slice(2);
+      const key = spec.split('=')[0].trim().toLowerCase();
+      if (!SSH_O_ALLOW.has(key)) return netUnknown(`${name} -o ${spec} sets or runs something the hook cannot read`);
+      continue;
+    }
+    if (valued.has(t) && !t.includes('=')) k++; // skip a valued option's value
+  }
+  return null;
+}
+
+/** rsync's remote shell (`-e`/`--rsh`): allowed only when it is `ssh` with allowed options; anything else is an unknown target. */
+function rsyncRemoteShellDeny(args: Word[]): GuardVerdict | null {
+  let val: Word | null = null;
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k].text;
+    if (t === '-e' || t === '--rsh') { val = args[k + 1] ?? { text: '', dynamic: false, glob: false }; break; }
+    const m = /^(?:--rsh=|-e)(.+)$/.exec(t); if (m && t !== '-e') { val = { text: m[1], dynamic: args[k].dynamic, glob: false }; break; }
+  }
+  if (val === null) return null;
+  if (val.dynamic) return netUnknown('rsync -e runs a remote shell only the shell names');
+  const words = val.text.split(/\s+/).filter(Boolean);
+  if (!words.length) return null;
+  if (commandName({ text: words[0], dynamic: false, glob: false }) !== 'ssh') return netUnknown(`rsync -e ${words[0]} runs a remote shell the hook cannot read`);
+  return sshOptionsDeny('ssh', words.slice(1).map(w => ({ text: w, dynamic: false, glob: false })));
+}
+
 /** Every host an ssh-like command would reach is local (Minor 3). */
 function sshAllLocal(name: string, args: Word[]): boolean {
   const valued = SSH_VALUED[name] ?? new Set<string>();
@@ -379,8 +419,11 @@ function publisherDeny(name0: string, args: Word[]): GuardVerdict | null {
   const words = ops.map(w => w.text.toLowerCase());
   const o0 = words[0] ?? '';
   const has = (set: Set<string>): boolean => words.some(w => set.has(w));
-  if (SSH_LIKE.has(name)) return sshAllLocal(name, args) ? null : netWrite(`${name} connects to another host`);
-  if (name === 'rsync') { const rem = ops.filter(w => rsyncRemote(w.text)); if (!rem.length) return null; return rem.every(w => !w.dynamic && isLocalHost(hostToken(w.text))) ? null : netWrite('rsync copies to another host'); }
+  if (SSH_LIKE.has(name)) {
+    if (name === 'ssh' || name === 'scp' || name === 'sftp') { const od = sshOptionsDeny(name, args); if (od) return od; } // fix 1: an ssh option that runs a local command
+    return sshAllLocal(name, args) ? null : netWrite(`${name} connects to another host`);
+  }
+  if (name === 'rsync') { const e = rsyncRemoteShellDeny(args); if (e) return e; const rem = ops.filter(w => rsyncRemote(w.text)); if (!rem.length) return null; return rem.every(w => !w.dynamic && isLocalHost(hostToken(w.text))) ? null : netWrite('rsync copies to another host'); }
   if (name === 'git') {
     // 6b-2 Task 0: find the subcommand past git's global options (`git -C <dir> svn dcommit`, `git -c k=v svn dcommit`)
     let gi = 0;

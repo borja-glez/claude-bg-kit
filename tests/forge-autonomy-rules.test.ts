@@ -825,11 +825,13 @@ describe('6b-2 Task 0 · git config and environment (m1)', () => {
     ['S10', bash("GIT_SSH_COMMAND='x' git fetch")], ['S11', bash("GIT_EXTERNAL_DIFF='x' git diff")], ['S13', bash(`XDG_CONFIG_HOME=${W('xdg')} git foo`)],
     ['S14', bash(`HOME=${W('')} git foo`)], ['S17', bash("GIT_PAGER='less' git log")], ['--config-env', bash('git --config-env=core.pager=P log')],
     ['-c with a glued key', bash('git -ccore.pager=x log')], ['a dynamic key', bash('git -c "$K"=x status')], ['GIT_EDITOR', bash('GIT_EDITOR=vim git commit')],
+    ['fix 1: protocol.file.allow', bash('git -c protocol.file.allow=always submodule update')], ['fix 1: protocol.ext.allow', bash('git -c protocol.ext.allow=always fetch')],
+    ['fix 1: protocol.allow', bash('git -c protocol.allow=always fetch')],
   ] as const)('denies as an unknown target a -c key or a git environment outside the allow-lists: %s', (_, input) => unknown('git', gitRule.check(input, CTX)));
   it.each([
     B('git -c user.name=x -c user.email=x@y commit -m x'), B('git -c color.ui=never log'), B('git -c advice.detachedHead=false checkout HEAD~1'),
     B('git -c core.autocrlf=false -c core.safecrlf=false add -A'), B('git -c commit.gpgsign=false commit -m x'), B('git -c tag.gpgsign=false tag v1'),
-    B('git -c init.defaultBranch=main init sub'), B('git -c protocol.file.allow=always submodule update'), B('git -c pull.rebase=false pull'),
+    B('git -c init.defaultBranch=main init sub'), B('git -c protocol.version=2 fetch'), B('git -c pull.rebase=false pull'),
     B('git -c merge.ff=false merge forge/run-x'), B('git -c diff.renames=true diff'), B('git -c log.showSignature=false log'), B('git -c format.pretty=oneline log'),
     B('GIT_AUTHOR_NAME=x GIT_AUTHOR_EMAIL=x@y GIT_COMMITTER_NAME=x git commit -m x'), B('GIT_TERMINAL_PROMPT=0 git fetch'), B('GIT_TRACE=1 GIT_TRACE_PERFORMANCE=1 git status'),
     B('GIT_PAGER=cat git log'), B(`GIT_DIR=${W('.git')} git status`), B('HOME=/x npm test'),

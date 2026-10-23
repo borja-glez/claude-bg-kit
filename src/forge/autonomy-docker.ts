@@ -142,8 +142,8 @@ export function dockerFinding(name: string, args: Word[], seg: Segment, ctx: Gua
   if (g.unknown) return rest0.some(w => DESTROY_WORDS.has(lower(w))) ? unk(`${name} has a global option the hook does not know`) : null;
   let w0 = lower(rest0[0]), w1 = lower(rest0[1]), from = 1;
   if (w0 === 'compose') return compose(rest0.slice(1), seg, ctx);
-  // 6b-2 Task 0: switching or editing the docker context changes which daemon the run talks to (context ls/inspect/show read)
-  if (w0 === 'context' && ['use', 'create', 'rm', 'update'].includes(w1)) return den(`docker context ${w1} changes the daemon the run talks to`);
+  // 6b-2 Task 0 (fix 1): only ls|list|inspect|show (and a bare `context`) read; every other verb — use, create, rm, update, import, export, unknown — changes the daemon the run talks to or the stored contexts
+  if (w0 === 'context') return ['ls', 'list', 'inspect', 'show', ''].includes(w1) ? null : den(`docker context ${w1} changes the daemon the run talks to or the stored contexts`);
   if (w0 === 'container' && ['run', 'create', 'cp'].includes(w1)) { w0 = w1; w1 = lower(rest0[2]); from = 2; }
   const two = `${w0} ${w1}`;
   if (DOCKER_ALWAYS.has(two)) return den(`${name} ${two} deletes containers or volumes the run did not register`);

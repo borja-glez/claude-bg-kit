@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
-import { AUTONOMY_RULES, machineRule } from '../src/forge/autonomy-rules.js';
+import { AUTONOMY_RULES, gitRule, machineRule, networkRule } from '../src/forge/autonomy-rules.js';
 import { evaluateGuard } from '../src/forge/guard.js';
 import { CTX, ATTENDED, WT, sh, bash, pwsh, mcp, B, P } from './helpers/autonomy.js';
 
@@ -101,6 +101,39 @@ describe('machine · 6b-2 Task 0: a pid kill from Bash (m5) and a server of the 
     ['P19', bash('pg_ctl stop')], ['outside -D', bash('pg_ctl -D /var/lib/pg stop')],
     ['dynamic -D', bash('pg_ctl -D "$PGDIR" stop')], ['register', bash(`pg_ctl register -D ${PG}`)], ['B11', bash('pg_ctlcluster 16 main stop')],
   ])('denies %s', (_, input) => denies(input));
+});
+
+// 6b-2 Task 0 fix round 1 (task-0-fix1.md): ssh options, git trace paths. Rows from the review probe (w6b2-t0-review: rev, trace).
+describe('6b-2 Task 0 fix 1 · ssh, scp and rsync options; GIT_TRACE values', () => {
+  const W = (f: string) => sh(path.join(WT, f));
+  const unknownBy = (rule: string, v: ReturnType<typeof machineRule.check>) => {
+    expect(v).toMatchObject({ decision: 'deny', rule });
+    expect((v as { reason: string }).reason).toMatch(new RegExp(`^forge autonomy · ${rule}: unknown target`));
+  };
+  it.each<Row>([
+    ['ssh-proxycmd', bash('ssh -o ProxyCommand="rm -rf /x" localhost true')], ['ssh-localcmd', bash('ssh -o LocalCommand="x" -o PermitLocalCommand=yes localhost true')],
+    ['glued -o', bash('ssh -oProxyCommand=x localhost')], ['-o with a space', bash('ssh -o "ProxyJump h" localhost')], ['-o after the host', bash('ssh localhost -o ProxyCommand=x true')],
+    ['-F', bash(`ssh -F cfg localhost ls ${W('')}`)], ['scp -o', bash(`scp -o ProxyCommand=x a.txt localhost:${W('b.txt')}`)], ['scp -F', bash(`scp -F cfg a.txt localhost:${W('b.txt')}`)],
+    ['rsync -e ssh -o', bash(`rsync -e "ssh -o ProxyCommand=x" src/ localhost:${W('dst')}/`)], ['rsync -e not ssh', bash('rsync -e mysh src/ dst/')],
+    ['rsync --rsh=', bash('rsync --rsh=mysh src/ dst/')],
+  ])('network: an ssh option the allow-list does not hold, a config file or a remote shell that is not ssh is an unknown target: %s', (_, input) => {
+    unknownBy('network', networkRule.check(input, CTX));
+    expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toMatchObject({ decision: 'deny' });
+  });
+  it.each<Row>([
+    B(`ssh -o StrictHostKeyChecking=no -o BatchMode=yes localhost ls ${W('')}`), B(`ssh -o ConnectTimeout=5 -o UserKnownHostsFile=/dev/null localhost ls ${W('')}`),
+    B(`scp -o BatchMode=yes a.txt localhost:${W('b.txt')}`), B(`rsync -e ssh src/ localhost:${W('dst')}/`),
+    B(`rsync -e 'ssh -p 2222 -o StrictHostKeyChecking=no' -a src/ localhost:${W('dst')}/`), B('rsync -a src/ dst/'),
+  ])('every rule allows the everyday options: %s', (_, input) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
+  it.each<Row>([
+    ['GIT_TRACE=/etc/x', bash('GIT_TRACE=/etc/evil git status')], ['GIT_TRACE2=/abs', bash('GIT_TRACE2=/var/tmp/out git log')],
+    ['GIT_TRACE_PACKET', bash('GIT_TRACE_PACKET=/outside/pkt git fetch')],
+  ])('git: a GIT_TRACE* value that is no 0/1/2/true/false and no path inside the roots is an unknown target: %s', (_, input) => {
+    unknownBy('git', gitRule.check(input, CTX));
+    expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toMatchObject({ decision: 'deny', rule: 'git' });
+  });
+  it.each<Row>([B('GIT_TRACE=1 git status'), B('GIT_TRACE=true GIT_TRACE_PERFORMANCE=2 git log'), B(`GIT_TRACE=${W('trace.log')} git status`), B('GIT_DIR=.git git status')])(
+    'every rule allows %s', (_, input) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
 });
 
 describe('machine · wiring', () => {

@@ -578,12 +578,14 @@ const MSG_VALUED = new Set(['-m', '--message', '-F', '--file', '--author', '--da
 
 // m1 (6b-2 Task 0): the git -c keys and GIT_* environment the run may set. Anything else on a git segment hides how git
 // runs (a pager, editor, diff/credential helper, include path, …) and is an unknown target. Keys are lower-cased.
+// fix 1 (m4 ruling): `protocol.version` only, not `protocol.*` — `protocol.ext.allow`/`protocol.allow` enable the ext:: transport (an arbitrary command).
 const GIT_C_ALLOW: readonly (string | RegExp)[] = [/^user\./, /^color\./, /^advice\./, 'core.autocrlf', 'core.safecrlf',
-  'commit.gpgsign', 'tag.gpgsign', 'init.defaultbranch', /^protocol\./, 'pull.rebase', 'merge.ff', 'diff.renames', /^log\./, /^format\./];
+  'commit.gpgsign', 'tag.gpgsign', 'init.defaultbranch', 'protocol.version', 'pull.rebase', 'merge.ff', 'diff.renames', /^log\./, /^format\./];
 const gitCKeyAllowed = (k: string): boolean => GIT_C_ALLOW.some(a => (typeof a === 'string' ? a === k : a.test(k)));
+// fix 1 (m2 ruling): GIT_TRACE* handled in the env loop (its value must be a boolean/fd or a path inside the roots), so it is not here.
 const gitEnvAllowed = (k: string, v: string): boolean =>
   /^GIT_AUTHOR_/.test(k) || /^GIT_COMMITTER_/.test(k) || k === 'GIT_TERMINAL_PROMPT' || k === 'GIT_DIR' || k === 'GIT_WORK_TREE'
-  || /^GIT_TRACE/.test(k) || (k === 'GIT_PAGER' && v === 'cat');
+  || (k === 'GIT_PAGER' && v === 'cat');
 
 /** git's global options (composing -C over the cwd, work tree, git dir and -c), its subcommand and operands. */
 function gitParse(seg: Segment): GitParse {
@@ -702,7 +704,12 @@ function gitSeg(seg: Segment, ctx: GuardCtx): GuardVerdict | null {
   // m1: a -c key or a GIT_*/HOME/XDG_CONFIG_HOME on the segment must be on the allow-lists; anything else hides how git runs (unknown target).
   // GIT_CONFIG_PARAMETERS/COUNT/KEY_n/VALUE_n already denied above, so the loop never meets them; GIT_CONFIG_GLOBAL/SYSTEM fall here.
   for (const cf of g.cflags) { const k = cf.replace(/^'/, '').split('=')[0].toLowerCase(); if (!gitCKeyAllowed(k)) return U(`the git -c key ${k || cf} the hook does not allow`); }
-  for (const [k, w] of Object.entries(seg.env)) if ((/^GIT_/.test(k) || k === 'HOME' || k === 'XDG_CONFIG_HOME') && !gitEnvAllowed(k, w.text)) return U(`the git environment ${k} the hook does not allow`);
+  for (const [k, w] of Object.entries(seg.env)) {
+    if (!/^GIT_/.test(k) && k !== 'HOME' && k !== 'XDG_CONFIG_HOME') continue;
+    // fix 1: GIT_TRACE* appends to an absolute-path value; a path must be inside the roots (a boolean/fd value is fine, a path outside is unknown).
+    if (/^GIT_TRACE/.test(k)) { if (/^(?:0|1|2|true|false)$/i.test(w.text) || judge(w, seg, ctx) === 'ok') continue; return U(`a GIT_TRACE value (${w.text}) the hook cannot place inside the roots`); }
+    if (!gitEnvAllowed(k, w.text)) return U(`the git environment ${k} the hook does not allow`);
+  }
   if (sub === 'checkout' || sub === 'switch') {
     const cb = createdBranchFlag(rest, operands);
     if (cb) { if (cb.word?.dynamic) return U('a branch name the hook cannot read'); if (cb.word && isProtected(cb.word.text)) return D(`creating ${prot} would move it`); if (cb.force && cb.word && !ownsBranch(cb.word.text)) return D(`${cb.word.text} is not the run's branch`); }
