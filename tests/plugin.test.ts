@@ -2253,4 +2253,19 @@ describe('plugin layout', () => {
     expect(head).toMatch(/\ntools: Read, Grep, Glob, Write\r?\n/);
     for (const w of ['verdicts.json', '"keep"', '"adapt"', '"drop"', '"clash"', '"digest"', 'batch.json']) expect(md, w).toContain(w);
   });
+  it('the infinite skill routes the autonomous profiles and the person\'s ideas through the CLI (6b-2)', () => {
+    const skill = read('plugins/forge/skills/infinite/SKILL.md');
+    for (const w of ['--profile', 'references/autonomous.md', 'references/ideas.md']) expect(skill, w).toContain(w);
+    const auto = read('plugins/forge/skills/infinite/references/autonomous.md');
+    for (const w of ['## Start from an idea', '## Each cycle', '## Stop', 'FORGE infinite prepare --profile', 'EnterWorktree', 'FORGE infinite start --profile', 'forge-critic',
+      'FORGE proposals batch', 'FORGE proposals judge', 'FORGE decision publish --session <SID>', 'FORGE resource add', 'FORGE blocked note', 'design-critic', 'forge-planner']) expect(auto, w).toContain(w);
+    expect(auto).not.toContain('FORGE proposals policy');
+    const ideas = read('plugins/forge/skills/infinite/references/ideas.md');
+    for (const w of ['FORGE proposals ideas --db', '--from-note', '--from-chat', 'FORGE proposals unpark', 'proposalId', 'critique-dismiss']) expect(ideas, w).toContain(w);
+    expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('forge/<profile>-<name>');
+  });
+  it('the stop report of an autonomous run names its branch, its worktree, the parked ideas and that nothing left the branch (6b-2 M-4)', () => {
+    const item2 = read('plugins/forge/skills/infinite/references/stop.md').split('\n').find(l => l.startsWith('2. '))!;
+    for (const w of ['In an autonomous run', 'worktree', 'FORGE proposals list --status discussing', '`parked`', 'start branch']) expect(item2, w).toContain(w);
+  });
 });

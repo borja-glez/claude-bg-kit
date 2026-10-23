@@ -1,10 +1,52 @@
-Read from forge:infinite (`SKILL.md`, step 3.5, Record, in an autonomous run). `FORGE`, `WP`, `NOW`, `SID`, `<CSID>`, `<plan>` and `DB` mean what that skill says.
+Read from forge:infinite (`SKILL.md`: §1, Gate, when the request names `--profile`, and the head of §3, Cycle, in an autonomous run). `FORGE`, `WP`, `NOW`, `SID`, `<CSID>`, `<plan>` and `DB` mean what that skill says.
+
+An autonomous profile (`spike` or `product`) starts from an idea, not from an approved design, and then runs on its own: nobody approves anything for it, and the person follows it on the roadmap. Its work stays on `forge/<profile>-<name>`, in the worktree `.claude/worktrees/<profile>-<name>`: it never merges into the start branch or `main`, and never pushes. It overrides these rules of the core:
+- the guard decides instead of asking: what it allows goes ahead, what it denies is noted (below), and the person is not asked;
+- deletes and merges inside the worktree and on the run's branches go ahead without asking;
+- merging into `main` or the start branch, and pushing, never happen, not even with an authorization;
+- §1, §2.2 and §3.2's rule that the sync runs only from the main checkout do not apply.
+
+A profile runs without an execution: one task per cycle, as in §3.3 «Without an execution». `--parallel` does not apply in this version (`swarm start` refuses inside a profile's worktree).
 
 An autonomous run (`run.autonomous`) works under the guard of `hook guard` on its sessions. A call it denies (its reason starts with `forge autonomy ·`) is not done in this run: never retry it in another form (another command, a script, another tool); note it and go on with other work. The guard judges a relative path against the session's cwd, so work from the worktree: use absolute paths inside it, or start a Bash call with `cd "<worktree>" &&`. Otherwise writes resolve outside it and are denied.
 
+## Start from an idea
+
+The design and plan steps (3 to 5) run before `start --profile`, so before the guard applies: they only write docs and run forge and waypoint commands.
+
+1. **Budget and name.** The budget is required: `--cycles N`, `--hours H` or both; with neither, ask once, as §2.1 says. The name `<n>` is a kebab id of the idea: lowercase `[a-z0-9-]`, repeated hyphens joined into one, none at the ends, 40 characters at most. It is also the waypoint project (`docs/waypoint/<n>/`). `<p>` is the profile. A later start with the same profile and name continues that project, on the same branch and worktree.
+2. **Worktree.** `FORGE infinite prepare --profile <p> --name <n>` prints `{runId, worktree, branch, startBranch, created, project, next}`; exit 2: tell the person its message and stop. The person asked for this worktree by starting a profile: enter it with `EnterWorktree`, `path` = its `worktree`, and run everything from there; the main checkout is never touched. If `EnterWorktree` is not available, or does not enter it, tell the person the worktree's path (its `next` names it) and stop.
+3. **Design** in `docs/waypoint/<n>/design.md`. Already `status: approved` → step 5; a draft → step 4's loop again. Otherwise write it with `/waypoint:design new` for the project `<n>`, the idea as the draft (nothing to ask), and go straight on to step 4. If the worktree already has code (a prototype), read it first.
+   - `spike`: short: what it wants to prove, and its pillars.
+   - `product`: the vision: what it is, who it is for, its pillars, the quality criteria of a professional product of that kind, and what it is not.
+4. **Design loop.** The design loop in auto of forge:run `references/autonomy.md`: rounds of `design-critic` (`/waypoint:design round --auto`, then `round --verify --auto`), each recorded as it says, and the approval with `/waypoint:design approve --auto`, recorded as `design-approve`. When the loop stops without an approval (`critical` proposals left after 3 rounds, or the gate refuses), the run does not start: tell the person what is left (the design needs their decision) and stop. On a later start, whose project already has a roadmap, leave it there too as a question note (`notes/<EID>` `{ts: NOW, type: "question", author: "session:<SID>", text}`).
+5. **Plan**, as forge:run `references/large.md` step 2 says in auto: `forge-planner` in its normal mode, its outline confirmed without asking and recorded as `plan-confirm` (each alternative with its `whyNot` and `tradeoffs`), then `/waypoint:plan` from the worktree, which publishes the roadmap and syncs it: the worktree is the main checkout of its project. With a plan already there (a later start), only `/waypoint:plan`.
+6. **Start.** `node "<WP>" bind <plan> --via forge-infinite --claude <CSID>` as §2.3 says, taking the second seat without asking (`<plan>` = `docs/waypoint/<n>/plan.yaml`). Then, from the worktree, `FORGE infinite start --profile <p> --name <n> --cycles N --hours H --session <CSID> --locale <the language the person writes in>` (only the budget flags given). Exit 2: tell the person its message and stop; a run that is active, or a `.forge/run.json` that does not read: continue the active run, or stop it and start from a new conversation. ArtifactData `set` `meta/infinite` with the `publish.infinite` it printed, as §2.4 says. Its `trust`, when it prints one, is the run's own trust in the commands of `.forge/config.yaml`, delegated by starting the profile: never ask the person about it; with `blocked: true`, do what `## Each cycle` says of a refused config.
+7. **Tell the person** in one line where the worktree, the branch and the roadmap are, and that `/forge:stop` stops the run. Then end the turn as §2.6 says.
+
 ## Each cycle
 
-- Before `FORGE cycle`, run `FORGE blocked note --session <SID>` and send its `publish` in one ArtifactData `batch` (each write as it is printed).
+The cycle of §3, with these changes:
+- **Tasks.** Each task works as §3.3 «Without an execution» says, through `/forge:run --auto`: its **Large triage** takes the `autonomy: auto` path.
+- **Sync.** `/waypoint:plan`'s sync (§3.2, and wherever a reference sends it to the main checkout) runs from this worktree: it is the main checkout of its project.
+- **`spike`.** When `waypoint next` gives no task, the work the critic approved becomes tasks through §3.2's `to-task`, in the improvements phase, as today. Re-planning a plan that falls short comes in a later version.
+- **Proposals.** The cycle's proposals never go through `proposals policy`: the scout's (§3.4: after its `set`, skip the policy), the defects verify added (`defects.added`), the person's ideas (`references/ideas.md`), the v2s of the last batch, and those `judge` left for this batch. After step 4, whether the scout ran or not, they are judged in one batch:
+  1. `FORGE proposals batch <ids> --out .forge/work/infinite/critic-<cycle>/batch.json`.
+  2. Spawn `forge:forge-critic`, fresh (it knows only what its input says), with the design path, the plan path, the folder `.forge/work/infinite/critic-<cycle>/`, `DB`, the profile and the person's language. It writes `verdicts.json` in that folder.
+  3. For each id, `FORGE proposals judge <id> --critic .forge/work/infinite/critic-<cycle>/verdicts.json --session <SID>` prints `{id, outcome, write, approval, original, changes, decision, publish}` (each when it has one). Exit 2: it is not judged now. When its message is about the critic's verdict (none, one of another text, or a clash without `loses`), it stays for the next batch; one already decided, judged or marked by the owner is left as it is.
+  4. When `write` is not null, one ArtifactData `batch` per proposal, as §3.4 sends one: `update` `proposals/<id>` with its `write` and `if_version: PV` (the version of its `set`, or the one `DB` lists), the `set` of its `approval` when it has one, those of `original` when there is one (its `write` as an `update` of `proposals/<original id>` pinned to the version `DB` lists, and its `approval`), and its `publish`, each as it is printed. A null `write` (`waits-owner`, or `parked` for a v2 of a parked original) sends nothing to the store: answer in the thread only.
+  5. `adapt`: write the v2 with its `changes`, then `FORGE proposals add --file <f> --revises <id>` (for a person's idea, with `--from-chat`), and ArtifactData `set` `proposals/<v2 id>` with the printed doc. The v2 goes into the next cycle's batch, and `judge` approves it only on its own `keep`: never judge a v2 on its original's `adapt`.
+
+  These writes go out in this cycle, before the next `proposals pull`: otherwise the pull drops the local marks.
+- **The person's ideas**, as `references/ideas.md` says, with the answers in their thread by `judge`'s outcome.
+- **Decisions.** Record every decision that is not trivial, each alternative with its `whyNot` and `tradeoffs` (forge:run `references/decisions.md`, **What to record**).
+- Before `FORGE cycle`, run `FORGE blocked note --session <SID>` and send its `publish` in one ArtifactData `batch` (each write as it is printed). Then run `FORGE decision publish --session <SID> --since <startedAt> --run <runId>`, with the run's `startedAt` and `autonomous.runId` from `FORGE infinite status`, and send its `publish` the same way.
+- **A refused config.** When the `trust` that `infinite start --profile`, `FORGE triage` or a stalled tick prints shows `blocked: true`, the guard refused commands of `.forge/config.yaml`. Never ask the person:
+  1. read `FORGE blocked list`, its records with `tool: config`;
+  2. rewrite each denied command in `.forge/config.yaml` in the form its `Instead:` names, such as a migration with its URL on the command, or an install in the worktree's venv;
+  3. run the command that printed the `trust` again (after `start --profile`, which runs once, the next `FORGE triage` judges the rewritten set).
+
+  A record of rule `trust` is a set the person refused, and it stays refused: leave those commands out.
 - What the run creates (a database, a container, a volume, a compose project, a SQLite file, a redis on a port other than 6379-6381) is registered before it is created, with `FORGE resource add --kind <k> --name <n> [--host h]`, under a name with the run's prefix: `fg_<runId with _>__` for databases, `fg-<runId>--` for Docker, with the double separator (`FORGE resource list` shows the `runId`).
 - What the run installs goes inside the worktree: `node_modules`, `.venv`, and a `.forge-tools/` folder for `PLAYWRIGHT_BROWSERS_PATH` and the like.
 - A path the guard cannot see (a variable, `xargs`) is never used to delete or write: name each file.
@@ -17,4 +59,4 @@ An autonomous run (`run.autonomous`) works under the guard of `hook guard` on it
 
 - The run stops when the person asks in the conversation or runs `/forge:stop`; the session then runs `FORGE stop`, which the guard allows.
 - The conversation stays guarded afterwards: the guard keeps its rules for the run's sessions while `.forge/run.json` holds the autonomous block, so stopping unlocks nothing. Work without the guard happens in a new conversation.
-- `references/stop.md` starts with a last `FORGE blocked note --session <SID>`; its report lists what was blocked (`FORGE blocked list`).
+- `references/stop.md` starts with a last `FORGE blocked note --session <SID>`; its report lists what was blocked (`FORGE blocked list`) and, in its item 2, the branch, the worktree and the parked ideas.

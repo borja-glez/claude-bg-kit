@@ -70,7 +70,7 @@ Everything local lives in `.waypoint/<project>/` (`<project>` = the plan's `proj
 
 ## 4. Sync the database
 
-Run sync only from the main checkout (`MAIN_REPO` = the path on the first `worktree` line of `git worktree list --porcelain`); sessions in track worktrees never sync. Running these steps with cwd = `MAIN_REPO` (as the work skill's delegation does) counts as being in it. Otherwise do not sync: tell the user the plan must be synced from the main checkout.
+Run sync only from the main checkout (`MAIN_REPO` = the path on the first `worktree` line of `git worktree list --porcelain`); sessions in track worktrees never sync. Running these steps with cwd = `MAIN_REPO` (as the work skill's delegation does) counts as being in it. The worktree of a forge autonomous run (`.claude/worktrees/<profile>-<name>`, on `forge/<profile>-<name>`) counts as the main checkout of its project: that project's plan lives only on that branch. Otherwise do not sync: tell the user the plan must be synced from the main checkout.
 
 1. For each of the collections `meta`, `plan` and `state`: first `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" clean-cache <plan> <collection>` so stale files never leak, then ArtifactData `list` (`url` = roadmap, `query: {limit: 1000}`, `out_dir: .waypoint/<project>/dbcache`). Each result lists every document with its version.
 2. Write `.waypoint/<project>/known.json` mapping collection → doc id → version exactly as listed, e.g. `{"meta":{"project":3},"plan":{"F1":2},"state":{"T001":5}}` (empty collections → `{}`).
