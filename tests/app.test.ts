@@ -827,6 +827,31 @@ describe('proposals', () => {
     await settle();
     return r;
   }
+  it('the owner\'s idea note tells forge who the owner is, once; nobody else\'s does, and no other note (6b-2)', async () => {
+    const f = fakeDb();
+    const { root, app } = await bootProposals(f);
+    click(root, '[data-action="talk-c"][data-c="all"]');
+    await settle();
+    for (const text of ['una idea', 'otra idea']) {
+      typeIn(root, 'note-text', text);
+      await settle();
+      click(root, '[data-action="note-add"]');
+      await settle();
+    }
+    expect(f.set.mock.calls.filter(c => c[0] === 'approvals/owner')).toEqual([['approvals/owner', { user: 'user:u1', decidedAt: expect.stringMatching(ISO) }]]);
+    expect(f.add).toHaveBeenCalledTimes(2);
+    app.stop();
+    const g = fakeDb();
+    const other = await bootProposals(g, fakeUser());
+    click(other.root, '[data-action="talk-c"][data-c="all"]');
+    await settle();
+    typeIn(other.root, 'note-text', 'idea ajena');
+    await settle();
+    click(other.root, '[data-action="note-add"]');
+    await settle();
+    expect(g.set).not.toHaveBeenCalled();
+    other.app.stop();
+  });
   const inject = (root: HTMLElement, action: string, id: string) => {
     const b = document.createElement('button');
     b.dataset.action = action;

@@ -138,6 +138,7 @@ function decidedLine(m: Model, d: Dict, p: Prop, status: ProposalStatus, a: Appr
   if (a) {
     const owner = m.isOwner === true;
     const who = a.by === 'forge:policy' ? d.owner.by.policy
+      : a.by === 'forge:auto' ? d.owner.by.auto
       : a.by === 'forge:decide' ? (owner ? d.owner.by.youForge : d.owner.by.ownerForge)
       : owner ? d.you : d.owner.by.owner;
     at = a.decidedAt;
@@ -198,6 +199,8 @@ function proposalCard(m: Model, d: Dict, ui: UiState, loc: string, p: Prop): str
     ? `<div class="pmark"><span class="warn">${esc(d.owner.noMark)}</span>${m.isOwner === true && !ro ? ` <button type="button" class="btn" data-action="p-confirm" data-id="${id}">${esc(d.owner.confirm)}</button>` : ''}</div>`
     : why === 'changed' ? `<div class="pmark"><span class="warn">${esc(changed)}</span></div>` : '';
   // G-17: the task the proposal became; a button only when the plan has it.
+  // 6b-2 M-3: an idea an autonomous run parked until the person answers: why, and what integrating it would lose.
+  const parked = status === 'discussing' && p.parked ? `<div class="prsn"><span class="k">${esc(d.pfield.parked(p.parked.why, p.parked.loses))}</span></div>` : '';
   const toTask = !p.taskId ? ''
     : m.plan.tasks.some(t => t.id === p.taskId)
       ? `<button type="button" class="chip st-${safeStatus(m.states[p.taskId]?.status)}" data-action="open-task" data-id="${esc(p.taskId)}" data-k="pt:${id}">→ ${esc(p.taskId)}</button>`
@@ -216,7 +219,7 @@ function proposalCard(m: Model, d: Dict, ui: UiState, loc: string, p: Prop): str
     ${p.rationale ? `<p>${esc(p.rationale)}</p>` : ''}
     ${p.evidence ? `<div class="lbl">${esc(d.pfield.evidence)}</div><pre class="evid" data-scroll-key="evid:${id}">${esc(p.evidence)}</pre>` : ''}
     ${p.estimate || p.path ? `<div class="mono">${p.estimate ? `${esc(d.pfield.estimate)}: ${esc(p.estimate)}` : ''}${p.estimate && p.path ? ' · ' : ''}${p.path ? `${esc(d.pfield.path)}: ${esc(p.path)}` : ''}</div>` : ''}
-    ${decided}${reason}${mark}${history}
+    ${decided}${reason}${parked}${mark}${history}
     ${thread}
     ${actions}
   </div>`;

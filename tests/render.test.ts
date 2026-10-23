@@ -706,6 +706,20 @@ describe('proposals view', () => {
     expect(other.match(/sin la marca del dueño/g)).toHaveLength(2);
     expect(other).not.toContain('data-action="p-confirm"');
   });
+  it('an approval of an autonomous run says forge decided on its own (6b-2)', () => {
+    const p = P({ id: 'p1', status: 'auto_approved' });
+    const approvals = { p1: { status: 'auto_approved' as const, by: 'forge:auto' as const, decidedAt: '2026-10-22T10:00:00.000Z', digest: proposalDigest('p1', p) } };
+    expect(renderApp({ ...base(), isOwner: true, proposals: [p], approvals }, { ...ui(), view: 'talk', talk: 'proposals' })).toContain('forge por su cuenta (ejecución autónoma)');
+  });
+  it('a parked idea says why it waits and what integrating it would lose, escaped (6b-2 M-3)', () => {
+    const p = P({ id: 'p1', status: 'discussing', parked: { at: '2026-10-22T10:00:00.000Z', why: 'clashes <b>x</b>', loses: 'the "cart" <i>y</i>' } });
+    const html = renderApp({ ...base(), isOwner: true, proposals: [p] }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(html).toContain('Aparcada: clashes &lt;b&gt;x&lt;/b&gt; · Se perdería: the &quot;cart&quot; &lt;i&gt;y&lt;/i&gt;');
+    expect(html).not.toContain('<b>x</b>');
+    expect(html).not.toContain('<i>y</i>');
+    const plain = renderApp({ ...base(), isOwner: true, proposals: [P({ status: 'discussing' })] }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(plain).not.toContain('Aparcada');
+  });
   it('only a mark of this very text and status counts: without one the owner confirms; a mark of other text or another status means the decision changed, to decide again (§4.1, review I2, re-review N1)', () => {
     const now = P({ id: 'p1', status: 'approved', title: 'Cache prices v2' });
     const older = proposalDigest('p1', P({ id: 'p1', status: 'approved', title: 'Cache prices' }));

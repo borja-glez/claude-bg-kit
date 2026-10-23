@@ -534,6 +534,15 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
 
   // Writes happen only here, from event handlers, and only under notes/, proposals/ and, for the owner, approvals/.
   let busy = false;
+  // 6b-2: forge can tell the owner's ideas from the others' only if the owner says who they are. approvals/ is a collection
+  // only the owner writes: once per load, just before the owner's own idea (a note or a comment on a proposal) is sent. A
+  // failure is ignored and the note goes anyway.
+  let ownerSaid = false;
+  const sayOwner = async (id: string) => {
+    if (ownerSaid || model.isOwner !== true || !db) return;
+    ownerSaid = true;
+    try { await db.doc('approvals/owner').set({ user: `user:${id}`, decidedAt: new Date(now()).toISOString() }); } catch { /* the note is sent anyway */ }
+  };
   const addNote = async () => {
     const text = ui.draft.text.slice(0, MAX_NOTE);
     if (!text.trim() || busy) return;
@@ -542,6 +551,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     try {
       const id = await userId(await getUser());
       if (!id) { setReadOnly(); return; }
+      if (ui.draft.type === 'idea') await sayOwner(id);
       await db.collection('notes').add({ ts: new Date(now()).toISOString(), type: ui.draft.type, author: `user:${id}`, text });
       ui.draft = { type: ui.draft.type, text: '' };
       // H-06: the box is morphed, not replaced, and a focused one keeps its value: empty it here.
@@ -688,6 +698,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     try {
       const id = await userId(await getUser());
       if (!id) { setReadOnly(); return; }
+      await sayOwner(id);
       await db.collection('notes').add({ ts: new Date(now()).toISOString(), type: 'idea', author: `user:${id}`, text, proposalId: pid });
       ui.commenting = null;
       ui.commentDraft = '';
