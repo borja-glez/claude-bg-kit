@@ -191,16 +191,18 @@ function proposalCard(m: Model, d: Dict, ui: UiState, loc: string, p: Prop): str
     actions = `<div class="pact">${decide ? `<button type="button" class="btn pri" data-action="p-approve" data-id="${id}">${esc(d.approve)}</button>` : ''}${rejectUi}${commentUi}${onlyOwner}</div>`;
   }
   // C26, carry 4b-3: a decision that changed after it was taken says whose it was: forge's policy, or the owner's («tu
-  // decisión» to the owner).
+  // decisión» to the owner); an autonomous run's approval is forge's own, never a person's.
   const changed = a?.by === 'forge:policy'
     ? (m.isOwner === true ? d.owner.changedPolicy : d.owner.changedPolicyOther)
+    : a?.by === 'forge:auto'
+    ? (m.isOwner === true ? d.owner.changedAuto : d.owner.changedAutoOther)
     : (m.isOwner === true ? d.owner.changed : d.owner.changedOther);
   const mark = why === 'no-mark'
     ? `<div class="pmark"><span class="warn">${esc(d.owner.noMark)}</span>${m.isOwner === true && !ro ? ` <button type="button" class="btn" data-action="p-confirm" data-id="${id}">${esc(d.owner.confirm)}</button>` : ''}</div>`
     : why === 'changed' ? `<div class="pmark"><span class="warn">${esc(changed)}</span></div>` : '';
-  // G-17: the task the proposal became; a button only when the plan has it.
   // 6b-2 M-3: an idea an autonomous run parked until the person answers: why, and what integrating it would lose.
   const parked = status === 'discussing' && p.parked ? `<div class="prsn"><span class="k">${esc(d.pfield.parked(p.parked.why, p.parked.loses))}</span></div>` : '';
+  // G-17: the task the proposal became; a button only when the plan has it.
   const toTask = !p.taskId ? ''
     : m.plan.tasks.some(t => t.id === p.taskId)
       ? `<button type="button" class="chip st-${safeStatus(m.states[p.taskId]?.status)}" data-action="open-task" data-id="${esc(p.taskId)}" data-k="pt:${id}">→ ${esc(p.taskId)}</button>`

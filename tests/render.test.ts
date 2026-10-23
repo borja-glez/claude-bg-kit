@@ -711,6 +711,20 @@ describe('proposals view', () => {
     const approvals = { p1: { status: 'auto_approved' as const, by: 'forge:auto' as const, decidedAt: '2026-10-22T10:00:00.000Z', digest: proposalDigest('p1', p) } };
     expect(renderApp({ ...base(), isOwner: true, proposals: [p], approvals }, { ...ui(), view: 'talk', talk: 'proposals' })).toContain('forge por su cuenta (ejecución autónoma)');
   });
+  it('the autonomous line, its stale line and the parked line read in English too (6b-2)', () => {
+    const en = { ...base(), meta: { ...base().meta!, locale: 'en' as const }, isOwner: true };
+    const v = { ...ui(), view: 'talk' as const, talk: 'proposals' as const };
+    const p = P({ id: 'p1', status: 'auto_approved' });
+    const mark = (digest: string) => ({ p1: { status: 'auto_approved' as const, by: 'forge:auto' as const, decidedAt: '2026-10-22T10:00:00.000Z', digest } });
+    expect(renderApp({ ...en, proposals: [p], approvals: mark(proposalDigest('p1', p)) }, v)).toContain('forge on its own (autonomous run)');
+    const edited = P({ id: 'p1', status: 'auto_approved', title: 'Cache prices v2' });
+    const stale = renderApp({ ...en, proposals: [edited], approvals: mark(proposalDigest('p1', p)) }, v);
+    expect(stale).toContain('changed after forge approved it on its own: review the text and decide');
+    expect(stale).not.toContain('changed after your decision');
+    expect(renderApp({ ...en, isOwner: false, proposals: [edited], approvals: mark(proposalDigest('p1', p)) }, v)).toContain('changed after forge approved it on its own · it will not become a task');
+    const parked = P({ id: 'p1', status: 'discussing', parked: { at: '2026-10-22T10:00:00.000Z', why: 'clashes', loses: 'the cart' } });
+    expect(renderApp({ ...en, proposals: [parked] }, v)).toContain('Parked: clashes · Would lose: the cart');
+  });
   it('a parked idea says why it waits and what integrating it would lose, escaped (6b-2 M-3)', () => {
     const p = P({ id: 'p1', status: 'discussing', parked: { at: '2026-10-22T10:00:00.000Z', why: 'clashes <b>x</b>', loses: 'the "cart" <i>y</i>' } });
     const html = renderApp({ ...base(), isOwner: true, proposals: [p] }, { ...ui(), view: 'talk', talk: 'proposals' });
