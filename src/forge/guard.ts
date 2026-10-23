@@ -16,10 +16,16 @@ import type { Dialect } from './shell-words.js';
  * The fields of Claude Code's PreToolUse input the guard reads. `dialect`: the shell of the command, set only by a caller
  * that runs evaluateGuard itself (forge's own commands); without it Bash reads as bash and PowerShell as powershell.
  */
-export interface GuardInput { tool_name: string; tool_input: Record<string, unknown>; session_id?: string; cwd?: string; dialect?: Dialect }
+export interface GuardInput { tool_name: string; tool_input: Record<string, unknown>; session_id?: string; cwd?: string; scratchpad_dir?: string; dialect?: Dialect }
 export type GuardVerdict = { decision: 'allow' } | { decision: 'deny'; rule: string; reason: string };
-/** Where the rules look: the main checkout, the git common dir (null outside git) and the autonomous run (null when attended). */
-export interface GuardCtx { main: string; gitCommonDir: string | null; autonomous: AutonomousCtx | null }
+/**
+ * Where the rules look: the main checkout, the git common dir (null outside git) and the autonomous run (null when attended).
+ * `mainOf` and `gitCommonDirOf` answer for the repository that holds a path (CARRY-5), so a file rule judges a file by its own repository.
+ */
+export interface GuardCtx {
+  main: string; gitCommonDir: string | null; autonomous: AutonomousCtx | null;
+  mainOf?(p: string): string; gitCommonDirOf?(p: string): string | null;
+}
 /** A rule: null when it does not apply to the call. */
 export interface GuardRule { id: string; check(input: GuardInput, ctx: GuardCtx): GuardVerdict | null }
 
@@ -28,12 +34,13 @@ export const SHELL_TOOLS: readonly string[] = ['Bash', 'PowerShell'];
 
 const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 
-/** The input of the hook, keeping only the four fields; null without a string tool_name and an object tool_input. */
+/** The input of the hook, keeping only the fields the rules read; null without a string tool_name and an object tool_input. */
 export function parseGuardInput(x: unknown): GuardInput | null {
   if (!isRecord(x) || typeof x.tool_name !== 'string' || !isRecord(x.tool_input)) return null;
   return {
     tool_name: x.tool_name, tool_input: x.tool_input,
     ...(typeof x.session_id === 'string' ? { session_id: x.session_id } : {}), ...(typeof x.cwd === 'string' ? { cwd: x.cwd } : {}),
+    ...(typeof x.scratchpad_dir === 'string' ? { scratchpad_dir: x.scratchpad_dir } : {}),
   };
 }
 
@@ -159,12 +166,14 @@ const shellRule = (id: string, reason: string, args: RegExp): GuardRule => ({
 export const TRUST_RULES: readonly GuardRule[] = [
   fileRule('auth-records',
     "forge: .forge/execution/auth/ holds the person's authorizations. Only the person's answer to the question forge printed records one (forge's hook takes it from AskUserQuestion): do not write it.",
-    (t, ctx) => holds(guardPath(t), AUTH_DIR) && isInside(t, path.join(ctx.main, ...AUTH_DIR))),
+    (t, ctx) => holds(guardPath(t), AUTH_DIR) && isInside(t, path.join(ctx.mainOf?.(t) ?? ctx.main, ...AUTH_DIR))),
   fileRule('trust-file',
     "forge: trust.json holds the person's trust in the commands of .forge/config.yaml. Only the person's answer to the question forge printed records it (forge's hook takes it from AskUserQuestion): do not write it.",
     (t, ctx) => {
       const g = guardPath(t);
-      return isTrustFile(g) && ctx.gitCommonDir !== null && g === guardPath(path.join(ctx.gitCommonDir, 'forge', 'trust.json'));
+      if (!isTrustFile(g)) return false;
+      const common = ctx.gitCommonDirOf ? ctx.gitCommonDirOf(t) : ctx.gitCommonDir;
+      return common !== null && g === guardPath(path.join(common, 'forge', 'trust.json'));
     }),
   fileRule('local-yaml',
     "forge: .forge/local.yaml holds the person's permissions and preferences. Only the person's answer records them, through FORGE local set (a surface after their yes, workflow, autonomy): do not edit it.",

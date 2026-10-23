@@ -175,6 +175,12 @@ describe('forge hook guard (D9)', () => {
     const io = { cwd: root, now: () => new Date('2026-10-22T10:00:00.000Z'), env: {}, stdin: '' } as unknown as Parameters<typeof guardCtx>[0];
     const ctx = guardCtx(io, { tool_name: 'Bash', tool_input: { command: 'ls' } });
     for (const key of ['main', 'gitCommonDir'] as const) expect(typeof Object.getOwnPropertyDescriptor(ctx, key)?.get, key).toBe('function');
+    expect(Object.getOwnPropertyDescriptor(ctx, 'autonomous')).toMatchObject({ value: null });
+  });
+  it('judges a protected file by its own repository when CLAUDE_PROJECT_DIR points outside it (CARRY-5)', () => {
+    const r = run(['hook', 'guard'], { cwd: root, now: () => new Date('2026-10-22T10:00:00.000Z'), env: { CLAUDE_PROJECT_DIR: tmp('outside-') },
+      stdin: JSON.stringify(pre('Write', { file_path: path.join(root, '.forge', 'execution', 'auth', 'm.json'), content: '{}' })) });
+    expect(denied(r).permissionDecision).toBe('deny');
   });
   it('denies a Bash call to hook answer and lets local set surfaces through', () => {
     expect(denied(guard(pre('Bash', { command: 'node /p/dist/forge.cjs hook answer < a.json', description: 'x' }))).permissionDecisionReason).toContain("Only the person's answer");

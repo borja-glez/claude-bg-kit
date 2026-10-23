@@ -1900,9 +1900,12 @@ describe('plugin layout', () => {
       .toEqual([{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" hook answer' }] }]);
     expect(read('plugins/forge/hooks/hooks.json').split('hook answer')).toHaveLength(2);
   });
-  it('forge hooks: guard on PreToolUse for Bash, PowerShell, Edit, Write and NotebookEdit (D9)', () => {
-    expect(JSON.parse(read('plugins/forge/hooks/hooks.json')).hooks.PreToolUse)
-      .toEqual([{ matcher: 'Bash|PowerShell|Edit|Write|NotebookEdit', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" hook guard' }] }]);
+  it('forge hooks: guard on PreToolUse for Bash, PowerShell, Edit, Write, NotebookEdit and the MCP tools (D9, 6b-1)', () => {
+    const pre = JSON.parse(read('plugins/forge/hooks/hooks.json')).hooks.PreToolUse;
+    expect(pre).toEqual([{ matcher: '^(Bash|PowerShell|Edit|Write|NotebookEdit)$|^mcp__', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" hook guard' }] }]);
+    const re = new RegExp(pre[0].matcher);
+    for (const t of ['Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell', 'mcp__github__create_issue']) expect(re.test(t), t).toBe(true);
+    for (const t of ['Read', 'Grep', 'Glob', 'WebFetch', 'BashOutput', 'Agent']) expect(re.test(t), t).toBe(false);
   });
   it('the final merge goes through a recorded answer: authorize merge-on-finish with the run id, and each ask as printed (I-03)', () => {
     const large = runRef('large');

@@ -13,7 +13,10 @@ import { memberForHook } from '../../members.js';
 import { hookLive } from '../../live.js';
 import { hookRoute } from '../../route-hooks.js';
 import { hookAnswer } from '../../auth.js';
-import { TRUST_RULES, evaluateGuard, guardOutput, parseGuardInput, type GuardCtx, type GuardInput } from '../../guard.js';
+import { guardOutput, parseGuardInput, shellCommand, targetPath, type GuardCtx, type GuardInput, type GuardVerdict } from '../../guard.js';
+import {
+  INVALID_RUN, appendBlocked, autonomousFor, guardError, guardRulesFor, judgeGuard, runMainsOf, type AutonomousCtx,
+} from '../../autonomous.js';
 import { trustPlace } from '../../trust.js';
 import { liveJobs } from '../../jobs.js';
 import type { Io } from '../run.js';
@@ -76,13 +79,40 @@ function hookStop(io: Io): string {
   } catch { return ''; }
 }
 
+/** The nearest folder that exists, from the folder of a path: where git can be asked about a file that may not exist yet. */
+function existingDir(p: string): string {
+  let dir = path.dirname(path.resolve(p));
+  while (!existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir);
+  return dir;
+}
+
+/** `answer` for each folder once: the answers of mainOf and gitCommonDirOf are memoized by the nearest folder that exists. */
+function perDir<T>(answer: (dir: string) => T): (p: string) => T {
+  const memo = new Map<string, T>();
+  return p => {
+    const dir = existingDir(p);
+    if (!memo.has(dir)) memo.set(dir, answer(dir));
+    return memo.get(dir) as T;
+  };
+}
+
 /**
  * The guard's context for a PreToolUse call (D9), from the hook's directory (hookRoot): the main checkout, the git common
- * dir (absolute: trustPlace resolves git's answer against the directory it ran in; null outside git), no autonomous run.
- * H4: lazy, so only a file rule that met a protected name asks git; a Bash or PowerShell call starts no git process.
+ * dir (absolute: trustPlace resolves git's answer against the directory it ran in; null outside git), and the autonomous
+ * run of the session (null when attended), found first and without git: runMainsOf walks up from the hook's directory and
+ * from the session's cwd (H1, CARRY-3). `mainOf` and `gitCommonDirOf` answer for the repository that holds a path, so a
+ * CLAUDE_PROJECT_DIR outside the session's repository does not hide a protected file (CARRY-5).
+ * H4: lazy, so only a file rule that met a protected name asks git; a call that meets none starts no git process,
+ * also with an autonomous run (autonomous is a plain property). The literal is built once: a spread would read the getters.
  */
 export function guardCtx(io: Io, input: GuardInput): GuardCtx {
   const dir = hookRoot(io, input);
+  const starts = typeof input.cwd === 'string' && input.cwd !== '' ? [dir, input.cwd] : [dir];
+  let autonomous: GuardCtx['autonomous'] = null;
+  for (const m of runMainsOf(starts)) {
+    autonomous = autonomousFor(m, input);
+    if (autonomous) break;
+  }
   let main: string | undefined;
   let common: string | null | undefined;
   return {
@@ -91,25 +121,53 @@ export function guardCtx(io: Io, input: GuardInput): GuardCtx {
       if (common === undefined) { const f = trustPlace(dir).file; common = f ? path.dirname(path.dirname(f)) : null; }
       return common;
     },
-    autonomous: null,
+    mainOf: perDir(mainCheckout),
+    gitCommonDirOf: perDir(d => { const f = trustPlace(d).file; return f ? path.dirname(path.dirname(f)) : null; }),
+    autonomous,
   };
 }
 
-// The PreToolUse hook (D9): Claude Code's deny for a call TRUST_RULES denies, nothing for any other call.
-function hookGuard(io: Io): string {
+/** The target of a denied call for blocked.jsonl: the file, the command cut to 300 characters, or the MCP tool's name. */
+function blockedTarget(input: GuardInput, auto: AutonomousCtx): string {
+  const plain: GuardCtx = { main: auto.main, gitCommonDir: null, autonomous: auto };
+  return targetPath(input, plain) ?? shellCommand(input)?.slice(0, 300) ?? input.tool_name;
+}
+
+/** Prints the deny, and for an autonomous run records it in blocked.jsonl; stderr says so when it could not. */
+function deliver(v: GuardVerdict, input: GuardInput, auto: AutonomousCtx | null, io: Io): { stdout: string; stderr: string } {
+  const out = { stdout: guardOutput(v), stderr: '' };
+  if (v.decision !== 'deny' || !auto || auto.runId === INVALID_RUN) return out;
+  let failed: string | null;
   try {
-    const input = parseGuardInput(JSON.parse(io.stdin ?? ''));
-    return input ? guardOutput(evaluateGuard(input, guardCtx(io, input), TRUST_RULES)) : '';
-  } catch {
-    // fail-open while autonomous is null: any error lets the call through (6b-1 makes an autonomous run fail closed here)
-    return '';
+    failed = appendBlocked(auto.main, auto.runId, {
+      ts: io.now().toISOString(), rule: v.rule, tool: input.tool_name, target: blockedTarget(input, auto), reason: v.reason, session: input.session_id ?? null,
+    });
+  } catch (e) { failed = e instanceof Error ? e.message : String(e); }
+  return failed === null ? out : { ...out, stderr: `forge guard: could not record the denial (${failed})\n` };
+}
+
+// The PreToolUse hook (D9): Claude Code's deny for a call the rules deny, nothing for any other call. The rules of an
+// autonomous run are added only for its sessions, which fail closed (guard-error) on any error; every other session fails open.
+function hookGuard(io: Io): { stdout: string; stderr: string } {
+  let input: GuardInput | null = null;
+  let auto: AutonomousCtx | null = null;
+  try {
+    input = parseGuardInput(JSON.parse(io.stdin ?? ''));
+    if (!input) return { stdout: '', stderr: '' };
+    const ctx = guardCtx(io, input);
+    auto = ctx.autonomous;
+    return deliver(judgeGuard(input, ctx, guardRulesFor(ctx)), input, auto, io);
+  } catch (e) {
+    if (!input || !auto) return { stdout: '', stderr: '' };
+    return deliver(guardError(e instanceof Error ? e.message : String(e)), input, auto, io);
   }
 }
 
 export const command: Command = (args, ctx) => {
   const { io } = ctx;
   const which = args[0];
-  const out = which === 'stop' ? hookStop(io) : which === 'answer' ? hookAnswer(io) : which === 'live' ? hookLive(io) : which === 'guard' ? hookGuard(io)
+  if (which === 'guard') return { code: 0, ...hookGuard(io) };
+  const out = which === 'stop' ? hookStop(io) : which === 'answer' ? hookAnswer(io) : which === 'live' ? hookLive(io)
     : which === 'route-session' ? hookRoute(io, 'session') : which === 'route-prompt' ? hookRoute(io, 'prompt') : '';
   return { code: 0, stdout: out, stderr: '' };
 };

@@ -2,14 +2,16 @@
 // The guard rules of an autonomous run apply only to the sessions this module names; an attended session gets null.
 // Only files are read here (run.json and, when it has an autonomous block, the execution and its members): never git.
 // Each read that fails says in a comment which way it errs (M17): roots toward fewer, ids and dirs toward more sessions under the rules.
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { parseRun, runFile, type RunState } from './run.js';
 import { executionFile, runWorktree } from './execution.js';
 import { listMembers } from './members.js';
-import { readResources, runTmp, type Resource } from './resources.js';
-import { isInside } from './guard.js';
+import { autonomousDir, readResources, runTmp, type Resource } from './resources.js';
+import { isInside, evaluateGuard, TRUST_RULES, type GuardCtx, type GuardInput, type GuardRule, type GuardVerdict } from './guard.js';
+import { AUTONOMY_RULES } from './autonomy-rules.js';
 import { parseExecution, type ExecutionState } from '../lib/execution-state.js';
+import { samePath } from '../lib/worktree.js';
 
 export interface AutonomousCtx {
   runId: string; main: string; worktree: string; roots: string[]; tmp: string;
@@ -169,3 +171,88 @@ const scratchpadOf = (input: SessionInput): string | null => {
   const s = str(input.scratchpad_dir);
   return s !== null && path.isAbsolute(s) ? s : null;
 };
+
+/**
+ * The checkouts whose .forge/run.json may hold an autonomous run, found without git (H1, CARRY-5): from each start point,
+ * every folder up to the root that has one, the nearest first, each once. Only existsSync: a worktree of a run lives in
+ * <main>/.claude/worktrees/<p>-<n>, so the walk reaches <main>/.forge/run.json, and an old run.json in a worktree hides
+ * nothing, since the folders above it are listed too.
+ */
+export function runMainsOf(starts: readonly string[]): string[] {
+  const found: string[] = [];
+  for (const start of starts) {
+    for (let dir = path.resolve(start); ; dir = path.dirname(dir)) {
+      if (existsSync(runFile(dir)) && !found.some(f => samePath(f, dir))) found.push(dir);
+      if (path.dirname(dir) === dir) break;
+    }
+  }
+  return found;
+}
+
+export const GUARD_ERROR = 'guard-error';
+
+/** The denial of a call the guard could not judge in an autonomous run: nothing was done, and the model is told what to try. */
+export function guardError(message: string): GuardVerdict {
+  return {
+    decision: 'deny', rule: GUARD_ERROR,
+    reason: `forge autonomy · ${GUARD_ERROR}: the guard could not judge this call (${message}); nothing was done. Instead: try a simpler form, or record it as not done`,
+  };
+}
+
+/** evaluateGuard; a rule that throws denies in an autonomous run (fail closed) and throws otherwise. Reads only ctx.autonomous. */
+export function judgeGuard(input: GuardInput, ctx: GuardCtx, rules: readonly GuardRule[]): GuardVerdict {
+  try {
+    return evaluateGuard(input, ctx, rules);
+  } catch (e) {
+    if (ctx.autonomous === null) throw e;
+    return guardError(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** The rules for a context: the trust rules of 6a, and the autonomy rules only for an autonomous run. Reads only ctx.autonomous. */
+export function guardRulesFor(ctx: GuardCtx): readonly GuardRule[] {
+  return ctx.autonomous ? [...TRUST_RULES, ...AUTONOMY_RULES] : TRUST_RULES;
+}
+
+const VALUE = String.raw`(?:"[^"\n]*"|'[^'\n]*'|[^\s;|&"']+)`;
+const SECRETS: readonly [RegExp, string][] = [
+  [/\b(Authorization|Cookie)(\s*:\s*)[^"'\n]*/gi, '$1$2***'],
+  [new RegExp(String.raw`(--password(?:=|\s+))${VALUE}`, 'gi'), '$1***'],
+  [/(^|\s)-p(?=[^\s;|&"'])[^\s;|&"']+/g, '$1-p***'],
+  [new RegExp(String.raw`\b(PGPASSWORD|MYSQL_PWD|[A-Za-z0-9_]*_(?:TOKEN|KEY|SECRET))(=)${VALUE}`, 'g'), '$1$2***'],
+  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:)[^\s@/]+@/gi, '$1***@'],
+  [/\b(?:sk-|ghp_|github_pat_|xox[a-zA-Z]-|AKIA)[A-Za-z0-9_-]*/g, '***'],
+];
+
+/** M7: what a record of a denial must not keep: header values, passwords, secret assignments, URL credentials and well-known token shapes. */
+export function redactSecrets(s: string): string {
+  return SECRETS.reduce((text, [re, to]) => text.replace(re, to), s);
+}
+
+export interface BlockedRecord { ts: string; rule: string; tool: string; target: string; reason: string; session: string | null }
+
+export const blockedFile = (main: string, runId: string): string => path.join(autonomousDir(main, runId), 'blocked.jsonl');
+
+/** Appends a denial, without its secrets, to blocked.jsonl. Null, or the error's message when it could not (M17); never throws. */
+export function appendBlocked(main: string, runId: string, r: BlockedRecord): string | null {
+  try {
+    mkdirSync(autonomousDir(main, runId), { recursive: true });
+    appendFileSync(blockedFile(main, runId), JSON.stringify({ ...r, target: redactSecrets(r.target), reason: redactSecrets(r.reason) }) + '\n');
+    return null;
+  } catch (e) { return e instanceof Error ? e.message : String(e); }
+}
+
+/** The last `limit` records that read, in order (Infinity: all); lines that do not parse are skipped. */
+export function readBlocked(main: string, runId: string, limit = 1000): BlockedRecord[] {
+  let text: string;
+  try { text = readFileSync(blockedFile(main, runId), 'utf8'); } catch { return []; }
+  const records: BlockedRecord[] = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const r: unknown = JSON.parse(line);
+      if (r && typeof r === 'object' && typeof (r as BlockedRecord).rule === 'string') records.push(r as BlockedRecord);
+    } catch { /* a torn line: skipped */ }
+  }
+  return Number.isFinite(limit) ? records.slice(Math.max(0, records.length - limit)) : records;
+}
