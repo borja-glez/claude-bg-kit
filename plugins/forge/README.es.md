@@ -106,6 +106,7 @@ El triaje lee el texto de la tarea, los ficheros que probablemente toque y las z
 | `forge-verify` | Sonnet | alto | usa el trabajo a través de una superficie e informa con pruebas (`forge-verify-heavy`, Opus, también alto, con el perfil `quality`) |
 | `forge-planner` | Opus | muy alto | camino Large: convierte un diseño aprobado en un plan de waypoint |
 | `forge-scout` | Opus | medio | modo infinito: propuestas de mejora con pruebas |
+| `forge-critic` | Opus | alto | modo infinito: juzga un lote de propuestas (quedarla, adaptarla, descartarla o chocar) |
 
 Cada agente fija su `model` y su `effort`, así que ninguno hereda los de tu sesión. Los implementadores escriben su informe en `report-<n>.txt` y también lo incluyen en su respuesta. Suben por una escalera de cinco peldaños: `mech` → `impl-light` → `impl` → `impl-high` → `impl-heavy`. El perfil `economy` baja un peldaño a los implementadores (`impl-heavy` → `forge-impl-high`, `impl-high` → `forge-impl`, `impl` → `forge-impl-light`) y `quality` los sube (`impl` e `impl-high` → `forge-impl-heavy`, `impl-light` → `forge-impl`, `mech` → `forge-impl-light`).
 

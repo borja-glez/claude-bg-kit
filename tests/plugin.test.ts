@@ -544,6 +544,7 @@ describe('plugin layout', () => {
       'forge-review-correctness': ['opus', 'high'], 'forge-review-security': ['opus', 'high'], 'forge-review-perf': ['opus', 'high'], 'forge-fable': ['fable', 'high'],
       'forge-review-final': ['opus', 'xhigh'],
       'forge-planner': ['opus', 'xhigh'], 'forge-scout': ['opus', 'medium'], 'forge-verify': ['sonnet', 'high'], 'forge-verify-heavy': ['opus', 'high'],
+      'forge-critic': ['opus', 'high'],
     };
     const agents = readdirSync(new URL('../plugins/forge/agents/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3));
     expect(agents.length).toBeGreaterThan(0);
@@ -2245,5 +2246,11 @@ describe('plugin layout', () => {
         expect(md, `${f}: ${w}`).toContain(w);
       expect(md.split('\n').find(l => l.startsWith('- `hook guard`')), f).toContain('MCP');
     }
+  });
+  it('forge-critic judges a batch without editing anything, and writes one verdict per proposal (6b-2)', () => {
+    const md = read('plugins/forge/agents/forge-critic.md');
+    const head = md.split(/\r?\n---\r?\n/)[0];
+    expect(head).toMatch(/\ntools: Read, Grep, Glob, Write\r?\n/);
+    for (const w of ['verdicts.json', '"keep"', '"adapt"', '"drop"', '"clash"', '"digest"', 'batch.json']) expect(md, w).toContain(w);
   });
 });

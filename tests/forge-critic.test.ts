@@ -1,0 +1,54 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { readVerdicts, proposalBatch, CRITIC_TEXT_MAX } from '../src/forge/critic.js';
+import { run } from '../src/forge/cli/run.js';
+import { proposalDigest } from '../src/lib/proposals.js';
+import { useTempDirs } from './helpers/tmp.js';
+
+const tmp = useTempDirs();
+const ID = 'p20261022100000abcd';
+const D = 'a'.repeat(64);
+
+describe('readVerdicts', () => {
+  it('keeps each well formed verdict once, and drops the rest', () => {
+    const text = JSON.stringify({ verdicts: [
+      { id: ID, digest: D, verdict: 'keep', why: 'serves the core loop' },
+      { id: ID, digest: D, verdict: 'drop', why: 'second one for the same id' },
+      { id: 'p20261022100000zzzz', digest: D, verdict: 'adapt', why: 'too broad' },
+      { id: 'p20261022100000yyyy', digest: D, verdict: 'clash', why: 'multiplayer is out of the vision' },
+      { id: 'p20261022100000xxxx', digest: 'short', verdict: 'keep', why: 'x' }, { id: '../x', digest: D, verdict: 'keep', why: 'x' },
+      { id: 'p20261022100000wwww', digest: D, verdict: 'maybe', why: 'x' }, { id: 'p20261022100000vvvv', digest: D, verdict: 'keep', why: ' ' },
+    ] });
+    expect(readVerdicts(text)).toEqual([{ id: ID, digest: D, verdict: 'keep', why: 'serves the core loop' }]);
+  });
+  it('keeps adapt with its changes and clash with what would be lost, clipped', () => {
+    const v = readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: D, verdict: 'adapt', why: 'w', changes: 'x'.repeat(2000) }] }));
+    expect(v[0].changes).toHaveLength(CRITIC_TEXT_MAX);
+    expect(readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: D, verdict: 'clash', why: 'w', loses: 'the solo focus' }] }))[0]).toMatchObject({ verdict: 'clash', loses: 'the solo focus' });
+  });
+  it('is empty for text that is not a verdicts file', () => {
+    expect(readVerdicts('nope')).toEqual([]);
+    expect(readVerdicts('{"verdicts": 3}')).toEqual([]);
+  });
+});
+
+describe('proposals batch', () => {
+  it('writes each proposal with the digest of its text, and lists the missing ones', () => {
+    const root = tmp('batch-');
+    writeFileSync(path.join(root, 'p.json'), JSON.stringify({ category: 'feature', risk: 'medium', title: 'Combo meter', rationale: 'r', evidence: 'e', pillar: 'Juice', source: 'scout' }));
+    const id = JSON.parse(run(['proposals', 'add', '--file', 'p.json', '--author', 'session:main'], { cwd: root, now: () => new Date('2026-10-22T10:00:00Z'), env: {}, rand: () => 0.5 }).stdout).id;
+    const r = JSON.parse(run(['proposals', 'batch', id, 'p20261022100000none', '--out', 'b.json'], { cwd: root, now: () => new Date(), env: {} }).stdout);
+    expect(r).toMatchObject({ count: 1, missing: ['p20261022100000none'] });
+    const b = JSON.parse(readFileSync(path.join(root, 'b.json'), 'utf8'));
+    expect(b.proposals[0]).toMatchObject({ id, digest: proposalDigest(id, b.proposals[0].doc) });
+    expect(proposalBatch(root, [id]).proposals).toHaveLength(1);
+    expect(run(['proposals', 'batch', '../x', '--out', 'b.json'], { cwd: root, now: () => new Date(), env: {} }).code).toBe(2);
+  });
+  it('creates the folder of --out', () => {
+    const root = tmp('batch-dir-');
+    const r = run(['proposals', 'batch', 'p20261022100000none', '--out', 'deep/er/b.json'], { cwd: root, now: () => new Date(), env: {} });
+    expect(r.code).toBe(0);
+    expect(JSON.parse(readFileSync(path.join(root, 'deep', 'er', 'b.json'), 'utf8'))).toMatchObject({ proposals: [] });
+  });
+});

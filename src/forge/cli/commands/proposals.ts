@@ -1,5 +1,6 @@
 import type { Command } from '../context.js';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { proposalBatch } from '../../critic.js';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir } from '../../ledger.js';
 import { parsePlan, PlanError } from '../../../lib/plan.js';
@@ -341,7 +342,20 @@ export const command: Command = (args, ctx) => {
       appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'to-task', id, taskId: task.id });
       return json({ id, taskId: task.id, write: { taskId: task.id } });
     }
+    case 'batch': {
+      // The ids are the positional arguments up to the first flag.
+      const ids = rest.slice(0, rest.findIndex(a => a.startsWith('--')) < 0 ? rest.length : rest.findIndex(a => a.startsWith('--')));
+      const out = subFlag('out');
+      if (!out) throw new UsageError('proposals batch: --out is required');
+      if (ids.length === 0) throw new UsageError('proposals batch: at least one proposal id is required');
+      for (const id of ids) if (!PROPOSAL_ID.test(id)) throw new UsageError(`proposals batch: ${id} is not a proposal id (p + 14 digits + 4 letters/digits)`);
+      const batch = proposalBatch(io.cwd, ids);
+      const file = path.resolve(io.cwd, out);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify({ proposals: batch.proposals }, null, 2) + '\n');
+      return json({ count: batch.proposals.length, missing: batch.missing, out });
+    }
     default:
-      throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task> ...');
+      throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task|batch> ...');
   }
 };
