@@ -8,7 +8,7 @@ import { parseRun, runFile, type RunState } from './run.js';
 import { executionFile, runWorktree } from './execution.js';
 import { listMembers } from './members.js';
 import { autonomousDir, readResources, runTmp, type Resource } from './resources.js';
-import { isInside, evaluateGuard, TRUST_RULES, type GuardCtx, type GuardInput, type GuardRule, type GuardVerdict } from './guard.js';
+import { isInside, evaluateGuard, forgeCalls, shellCommand, CWD_FLAG, TRUST_RULES, type GuardCtx, type GuardInput, type GuardRule, type GuardVerdict } from './guard.js';
 import { AUTONOMY_RULES } from './autonomy-rules.js';
 import { parseExecution, type ExecutionState } from '../lib/execution-state.js';
 import { samePath } from '../lib/worktree.js';
@@ -199,8 +199,26 @@ export function guardError(message: string): GuardVerdict {
   };
 }
 
-/** evaluateGuard; a rule that throws denies in an autonomous run (fail closed) and throws otherwise. Reads only ctx.autonomous. */
+const UNREADABLE_RUN = `forge autonomy · ${GUARD_ERROR}: the autonomous block of .forge/run.json does not read, so this session is guarded and nothing was done. `
+  + 'Instead: stop the run (FORGE stop) or fix run.json from another conversation';
+
+/** The call is `node …forge.cjs stop` and nothing else: the one thing a session of an unreadable run may do (STOP-ALLOWED). */
+function isPlainStop(input: GuardInput): boolean {
+  const command = shellCommand(input);
+  if (command === null || /[;|&\n`$()<>]/.test(command) || !/^\s*node/i.test(command)) return false;
+  const calls = forgeCalls(command);
+  return calls.length === 1 && calls[0].replace(CWD_FLAG, ' ').trim() === 'stop';
+}
+
+/**
+ * evaluateGuard; a rule that throws denies in an autonomous run (fail closed) and throws otherwise. Reads only ctx.autonomous.
+ * T7-INVALID-RUN-REASON: a run whose block does not read has no roots or branches to judge by, so every call is denied with
+ * its own reason, except a plain FORGE stop.
+ */
 export function judgeGuard(input: GuardInput, ctx: GuardCtx, rules: readonly GuardRule[]): GuardVerdict {
+  if (ctx.autonomous?.runId === INVALID_RUN) {
+    return isPlainStop(input) ? { decision: 'allow' } : { decision: 'deny', rule: GUARD_ERROR, reason: UNREADABLE_RUN };
+  }
   try {
     return evaluateGuard(input, ctx, rules);
   } catch (e) {
@@ -218,8 +236,10 @@ const VALUE = String.raw`(?:"[^"\n]*"|'[^'\n]*'|[^\s;|&"']+)`;
 const SECRETS: readonly [RegExp, string][] = [
   [/\b(Authorization|Cookie)(\s*:\s*)[^"'\n]*/gi, '$1$2***'],
   [new RegExp(String.raw`(--password(?:=|\s+))${VALUE}`, 'gi'), '$1***'],
-  [/(^|\s)-p(?=[^\s;|&"'])[^\s;|&"']+/g, '$1-p***'],
-  [new RegExp(String.raw`\b(PGPASSWORD|MYSQL_PWD|[A-Za-z0-9_]*_(?:TOKEN|KEY|SECRET))(=)${VALUE}`, 'g'), '$1$2***'],
+  // -p<password>, bare or quoted (`-p'x'`, `-p"x"`), and inside a quoted word (`"-px"`)
+  [/(^|[\s"'])-p(?:"[^"\n]*"|'[^'\n]*'|[^\s;|&"']+)/g, '$1-p***'],
+  // an assignment, also PowerShell's `$env:X = "…"` with spaces around the `=`
+  [new RegExp(String.raw`\b(PGPASSWORD|MYSQL_PWD|[A-Za-z0-9_]*_(?:TOKEN|KEY|SECRET))(\s*=\s*)${VALUE}`, 'g'), '$1$2***'],
   [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:)[^\s@/]+@/gi, '$1***@'],
   [/\b(?:sk-|ghp_|github_pat_|xox[a-zA-Z]-|AKIA)[A-Za-z0-9_-]*/g, '***'],
 ];

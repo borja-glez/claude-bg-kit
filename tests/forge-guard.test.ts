@@ -182,6 +182,12 @@ describe('forge hook guard (D9)', () => {
       stdin: JSON.stringify(pre('Write', { file_path: path.join(root, '.forge', 'execution', 'auth', 'm.json'), content: '{}' })) });
     expect(denied(r).permissionDecision).toBe('deny');
   });
+  it('outside any git repository, an authorization is still judged against the hook\'s own checkout, as in 6a', () => {
+    const plain = tmp('forge-guard-plain-');
+    const r = run(['hook', 'guard'], { cwd: plain, now: () => new Date('2026-10-22T10:00:00.000Z'), env: { CLAUDE_PROJECT_DIR: plain },
+      stdin: JSON.stringify(pre('Write', { file_path: path.join(plain, '.forge', 'execution', 'auth', 'm.json'), content: '{}' }, plain)) });
+    expect(denied(r).permissionDecision).toBe('deny');
+  });
   it('denies a Bash call to hook answer and lets local set surfaces through', () => {
     expect(denied(guard(pre('Bash', { command: 'node /p/dist/forge.cjs hook answer < a.json', description: 'x' }))).permissionDecisionReason).toContain("Only the person's answer");
     expect(guard(pre('Bash', { command: 'node /p/dist/forge.cjs local set surfaces.web allowed --expect h' }))).toEqual(SILENT);

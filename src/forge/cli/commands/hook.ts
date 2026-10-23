@@ -15,7 +15,7 @@ import { hookRoute } from '../../route-hooks.js';
 import { hookAnswer } from '../../auth.js';
 import { guardOutput, parseGuardInput, shellCommand, targetPath, type GuardCtx, type GuardInput, type GuardVerdict } from '../../guard.js';
 import {
-  INVALID_RUN, appendBlocked, autonomousFor, guardError, guardRulesFor, judgeGuard, runMainsOf, type AutonomousCtx,
+  INVALID_RUN, appendBlocked, autonomousFor, guardError, guardRulesFor, judgeGuard, redactSecrets, runMainsOf, type AutonomousCtx,
 } from '../../autonomous.js';
 import { trustPlace } from '../../trust.js';
 import { liveJobs } from '../../jobs.js';
@@ -115,14 +115,17 @@ export function guardCtx(io: Io, input: GuardInput): GuardCtx {
   }
   let main: string | undefined;
   let common: string | null | undefined;
+  const commonOf = perDir(d => { const f = trustPlace(d).file; return f ? path.dirname(path.dirname(f)) : null; });
+  const mainIn = perDir(mainCheckout);
   return {
     get main() { return (main ??= mainCheckout(dir)); },
     get gitCommonDir() {
       if (common === undefined) { const f = trustPlace(dir).file; common = f ? path.dirname(path.dirname(f)) : null; }
       return common;
     },
-    mainOf: perDir(mainCheckout),
-    gitCommonDirOf: perDir(d => { const f = trustPlace(d).file; return f ? path.dirname(path.dirname(f)) : null; }),
+    // a path in no git repository is judged by the hook's own checkout, as 6a did
+    mainOf: p => (commonOf(p) === null ? (main ??= mainCheckout(dir)) : mainIn(p)),
+    gitCommonDirOf: commonOf,
     autonomous,
   };
 }
@@ -130,7 +133,10 @@ export function guardCtx(io: Io, input: GuardInput): GuardCtx {
 /** The target of a denied call for blocked.jsonl: the file, the command cut to 300 characters, or the MCP tool's name. */
 function blockedTarget(input: GuardInput, auto: AutonomousCtx): string {
   const plain: GuardCtx = { main: auto.main, gitCommonDir: null, autonomous: auto };
-  return targetPath(input, plain) ?? shellCommand(input)?.slice(0, 300) ?? input.tool_name;
+  if (input.tool_name.startsWith('mcp__')) return input.tool_name;
+  // redacted before it is cut, so the cut never leaves half a secret that no pattern matches
+  const command = shellCommand(input);
+  return targetPath(input, plain) ?? (command !== null ? redactSecrets(command).slice(0, 300) : input.tool_name);
 }
 
 /** Prints the deny, and for an autonomous run records it in blocked.jsonl; stderr says so when it could not. */

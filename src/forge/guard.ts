@@ -172,7 +172,7 @@ export const TRUST_RULES: readonly GuardRule[] = [
     (t, ctx) => {
       const g = guardPath(t);
       if (!isTrustFile(g)) return false;
-      const common = ctx.gitCommonDirOf ? ctx.gitCommonDirOf(t) : ctx.gitCommonDir;
+      const common = ctx.gitCommonDirOf?.(t) ?? ctx.gitCommonDir;
       return common !== null && g === guardPath(path.join(common, 'forge', 'trust.json'));
     }),
   fileRule('local-yaml',

@@ -84,6 +84,29 @@ describe('hook guard in an autonomous run', () => {
     expect(r.rule).toBe('database');
     expect(JSON.stringify(r)).not.toContain('hunter2');
   });
+  it('redacts the command before it cuts it to 300 characters (I1)', () => {
+    autonomous();
+    const command = 'echo ' + 'a'.repeat(268) + '; psql postgres://u:hunter2@db.example.com/x -c "drop table t"';
+    guard({ session_id: 'coord-1', cwd: wt, tool_name: 'Bash', tool_input: { command } });
+    const [r] = readBlocked(main, 'spike-x');
+    expect(r.target).toContain('postgres://u:***');
+    expect(JSON.stringify(r)).not.toContain('hunter2');
+  });
+  it('records an MCP tool by its name, whatever its input holds', () => {
+    autonomous();
+    guard({ session_id: 'coord-1', cwd: wt, tool_name: 'mcp__github__createIssue', tool_input: { title: 'x', file_path: 'notes.md' } });
+    expect(readBlocked(main, 'spike-x').map(r => [r.rule, r.target])).toEqual([['mcp-write', 'mcp__github__createIssue']]);
+  });
+  it('an autonomous block that does not read denies every call with its own reason, and lets FORGE stop through (T7-INVALID-RUN-REASON)', () => {
+    writeFileSync(runFile(main), JSON.stringify({ ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: { profile: 'nope' } }));
+    const reasons = [
+      guard({ session_id: 'coord-1', cwd: wt, tool_name: 'Bash', tool_input: { command: 'ls' } }),
+      guard({ session_id: 'coord-1', cwd: wt, tool_name: 'mcp__github__getIssue', tool_input: {} }),
+    ].map(o => o.permissionDecisionReason);
+    for (const reason of reasons) expect(reason).toMatch(/^forge autonomy · guard-error: the autonomous block of \.forge\/run\.json does not read/);
+    expect(guard({ session_id: 'coord-1', cwd: wt, tool_name: 'Bash', tool_input: { command: 'node /p/forge.cjs stop' } })).toBeNull();
+    expect(guard({ session_id: 'coord-1', cwd: wt, tool_name: 'Bash', tool_input: { command: 'node /p/forge.cjs stop; rm -rf x' } })).toMatchObject({ permissionDecision: 'deny' });
+  });
   it('a denial it cannot record still denies, and says so on stderr (M17)', () => {
     autonomous();
     writeFileSync(path.join(main, '.forge', 'autonomous'), 'not a folder');
@@ -115,5 +138,19 @@ describe('judgeGuard and redactSecrets', () => {
     const s = redactSecrets('psql postgres://u:hunter2@h/x -c x; mysql -psecret1; PGPASSWORD=pw2 GITHUB_TOKEN=ghp_abc123 curl -H "Authorization: Bearer tok3" sk-live9');
     for (const w of ['hunter2', 'secret1', 'pw2', 'ghp_abc123', 'tok3', 'sk-live9']) expect(s, w).not.toContain(w);
     expect(s).toContain('postgres://u:***@h/x');
+  });
+  it.each([
+    `mysql -u root -p'hunter2' db`, `mysql -u root -p"hunter2" db`, `mysql "-phunter2" db`, `mysql '-phunter2' db`, `mysql -h db -u root -phunter2`,
+    `mysqldump --password=hunter2 db`, `mysqldump --password hunter2 db`, `mysqldump --password="hunter2 x" db`, `tool --PASSWORD=hunter2`,
+    `curl -H 'Cookie: sid=hunter2' https://x`, `curl -H Authorization:hunter2 https://x`, `curl -H "Authorization: Bearer hunter2" x`,
+    `MYSQL_PWD=hunter2 mysql`, `export AWS_SECRET_ACCESS_KEY=hunter2`, `CLIENT_SECRET='hunter2 x' node a`,
+    `$env:GITHUB_TOKEN = "hunter2"`, `$env:GITHUB_TOKEN="hunter2"`, `$env:PGPASSWORD='hunter2'; psql`, `$env:API_KEY = hunter2`, `$env:SOME_SECRET = 'hunter2'`, `$env:MYSQL_PWD = "hunter2"`,
+    `mongosh mongodb+srv://u:hunter2@h/db`, `curl -d token=xoxb-123-hunter2`, `git clone https://github_pat_hunter2@github.com/a/b`,
+    `aws configure set aws_access_key_id AKIAHUNTER2`, `OPENAI=sk-proj-hunter2 node a`, `git remote add o https://x:ghp_hunter2@github.com/a`,
+  ])('redacts %s', command => {
+    expect(redactSecrets(command)).not.toContain('hunter2');
+  });
+  it('leaves a command without secrets alone', () => {
+    expect(redactSecrets('mkdir -p out && ls -p')).toBe('mkdir -p out && ls -p');
   });
 });
