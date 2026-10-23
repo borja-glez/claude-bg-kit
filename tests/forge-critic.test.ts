@@ -100,7 +100,8 @@ describe('proposals batch', () => {
     add(P('park'), 'parked one', { status: 'discussing', parked: { why: 'w', loses: 'l', at: ts } });
     add(P('disc'), 'discussed one', { status: 'discussing' });
     add(P('rejd'), 'rejected one', { status: 'rejected' });
-    add(P('chat'), 'owner chat idea', { source: 'user', author: 'user:o' }, { from: 'chat', owner: true, author: 'user:o', source: 'user' });
+    // As `add --from-chat` writes it while no owner is known (its author is then `owner`).
+    add(P('chat'), 'owner chat idea', { source: 'user', author: 'owner' }, { from: 'chat', owner: true, author: 'owner', source: 'user' });
     add(P('note'), 'someone else idea', { source: 'user', author: 'user:x' }, { from: 'note:n1', owner: false, author: 'user:x', source: 'user' });
     add(P('page'), 'written on the page', { source: 'user', author: 'user:x' }, null);
     add(P('verf'), 'verify defect', { source: 'verify' }, { from: 'verify:T1' });

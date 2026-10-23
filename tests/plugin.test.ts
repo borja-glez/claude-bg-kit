@@ -2280,7 +2280,11 @@ describe('plugin layout', () => {
     expect(lines.find(l => l.startsWith('1. **Read decisions.**')), '3.1').toContain('references/autonomous.md');
     expect(lines.find(l => l.startsWith('5. **Record.**')), '3.5').toContain('references/autonomous.md');
     expect(read('plugins/waypoint/skills/work/SKILL.md')).toContain("or `forge/<profile>-<name>` in a forge profile's worktree");
-    expect(runRef('trust')).toContain('**In an autonomous profile** (`run.autonomous` in `FORGE infinite status`) never ask the trust question');
+    // T6B2-TRUST-KEY: keyed on the printed `trust.blocked`, which only an active profile's worktree gets, so an attended run
+    // in the main checkout keeps its question while a profile runs elsewhere.
+    expect(runRef('trust')).toContain('**A `trust` with `blocked: true`** is never asked');
+    expect(runRef('trust')).not.toContain('`run.autonomous` in `FORGE infinite status`');
+    expect(runRef('autonomy')).toContain('a `trust` with `blocked: true` is never asked');
     const auto = read('plugins/forge/skills/infinite/references/autonomous.md');
     for (const w of ['FORGE proposals batch --pending --out', 'count: 0', '--base forge/<p>-<n>']) expect(auto, w).toContain(w);
     expect(auto).not.toContain('stalled tick');

@@ -286,13 +286,56 @@ describe('a v2 keeps its original\'s standing (I-2)', () => {
     expect([outcome(ofDecided), outcome(ofMissing)]).toEqual(['waits-owner', 'waits-owner']);
     expect([loadProposal(root, ofDecided)?.status, loadProposal(root, ofMissing)?.status, decisions()]).toEqual(['proposed', 'proposed', []]);
   });
+  it('a v2 the critic drops takes its adapted original with it: rejected, with its reason and mark, the decision first (T6B2-PENDING-V2)', () => {
+    const orig = add({ title: 'Big shop' });
+    verdicts({ id: orig, verdict: 'adapt', why: 'too big', changes: 'only cosmetic items' });
+    expect(outcome(orig)).toBe('adapt');
+    const v2 = add({ title: 'Cosmetic shop', rationale: `r (v2 of ${orig})` }, ['--revises', orig]);
+    verdicts({ id: v2, verdict: 'drop', why: 'still moves nothing for the player' });
+    expect(JSON.parse(judge(v2).stdout)).toMatchObject({
+      outcome: 'rejected', write: { status: 'rejected', reason: 'still moves nothing for the player' },
+      original: { id: orig, write: { status: 'rejected', reason: 'its v2 was dropped' }, approval: { doc_id: orig, data: { status: 'rejected', by: 'forge:auto' } } },
+    });
+    expect([loadProposal(root, orig)?.status, loadProposal(root, orig)?.reason, loadApproval(root, orig)?.status]).toEqual(['rejected', 'its v2 was dropped', 'rejected']);
+    expect(decisions()).toHaveLength(1);
+    expect(judged().map(e => [e.id, e.status])).toEqual([[v2, 'rejected'], [orig, 'rejected']]);
+    // In Spanish, the original's reason too.
+    autonomousRun(root, 'es');
+    const o2 = add({ title: 'Ranking global' });
+    const w2 = add({ title: 'Ranking semanal', rationale: `r (v2 of ${o2})` }, ['--revises', o2]);
+    verdicts({ id: w2, verdict: 'drop', why: 'no aporta' });
+    expect(JSON.parse(judge(w2).stdout).original).toMatchObject({ id: o2, write: { reason: 'su v2 se descartó' } });
+  });
+  it('--pending leaves out an original while its v2 is open, and what judge answers without the verdict (T6B2-PENDING-V2, N3)', () => {
+    const pending = () => JSON.parse(run(['proposals', 'batch', '--pending', '--out', 'b.json'], io()).stdout).ids as string[];
+    const orig = add({ title: 'Big shop' });
+    const v2 = add({ title: 'Cosmetic shop', rationale: `r (v2 of ${orig})` }, ['--revises', orig]);
+    // no add event in this ledger (pulled from the roadmap), and a text edited since forge added it: both wait for the owner
+    const pulled = 'p20261022090000pull';
+    saveProposal(root, pulled, { ...loadProposal(root, orig)!, title: 'Pulled one', rationale: 'from the page' });
+    const edited = add({ title: 'Combo meter' });
+    saveProposal(root, edited, { ...loadProposal(root, edited)!, title: 'Combo meter, edited on the page' });
+    // a v2 of a parked idea waits with it
+    const idea = add({ title: 'Online mode', source: 'user' });
+    fromChat(idea);
+    verdicts({ id: idea, verdict: 'clash', why: 'the vision is a solo game', loses: 'the focus on solo play' });
+    expect(outcome(idea)).toBe('parked');
+    const ofParked = add({ title: 'Local co-op', rationale: `r (v2 of ${idea})`, source: 'user' }, ['--revises', idea]);
+    const free = add({ title: 'Daily challenge' });
+    expect(pending().sort()).toEqual([v2, free].sort());
+    expect(pending()).not.toContain(ofParked);
+    // Once the v2 is decided, the original is no longer held by it.
+    verdicts({ id: v2, verdict: 'keep', why: 'small and fun' });
+    expect(outcome(v2)).toBe('approved');
+    expect(pending()).toEqual([free]);
+  });
   it("a v2 from someone's comment on forge's proposal, added as source: user with the comment's author, waits for the owner (T6B2-COMMENT-V2)", () => {
     const orig = add({ title: 'Big shop' });
     writeFileSync(path.join(root, 'v2.json'), JSON.stringify({ category: 'feature', risk: 'high', title: 'Cosmetic shop', rationale: `r (v2 of ${orig})`, evidence: 'e', pillar: 'Juice', source: 'user' }));
     const v2 = JSON.parse(run(['proposals', 'add', '--file', 'v2.json', '--revises', orig, '--author', 'user:editor'], io()).stdout).id as string;
     expect(loadProposal(root, v2)).toMatchObject({ source: 'user', author: 'user:editor' });
-    // --pending leaves it out (its original, forge's own, is still taken), and judge, given a keep, says it waits.
-    expect(JSON.parse(run(['proposals', 'batch', '--pending', '--out', 'b.json'], io()).stdout).ids).toEqual([orig]);
+    // --pending leaves it out, and its original too while it is open (T6B2-PENDING-V2); judge, given a keep, says it waits.
+    expect(JSON.parse(run(['proposals', 'batch', '--pending', '--out', 'b.json'], io()).stdout).ids).toEqual([]);
     verdicts({ id: v2, verdict: 'keep', why: 'small and fun' });
     expect(JSON.parse(judge(v2).stdout)).toMatchObject({ outcome: 'waits-owner', write: null, approval: null });
     expect([loadProposal(root, v2)?.status, loadProposal(root, orig)?.status, decisions()]).toEqual(['proposed', 'proposed', []]);
