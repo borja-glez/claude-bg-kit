@@ -469,6 +469,7 @@ const MAX_DEPTH = 16;
 /** H6: wrappers dropped from the front of a segment, with their options that take a value and the words before the command. */
 const WRAPPERS = new Map<string, [readonly string[], number]>([
   ['nohup', [[], 0]], ['time', [[], 0]], ['exec', [['-a'], 0]], ['command', [[], 0]], ['builtin', [[], 0]], ['doas', [['-u', '-C'], 0]],
+  ['sudo', [['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-T'], 0]], ['gsudo', [[], 0]],
   ['chronic', [[], 0]], ['busybox', [[], 0]], ['timeout', [['-s', '--signal', '-k', '--kill-after'], 1]], ['nice', [['-n', '--adjustment'], 0]],
   ['ionice', [['-c', '--class', '-n', '--classdata', '-p', '--pid', '-P', '--pgid', '-u', '--uid'], 0]],
   ['stdbuf', [['-i', '-o', '-e', '--input', '--output', '--error'], 0]], ['watch', [['-n', '--interval', '-q', '--equexit'], 0]],

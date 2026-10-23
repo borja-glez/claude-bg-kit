@@ -1,7 +1,8 @@
 // Plan 6b-1, Tasks 4–6: the helpers the autonomy rules share. An autonomous run's guard reads a Bash or PowerShell
 // command as its own shell reads it (Task 1), and judges every path it would write against the run's roots. Only inside
 // the roots is allowed (confinedIn, B1: never isInside, which folds spellings toward «inside»); an unknown target is a
-// deny. Pure: reads no file, starts no process. Tasks 5 and 6 add mcpWords here; the rules live in autonomy-rules.ts.
+// deny. Pure: reads no file, starts no process. mcpWords lives here (Tasks 5 and 6 use it); the rules live in
+// autonomy-rules.ts (self/files/install/git) and autonomy-net.ts (network/cloud/mcp-write), re-exported from the former.
 import type { GuardCtx, GuardInput, GuardVerdict } from './guard.js';
 import { confinedIn, shellCommand, SHELL_TOOLS } from './guard.js';
 import { shellSegments, shellPath, type Dialect, type Segment, type Word } from './shell-words.js';

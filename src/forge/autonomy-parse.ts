@@ -142,7 +142,7 @@ function bashWrite(seg: Segment): WriteInfo {
 
 type PK = 'p' | 's' | 'c' | 'v' | 'w'; // path target, source, content, valued (exempt), switch
 // Common parameters every cmdlet accepts; a valued one consumes its value, a switch does not.
-const COMMON: Record<string, PK> = {
+export const COMMON: Record<string, PK> = {
   erroraction: 'v', ea: 'v', warningaction: 'v', wa: 'v', informationaction: 'v', infa: 'v', errorvariable: 'v', ev: 'v', warningvariable: 'v', wv: 'v',
   informationvariable: 'v', iv: 'v', outvariable: 'v', ov: 'v', outbuffer: 'v', ob: 'v', pipelinevariable: 'v', pv: 'v', progressaction: 'v', proga: 'v', verbose: 'w', debug: 'w', whatif: 'w', confirm: 'w',
 };
@@ -190,7 +190,7 @@ const PS_CMDLETS: Record<string, Spec> = {
 };
 
 /** Resolve a typed PowerShell parameter name (or unambiguous prefix) against this cmdlet's parameters and the common ones. */
-function resolveParam(spec: Spec, nm: string): string | null {
+export function resolveParam(spec: Spec, nm: string): string | null {
   if (spec.params[nm] !== undefined) return nm;
   if (COMMON[nm] !== undefined) return nm;
   const keys = [...Object.keys(spec.params), ...Object.keys(COMMON)].filter(k => k.startsWith(nm));
@@ -244,6 +244,44 @@ function itemLinks(named: Record<string, Word>): boolean {
 }
 
 const isPsCmdlet = (name: string): boolean => PS_CMDLETS[PS_ALIAS[name] ?? name] !== undefined;
+
+/** What Invoke-WebRequest / Invoke-RestMethod would do over the network (Task 5 reuses Task 4's cmdlet reading, T5-LESSONS 5). */
+export interface WebReq { uri: Word | null; method: string; methodDynamic: boolean; hasBody: boolean; dynamicOther: boolean; unknownParam: boolean }
+const WEB_CMDLETS = new Set(['invoke-webrequest', 'invoke-restmethod']);
+/** Read a web-request segment with the cmdlet's own parameter set (abbreviation, `-Name:Value`, case, common parameters), or null when it is not one. */
+export function readWebRequest(seg: Segment): WebReq | null {
+  if (!seg.argv.length) return null;
+  const canon = PS_ALIAS[commandName(seg.argv[0])] ?? commandName(seg.argv[0]);
+  if (!WEB_CMDLETS.has(canon)) return null;
+  const spec = PS_CMDLETS[canon];
+  const args = seg.argv.slice(1);
+  let uri: Word | null = null, method = '', methodDynamic = false, hasBody = false, dynamicOther = false, unknownParam = false;
+  const positionals: Word[] = [];
+  const apply = (p: string, v: Word) => {
+    if (p === 'method' || p === 'custommethod') { if (v.dynamic) methodDynamic = true; else method = v.text.toUpperCase(); }
+    else if (p === 'body' || p === 'form' || p === 'infile') hasBody = true;
+    else if (p === 'uri') uri = v;
+  };
+  for (let k = 0; k < args.length; k++) {
+    const w = args[k], t = w.text;
+    if (w.dynamic && /^@/.test(t)) { dynamicOther = true; continue; } // a splat @name hides the parameters
+    const glued = /^-([A-Za-z][\w-]*):(.*)$/s.exec(t);
+    if (glued) { const p = resolveParam(spec, glued[1].toLowerCase()); if (p) apply(p, word(glued[2], w.dynamic)); else unknownParam = true; continue; }
+    const bare = /^-([A-Za-z][\w-]*)$/.exec(t);
+    if (bare) {
+      const p = resolveParam(spec, bare[1].toLowerCase());
+      if (!p) { unknownParam = true; continue; }
+      if (kindOf(spec, p) === 'w') continue;
+      const nx = args[k + 1];
+      if (nx && !nx.text.startsWith('-')) { apply(p, nx); k++; }
+      continue;
+    }
+    positionals.push(w);
+  }
+  if (!uri && positionals.length) uri = positionals[0];
+  for (const p of positionals) if (p !== uri && p.dynamic) dynamicOther = true;
+  return { uri, method, methodDynamic, hasBody, dynamicOther, unknownParam };
+}
 
 /** What a write-class segment would write. In the powershell dialect a known cmdlet is read by psWrite; an external command (robocopy, tar, …) by bashWrite. */
 export function writeInfo(seg: Segment): WriteInfo {

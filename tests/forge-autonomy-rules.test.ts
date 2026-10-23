@@ -650,3 +650,63 @@ describe('mcp-write', () => {
     expect(mcpWriteRule.check(mcp('mcp__github__createIssue'), ATTENDED)).toBeNull();
   });
 });
+
+// ---- fix round 1: the review's probe MISS rows, both directions (T5-CLOUD-SHAPE, runners, PowerShell curl, splats, httpie stdin) ----
+
+describe('fix round 1 · network', () => {
+  it.each([
+    // PowerShell real curl.exe / wget.exe and bare curl read as Invoke-WebRequest
+    P('curl.exe --data x https://api.example.com/items'), P('curl.exe --request POST https://api.example.com/items'), P(`curl --json '{"a":1}' https://api.example.com`),
+    P('wget.exe --post-data=a=1 https://api.example.com'), P('curl -Method Post https://api.example.com'), P(`$p = @{Uri='https://api.example.com/x'; Method='Post'; Body='a'}; Invoke-RestMethod @p`),
+    // httpie stdin body and a custom method
+    B(`echo '{"a":1}' | http api.example.com/items`), B('http api.example.com/items < body.json'), B('http PURGE cdn.example.com/x'),
+    // publishers after a global/workspace option, management forms, runners, sudo, mvnw
+    B('pnpm --filter ./packages/a publish'), B('pnpm -F a publish'), B('npm -w packages/a publish'), B('docker image push me/img'), B('docker build --push -t me/img .'),
+    B('./mvnw deploy'), B('yarn workspace a npm publish'), B('uv run twine upload dist/app.whl'), B('sudo npm publish'), B('npx vsce@latest publish'), B('docker compose push'),
+    B('docker buildx build --push=true -t me/img .'),
+    // curl: a second URL, -K config, wget -e
+    B('curl -d x http://localhost:3000 --url https://api.example.com'), B('curl -K req.cfg'), B('wget -e post_data=a=1 https://api.example.com'),
+  ])('denies a write off the machine: %s', (_, input) => expect(networkRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'network' }));
+  it.each([
+    P('curl.exe -sL https://example.com'), P('curl.exe -X POST http://localhost:3000/x -d a'),
+    B('curl -X POST localhost:3000/api -d x'), B('curl -G --data-urlencode q=x https://api.github.com/search/repositories'), B('nc -z localhost 5432'),
+  ])('allows a read or a local write: %s', (_, input) => expect(networkRule.check(input, CTX)).toBeNull());
+});
+
+describe('fix round 1 · cloud (T5-CLOUD-SHAPE)', () => {
+  it.each([
+    // gh api glued/abbreviated forms; a version value is not help; a write verb spelled as a prefix; runners with @version or a package that is not the bin
+    B('gh api --method POST -H "Accept: application/vnd.github+json" /repos/o/r/issues -f title=x'), B('gh api -XPOST repos/o/r/issues'), B('gh api repos/o/r/issues -ftitle=x'),
+    B('gh api --input body.json repos/o/r/issues'), B('gh api --method=PATCH repos/o/r/issues/3'), B('helm upgrade --install web ./chart --version 1.2.3'), B('gcloud app deploy --version v2'),
+    B('gsutil -h "Cache-Control:no-cache" cp a.html gs://b/'), B('kubectl run tmp --image=busybox -- df -h'), B('aws logs delete-log-group --log-group-name /x'),
+    B('npx vercel@latest --prod'), B('npx netlify-cli deploy --prod'), B('npx firebase-tools deploy'), B('npx aws-cdk deploy'), B('npx eas-cli@latest build'),
+    B('gh run rerun 123'), B('gh workflow run ci.yml'), B('kubectl -n prod rollout undo deploy/x'), B('supabase db push'), B('gh release upload v1 a.zip'),
+    // T5-CLOUD-SHAPE accepted cost: a flag value that is a write verb denies
+    B('gh issue list --label deploy'),
+  ])('denies a write by a cloud CLI: %s', (_, input) => expect(cloudRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'cloud' }));
+  it.each([
+    // nouns that are also write verbs read; group CLIs read to the third word; local-dev commands; global switches before a read verb
+    B('kubectl get deploy'), B('kubectl describe deploy web'), B('gh run list'), B('gh run view 123 --log'), B('gh run watch 123'), B('gcloud run services list'),
+    B('gcloud compute instances list'), B('helm --debug list'), B('kubectl --insecure-skip-tls-verify get pods'), B(`gh api graphql -f query='{viewer{login}}'`), B('wrangler kv key list --binding X'),
+    B('wrangler dev'), B('vercel dev'), B('netlify dev'), B('supabase start'), B('firebase emulators:start'), B('sam local start-api'), B('helm template web ./chart'),
+    B('stripe listen --forward-to localhost:3000/webhook'), B('kubectl port-forward svc/web 8080:80'), B('cdk synth'), B('pulumi preview'), B('gh repo clone o/r'), B('supabase db reset'),
+    B('npx wrangler dev'), B('gh auth status'), B('aws logs tail /aws/lambda/x --follow'), B('kubectl logs deploy/web'),
+    // T5-CLOUD-SHAPE accepted limit: a write whose verb is a plain word (config) behind a read-verb group word (log) is not caught
+    B('az webapp log config -n x -g y --application-logging filesystem'),
+  ])('allows a read or local-dev command: %s', (_, input) => expect(cloudRule.check(input, CTX)).toBeNull());
+});
+
+describe('fix round 1 · mcp-write (T5-BROWSER, more write words)', () => {
+  it.each([
+    ['mcp__github__manage_notification_subscription'], ['mcp__github__rerun_failed_jobs'], ['mcp__x__toggleFeatureFlag'], ['mcp__x__acceptInvitation'],
+    // the person's signed-in browser: interaction tools deny
+    ['mcp__claude-in-chrome__form_input'], ['mcp__claude-in-chrome__computer'],
+  ])('denies %s', (name) => expect(mcpWriteRule.check(mcp(name), CTX)).toMatchObject({ decision: 'deny', rule: 'mcp-write' }));
+  it.each([
+    // find_replace stays allowed (name-matching limit); chrome-devtools is an isolated browser, kept on the name rule (click is not a write word)
+    ['mcp__docs__find_replace'], ['mcp__plugin_chrome-devtools-mcp_chrome-devtools__click'],
+    ['mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page'], ['mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page'], ['mcp__github__get_merge_status'],
+    // signed-in browser read tools are allowed
+    ['mcp__claude-in-chrome__read_page'], ['mcp__claude-in-chrome__navigate'],
+  ])('allows %s', (name) => expect(mcpWriteRule.check(mcp(name), CTX)).toBeNull());
+});
