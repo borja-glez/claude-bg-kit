@@ -137,6 +137,30 @@ describe('6b-2 Task 0 fix 1 · ssh, scp and rsync options; GIT_TRACE values', ()
   it.each<Row>([B('ssh localhost ps -o pid'), B(`ssh localhost grep -F x ${W('a.txt')}`), B(`ssh -o "StrictHostKeyChecking no" localhost ls ${W('')}`),
     B(`ssh -J localhost -o BatchMode=yes localhost ls ${W('')}`)])(
     'every rule allows a remote command with its own options, the space form, and a local -J: %s', (_, input) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
+  // fix round 3 (T6B2-SSH-ONE-PARSER): one table reading finds the destination for every rule; options right after the host are read
+  // with the same table; -I and -O (but `-O check`) are unknown targets; the files rule skips the option values that are reads (-i).
+  it.each<Row>([
+    ['AH1 -o after the host', bash('ssh localhost -o ProxyCommand=x true')], ['AH2 glued after the host', bash(`ssh localhost -oProxyCommand=x ls ${W('')}`)],
+    ['AH3 -F after the host', bash(`ssh localhost -F cfg ls ${W('')}`)], ['TB1 -I pkcs11', bash('ssh -I ./lib.so localhost true')], ['TB9 -I named like a host', bash('ssh -I localhost localhost true')],
+    ['HD2 -I then a remote host', bash('ssh -I localhost remote.example.com')], ['TB10 -O exit', bash('ssh -O exit localhost')], ['-O stop', bash('ssh -O stop localhost')],
+    ['a dynamic remote command', bash('ssh localhost "$CMD"')],
+  ])('network: %s is an unknown target, read through the table', (_, input) => {
+    unknownBy('network', networkRule.check(input, CTX));
+    expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toMatchObject({ decision: 'deny' });
+  });
+  it.each<Row>([
+    ['HD1 -E then a remote host', bash('ssh -E localhost remote.example.com')], ['HD3 -B then a remote host', bash('ssh -B localhost remote.example.com')],
+    ['sftp to a remote host', bash('sftp -b batch.txt remote.example.com')],
+  ])('network: the table finds the real destination, a host that is not local: %s', (_, input) => {
+    const v = networkRule.check(input, CTX);
+    expect(v).toMatchObject({ decision: 'deny', rule: 'network' });
+    expect((v as { reason: string }).reason).toMatch(/connects to another host/);
+  });
+  it.each<Row>([
+    ['EV8 -i ~/.ssh', bash(`ssh -i ~/.ssh/id_ed25519 localhost ls ${W('')}`)], ['EV10 -vo allowed key', bash(`ssh -vo BatchMode=yes localhost ls ${W('')}`)],
+    ['EV12 -vp bundle', bash(`ssh -vp 2222 localhost ls ${W('')}`)], ['-O check', bash('ssh -O check localhost')], ['sftp -i ~', bash('sftp -i ~/.ssh/id_ed25519 localhost')],
+    ['options after the host that allow', bash(`ssh localhost -p 22 -o BatchMode=yes ls ${W('')}`)],
+  ])('every rule allows %s', (_, input) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
   it.each<Row>([
     B(`ssh -o StrictHostKeyChecking=no -o BatchMode=yes localhost ls ${W('')}`), B(`ssh -o ConnectTimeout=5 -o UserKnownHostsFile=/dev/null localhost ls ${W('')}`),
     B(`scp -o BatchMode=yes a.txt localhost:${W('b.txt')}`), B(`rsync -e ssh src/ localhost:${W('dst')}/`),

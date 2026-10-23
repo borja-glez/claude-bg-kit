@@ -335,3 +335,21 @@ export const COMPOSE_RUN = T(`-d --detach --name= --entrypoint= -e= --env= -l= -
   -v= --volume= -w= --workdir= -T --no-TTY -i --interactive -t --tty --build --pull= --quiet-pull --remove-orphans --cap-add= --cap-drop= --help`);
 export const COMPOSE_EXEC = T('-d --detach --privileged -u= --user= -T --no-TTY --index= -e= --env= -w= --workdir= --help -i --interactive -t --tty');
 export const DOCKER_CP = T('-a --archive -L --follow-link -q --quiet --overwrite --help');
+
+// ---- the ssh family (6b-2 Task 0, T6B2-SSH-FAILCLOSED and T6B2-SSH-ONE-PARSER) ----------------------------------------
+
+// Each tool's options from its OpenSSH man page. The network rule judges them (switch, checked value, or unknown target);
+// shell-words and every rule find the destination with the same reading (sshParts, head), never a second parser.
+export const SSH_OPTS = T('-4 -6 -A -a -C -f -G -g -K -k -N -n -q -T -t -V -v -X -x -Y -y -s -B= -b= -c= -D= -E= -e= -F= -I= -i= -J= -L= -l= -m= -O= -o= -p= -Q= -R= -S= -W= -w=');
+export const SCP_OPTS = T('-3 -4 -6 -A -B -C -O -p -q -r -T -v -d -c= -F= -i= -J= -l= -o= -P= -S= -X=');
+export const SFTP_OPTS = T('-4 -6 -a -f -N -p -q -r -v -A -C -c= -B= -b= -D= -F= -i= -J= -l= -o= -P= -R= -S= -X=');
+
+/** One ssh call read: the options before the destination, the destination's index (-1 when none), the options OpenSSH reads again right after it, and where the remote command starts. */
+export interface SshParts { pre: { at: number; unknown: boolean; sc: Scan }; dest: number; post: { at: number; unknown: boolean; sc: Scan } | null; cmd: number }
+/** ssh's words read with SSH_OPTS: OpenSSH re-runs getopt right after the destination, so options there are read too, up to the first non-option (the remote command). */
+export function sshParts(args: Word[], d: Dialect): SshParts {
+  const pre = head(args, SSH_OPTS, d);
+  if (pre.at >= args.length) return { pre, dest: -1, post: null, cmd: args.length };
+  const post = head(args.slice(pre.at + 1), SSH_OPTS, d);
+  return { pre, dest: pre.at, post, cmd: pre.at + 1 + post.at };
+}

@@ -11,7 +11,8 @@ import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
 import { isLocalHost } from './resources.js';
 import { commandName, GIT_VALUED, isNullSink, type Segment, type Word } from './shell-words.js';
 import { bashSegments, deny, insideRoots, mcpWords, segmentPath, withContainers } from './autonomy-shared.js';
-import { BASH_TABLES, head, scan, T, type OptTable, type Scan } from './autonomy-tables.js';
+import { BASH_TABLES, head, scan, sshParts, type OptTable, type Scan } from './autonomy-tables.js';
+import { NETCAT_VALUED, SSH_FAMILY, SSH_O_ALLOW } from './autonomy-net-tables.js';
 import { readWebRequest, type WebReq } from './autonomy-parse.js';
 
 const NET_INSTEAD = 'only local services may be written; record the action as not done';
@@ -326,14 +327,6 @@ export function effectiveCommand(seg: Segment): Eff | Cancel | null {
 const SSH_LIKE = new Set(['ssh', 'scp', 'sftp', 'nc', 'ncat', 'telnet']);
 const NPM_PUBLISH = new Set(['publish', 'unpublish', 'deprecate', 'dist-tag', 'owner', 'access', 'token', 'login', 'adduser']);
 const RUN_SUBS = new Set(['run', 'run-script', 'exec', 'x', 'dlx']);
-const SSH_VALUED: Record<string, Set<string>> = {
-  ssh: new Set(['-p', '-i', '-o', '-l', '-c', '-b', '-e', '-F', '-L', '-R', '-D', '-W', '-J', '-Q', '-m', '-O', '-S', '-w']),
-  scp: new Set(['-P', '-i', '-o', '-c', '-l', '-F', '-J', '-S']),
-  sftp: new Set(['-P', '-i', '-o', '-c', '-l', '-F', '-J', '-S', '-B', '-D', '-R', '-b']),
-  nc: new Set(['-p', '-s', '-w', '-X', '-x', '-b', '-q', '-i', '-O', '-T', '-g', '-G', '-m']),
-  ncat: new Set(['-p', '-s', '-w', '-g', '-G', '-m', '-i', '-e', '-c']),
-  telnet: new Set(['-b', '-l', '-n', '-e']),
-};
 /** Whether an rsync/scp operand is a remote spec `[user@]host:path`, `host::module` or `rsync://…` (not a local path or a Windows drive). */
 function rsyncRemote(text: string): boolean {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return true;
@@ -346,24 +339,25 @@ function hostToken(spec: string): string {
   const at = s.indexOf('@'); if (at >= 0) s = s.slice(at + 1);
   return s.split(/[:/\s]/)[0];
 }
-// fix 1 (m3 ruling): the ssh `-o` keys the run may set. Any other key — ProxyCommand, LocalCommand, PermitLocalCommand,
-// ProxyJump, `Match exec`, … — runs or changes a command on this machine whatever the host, so it is an unknown target.
-const SSH_O_ALLOW = new Set(['stricthostkeychecking', 'userknownhostsfile', 'batchmode', 'connecttimeout', 'connectionattempts', 'port', 'user',
-  'identityfile', 'identitiesonly', 'loglevel', 'serveraliveinterval', 'serveralivecountmax', 'compression', 'addkeystoagent', 'hostkeyalias',
-  'preferredauthentications', 'passwordauthentication']);
-
-// fix 2 (T6B2-SSH-FAILCLOSED): read the ssh family with Task 4's `scan`, a full option table per tool from its OpenSSH man
-// page. Every option is a switch that allows, a valued option that allows when its value checks out, or an unknown target;
-// an option the table does not have is an unknown target too. `deny` holds the options that run or reach outside the run
-// (forwards, control/program paths, config files); `-o`, `-J` and `-E` carry their own value checks.
-const SSH_OPTS = T('-4 -6 -A -a -C -f -G -g -K -k -N -n -q -T -t -V -v -X -x -Y -y -s -B= -b= -c= -D= -E= -e= -F= -I= -i= -J= -L= -l= -m= -O= -o= -p= -Q= -R= -S= -W= -w=');
-const SCP_OPTS = T('-3 -4 -6 -A -B -C -O -p -q -r -T -v -d -c= -F= -i= -J= -l= -o= -P= -S= -X=');
-const SFTP_OPTS = T('-4 -6 -a -f -N -p -q -r -v -A -C -c= -B= -b= -D= -F= -i= -J= -l= -o= -P= -R= -S= -X=');
-const SSH_FAMILY: Record<string, { table: OptTable; deny: ReadonlySet<string> }> = {
-  ssh: { table: SSH_OPTS, deny: new Set(['-F', '-S', '-L', '-R', '-D', '-w', '-W', '-s']) },
-  scp: { table: SCP_OPTS, deny: new Set(['-F', '-S']) },
-  sftp: { table: SFTP_OPTS, deny: new Set(['-F', '-S', '-D']) },
-};
+// fix 2 (T6B2-SSH-FAILCLOSED) and fix 3 (T6B2-SSH-ONE-PARSER): the ssh family is read with Task 4's `scan` and each tool's
+// full table (data in autonomy-tables.ts and autonomy-net-tables.ts): a switch allows, a valued option allows when its value
+// checks out, and a deny-set option, an option the table lacks or a dynamic word is an unknown target.
+/** The option scans of an ssh-family call: ssh's before and right after the destination (sshParts), scp's and sftp's up to the first operand. */
+function sshScans(tool: string, args: Word[], d: Segment['dialect']): { sc: Scan; unknown: boolean }[] {
+  if (tool !== 'ssh') return [head(args, SSH_FAMILY[tool].table, d)];
+  const p = sshParts(args, d);
+  return p.post ? [p.pre, p.post] : [p.pre];
+}
+/** fix 3: the ssh/scp/sftp option values that are reads (`-i <key>`, `-o IdentityFile=…`), read with the same table, so the files rule does not judge them as targets. */
+export function sshReadValues(seg: Segment): Set<Word> | null {
+  if (!seg.argv.length || seg.argv[0].dynamic) return null;
+  const tool = commandName(seg.argv[0]);
+  if (!SSH_FAMILY[tool]) return null;
+  const out = new Set<Word>();
+  for (const { sc } of sshScans(tool, seg.argv.slice(1), seg.dialect))
+    for (const { key, w } of sc.vals) if (key === '-i' || (key === '-o' && /^\s*identityfile(?:\s*=|\s)/i.test(w.text))) out.add(w);
+  return out;
+}
 
 /** A value word that resolves to `/dev/null` or a literal path inside the run's roots (for `-E`, `-o UserKnownHostsFile/IdentityFile`). */
 function insidePath(w: Word, seg: Segment, ctx: GuardCtx): boolean {
@@ -401,14 +395,15 @@ function sshFamilyDeny(tool: string, sc: Scan, unknown: boolean, seg: Segment, c
     if (key === '-o') { const v = sshOValueDeny(tool, w, seg, ctx); if (v) return v; }
     else if (key === '-J') { const v = sshJDeny(tool, w); if (v) return v; }
     else if (key === '-E' && !insidePath(w, seg, ctx)) return netUnknown(`${tool} -E writes a log the hook cannot place inside the roots`);
+    else if (key === '-O' && tool === 'ssh' && (w.dynamic || w.text !== 'check')) return netUnknown(`ssh -O ${w.text} acts on the person's ControlMaster connections`);
   }
   return null;
 }
 
-/** An ssh/scp/sftp call, judged by its own option table; ssh/scp/sftp stop option reading at the first operand (OpenSSH getopt). */
+/** An ssh/scp/sftp call, judged by its own option table: ssh's options before and right after the destination, scp's and sftp's up to the first operand. */
 function sshFamilyOptionsDeny(tool: string, args: Word[], seg: Segment, ctx: GuardCtx): GuardVerdict | null {
-  const h = head(args, SSH_FAMILY[tool].table, seg.dialect);
-  return sshFamilyDeny(tool, h.sc, h.unknown, seg, ctx);
+  for (const s of sshScans(tool, args, seg.dialect)) { const v = sshFamilyDeny(tool, s.sc, s.unknown, seg, ctx); if (v) return v; }
+  return null;
 }
 
 /** rsync's remote shell: an `ssh` command line read by the same table (anything else is unknown); `--rsync-path` runs a remote command. */
@@ -430,9 +425,20 @@ function rsyncRemoteShellDeny(args: Word[], seg: Segment, ctx: GuardCtx): GuardV
   return rsh ? rshDeny(rsh, seg, ctx) : null;
 }
 
-/** Every host an ssh-like command would reach is local (Minor 3). */
-function sshAllLocal(name: string, args: Word[]): boolean {
-  const valued = SSH_VALUED[name] ?? new Set<string>();
+/** A destination word names a local host. */
+const localDest = (w: Word | undefined): boolean => !w || (!w.dynamic && isLocalHost(hostToken(w.text)));
+/**
+ * Every host an ssh-like command would reach is local (Minor 3). fix 3 (T6B2-SSH-ONE-PARSER): ssh's destination is the one
+ * sshParts finds, scp's operands and sftp's destination come from their tables' reading; only the netcat family keeps a list.
+ */
+function sshAllLocal(name: string, args: Word[], d: Segment['dialect']): boolean {
+  if (name === 'ssh') { const p = sshParts(args, d); return localDest(p.dest >= 0 ? args[p.dest] : undefined); }
+  if (name === 'scp' || name === 'sftp') {
+    const ops = args.slice(head(args, SSH_FAMILY[name].table, d).at);
+    if (name === 'sftp') return localDest(ops[0]); // sftp's first operand is the destination
+    return ops.filter(w => rsyncRemote(w.text) || w.text.includes('@')).every(localDest);
+  }
+  const valued = NETCAT_VALUED[name] ?? new Set<string>();
   const ops: Word[] = [];
   for (let k = 0; k < args.length; k++) {
     const t = args[k].text;
@@ -440,12 +446,7 @@ function sshAllLocal(name: string, args: Word[]): boolean {
     if (t.startsWith('-')) { const key = t.includes('=') ? t.slice(0, t.indexOf('=')) : t; if (valued.has(key) && !t.includes('=')) k++; continue; }
     ops.push(args[k]);
   }
-  if (name === 'scp' || name === 'sftp') {
-    const rem = ops.filter(w => rsyncRemote(w.text) || w.text.includes('@'));
-    return rem.length ? rem.every(w => !w.dynamic && isLocalHost(hostToken(w.text))) : true;
-  }
-  const h = ops[0];
-  return h ? !h.dynamic && isLocalHost(hostToken(h.text)) : true;
+  return localDest(ops[0]);
 }
 function dockerPublish(args: Word[], ops: string[]): GuardVerdict | null {
   if (ops.includes('push') || ops.includes('login')) return netWrite('docker reaches a registry');
@@ -465,7 +466,7 @@ function publisherDeny(name0: string, args: Word[], seg: Segment, ctx: GuardCtx)
   const has = (set: Set<string>): boolean => words.some(w => set.has(w));
   if (SSH_LIKE.has(name)) {
     if (SSH_FAMILY[name]) { const od = sshFamilyOptionsDeny(name, args, seg, ctx); if (od) return od; } // fix 2: read ssh/scp/sftp options fail-closed
-    return sshAllLocal(name, args) ? null : netWrite(`${name} connects to another host`);
+    return sshAllLocal(name, args, seg.dialect) ? null : netWrite(`${name} connects to another host`);
   }
   if (name === 'rsync') { const e = rsyncRemoteShellDeny(args, seg, ctx); if (e) return e; const rem = ops.filter(w => rsyncRemote(w.text)); if (!rem.length) return null; return rem.every(w => !w.dynamic && isLocalHost(hostToken(w.text))) ? null : netWrite('rsync copies to another host'); }
   if (name === 'git') {

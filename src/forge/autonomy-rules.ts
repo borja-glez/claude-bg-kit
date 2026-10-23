@@ -19,7 +19,7 @@ import { copyEnds, isPsPipeItem, knownWriteCommand, newItemName, plainOperands, 
 // autonomy-db.ts (neither imports this file); re-exported here, and listed in AUTONOMY_RULES at the end, so the hook
 // assembles every rule from one module and the tests import them from autonomy-rules.js.
 // The final fix's ninth rule, `machine` (the person's processes, services and user-level settings), is autonomy-machine.ts's.
-import { networkRule, cloudRule, mcpWriteRule } from './autonomy-net.js';
+import { networkRule, cloudRule, mcpWriteRule, sshReadValues } from './autonomy-net.js';
 import { databaseRule, inlineSqlWords } from './autonomy-db.js';
 import { machineRule } from './autonomy-machine.js';
 export { networkRule, cloudRule, mcpWriteRule } from './autonomy-net.js';
@@ -204,6 +204,9 @@ export const filesRule: GuardRule = {
         // its host writes (--cidfile) and a cp's host destination stay judged
         const box = containerFiles(seg);
         if (box) cands = [...cands.filter(w => !box.skip.has(w)), ...box.writes];
+        // 6b-2 Task 0 fix 3: the ssh family's option values that are reads (-i <key>, -o IdentityFile=…), read with the network rule's table
+        const reads = sshReadValues(seg);
+        if (reads) cands = cands.filter(w => !reads.has(w));
         const v = cwdDeny(seg) ?? judgeAll(cands, seg); if (v) return v;
       }
     }
