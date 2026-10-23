@@ -108,6 +108,11 @@ export function prepareProfile(main: string, cwd: string, profile: Profile, name
   if (stale?.locked) {
     throw new UsageError(`infinite prepare: ${worktree} is registered and locked, but its folder is missing; bring the folder back, or unlock it (git worktree unlock) and run this again`);
   }
+  // n-1: an entry on another branch is someone's work whose folder may only have moved; clearing it would wire that folder to this worktree.
+  if (stale && stale.branch !== null && stale.branch !== branch) {
+    throw new UsageError(`infinite prepare: ${worktree} is registered on ${stale.branch}, not ${branch}, and its folder is missing; `
+      + 'bring the folder back (git worktree repair), or remove that entry (git worktree remove --force) if it is gone for good');
+  }
   const holder = exists ? null : checkouts.find(c => c.branch === branch && !samePath(c.dir, worktree));
   if (holder && existsSync(holder.dir)) throw new UsageError(`infinite prepare: ${branch} is checked out in ${holder.dir}; switch that checkout to another branch first`);
   if (holder) {

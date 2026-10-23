@@ -165,6 +165,18 @@ describe('infinite prepare', () => {
     expect(r2.stderr).toMatch(/the start branch feature no longer exists, and neither does forge\/spike-gone/);
     expect(existsSync(gone)).toBe(false);
   });
+  it('refuses a stale entry at its own path that holds another branch, and leaves it registered (n-1)', () => {
+    const { worktree } = profileNames(main, 'spike', 'tetris');
+    g(main, 'worktree', 'add', '-q', '-b', 'other-work', worktree);
+    renameSync(worktree, path.join(tmp('away-'), 'moved'));
+    const r = cli(main, ['prepare', '--profile', 'spike', '--name', 'tetris']);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('other-work');
+    expect(r.stderr).toContain(worktree);
+    expect(existsSync(worktree)).toBe(false);
+    expect(g(main, 'worktree', 'list', '--porcelain')).toContain('branch refs/heads/other-work');
+    expect(existsSync(startFile(main, 'spike-tetris'))).toBe(false);
+  });
   it('says so when git cannot name the branch it starts from, or cannot add the worktree (m-4)', () => {
     const outside = cli(tmp('nogit-'), ['prepare', '--profile', 'spike', '--name', 'tetris']);
     expect(outside.code).toBe(2);
