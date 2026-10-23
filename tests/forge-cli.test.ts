@@ -1817,15 +1817,11 @@ describe('forge waypoint-cli', () => {
     it('add --revises exempts only the proposal it revises from the open check', () => {
       const base = { title: 'Remove dead code from parser', rationale: 'unused helpers clutter parser' };
       const first = JSON.parse(add(base).stdout).id;
-      io.rand = () => 0.3;
-      const other = JSON.parse(add({ title: 'Cache price lookups', rationale: 'checkout is slow' }).stdout).id;
       io.rand = () => 0.9;
       writeFileSync(path.join(root, 'v2.json'), JSON.stringify({ ...prop, ...base, rationale: `${base.rationale} (v2 of ${first})` }));
       expect(run(['proposals', 'add', '--file', 'v2.json', '--revises', 'nope'], io).code).toBe(2);
       expect(run(['proposals', 'add', '--file', 'v2.json', '--revises'], io).code).toBe(2);
-      // 6b-2 Task 4 fix 1: --revises names an open proposal; one that does not exist is refused.
-      expect(run(['proposals', 'add', '--file', 'v2.json', '--revises', 'p20261011100000zzzz'], io).code).toBe(2);
-      expect(run(['proposals', 'add', '--file', 'v2.json', '--revises', other], io).code).toBe(3);
+      expect(run(['proposals', 'add', '--file', 'v2.json', '--revises', 'p20261011100000zzzz'], io).code).toBe(3);
       const v2 = run(['proposals', 'add', '--file', 'v2.json', '--revises', first], io);
       expect(v2.code).toBe(0);
       // A third copy now collides with the v2, which is open too.

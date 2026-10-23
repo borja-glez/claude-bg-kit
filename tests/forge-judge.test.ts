@@ -275,16 +275,14 @@ describe('a v2 keeps its original\'s standing (I-2)', () => {
     saveProposal(root, orig, { ...loadProposal(root, orig)!, status: 'proposed' });
     expect(JSON.parse(judge(v2).stdout)).toMatchObject({ outcome: 'approved', original: { id: orig } });
   });
-  it('add --revises must name an open proposal: a missing or decided one is refused', () => {
-    const orig = add({ title: 'Big shop' });
+  it('add --revises takes any proposal, as the attended flow does, and judge alone keeps the v2 to its original\'s standing (T6B2-REVISES-REVERT)', () => {
     const done = add({ title: 'Combo meter' });
     run(['proposals', 'decide', done, 'reject'], io());
-    writeFileSync(path.join(root, 'p.json'), JSON.stringify({ category: 'feature', risk: 'high', rationale: 'r', evidence: 'e', pillar: 'Juice', source: 'scout', title: 'Cosmetic shop' }));
-    const addV2 = (of: string) => run(['proposals', 'add', '--file', 'p.json', '--revises', of], io());
-    expect(addV2('p20261022090000zzzz').code).toBe(2);
-    expect(addV2(done).code).toBe(2);
-    // Positive control: an open one is revised.
-    expect(addV2(orig).code).toBe(0);
+    const ofDecided = add({ title: 'Cosmetic shop' }, ['--revises', done]);
+    const ofMissing = add({ title: 'Ghost replays' }, ['--revises', 'p20261022090000zzzz']);
+    verdicts({ id: ofDecided, verdict: 'keep', why: 'fine' }, { id: ofMissing, verdict: 'keep', why: 'fine' });
+    expect([outcome(ofDecided), outcome(ofMissing)]).toEqual(['waits-owner', 'waits-owner']);
+    expect([loadProposal(root, ofDecided)?.status, loadProposal(root, ofMissing)?.status, decisions()]).toEqual(['proposed', 'proposed', []]);
   });
 });
 

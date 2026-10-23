@@ -102,11 +102,6 @@ export const command: Command = (args, ctx) => {
       // A v2 names the proposal it revises with --revises, and only that one is exempt from the open-proposal check.
       const revises = subFlag('revises');
       if (has('revises') && (!revises || !PROPOSAL_ID.test(revises))) throw new UsageError('proposals add: --revises needs a proposal id');
-      // 6b-2 Task 4 fix 1, I-2: a v2 revises a proposal that exists and is still open, whose standing it then keeps.
-      const original = revises ? loadProposal(io.cwd, revises) : null;
-      if (revises && (!original || !canDecide(original.status))) {
-        throw new UsageError(`proposals add: --revises ${revises} must name an open proposal (proposed or discussing); ${original ? `it is ${original.status}` : 'there is none'}`);
-      }
       let r: AddOutcome;
       try {
         r = addProposal(io.cwd, o, { ts: ts(), author: subFlag('author') ?? o.author ?? 'session', now: io.now(), rand: io.rand ?? Math.random, ...(revises ? { revises } : {}) });
