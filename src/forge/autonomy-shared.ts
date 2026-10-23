@@ -63,3 +63,19 @@ export function insideRoots(p: string, ctx: GuardCtx): boolean {
 export function deny(rule: string, what: string, instead: string): GuardVerdict {
   return { decision: 'deny', rule, reason: `forge autonomy · ${rule}: ${what}. Instead: ${instead}` };
 }
+
+/**
+ * The words of an MCP tool name (Tasks 5 and 6): the part after the last `__` (Claude Code names a tool
+ * `mcp__<server>__<tool>`), split on `_`, `-` and an internal uppercase boundary, lower-cased —
+ * `mcp__github__createIssue` → `['create', 'issue']`, `mcp__plugin_x_y__send-message` → `['send', 'message']`.
+ */
+export function mcpWords(toolName: string): string[] {
+  const i = toolName.lastIndexOf('__');
+  const tail = i >= 0 ? toolName.slice(i + 2) : toolName;
+  return tail
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map(s => s.toLowerCase());
+}

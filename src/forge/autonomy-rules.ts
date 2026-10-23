@@ -14,6 +14,10 @@ import { commandName, GIT_VALUED, isNullSink, shellPath, type Dialect, type Segm
 import { bashSegments, deny, insideRoots, segmentPath } from './autonomy-shared.js';
 import { copyEnds, isPsPipeItem, knownWriteCommand, newItemName, plainOperands, writeInfo } from './autonomy-parse.js';
 
+// Task 5 (T5-FILE): the rules for writes off the machine live in autonomy-net.ts (it never imports this file); re-exported
+// here so the hook assembles every rule from one module and the tests import them from autonomy-rules.js.
+export { networkRule, cloudRule, mcpWriteRule } from './autonomy-net.js';
+
 // A write target kept for compatibility with the review probes; the rules read writeInfo directly.
 export function writeTargets(seg: Segment): Word[] { return writeInfo(seg).targets; }
 

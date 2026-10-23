@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { selfRule, filesRule, installRule, gitRule } from '../src/forge/autonomy-rules.js';
+import { selfRule, filesRule, installRule, gitRule, networkRule, cloudRule, mcpWriteRule } from '../src/forge/autonomy-rules.js';
+import { mcpWords } from '../src/forge/autonomy-shared.js';
 import { runTmp } from '../src/forge/resources.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { MAIN, WT, TMP, CTX, ATTENDED, withAuto, sh, bash, pwsh, edit, mcp, B, P } from './helpers/autonomy.js';
@@ -573,5 +574,79 @@ describe('post-breaker fix · self (T4-GLOB-SHORT)', () => {
     expect(selfRule.check(bash(`cp evil.json ${sh(path.join(root, 'cfg', 'settings.json'))}`, root), ctx)).toMatchObject({ decision: 'deny', rule: 'self' });
     expect(selfRule.check(edit(path.join(root, 'src', 'a.ts')), ctx)).toBeNull();
     expect(selfRule.check(bash('cp a.json other/settings.json', root), ctx)).toBeNull();
+  });
+});
+
+describe('network', () => {
+  it.each([
+    B('curl -X POST https://api.example.com/items -d "{}"'), B('curl --json \'{"a":1}\' https://api.example.com'), B('curl -F f=@a.png https://up.example.com'),
+    B('wget --post-data=a=1 https://example.com'), P('Invoke-RestMethod -Method Delete https://api.example.com/x'), B('http POST api.example.com a=1'),
+    B('npm publish'), B('docker push me/img'), B('scp a.txt host:/tmp/'), B('curl -X POST "$URL"'),
+    // M11: attached and abbreviated flags, more publishers
+    B('curl -XPOST https://api.example.com'), B('curl -sXPOST https://x'), B('curl --request=DELETE https://x'), P('irm -Method:Post https://x'), P('iwr -meth post https://x'),
+    B('npm unpublish x@1'), B('uv publish'),
+  ])('denies a write off the machine: %s', (_, input) => expect(networkRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'network' }));
+  it.each([B('curl https://example.com'), B('curl -I https://example.com'), B('wget https://example.com/a.tgz'), B('curl -X POST http://localhost:41000/api -d x'),
+    B('curl -d x http://127.0.0.1:3000'), B('curl -X PUT http://app.localhost/x'), B('curl -X POST http://[::1]:3000/x -d a')])(
+    'allows %s', (_, input) => expect(networkRule.check(input, CTX)).toBeNull());
+
+  // T5-LESSONS 6: more write spellings (glued, bundled, `=`, publishers via a runner, dynamic URL, an unknown option)
+  it.each([
+    B('curl -sd x https://api.example.com'), B('curl --data=x https://api.example.com'), B('curl -T a.txt https://up.example.com'), B('curl --upload-file a.txt https://up.example.com'),
+    B('wget --method=PUT --body-data=x https://example.com'), B('wget --post-file=a.txt https://example.com'),
+    P('Invoke-WebRequest -Method Post -Body data https://api.example.com'), P('irm -InFile a.json -Method Put https://api.example.com/x'),
+    // publishers reached through a runner (npx/uvx/pnpm dlx/python -m count as the CLI they run), more publishers, ssh-family and remote rsync
+    B('uvx twine upload dist/app.whl'), B('python -m twine upload dist/app.whl'), B('cargo publish'), B('gem push pkg.gem'), B('dotnet nuget push a.nupkg'),
+    B('mvn clean deploy'), B('gradle publish'), B('podman push me/img'), B('vsce publish'), B('ssh host "ls"'), B('rsync -a src/ host:/dst'), B('git send-email patch.eml'),
+    // an unknown curl option with a non-local URL cannot be ruled a read (fail-closed)
+    B('curl --madeup-flag https://example.com'),
+  ])('denies more write spellings off the machine: %s', (_, input) => expect(networkRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'network' }));
+  it.each([
+    // everyday reads to remote hosts allow
+    B('curl -fsSL https://api.github.com/repos/o/r'), B('curl -sS https://example.com'), B('curl -L https://example.com'), B('curl -H "Accept: application/json" https://api.github.com'),
+    B('curl -A agent https://example.com'), B('curl -u user:pass https://example.com'), B('curl --compressed https://example.com'), B('curl -m 5 https://example.com'),
+    B('curl --retry 3 https://example.com'), B('curl -k https://example.com'), B('curl -o out.json https://x'), B('curl -O https://example.com/file.tgz'),
+    B('curl -s https://registry.npmjs.org/x | jq .version'), B('wget -q -O - https://x/y.json'), B('wget -q -O out.tgz https://example.com/a.tgz'), P('Invoke-RestMethod https://api.example.com/x'),
+    // local-service writes with every spelling isLocalHost accepts, and ports
+    B('curl -X POST http://localhost:3000/x -d a'), B('curl -d x http://127.0.0.1:8080/api'), B('curl -X PUT http://[::1]:5173/x -d a'), B('curl -X POST http://sub.localhost:4000/api -d x'),
+    B('curl -X DELETE http://0.0.0.0:9000/x'), B('curl -XPOST http://localhost:3000'), B('curl -sd a http://127.0.0.1:3000'), P('Invoke-RestMethod -Method Post http://localhost:3000/x -Body a'),
+  ])('allows a read or a local write: %s', (_, input) => expect(networkRule.check(input, CTX)).toBeNull());
+  it('says nothing for an attended session', () => expect(networkRule.check(bash('npm publish'), ATTENDED)).toBeNull());
+});
+
+describe('cloud', () => {
+  it.each([B('aws s3 rm s3://b/x'), B('aws ec2 terminate-instances --instance-ids i-1'), B('kubectl delete pod x'), B('terraform apply -auto-approve'),
+    B('vercel --prod'), B('fly deploy'), B('gh pr create --fill'), B('gh issue comment 3 -b x'), B('gh api -X POST repos/o/r/issues -f title=x'), B('gcloud run deploy svc'),
+    B('gcloud --verbosity info run deploy svc'), B('cdk deploy'), B('glab mr create')])(
+    'denies %s', (_, input) => expect(cloudRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'cloud' }));
+  it.each([B('aws s3 ls'), B('aws ec2 describe-instances'), B('kubectl get pods'), B('terraform plan'), B('gh pr view 3'), B('gh api repos/o/r/issues'), B('gcloud --version'),
+    B('aws sts get-caller-identity')])('allows %s', (_, input) => expect(cloudRule.check(input, CTX)).toBeNull());
+
+  // T5-LESSONS extra rows: runners count as the CLI they run; always-deny forms; a write verb anywhere wins; more reads allow
+  it.each([
+    B('npx vercel --prod'), B('pnpm dlx wrangler deploy'), B('wrangler deploy'), B('terraform destroy'), B('tofu apply'), B('kubectl apply -f x.yaml'),
+    B('helm install x ./chart'), B('stripe trigger payment_intent.created'), B('gh release create v1'), B('az webapp create -n x'),
+  ])('denies a write by a cloud CLI: %s', (_, input) => expect(cloudRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'cloud' }));
+  it.each([
+    B('helm list'), B('terraform init'), B('terraform output'), B('vercel ls'), B('wrangler whoami'), B('az account show'),
+    B('gh repo view o/r'), B('kubectl get pods -o yaml'), B('aws s3 ls s3://bucket'), B('npx vercel ls'), B('kubectl --namespace kube-system get pods'),
+  ])('allows a read by a cloud CLI: %s', (_, input) => expect(cloudRule.check(input, CTX)).toBeNull());
+  it('says nothing for an attended session', () => expect(cloudRule.check(bash('kubectl delete pod x'), ATTENDED)).toBeNull());
+});
+
+describe('mcp-write', () => {
+  it('splits a tool name into its words', () => {
+    expect(mcpWords('mcp__github__createIssue')).toEqual(['create', 'issue']);
+    expect(mcpWords('mcp__plugin_x_y__send-message')).toEqual(['send', 'message']);
+    expect(mcpWords('mcp__claude_ai_Gmail__authenticate')).toEqual(['authenticate']);
+  });
+  it.each([['mcp__github__createIssue'], ['mcp__plugin_x_y__send-message'], ['mcp__slack__post_message'], ['mcp__linear__issue_update'], ['mcp__claude_ai_Claude_Docs__batch'],
+    ['mcp__github__fork_repository'], ['mcp__x__get_or_create_user'], ['mcp__stitch__generate_screen_from_text']])(
+    'denies %s', (name) => expect(mcpWriteRule.check(mcp(name), CTX)).toMatchObject({ decision: 'deny', rule: 'mcp-write' }));
+  it.each([['mcp__claude_ai_Gmail__authenticate'], ['mcp__chrome__take_screenshot'], ['mcp__db__listUpdates'], ['mcp__github__get_issue'], ['mcp__github__get_commit'],
+    ['mcp__claude-in-chrome__tabs_create_mcp'], ['WebFetch'], ['Read']])(
+    'allows %s', (name) => expect(mcpWriteRule.check(mcp(name), CTX)).toBeNull());
+  it('says nothing for an attended session', () => {
+    expect(mcpWriteRule.check(mcp('mcp__github__createIssue'), ATTENDED)).toBeNull();
   });
 });
