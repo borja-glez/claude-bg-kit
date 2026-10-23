@@ -82,13 +82,14 @@ export const command: Command = (args, ctx) => {
     if (autonomous) resetDelegation(autonomous.worktree, autonomous.runId);
     saveRun(main, run);
     // 6b-2 M-1: once the run is on disk, it trusts its worktree's commands (trustFor) and prints that `trust`; a config
-    // that does not load runs nothing, and one without commands needs no trust: no `trust` then.
-    let trust: { state: TrustState; hash: string } | null = null;
+    // that does not load runs nothing, and one without commands needs no trust: no `trust` then. A set the run's guard or the
+    // person refused is `blocked`, with no note: nobody is asked (T6B2-REFUSED-IN-RUN, H-4).
+    let trust: { state: TrustState; hash: string; blocked?: true; note?: false } | null = null;
     if (autonomous) {
       let config: ForgeConfig | null = null;
       try { config = loadConfig(autonomous.worktree); } catch { config = null; }
       const t = config ? trustFor(autonomous.worktree, config, ts()) : null;
-      if (t?.hash) trust = { state: t.state, hash: t.hash };
+      if (t?.hash) trust = { state: t.state, hash: t.hash, ...(t.blocked ? { blocked: true as const, note: false as const } : {}) };
     }
     return json({ ...run, publish: { infinite: infinitePublish(main, run, io.now()) }, ...(trust ? { trust } : {}) });
   }

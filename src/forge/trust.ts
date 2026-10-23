@@ -395,12 +395,15 @@ function withDelegation(r: TrustRecord, runId: string, at: string, fn: (d: Deleg
   return { ...r, delegated: [...(r.delegated ?? []).filter(x => x.runId !== runId), d].slice(-MAX_KEPT) };
 }
 
+/** T6B2-REFUSED-IN-RUN: the reason a run's blocked action gives for a set the person refused. */
+export const PERSON_REFUSED = 'the person refused these commands; rewrite them or leave them out';
+
 /**
  * 6b-2: `t` once the active autonomous run whose profile worktree holds `dir` has trusted it. A set the person must answer
- * (ask or changed) is trusted by forge for that run, unless the person denied it (their No always wins) or the guard would
- * deny one of its commands: each denial is then a blocked action of the run and the hash is refused, noted once, and the
- * set comes back `blocked` (nobody is asked: H-4 reads blocked.jsonl). Anywhere else, in any other state, or on any
- * failure: `t` as it is.
+ * (ask or changed) is trusted by forge for that run, unless the person denied it (their No always wins: T6B2-REFUSED-IN-RUN,
+ * one blocked action of rule `trust` for the set) or the guard would deny one of its commands (one blocked action each).
+ * The hash is then refused, noted once, and the set comes back `blocked`: nobody is asked (H-4 reads blocked.jsonl).
+ * Anywhere else, in any other state, or on any failure: `t` as it is.
  */
 export function delegatedTrust(dir: string, t: Trust, at: string): Trust {
   if ((t.state !== 'ask' && t.state !== 'changed') || t.hash === null) return t;
@@ -411,18 +414,20 @@ export function delegatedTrust(dir: string, t: Trust, at: string): Trust {
     const { main, run } = found;
     const runId = run.ctx.runId;
     const record = readTrust(dir);
-    if (deniedByPerson(record.commands, hash)) return t;
     const mine = delegationOf(record, runId);
     if (mine?.refused.includes(hash)) return { ...t, blocked: true };
     // The run's session judges them, and its locale is the decision's.
     const runState = parseRun(readRunText(main));
-    const denials = configGuardDenials(dir, t.commands, run, runState?.sessionId ?? null);
+    // redacted before it is cut, as the hook's targets: a cut never leaves half a secret no pattern matches
+    const targetOf = (text: string) => cut(redactSecrets(text), 300);
+    const denials: { rule: string; target: string; reason: string }[] = deniedByPerson(record.commands, hash)
+      ? [{ rule: 'trust', target: targetOf(t.commands.map(c => `${c.name}: ${c.cmd}`).join('; ')), reason: PERSON_REFUSED }]
+      : configGuardDenials(dir, t.commands, run, runState?.sessionId ?? null)
+        .map(({ command, verdict }) => ({ rule: verdict.rule, target: targetOf(`${command.name}: ${command.cmd}`), reason: verdict.reason }));
     if (denials.length) {
       let failed = false;
-      for (const { command, verdict } of denials) {
-        // redacted before it is cut, as the hook's targets: a cut never leaves half a secret no pattern matches
-        const target = cut(redactSecrets(`${command.name}: ${command.cmd}`), 300);
-        if (appendBlocked(main, runId, { ts: at, rule: verdict.rule, tool: 'config', target, reason: verdict.reason, session: null }) !== null) failed = true;
+      for (const { rule, target, reason } of denials) {
+        if (appendBlocked(main, runId, { ts: at, rule, tool: 'config', target, reason, session: null }) !== null) failed = true;
       }
       // m-2: refused only once every denial is on record; else the next check judges and records them again.
       if (!failed) updateTrust(dir, r => withDelegation(r, runId, at, d => ({ ...d, refused: [...d.refused.filter(h => h !== hash), hash] })));

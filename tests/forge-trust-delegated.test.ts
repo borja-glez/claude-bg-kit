@@ -172,7 +172,7 @@ describe('delegated trust, fix round 1 (6b-2)', () => {
     config(wt, 'rm -rf ~/somewhere');
     expect(trustFor(wt, loadConfig(wt), AT).state).toBe('ask');
     stop();
-    expect(start('coord-3').trust).toEqual({ state: 'ask', hash: hashOf(wt) });
+    expect(start('coord-3').trust).toEqual({ state: 'ask', hash: hashOf(wt), blocked: true, note: false });
     expect(readBlocked(main, 'spike-x')).toHaveLength(2);
     expect(readTrust(main).delegated).toEqual([{ runId: 'spike-x', hashes: [], refused: [hashOf(wt)], at: AT, list: [] }]);
   });
@@ -196,7 +196,7 @@ describe('delegated trust, fix round 1 (6b-2)', () => {
     expect(trustIn(wt, loadConfig(wt)).state).toBe('denied');
     expect(trustFor(wt, loadConfig(wt), AT).state).toBe('denied');
   });
-  it('m-4: a set the person denied before a later Yes is never delegated: in the run it asks again', () => {
+  it('m-4, T6B2-REFUSED-IN-RUN: a set the person refused, once a run restores it, is blocked with one record and no question; outside a run it asks as before', () => {
     const answer = (cmd: string, state: 'allowed' | 'denied') => {
       config(wt, cmd);
       const list = configCommands(loadConfig(wt));
@@ -205,12 +205,27 @@ describe('delegated trust, fix round 1 (6b-2)', () => {
     answer('npm run a', 'denied');
     const a = hashOf(wt);
     answer('npm run b', 'allowed');
-    expect(start().trust).toMatchObject({ state: 'allowed' });
+    // Outside a run: the person is asked again, as 6a does.
     config(wt, 'npm run a');
+    expect(trustFor(wt, loadConfig(wt), AT)).toEqual(expect.not.objectContaining({ blocked: true }));
     expect(trustFor(wt, loadConfig(wt), AT).state).toBe('changed');
+    config(wt, 'npm run b');
+    expect(start().trust).toEqual({ state: 'allowed', hash: hashOf(wt) });
+    config(wt, 'npm run a'); // the run restores the set the person refused
+    expect(trustFor(wt, loadConfig(wt), AT)).toMatchObject({ state: 'changed', hash: a, blocked: true });
+    expect(trustFor(wt, loadConfig(wt), AT)).toMatchObject({ state: 'changed', blocked: true });
+    const r = JSON.parse(cli(wt, ['triage', '--task', 't1', 'fix the button']).stdout);
+    expect(r.trust).toMatchObject({ state: 'changed', hash: a, note: false, blocked: true });
+    expect(readTrust(main).commandsAsked).toBeUndefined();
+    expect(readBlocked(main, 'spike-x')).toEqual([{
+      ts: AT, rule: 'trust', tool: 'config', target: 'validators.unit.cmd: npm run a', reason: 'the person refused these commands; rewrite them or leave them out', session: null,
+    }]);
+    expect(readTrust(main).delegated?.[0]).toMatchObject({ hashes: [], refused: [a] }); // B was the person's own Yes: nothing delegated
     expect(readTrust(main).commands?.denied).toEqual([a]);
     expect(trustDecisions()).toEqual([]);
-    expect(readBlocked(main, 'spike-x')).toEqual([]);
+    // A start with that set in place prints it blocked, with no note.
+    stop();
+    expect(start('coord-2').trust).toEqual({ state: 'changed', hash: a, blocked: true, note: false });
   });
   it('keeps 20 runs, and 20 hashes of each kind per run, the newest last; and the person\'s last 20 Nos', () => {
     start();
