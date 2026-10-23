@@ -120,20 +120,20 @@ export const command: Command = (args, ctx) => {
       const revises = subFlag('revises');
       if (has('revises') && (!revises || !PROPOSAL_ID.test(revises))) throw new UsageError('proposals add: --revises needs a proposal id');
       if (noteId && revises) throw new UsageError('proposals add: a note becomes a new proposal, never a v2: --from-note takes no --revises');
-      let idea: { fields: Record<string, unknown>; author: string; from: string; owner: boolean } | null = null;
+      let idea: { author: string; from: string; owner: boolean; defaultEvidence?: string } | null = null;
       if (noteId && db) {
         const note = ideaNote(io.cwd, db, noteId);
         if (!note) throw new UsageError(`proposals add: note ${noteId} of ${db} is not a person's idea without a proposal`);
         // A note becomes one proposal at most: the ledger remembers it before the roadmap has the note's link.
         const already = convertedFrom(io.cwd, noteId);
         if (already) return { code: 3, stdout: '', stderr: `proposals add: note ${noteId} is already proposal ${already}\n` };
+        // The evidence a proposal without its own gets, once it is known to say something new (addProposal).
         const es = spanish(parseRun(readRunText(runRootOf(io.cwd)))?.locale);
-        const evidence = typeof o.evidence === 'string' && o.evidence.trim() ? o.evidence
-          : es ? `Idea de ${note.author} (nota ${noteId})` : `Idea by ${note.author} (note ${noteId})`;
-        idea = { fields: { source: 'user', evidence }, author: note.author, from: `note:${noteId}`, owner: note.author === roadmapOwner(io.cwd) };
+        const defaultEvidence = es ? `Idea de ${note.author} (nota ${noteId})` : `Idea by ${note.author} (note ${noteId})`;
+        idea = { author: note.author, from: `note:${noteId}`, owner: note.author === roadmapOwner(io.cwd), defaultEvidence };
       } else if (chat) {
         // An idea of this conversation is the owner's (spec «Ideas de la persona»): the session talks with whoever runs it.
-        idea = { fields: { source: 'user' }, author: roadmapOwner(io.cwd) ?? 'owner', from: 'chat', owner: true };
+        idea = { author: roadmapOwner(io.cwd) ?? 'owner', from: 'chat', owner: true };
       }
       // A v2 of a person's idea is still that person's idea, whatever its flags say: L-15, its add event logs the original's
       // `from` and `owner`; T6B2-V2-AUTHOR, it keeps the original's author and `source: user`.
@@ -143,16 +143,18 @@ export const command: Command = (args, ctx) => {
       const author = ofIdea?.author ?? idea?.author ?? subFlag('author') ?? o.author ?? 'session';
       let r: AddOutcome;
       try {
-        r = addProposal(io.cwd, { ...o, ...idea?.fields, ...(ofIdea ? { source: 'user' } : {}) }, {
+        r = addProposal(io.cwd, { ...o, ...(idea || ofIdea ? { source: 'user' } : {}) }, {
           ts: ts(), author, now: io.now(), rand: io.rand ?? Math.random, ...(revises ? { revises } : {}), ...origin,
+          ...(idea?.defaultEvidence ? { defaultEvidence: idea.defaultEvidence } : {}),
         });
       } catch (e) {
         if (e instanceof ProposalInputError) throw new UsageError(`proposals add: ${e.message}`);
         throw e;
       }
-      if (!r.ok && noteId && r.why === 'open') {
-        // I-2: a note that says what an open proposal says joins it, once: the ledger remembers it (so `ideas` lists it no
-        // more) and the note gets that proposal's link. A chat idea close to an open one is still refused below (L-6).
+      if (!r.ok && noteId) {
+        // I-2, T6B2-MERGE-RELINK: a note that says what an open proposal says, or a rejected one's without new evidence, joins
+        // it, once: the ledger remembers it, and the note gets that proposal's link, so the person reads on its thread where it
+        // stands (why it was rejected). A chat idea like either is still refused below (L-6).
         appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: IDEA_MERGED, id: r.similar, from: `note:${noteId}` });
         return json({ merged: r.similar, link: ideaLink(noteId, r.similar) });
       }

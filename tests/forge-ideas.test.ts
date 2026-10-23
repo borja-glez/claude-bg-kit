@@ -110,8 +110,12 @@ describe('ideas into proposals (6b-2)', () => {
     expect(JSON.parse(r.stdout)).toEqual({ merged: open, link: { op: 'update', collection: 'notes', doc_id: 'n1', data: { proposalId: open } } });
     expect(readEvents(root).filter(e => e.action === 'idea-merged')).toMatchObject([{ kind: 'proposal', id: open, from: 'note:n1' }]);
     expect(loadProposals(root).map(p => p.id)).toEqual([open]);
-    // It leaves the list at once, before the roadmap has its link; a next try names the proposal it joined.
+    // T6B2-MERGE-RELINK: until the roadmap has its link, the list gives the link again; once it is published, the note is gone.
+    expect(JSON.parse(cli(['ideas', '--db', db]).stdout).ideas).toMatchObject([{ note: 'n1', proposal: open, link: JSON.parse(r.stdout).link }]);
+    note('n1', { proposalId: open });
     expect(JSON.parse(cli(['ideas', '--db', db]).stdout).ideas).toEqual([]);
+    // A next try names the proposal it joined.
+    note('n1');
     const again = cli(['add', '--file', 'idea.json', '--from-note', 'n1', '--db', db]);
     expect([again.code, again.stderr.includes(open)]).toEqual([3, true]);
     // P5: the person said it in the chat first, then left it as a note.
@@ -122,6 +126,25 @@ describe('ideas into proposals (6b-2)', () => {
     note('n3', { text: 'ghost replays' });
     expect(JSON.parse(cli(['add', '--file', file('ghost.json', { ...idea, title: 'Ghost replays', rationale: 'race your best run' }), '--from-note', 'n3', '--db', db]).stdout))
       .toHaveProperty('id');
+  });
+  it('a note like a rejected proposal, with no new evidence, joins its thread; one with new evidence is a proposal of its own (T6B2-MERGE-RELINK)', () => {
+    pull(99);
+    const old = added(['--file', file('scout.json', { ...idea, source: 'scout', evidence: 'e' })]);
+    expect(cli(['decide', old, 'reject']).code).toBe(0);
+    // The note brings no evidence: the default one («Idea by …») is no new evidence.
+    note('n1');
+    const r = cli(['add', '--file', 'idea.json', '--from-note', 'n1', '--db', db]);
+    expect(r.code, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ merged: old, link: { op: 'update', collection: 'notes', doc_id: 'n1', data: { proposalId: old } } });
+    expect(readEvents(root).filter(e => e.action === 'idea-merged')).toMatchObject([{ id: old, from: 'note:n1' }]);
+    note('n1', { proposalId: old });
+    expect(JSON.parse(cli(['ideas', '--db', db]).stdout).ideas).toEqual([]);
+    // Positive control: the same idea with new evidence becomes a proposal, with the note's link.
+    note('n2');
+    const fresh = JSON.parse(cli(['add', '--file', file('new.json', { ...idea, evidence: 'players asked for it in the survey' }), '--from-note', 'n2', '--db', db]).stdout);
+    expect(fresh).toMatchObject({ doc: { evidence: 'players asked for it in the survey' }, link: { doc_id: 'n2', data: { proposalId: fresh.id } } });
+    // A chat idea like the rejected one still exits 3 (L-6 keeps the chat's path).
+    expect(cli(['add', '--file', 'idea.json', '--from-chat']).code).toBe(3);
   });
   it('the default evidence speaks the run\'s language, and a proposal that brings its own keeps it', () => {
     autonomousRun(root, 'es');

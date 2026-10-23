@@ -47,25 +47,26 @@ export function saveOwner(root: string, owner: RoadmapOwner | null): void {
 }
 
 const FROM_NOTE = 'note:';
-/** I-2: the ledger action of a note that joined the open proposal it says the same as. */
+/** I-2, T6B2-MERGE-RELINK: the ledger action of a note that joined the proposal it says the same as: an open one, or a
+ *  rejected one when it brings no new evidence. */
 export const IDEA_MERGED = 'idea-merged';
 
 /** The proposal each note became (`add`) or joined (`idea-merged`), by the ledger's events with `from: 'note:<id>'`: the
  *  first one counts (a v2 of it carries its original's `from`, L-15). */
-function conversions(events: readonly LedgerEvent[]): Map<string, { pid: string; merged: boolean }> {
-  const out = new Map<string, { pid: string; merged: boolean }>();
+function conversions(events: readonly LedgerEvent[]): Map<string, string> {
+  const out = new Map<string, string>();
   for (const e of events) {
     if (e.kind !== 'proposal' || (e.action !== 'add' && e.action !== IDEA_MERGED)) continue;
     if (typeof e.id !== 'string' || typeof e.from !== 'string' || !e.from.startsWith(FROM_NOTE)) continue;
     const note = e.from.slice(FROM_NOTE.length);
-    if (!out.has(note)) out.set(note, { pid: e.id, merged: e.action === IDEA_MERGED });
+    if (!out.has(note)) out.set(note, e.id);
   }
   return out;
 }
 
 /** The proposal that already came from note `noteId`, or that it joined, or null. */
 export function convertedFrom(root: string, noteId: string): string | null {
-  return conversions(readEvents(root)).get(noteId)?.pid ?? null;
+  return conversions(readEvents(root)).get(noteId) ?? null;
 }
 
 /** A person's idea that has no proposal yet: an `idea` note without proposalId, by an author that is no session (the notes
@@ -88,17 +89,17 @@ export function ideaNote(root: string, db: string, noteId: string): NoteDoc | nu
   return n && personsIdea(n) ? n : null;
 }
 
-/** An idea waiting to become a proposal; with `proposal` and `link` when it already became one here, but the roadmap lost the
- *  note's link (m-3): only the link is to be sent again. */
+/** An idea waiting to become a proposal; with `proposal` and `link` when it already became or joined one here, but the roadmap
+ *  lost the note's link (m-3, T6B2-MERGE-RELINK): only the link is to be sent again. */
 export interface PendingIdea { note: string; author: string; text: string; ts: string; owner: boolean; proposal?: string; link?: Write }
 
 const time = (s: string): number => { const t = Date.parse(s); return Number.isNaN(t) ? -Infinity : t; };
 
 /**
  * The ideas of `<db>/notes` that wait: a person's idea notes without a proposal, oldest first (a note without a time first of
- * all), a tie by note id (L-11). `owner`: its author is the roadmap's owner. One that the ledger says became a proposal this
- * checkout still has comes with that proposal and the link to send again (m-3); one whose proposal is gone, or that joined an
- * open proposal (I-2), is left out.
+ * all), a tie by note id (L-11). `owner`: its author is the roadmap's owner. One that the ledger says became or joined a
+ * proposal this checkout still has comes with that proposal and the link to send again (m-3, T6B2-MERGE-RELINK); one whose
+ * proposal is gone is left out.
  */
 export function pendingIdeas(root: string, db: string): PendingIdea[] {
   const owner = roadmapOwner(root);
@@ -106,9 +107,8 @@ export function pendingIdeas(root: string, db: string): PendingIdea[] {
   const out: PendingIdea[] = [];
   for (const [id, n] of notesOf(root, db)) {
     if (!personsIdea(n)) continue;
-    const c = done.get(id);
-    if (c && (c.merged || !loadProposal(root, c.pid))) continue;
-    const pid = c?.pid;
+    const pid = done.get(id);
+    if (pid !== undefined && !loadProposal(root, pid)) continue;
     out.push({ note: id, author: n.author, text: n.text, ts: n.ts, owner: owner !== null && n.author === owner,
       ...(pid !== undefined ? { proposal: pid, link: ideaLink(id, pid) } : {}) });
   }

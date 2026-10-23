@@ -145,20 +145,22 @@ export type AddOutcome = { ok: true; id: string; doc: ProposalDoc } | { ok: fals
  * author it is the idea of (m-1), and keeps the digest, so judge's edited-text rule applies to it; a verify defect (`from`
  * without `owner`) carries no digest. T6B2-SOURCE-USER: a `source: user` proposal logs it, so an editor who changes the
  * source later does not make it forge's. None of them ever goes through `proposals policy`: only the owner, or a profile's
- * judge on the owner's own idea, decides it.
+ * judge on the owner's own idea, decides it. `defaultEvidence` (a note's «Idea by …») fills an empty evidence only after the
+ * anti-repetition checks: it says whose idea it is, and is no new evidence against a rejected one.
  */
 export function addProposal(root: string, raw: Record<string, unknown>,
-  ctx: { ts: string; author: unknown; now: Date; rand: () => number; revises?: string; from?: string; owner?: boolean }): AddOutcome {
+  ctx: { ts: string; author: unknown; now: Date; rand: () => number; revises?: string; from?: string; owner?: boolean; defaultEvidence?: string }): AddOutcome {
   // A new proposal carries no decision, and no parked mark either (6b-2: only a judge parks, and a parked one fills no queue).
-  const doc = normalizeProposal({ ...raw, ts: typeof raw.ts === 'string' ? raw.ts : ctx.ts, status: 'proposed', decidedBy: undefined, decidedAt: undefined,
+  const checked = normalizeProposal({ ...raw, ts: typeof raw.ts === 'string' ? raw.ts : ctx.ts, status: 'proposed', decidedBy: undefined, decidedAt: undefined,
     reason: undefined, taskId: undefined, history: undefined, parked: undefined, author: ctx.author });
-  if (!doc) throw new ProposalInputError('invalid proposal (category, risk, title and source are required and must be valid)');
-  if (doc.source === 'scout' && (!doc.pillar?.trim() || !doc.evidence?.trim())) throw new ProposalInputError('a scout proposal needs a pillar and evidence');
+  if (!checked) throw new ProposalInputError('invalid proposal (category, risk, title and source are required and must be valid)');
+  if (checked.source === 'scout' && (!checked.pillar?.trim() || !checked.evidence?.trim())) throw new ProposalInputError('a scout proposal needs a pillar and evidence');
   const existing = loadProposals(root);
-  const rejected = similarRejected(doc, existing.filter(p => p.status === 'rejected'));
+  const rejected = similarRejected(checked, existing.filter(p => p.status === 'rejected'));
   if (rejected) return { ok: false, why: 'rejected', similar: rejected };
-  const open = similarOpen(doc, existing.filter(p => p.id !== ctx.revises));
+  const open = similarOpen(checked, existing.filter(p => p.id !== ctx.revises));
   if (open) return { ok: false, why: 'open', similar: open };
+  const doc: ProposalDoc = !checked.evidence.trim() && ctx.defaultEvidence ? { ...checked, evidence: ctx.defaultEvidence } : checked;
   const id = proposalId(ctx.now, ctx.rand);
   saveProposal(root, id, doc);
   const digest = !ctx.from || ctx.owner !== undefined ? { digest: proposalDigest(id, doc) } : {};
