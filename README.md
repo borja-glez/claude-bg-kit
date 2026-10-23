@@ -7,9 +7,9 @@ Design them, plan them, build them with independent review, run them in parallel
 
 **English** · [Español](README.es.md) · [Changelog](CHANGELOG.md)
 
-![waypoint 0.33.0](https://img.shields.io/badge/waypoint-0.33.0-cba6f7?style=flat-square)
-![forge 0.28.0](https://img.shields.io/badge/forge-0.28.0-fab387?style=flat-square)
-![lens 0.13.9](https://img.shields.io/badge/lens-0.13.9-b4befe?style=flat-square)
+![waypoint 0.34.0](https://img.shields.io/badge/waypoint-0.34.0-cba6f7?style=flat-square)
+![forge 0.29.0](https://img.shields.io/badge/forge-0.29.0-fab387?style=flat-square)
+![lens 0.13.10](https://img.shields.io/badge/lens-0.13.10-b4befe?style=flat-square)
 ![Claude Code plugin marketplace](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -78,7 +78,7 @@ Add the marketplace straight from GitHub, then install the plugins you want:
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # pulls in waypoint ^0.33.0 as a dependency
+claude plugin install forge@bg-kit     # pulls in waypoint ^0.34.0 as a dependency
 claude plugin install lens@bg-kit
 ```
 

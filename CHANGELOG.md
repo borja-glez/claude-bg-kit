@@ -13,6 +13,13 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.34.0 — 2026-10-23
+
+#### Added
+- When the roadmap's owner writes an idea or comments on a proposal, the page records `approvals/owner`, so forge can tell the owner's ideas from the others' in an autonomous run.
+- A proposal approved by an autonomous run reads «forge on its own»; a person's idea parked by one keeps its explanation (`parked`). Republish the roadmap after updating, as `waypoint:plan` says.
+- `waypoint:plan` syncs from the worktree of a forge autonomous run, where its project lives.
+
 ### 0.33.0 — 2026-10-23
 
 #### Added
@@ -392,6 +399,20 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.29.0 — 2026-10-23
+
+#### Added
+- Autonomous profiles: `/forge:infinite --profile spike|product "<idea>"` with a budget. `infinite prepare` creates or reuses the branch `forge/<profile>-<name>` and its worktree `.claude/worktrees/<profile>-<name>` (your main checkout is never touched); the run writes its own design (a short one for a spike, a vision for a product), takes it through `design-critic`, approves it, plans it and starts with `infinite start --profile`. It never merges into main or the start branch and never pushes. A profile runs one task per cycle in this version: `swarm start` refuses inside its worktree, and `--parallel` does not apply. `start --profile` refuses while a run is active, or when `.forge/run.json` does not read, and the run's session ids are kept in `.forge/autonomous/<runId>/sessions.json`, so a torn run.json still guards them.
+- Delegated trust: in the worktrees of an autonomous run, a new or changed set of `.forge/config.yaml` commands is trusted without asking, for that run only, and noted as a `trust` decision with what changed, but only when every command passes the rules the guard would apply if the model ran it through Bash in that run; a command the guard would deny leaves the set untrusted, as before, and becomes a blocked action on the roadmap. Each command is judged as forge will run it, its placeholders filled, only in the profile's own worktree, and each start looks at the config again. A set you refused is never delegated: inside a run it is a blocked action, not a question.
+- The proposal critic: `proposals batch` and the `forge-critic` agent judge each batch (keep, adapt, drop or clash); `proposals judge` approves on its own, with the owner's mark by `forge:auto`, only what passes, and records each approval and rejection. A verdict counts only for the proposal's present text, a v2 needs its own `keep` and keeps its original's standing, and `judge` records its decision before it writes anything else. `proposals batch --pending --out f` batches every proposal still to judge, and prints the `ids` it batched.
+- The person's ideas: `proposals ideas` lists the roadmap's idea notes without a proposal, `proposals add --from-note|--from-chat` turns one into a user proposal linked to its note, and the run answers in its thread; an idea that clashes with the vision is parked until the person answers (`proposals unpark --insist|--withdraw`, from this conversation or in a later note of the owner's on that proposal's thread). Only the owner's ideas take the autonomous path; anyone else's wait for the owner's mark. `proposals policy` never approves a person's idea, and a note that says what an open or rejected proposal says joins that proposal's thread.
+- `decision publish --session SID --since T [--run R]`: the roadmap notes of the automatic decisions the CLI took on its own; with `--run`, only that run's, those of its design and plan before the start included. `decision add` inside a prepared profile's worktree stamps its runId, and `decision list` takes `--run R`.
+
+#### Changed
+- The guard closes more holes outside the run: `fuser -k`, `at` and `batch`; user-level config (go env, conda, poetry and bundle without `--local`, macOS `defaults`, `Set-ExecutionPolicy` outside Process); `docker context` writes and `docker exec --privileged`; git's `-c` keys and `GIT_*` variables, which now pass only through allow-lists (an unlisted `-c` key denies); the ssh family (ssh, scp, sftp, rsync's remote shell), read with a full option table where an unknown option is an unknown target; `pg_ctl` on a data folder inside the run's roots; and `taskkill /PID` from Bash reads its switches as switches, not as paths (`/IM` and `/FI` stay denied).
+- `proposals pull` prints the roadmap's `owner`; parked proposals no longer fill the queue.
+- Depends on waypoint ^0.34.0.
 
 ### 0.28.0 — 2026-10-23
 
@@ -968,6 +989,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.13.10 — 2026-10-23
+
+#### Changed
+- Rebuilt with the code it shares with forge 0.29.0 (the autonomous block of run.json with its profile, branch and worktree, and a proposal's `parked`); nothing lens shows changes. In a profile run, lens in the main checkout shows the main checkout's proposals, not the profile worktree's.
 
 ### 0.13.9 — 2026-10-23
 

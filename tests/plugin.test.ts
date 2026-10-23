@@ -2289,4 +2289,17 @@ describe('plugin layout', () => {
     for (const w of ['FORGE proposals batch --pending --out', 'count: 0', '--base forge/<p>-<n>']) expect(auto, w).toContain(w);
     expect(auto).not.toContain('stalled tick');
   });
+  it('the forge READMEs describe the autonomous profiles, delegated trust, the critic and the person\'s ideas (6b-2)', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const w of ['--profile spike', '--profile product', 'forge/<profile>-<name>', '.claude/worktrees/<profile>-<name>', 'forge-critic', '`proposals judge', '`proposals ideas', 'blocked',
+        '--from-note', '`proposals unpark', '`infinite prepare', '`decision publish', 'forge:auto', 'parked']) expect(md, `${f}: ${w}`).toContain(w);
+      // M-12: 6b-2 makes these 6b-1 sentences false; B-2 and M-9: the README says what a profile does not do yet.
+      expect(md, f).not.toContain('Nothing starts one in this version');
+      expect(md, f).not.toContain('En esta versión nada la arranca');
+      expect(md, f).not.toContain('keep running only with your trust, as before');
+      expect(md, f).not.toContain('siguen corriendo solo con tu confianza, como hasta ahora');
+      expect(md, f).toMatch(/one task per cycle|una tarea por ciclo/);
+    }
+  });
 });
