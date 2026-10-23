@@ -11,7 +11,7 @@ import path from 'node:path';
 import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
 import { confinedIn, CWD_FLAG, FILE_TOOLS, forgeCalls, shellCommand, targetPaths } from './guard.js';
 import { commandName, GIT_VALUED, isNullSink, shellPath, type Dialect, type Segment, type Word } from './shell-words.js';
-import { bashSegments, deny, insideRoots, segmentPath } from './autonomy-shared.js';
+import { bashSegments, containerWords, deny, insideRoots, resolvePwd, segmentPath } from './autonomy-shared.js';
 import { copyEnds, isPsPipeItem, knownWriteCommand, newItemName, plainOperands, writeInfo } from './autonomy-parse.js';
 
 // Task 5 (T5-FILE): the rules for writes off the machine live in autonomy-net.ts, and Task 6's database rule in
@@ -102,7 +102,8 @@ function relativeInside(text: string, dialect: Dialect): boolean {
 }
 
 /** Judge one candidate target word: inside the roots (ok), outside, or a target the hook cannot know (unknown). A URL or a null sink is no path. */
-function judge(w: Word, seg: Segment, ctx: GuardCtx): 'ok' | 'outside' | 'unknown' {
+function judge(word: Word, seg: Segment, ctx: GuardCtx): 'ok' | 'outside' | 'unknown' {
+  const w = resolvePwd(word, seg); // T6-PWD: $PWD and its spellings are the segment's cwd
   if (w.dynamic) return 'unknown';
   if (URL_RE.test(w.text) || isNullSink(w.text, seg.dialect)) return 'ok';
   if (seg.cwd !== null && relativeInside(w.text, seg.dialect) && insideRoots(seg.cwd, ctx)) return 'ok';
@@ -164,6 +165,9 @@ export const filesRule: GuardRule = {
         // K200 (Task 6 fix 1): the SQL a database client runs inline is the database rule's; its file options (-o, -L, --tee) stay judged here
         const sql = inlineSqlWords(seg);
         if (sql.length) cands = cands.filter(w => !sql.includes(w));
+        // T6-CONTAINER-FILES (Task 6 fix 2): the command a container runs and its mounts are the container's (database judges them); a cp keeps its host side
+        const own = containerWords(seg);
+        if (own) cands = cands.filter(w => !own.has(w));
         const v = cwdDeny(seg) ?? judgeAll(cands, seg); if (v) return v;
       }
     }

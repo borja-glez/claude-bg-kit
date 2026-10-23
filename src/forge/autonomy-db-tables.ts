@@ -1,7 +1,7 @@
 // Plan 6b-1, Task 6 (fix 1, T6-SPLIT): the database rule's data: each client's option table, the migrators, the package
 // managers' script words, the docker subcommands and the SQL keyword lists. Data only: the logic is in autonomy-db.ts (and
 // autonomy-docker.ts for containers), which re-exports the brief's lists from here.
-import { T, type OptTable } from './autonomy-tables.js';
+import { DOCKER_CP, T, type OptTable } from './autonomy-tables.js';
 import type { ResourceKind } from './resources.js';
 
 // ---- clients ----------------------------------------------------------------------------------------------------------
@@ -172,7 +172,7 @@ export const DOCKER_SUB: ReadonlyMap<string, OptTable> = new Map([
   ['exec', T(`-d --detach --detach-keys= -e= --env= --env-file= -i --interactive --privileged -t --tty -u= --user= -w= --workdir= --help -l --latest
     --preserve-fds= --preserve-fd=`)],
   ['volume rm', T('-f --force --help')], ['pod rm', T('-f --force -i --ignore -t= --time= --pod-id-file= --help')],
-  ['cp', T('-a --archive -L --follow-link -q --quiet --overwrite --help')],
+  ['cp', DOCKER_CP],
 ]);
 /** The names a container uses for the machine it runs on: for the database rule a local host, so the database name must still be registered. */
 export const DOCKER_HOSTS: ReadonlySet<string> = new Set(['host.docker.internal', 'gateway.docker.internal', '172.17.0.1']);

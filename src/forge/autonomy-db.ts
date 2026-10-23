@@ -5,7 +5,7 @@
 // and makes the target unknown; a word only the shell knows is unknown; SQL that acts past the registered target (another
 // database, a reconnect, a server program or file, the whole cluster) is unknown too, and so is SQL that touches a file
 // outside the run's roots (T6-SQL-FILES). A migration's target is read only from where the tool reads it (T6-MIGRATOR-TARGET);
-// a database script's from the DATABASE_URL of its own segment. Launchers are Task 5's effectiveCommand (T6-LAUNCHER-REUSE),
+// a database script's is never known (T6-SCRIPT-TARGET). Launchers are Task 5's effectiveCommand (T6-LAUNCHER-REUSE),
 // the commands a container runs autonomy-shared.ts's containerSegments (T6-CONTAINER-INNER), the docker reading
 // autonomy-docker.ts and the data autonomy-db-tables.ts. An MCP tool is judged by the SQL it is given (H9). Pure: reads no
 // file, starts no process, opens no connection. It never imports autonomy-rules.ts, which lists it in AUTONOMY_RULES.
@@ -13,7 +13,7 @@ import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
 import { confinedIn } from './guard.js';
 import { dbPrefix, dockerPrefix, isLocalHost, type ResourceKind } from './resources.js';
 import { commandName, isNullSink, type Segment, type Word } from './shell-words.js';
-import { bashSegments, deny, envUnknown, insideRoots, markEnvUnknown, mcpWords, segmentPath, withContainers } from './autonomy-shared.js';
+import { bashSegments, deny, envUnknown, insideRoots, markEnvUnknown, mcpWords, resolvePwd, segmentPath, withContainers } from './autonomy-shared.js';
 import { head, scan, type Scan } from './autonomy-tables.js';
 import { effectiveCommand, MANAGERS, MCP_READ_FIRST, MCP_WRITE_WORDS, type Eff } from './autonomy-net.js';
 import { dockerFinding } from './autonomy-docker.js';
@@ -144,12 +144,14 @@ export function isDbScript(name: string): boolean {
 // ---- verdicts -------------------------------------------------------------------------------------------------------
 
 // What else to do, by the kind of deny (T6-H8-COST, T6-COMPOSE-VOLUMES, T6-MIGRATOR-TARGET).
+const MIGRATOR_FORMS = "a migration's database is read from its URL option (migrate -database, flyway -url, liquibase, drizzle-kit, sequelize-cli, atlas and "
+  + 'prisma db execute --url, dbmate --url, diesel and sqlx --database-url, goose\'s DSN), from DATABASE_URL for rails, rake, dbmate, diesel and sqlx, '
+  + "and from DATABASE_URL with DIRECT_URL (and SHADOW_DATABASE_URL for migrate dev) for prisma; any other migrator is the person's to run";
 const HINTS = {
-  script: 'run the tool directly when the script only generates or inspects',
+  // T6-H8-COST and T6-SCRIPT-TARGET: run the tool itself, its target visible
+  script: `run the tool directly when the script only generates or inspects, and with its target visible on the command when it writes: ${MIGRATOR_FORMS}`,
   volumes: "remove the run's volumes by name with docker volume rm",
-  migrator: "a migration's database is read from its URL option (migrate -database, flyway -url, liquibase, drizzle-kit, sequelize-cli, atlas and "
-    + 'prisma db execute --url, dbmate --url, diesel and sqlx --database-url, goose\'s DSN), from DATABASE_URL for rails, rake, dbmate, diesel and sqlx, '
-    + "and from DATABASE_URL with DIRECT_URL (and SHADOW_DATABASE_URL for migrate dev) for prisma; any other migrator is the person's to run",
+  migrator: MIGRATOR_FORMS,
 } as const;
 type Hint = keyof typeof HINTS;
 const instead = (ctx: GuardCtx, hint?: Hint): string => {
@@ -178,8 +180,9 @@ function targetVerdict(t: Target, ctx: GuardCtx, hint?: Hint): GuardVerdict | nu
   return owned(t, ctx) ? null : D(ctx, `${t.kind} ${t.name} is not one the run registered`, hint);
 }
 
-/** A client-side file (T6-SQL-FILES): null when it is a literal path inside the run's roots (or a null sink); else what is wrong with it. */
-function clientFile(w: Word, seg: Segment, ctx: GuardCtx): string | null {
+/** A client-side file (T6-SQL-FILES): null when it is a literal path inside the run's roots (or a null sink, or one under `$PWD`, T6-PWD); else what is wrong with it. */
+function clientFile(word: Word, seg: Segment, ctx: GuardCtx): string | null {
+  const w = resolvePwd(word, seg);
   if (w.dynamic) return 'a file only the shell names';
   if (w.text.startsWith('|')) return 'a shell command';
   if (isNullSink(w.text, seg.dialect)) return null;
@@ -225,8 +228,8 @@ function clientReads(k: ClientCall, seg: Segment): boolean {
   const files = c.files.some(f => sc.flags.has(f)) || (k.name === 'psql' && !!seg.env.PSQLRC); // m4: PSQLRC runs a file like -f
   // m3: sqlite3 runs -init and -cmd (and its SQL) before it prints its version
   if (c.info.some(f => sc.flags.has(f)) && !(k.name === 'sqlite3' && (files || sql.length))) return true;
-  // an operand only the shell knows may expand to more options (`$MORE` = `-c "drop table t"`)
-  if (sc.ops.some(w => w.dynamic)) return false;
+  // an operand only the shell knows may expand to more options (`$MORE` = `-c "drop table t"`); `$PWD` is a path (T6-PWD)
+  if (sc.ops.some(w => resolvePwd(w, seg).dynamic)) return false;
   if (seg.after === '|' || seg.redirects.some(r => r.op === '<') || files) return false;
   switch (k.name) {
     case 'psql': return sql.length ? sql.every(readWord) : sc.flags.has('-l') || sc.flags.has('--list');
@@ -294,7 +297,7 @@ function conninfo(text: string): Map<string, string> | null {
 function clientConn(k: ClientCall, seg: Segment): Conn | 'unknown' | null {
   const { name, sc } = k, env = seg.env;
   // an option outside the table, arguments xargs or find -exec add, or an operand only the shell knows (it may hold a -d or -h)
-  if (k.unknown || seg.dynamicArgs || sc.ops.some(w => w.dynamic)) return 'unknown';
+  if (k.unknown || seg.dynamicArgs || sc.ops.some(w => resolvePwd(w, seg).dynamic)) return 'unknown';
   const vals = (...keys: string[]): Word[] => sc.vals.filter(v => keys.includes(v.key)).map(v => v.w);
   const conn: Conn = { kind: KIND[k.c.family], names: [], hosts: [] };
   let hostGiven = false;
@@ -359,8 +362,8 @@ function clientConn(k: ClientCall, seg: Segment): Conn | 'unknown' | null {
       break;
     }
     case 'sqlite': {
-      // no file (memory, or stdin), a URI filename, or a path the shell hides: unknown
-      const f = sc.ops[0];
+      // no file (memory, or stdin), a URI filename, or a path the shell hides ($PWD aside, T6-PWD): unknown
+      const f = sc.ops[0] && resolvePwd(sc.ops[0], seg);
       if (!f || f.dynamic || f.glob || /^file:/i.test(f.text) || f.text === ':memory:') return 'unknown';
       const p = segmentPath(f, seg);
       if (p === null) return 'unknown';
@@ -802,10 +805,8 @@ function dbSeg(seg: Segment, ctx: GuardCtx): GuardVerdict | null {
     // a migrator's bin given its words (pnpm/yarn/bun <bin> …, m1 `npm run prisma -- migrate …`), or a script whose name says database
     const bin = commandName(w);
     if (PM_RUN.has(name) && rest.length && isMigration(bin, rest)) return migratorVerdict({ name: bin, args: rest }, s, ctx);
-    if (isDbScript(w.text)) {
-      if (envUnknown(s)) return U(ctx, `${name} ${w.text} looks like a database script, and an env file the hook cannot read sets its environment`, 'script');
-      return urlVerdict(s, ctx, `${name} ${w.text} looks like a database script`, envWords(s, ['DATABASE_URL']), 'a DATABASE_URL', 'script');
-    }
+    // T6-SCRIPT-TARGET: what a database script runs, and which config it reads, the hook cannot see; no env makes it known
+    if (isDbScript(w.text)) return U(ctx, `${name} ${w.text} looks like a database script, and the hook cannot see what it runs or which database it reads`, 'script');
   }
   return null;
 }

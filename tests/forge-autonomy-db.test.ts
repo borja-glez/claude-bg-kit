@@ -179,7 +179,6 @@ describe('database · migrations and scripts (M15, H8)', () => {
   ])('denies %s', (_, input) => denies(input));
   it.each([
     B('DATABASE_URL=file:./dev.db DIRECT_URL=file:./dev.db npx prisma migrate reset --force'), B('DATABASE_URL=postgresql://localhost:5432/fg_spike_x__main bundle exec rails db:migrate'),
-    B('DATABASE_URL=mysql://root@127.0.0.1/fg_spike_x__shop npm run db:reset'),
     B('npm ci'), B('pnpm install'), B('yarn add -D prisma'), B('npx prisma generate'), B('make'), B('make build'), B('pnpm vitest run tests/db.test.ts'),
     B('supabase start'), B('supabase stop'), B('goose --version'), B('npx prisma migrate reset --help'), B('npm test'),
   ])('allows %s', (_, input) => allows(input));
@@ -283,10 +282,12 @@ describe('fix round 1 · review probe p1', () => {
     ['D85', pwsh('docker compose -p fg-spike-x--stack down -v')], ['D90', bash(`${OWN}?schema=public npx prisma migrate dev`)],
     ['D91', bash(`${OWN} pnpm prisma migrate deploy`)], ['D94', bash('DATABASE_URL=file:./dev.db npx prisma db push')],
     ['D111', bash(`${OWN} python manage.py migrate`)], ['D114', bash('psql "$DATABASE_URL" -c "select 1"')],
+    // fix 2, relabelled by T6-SCRIPT-TARGET: no env makes a database script's target known
+    ['D92', bash(`${OWN} npm run db:migrate`)],
   ])('denies %s', (_, input) => denies(input));
   it.each<Row>([
     ['A66', mcp('mcp__acme__connect', { mysql_url: 'mysql://localhost/x' })], ['A84', pwsh('sqlite3 dev.db "delete from t"')],
-    ['A86', pwsh('psql -d prod -c "select count(*) from users"')], ['A87', pwsh('docker logs -f postgres')], ['A92', bash(`${OWN} npm run db:migrate`)],
+    ['A86', pwsh('psql -d prod -c "select count(*) from users"')], ['A87', pwsh('docker logs -f postgres')],
     ['A93', bash('npx prisma generate && npx prisma studio')], ['A95', bash('sqlite3 dev.db "create table t(a int)"')],
     ['A96', bash('sqlite3 ./data/app.sqlite < schema.sql')], ['A97', bash(`docker ps -a --format '{{.Names}}' && docker inspect postgres && docker logs --tail 50 postgres`)],
     ['A98', bash('docker compose logs -f db; docker compose ps')], ['A99', bash('docker exec fg-spike-x--db pg_isready')],
@@ -375,7 +376,7 @@ describe('fix round 1 · rulings beyond the probes', () => {
     B('psql -d postgres -c "drop database prod"'),
     // T6-DOCKER-MOUNTS
     B('docker run --rm -v pgdata:/data alpine ls'), B('docker run --rm -v /etc:/x alpine touch /x/y'), B('docker run --rm --mount type=volume,source=pgdata,target=/x alpine ls'),
-    B('docker run --rm -v "$PWD":/app node npm test'), B('docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro docker docker ps'),
+    B('docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro docker docker ps'),
     B('nerdctl run --rm -v pgdata:/x alpine ls'), B('podman create -v pgdata:/x alpine'),
     // T6-SQL-FILES on a registered target
     B(`psql -d fg_spike_x__main -c "\\copy t to '/etc/x.csv'"`), B(`psql -d fg_spike_x__main -c "\\copy t from program 'curl x'"`), B('psql -d fg_spike_x__main -c "\\! ls"'),
@@ -391,6 +392,7 @@ describe('fix round 1 · rulings beyond the probes', () => {
   it('says what else to do: the script, volume and migrator hints (T6-H8-COST, T6-COMPOSE-VOLUMES, T6-MIGRATOR-TARGET)', () => {
     const reason = (c: string) => (databaseRule.check(bash(c), MORE) as { reason: string }).reason;
     expect(reason('npm run db:studio')).toContain('run the tool directly when the script only generates or inspects');
+    expect(reason(`${OWN} npm run db:migrate`)).toMatch(/^forge autonomy · database: unknown target: [\s\S]*DIRECT_URL/);
     expect(reason('docker compose -p fg-spike-x--stack down -v')).toContain("remove the run's volumes by name with docker volume rm");
     expect(reason('python manage.py migrate')).toContain('DIRECT_URL');
   });
@@ -401,5 +403,49 @@ describe('fix round 1 · rulings beyond the probes', () => {
     expect(cloudRule.check(bash('docker compose -p fg-spike-x--stack run --rm app npx vercel --prod'), MORE)).toMatchObject({ decision: 'deny', rule: 'cloud' });
     expect(networkRule.check(bash('docker run --rm curlimages/curl curl -s https://example.com'), MORE)).toBeNull();
     expect(cloudRule.check(bash('pnpm --filter web exec vercel deploy'), MORE)).toMatchObject({ decision: 'deny', rule: 'cloud' });
+  });
+});
+
+// ---- fix round 2 (task-6-fix2.md) -----------------------------------------------------------------------------------------
+
+describe('fix round 2 · T6-SCRIPT-TARGET: a database script is never a known target', () => {
+  it.each([
+    B(`${OWN} DIRECT_URL=postgres://localhost/fg_spike_x__main pnpm db:reset`), B(`${OWN} make db-reset`), B(`${OWN} turbo run db:reset`),
+    B('DATABASE_URL=file:./dev.db yarn db:push'), P(`$env:DATABASE_URL='postgres://localhost/fg_spike_x__main'; npm run db:migrate`),
+  ])('denies %s', (_, input) => expect(databaseRule.check(input, MORE)).toMatchObject({ decision: 'deny', rule: 'database', reason: expect.stringMatching(/unknown target/) }));
+});
+
+describe('fix round 2 · T6-PWD: $PWD and its spellings are the segment\'s cwd', () => {
+  it.each([
+    B('docker run --rm -v "$PWD":/app node npm test'), B('docker run --rm -v "$(pwd)/data":/data alpine ls /data'), B('docker run --rm -v "${PWD}/data:/data" alpine ls'),
+    B('docker run --rm -v "`pwd`/data:/data" alpine ls'), B('sqlite3 "$PWD/dev.db" "delete from t"'), B('psql -d prod -c "select 1" -o "$PWD/out.txt"'),
+    P('docker run --rm -v "${PWD}:/app" node npm test'), P('docker run --rm -v "$pwd\\data:/data" alpine ls'), P('docker run --rm -v "$(Get-Location):/app" node npm test'),
+  ])('database allows %s', (_, input) => expect(databaseRule.check(input, MORE)).toBeNull());
+  it.each([
+    B('cd /tmp && sqlite3 "$PWD/dev.db" "delete from t"'), B('docker run --rm -v "$HOME/data":/data alpine ls'), B('docker run --rm -v "$PWD/$X":/data alpine ls'),
+  ])('database denies %s', (_, input) => expect(databaseRule.check(input, MORE)).toMatchObject({ decision: 'deny', rule: 'database' }));
+  it.each([
+    B('rm -rf "$PWD/build"'), B('touch "$(pwd)/x.txt"'), B('cp a.txt "${PWD}/b.txt"'), P('Remove-Item -Recurse "$PWD\\build"'),
+  ])('files allows %s', (_, input) => expect(filesRule.check(input, MORE)).toBeNull());
+  it.each([
+    B('rm -rf "$PWD/../../other"'), B('rm -rf "$HOME/x"'), B('rm -rf "$PWD/$X"'),
+  ])('files denies %s', (_, input) => expect(filesRule.check(input, MORE)).toMatchObject({ decision: 'deny', rule: 'files' }));
+});
+
+describe('fix round 2 · T6-CONTAINER-FILES: a container\'s paths are the container\'s', () => {
+  it('leaves the command a container runs to the database rule', () => {
+    const input = bash('docker exec fg-spike-x--db rm -rf /var/lib/x');
+    expect(filesRule.check(input, MORE)).toBeNull();
+    expect(databaseRule.check(input, MORE)).toBeNull();
+    expect(filesRule.check(bash('docker compose -p fg-spike-x--stack run --rm db rm -rf /var/lib/postgresql/data'), MORE)).toBeNull();
+  });
+  it('judges a cp\'s host destination, and only that', () => {
+    expect(filesRule.check(bash('docker cp fg-spike-x--db:/x /etc/y'), MORE)).toMatchObject({ decision: 'deny', rule: 'files' });
+    expect(filesRule.check(bash('docker cp ./dump.sql fg-spike-x--db:/tmp/dump.sql'), MORE)).toBeNull();
+    expect(databaseRule.check(bash('docker cp ./dump.sql fg-spike-x--db:/tmp/dump.sql'), MORE)).toBeNull();
+  });
+  it('leaves mounts to T6-DOCKER-MOUNTS and still judges the other host files of the call', () => {
+    expect(evaluateGuard(bash('docker run --rm -v /etc:/x:ro alpine cat /x/hosts'), MORE, AUTONOMY_RULES)).toEqual({ decision: 'allow' });
+    expect(filesRule.check(bash('docker run --rm --cidfile /etc/cid alpine true'), MORE)).toMatchObject({ decision: 'deny', rule: 'files' });
   });
 });

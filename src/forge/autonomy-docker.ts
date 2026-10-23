@@ -7,7 +7,7 @@ import path from 'node:path';
 import type { GuardCtx } from './guard.js';
 import type { ResourceKind } from './resources.js';
 import type { Segment, Word } from './shell-words.js';
-import { insideRoots, segmentPath } from './autonomy-shared.js';
+import { insideRoots, resolvePwd, segmentPath } from './autonomy-shared.js';
 import { COMPOSE_CLIS, COMPOSE_GLOBAL, DOCKER_GLOBAL, DOCKER_RUN, head, scan } from './autonomy-tables.js';
 import { COMPOSE_DESTROYERS, DESTROY_WORDS, DOCKER_ALIAS, DOCKER_ALWAYS, DOCKER_DESTROYERS, DOCKER_SUB } from './autonomy-db-tables.js';
 
@@ -40,15 +40,17 @@ function source(src: string, ro: boolean, seg: Segment, ctx: GuardCtx): DockerFi
   if (p === null) return unk(`a bind mount of ${src}`);
   return insideRoots(p, ctx) ? null : den(`${p} is outside the run's roots`);
 }
-/** `-v src:dst[:opts]` (a drive letter allowed in src); a single part is an anonymous volume. */
-function volume(w: Word, seg: Segment, ctx: GuardCtx): DockerFinding | null {
+/** `-v src:dst[:opts]` (a drive letter allowed in src); a single part is an anonymous volume. `$PWD` is the segment's cwd (T6-PWD). */
+function volume(word: Word, seg: Segment, ctx: GuardCtx): DockerFinding | null {
+  const w = resolvePwd(word, seg);
   if (w.dynamic) return unk('a mount only the shell names');
   const m = /^((?:[A-Za-z]:)?[^:]*)(?::([^:]*))?(?::([^:]*))?$/.exec(w.text);
   if (!m) return unk(`the mount ${w.text}`);
   return m[2] === undefined ? null : source(m[1], (m[3] ?? '').split(',').includes('ro'), seg, ctx);
 }
 /** `--mount type=…,source=…,target=…[,readonly]`; tmpfs, image and anonymous volumes reach nothing of the host. */
-function mount(w: Word, seg: Segment, ctx: GuardCtx): DockerFinding | null {
+function mount(word: Word, seg: Segment, ctx: GuardCtx): DockerFinding | null {
+  const w = resolvePwd(word, seg);
   if (w.dynamic) return unk('a mount only the shell names');
   const kv = new Map<string, string>();
   for (const part of w.text.split(',')) { const e = part.indexOf('='); kv.set((e < 0 ? part : part.slice(0, e)).trim().toLowerCase(), e < 0 ? 'true' : part.slice(e + 1)); }

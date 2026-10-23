@@ -334,3 +334,4 @@ export const COMPOSE_GLOBAL = T(`-f= --file= -p= --project-name= --project-direc
 export const COMPOSE_RUN = T(`-d --detach --name= --entrypoint= -e= --env= -l= --label= -u= --user= --no-deps --rm -p= --publish= --service-ports --use-aliases
   -v= --volume= -w= --workdir= -T --no-TTY -i --interactive -t --tty --build --pull= --quiet-pull --remove-orphans --cap-add= --cap-drop= --help`);
 export const COMPOSE_EXEC = T('-d --detach --privileged -u= --user= -T --no-TTY --index= -e= --env= -w= --workdir= --help -i --interactive -t --tty');
+export const DOCKER_CP = T('-a --archive -L --follow-link -q --quiet --overwrite --help');
