@@ -11628,7 +11628,7 @@ function findCycle(plan) {
 var import_node_crypto = require("node:crypto");
 
 // src/lib/waypoint-version.ts
-var WAYPOINT_VERSION = true ? "0.33.0" : "0.0.0";
+var WAYPOINT_VERSION = true ? "0.34.0" : "0.0.0";
 var VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})/;
 var partsOf = (v) => {
   const m = typeof v === "string" ? VERSION.exec(v) : null;
@@ -11769,7 +11769,23 @@ function chunk(writes, files, max = 50, maxBytes = 9e5) {
 }
 
 // src/lib/decisions.ts
-var DECISION_POINTS = ["route", "triage", "design-apply", "design-approve", "plan-confirm", "mode", "ruling", "safe-path", "takeover", "revert", "blocked", "other"];
+var DECISION_POINTS = [
+  "route",
+  "triage",
+  "design-apply",
+  "design-approve",
+  "plan-confirm",
+  "mode",
+  "ruling",
+  "safe-path",
+  "takeover",
+  "revert",
+  "blocked",
+  "trust",
+  "approve",
+  "idea",
+  "other"
+];
 var LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300, whyNot: 300, tradeoffs: 300 };
 var DECISIONS_MAX = 16 * 1024;
 var DECISIONS_WINDOW_MS = 24 * 36e5;
@@ -14667,6 +14683,7 @@ var import_node_child_process = require("node:child_process");
 var PROFILES = ["spike", "product"];
 var AUTONOMOUS_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 var MAX_AUTONOMOUS_NAME = 40;
+var isAutonomousName = (x2) => typeof x2 === "string" && x2.length <= MAX_AUTONOMOUS_NAME && AUTONOMOUS_NAME.test(x2);
 var isBranchName = (x2) => typeof x2 === "string" && x2 !== "" && !x2.includes("..") && !x2.startsWith("-") && !/[\s\u0000-\u001f\u007f]/.test(x2);
 var isAbsolutePath = (x2) => typeof x2 === "string" && /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(x2);
 function autonomousOf(x2) {
@@ -14674,7 +14691,7 @@ function autonomousOf(x2) {
   const a = x2;
   if (!PROFILES.includes(a.profile)) return null;
   const profile = a.profile;
-  if (typeof a.name !== "string" || a.name.length > MAX_AUTONOMOUS_NAME || !AUTONOMOUS_NAME.test(a.name)) return null;
+  if (!isAutonomousName(a.name)) return null;
   const runId = `${profile}-${a.name}`;
   if (a.runId !== runId || a.branch !== `forge/${runId}` || !isAbsolutePath(a.worktree) || !isBranchName(a.startBranch)) return null;
   const pb = a.protectedBranches;
