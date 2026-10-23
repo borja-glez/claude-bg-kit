@@ -449,3 +449,56 @@ describe('fix round 2 · T6-CONTAINER-FILES: a container\'s paths are the contai
     expect(filesRule.check(bash('docker run --rm --cidfile /etc/cid alpine true'), MORE)).toMatchObject({ decision: 'deny', rule: 'files' });
   });
 });
+
+// ---- fix round 3 (task-6-fix3.md; the re-review's rows, w6b1-t6-review p3.ts/p4.ts) ---------------------------------------
+
+describe('fix round 3 · N1: CREATE/DROP DATABASE by name only alone', () => {
+  it.each<Row>([
+    ['D1', bash('psql -d prod -c "create database fg_spike_x__main" -f drop_all.sql')],
+    ['D2', bash('psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -c "create database fg_spike_x__main" -f supabase/seed.sql')],
+    ['D3', bash('PSQLRC=rc.sql psql -d prod -c "drop database fg_spike_x__main"')], ['S10', bash('psql -d prod -c "drop database fg_spike_x__main" --file=drop_all.sql')],
+    ['ddl with <', bash('psql -d prod -c "create database fg_spike_x__main" < drop_all.sql')], ['ddl from a pipe', bash('cat x.sql | psql -d prod -c "drop database fg_spike_x__main"')],
+    ['ddl naming an unregistered database', bash('psql -d postgres -c "create database fg_spike_x__main; drop database prod"')],
+  ])('denies %s', (_, input) => denies(input));
+  it.each<Row>([['A4', bash('psql -d postgres -c "create database fg_spike_x__main"')]])('allows %s', (_, input) => allows(input));
+});
+
+describe('fix round 3 · N2: a container call\'s option values are no host paths', () => {
+  it.each<Row>([
+    ['A10', bash('docker run --rm -v "$PWD":/app -w /app node:20 npm test')], ['A18', bash('docker run --rm -v "$PWD":/app -w /app node:20 npm install')],
+    ['K2', bash('docker run --rm -w /app node:20 npm test')], ['K3', bash('docker run --rm --tmpfs /cache alpine ls')],
+    ['env and label files are reads', bash('docker run --rm --env-file /etc/app.env --label-file /etc/labels alpine true')],
+    ['exec -w', bash('docker exec -w /var/lib/postgresql fg-spike-x--db ls')], ['compose -f and --env-file are reads', bash('docker compose -f /etc/compose.yml --env-file /etc/x.env up -d')],
+  ])('all eight allow %s', (_, input) => expect(evaluateGuard(input, MORE, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
+  it.each<Row>([['--cidfile=', bash('docker run --rm --cidfile=/etc/cid alpine true')], ['--cidfile', bash('docker create --cidfile /etc/cid alpine')]])(
+    'files still judges the host write of %s', (_, input) => expect(filesRule.check(input, MORE)).toMatchObject({ decision: 'deny', rule: 'files' }));
+});
+
+describe('fix round 3 · N3: trigger DDL is no dynamic SQL', () => {
+  it.each<Row>([
+    ['A5', bash('psql -d fg_spike_x__main -c "create trigger trg before update on t for each row execute function set_updated_at()"')],
+    ['A6', bash('psql -d fg_spike_x__main -c "create trigger trg after insert on t for each row execute procedure f()"')],
+    ['event trigger', bash('psql -d fg_spike_x__main -c "create event trigger e on ddl_command_end execute function log_ddl()"')],
+  ])('allows %s', (_, input) => allows(input));
+  it.each<Row>([
+    ['K8 prepare/execute', bash('psql -d fg_spike_x__main -c "prepare p as select 1; execute p"')],
+    ['execute format', bash(`psql -d fg_spike_x__main -c "do \\$\\$ begin execute format('drop table %I', 't'); end \\$\\$"`)],
+    ['execute a variable', bash(`psql -d fg_spike_x__main -c "do \\$\\$ declare q text := 'x'; begin execute q; end \\$\\$"`)],
+  ])('still denies %s', (_, input) => denies(input));
+});
+
+describe('fix round 3 · N4: T6-MOUNT-SETTINGS-LIMIT (known limit, Task 13 docs)', () => {
+  it.each<Row>([
+    ['S21', bash(`docker run --rm -v "$PWD":/app alpine sh -c "echo '{}' > /app/.claude/settings.local.json"`)],
+    ['S22', bash('docker run --rm -v "$PWD/.claude":/c alpine rm /c/settings.json')],
+  ])('a container writing the worktree settings through a $PWD mount passes: %s', (_, input) => expect(evaluateGuard(input, MORE, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
+});
+
+describe('fix round 3 · N5: a read-named MCP tool of a database server reads', () => {
+  it('allows migrate-status, and still denies migrate-dev and migrate-reset', () => {
+    allows(mcp('mcp__prisma__migrate-status', { projectCWD: '/repo' }));
+    allows(mcp('mcp__prisma__migrate-diff', { projectCWD: '/repo' }));
+    denies(mcp('mcp__prisma__migrate-dev', { projectCWD: '/repo' }));
+    denies(mcp('mcp__prisma__migrate-reset', { projectCWD: '/repo' }));
+  });
+});

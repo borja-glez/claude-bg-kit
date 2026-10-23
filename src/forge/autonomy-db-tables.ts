@@ -198,9 +198,10 @@ export const PG_STATEMENT = new RegExp([String.raw`^(?:create|alter|drop)\s+(?:s
   String.raw`^(?:create|alter|drop)\s+user\s+mapping\b`, String.raw`^import\s+foreign\b`, String.raw`^alter\s+system\b`, String.raw`^reassign\s+owned\b`,
   String.raw`^create\s+extension\b[\s\S]*\b(?:dblink|postgres_fdw|file_fdw|adminpack|plsh|pl\w+u)\b`].join('|'));
 // Postgres, anywhere: calls that reach another database, session or server file, languages with the server's shell, and
-// EXECUTE (dynamic SQL in a DO or function body, m4; GRANT EXECUTE aside).
+// the EXECUTE statement (dynamic SQL in a DO or function body, m4: EXECUTE followed by a string, format(, a variable or
+// USING). N3: a trigger's EXECUTE FUNCTION|PROCEDURE and GRANT/REVOKE EXECUTE are not dynamic SQL.
 export const PG_ANYWHERE = new RegExp(String.raw`\b(?:dblink\w*|pg_(?:terminate|cancel)_backend|pg_reload_conf|lo_(?:import|export)|pg_file_write)\s*\(`
-  + String.raw`|\blanguage\s+(?:plpython\w*|plperlu|pltclu|plsh)\b|(?<!\b(?:grant|revoke)\s+(?:\w+\s*,\s*)*)\bexecute\b`);
+  + String.raw`|\blanguage\s+(?:plpython\w*|plperlu|pltclu|plsh)\b|(?<!\b(?:grant|revoke)\s+(?:\w+\s*,\s*)*)\bexecute\b(?!\s+(?:function|procedure)\b)`);
 // MySQL, per line: client commands (connect, source, system, tee…) and server-wide statements.
 export const MYSQL_STATEMENT = new RegExp(String.raw`^(?:connect|source|system|tee|delimiter|kill|shutdown|clone|grant|revoke|flush|purge|reset|install|uninstall`
   + String.raw`|(?:create|drop|alter|rename)\s+user|set\s+(?:global|persist)|(?:start|stop|change)\s+(?:replica|slave|master|replication|group_replication))\b`);
@@ -226,6 +227,8 @@ export const SQL_FIELDS: ReadonlySet<string> = new Set(['sql', 'statement', 'sta
 export const QUERY_FIELDS: ReadonlySet<string> = new Set(['query', 'queries']);
 // Words a database server's tool name uses to change data, besides mcp-write's write words.
 export const DB_TOOL_WRITES: ReadonlySet<string> = new Set(['migrate', 'drop', 'truncate', 'flush', 'wipe', 'seed', 'del', 'reset', 'delete']);
+// N5: a last word that makes such a tool a read (`migrate-status`, `migrate-diff`).
+export const DB_TOOL_READ_LAST: ReadonlySet<string> = new Set(['status', 'list', 'show', 'get', 'describe', 'diff', 'info', 'history']);
 // T6-H9-SEARCH (b): a query field is SQL when it starts with a read keyword (judged by isReadSql, so a read passes), or with a
 // write keyword followed by that keyword's grammar; a natural-language search (`delete button broken`) fits none.
 export const READ_KEYWORDS: ReadonlySet<string> = new Set(['select', 'with', 'explain', 'show', 'describe']);

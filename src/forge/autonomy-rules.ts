@@ -11,7 +11,7 @@ import path from 'node:path';
 import type { GuardCtx, GuardInput, GuardRule, GuardVerdict } from './guard.js';
 import { confinedIn, CWD_FLAG, FILE_TOOLS, forgeCalls, shellCommand, targetPaths } from './guard.js';
 import { commandName, GIT_VALUED, isNullSink, shellPath, type Dialect, type Segment, type Word } from './shell-words.js';
-import { bashSegments, containerWords, deny, insideRoots, resolvePwd, segmentPath } from './autonomy-shared.js';
+import { bashSegments, containerFiles, deny, insideRoots, resolvePwd, segmentPath } from './autonomy-shared.js';
 import { copyEnds, isPsPipeItem, knownWriteCommand, newItemName, plainOperands, writeInfo } from './autonomy-parse.js';
 
 // Task 5 (T5-FILE): the rules for writes off the machine live in autonomy-net.ts, and Task 6's database rule in
@@ -165,9 +165,10 @@ export const filesRule: GuardRule = {
         // K200 (Task 6 fix 1): the SQL a database client runs inline is the database rule's; its file options (-o, -L, --tee) stay judged here
         const sql = inlineSqlWords(seg);
         if (sql.length) cands = cands.filter(w => !sql.includes(w));
-        // T6-CONTAINER-FILES (Task 6 fix 2): the command a container runs and its mounts are the container's (database judges them); a cp keeps its host side
-        const own = containerWords(seg);
-        if (own) cands = cands.filter(w => !own.has(w));
+        // T6-CONTAINER-FILES and N2 (Task 6 fixes 2-3): a container's command and option values are no host paths (mounts are the database rule's);
+        // its host writes (--cidfile) and a cp's host destination stay judged
+        const box = containerFiles(seg);
+        if (box) cands = [...cands.filter(w => !box.skip.has(w)), ...box.writes];
         const v = cwdDeny(seg) ?? judgeAll(cands, seg); if (v) return v;
       }
     }

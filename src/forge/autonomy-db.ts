@@ -18,7 +18,7 @@ import { head, scan, type Scan } from './autonomy-tables.js';
 import { effectiveCommand, MANAGERS, MCP_READ_FIRST, MCP_WRITE_WORDS, type Eff } from './autonomy-net.js';
 import { dockerFinding } from './autonomy-docker.js';
 import {
-  CLIENTS, DB_CLIENTS, DB_GLUED, DB_TOOL_WRITES, DB_WORDS, DOCKER_HOSTS, FOR_LOCK, GOOSE_DRIVERS, GOOSE_T, INFO_WORDS, INTERPRETERS, KIND, MAKES, MCP_DB_WORDS,
+  CLIENTS, DB_CLIENTS, DB_GLUED, DB_TOOL_READ_LAST, DB_TOOL_WRITES, DB_WORDS, DOCKER_HOSTS, FOR_LOCK, GOOSE_DRIVERS, GOOSE_T, INFO_WORDS, INTERPRETERS, KIND, MAKES, MCP_DB_WORDS,
   META_READ, MIGRATORS, MONGO_REACH, MYSQL_ANYWHERE, MYSQL_STATEMENT, MYSQLADMIN_READ, PG_ANYWHERE, PG_STATEMENT, PM_OWN_COMMANDS, PM_RUN, PSQL_FILE_META,
   PSQL_SAFE_META, QUERY_FIELDS, READ_KEYWORDS, READ_START, REDIS_READ, REDIS_READ_MODES, SCHEME_KIND, SIDE_EFFECTS, SQL_FIELDS, SQL_SHAPES, SQLITE_FILE_DOT,
   SQLITE_REACH, SQLITE_SAFE_DOT, WITH_WRITES, type Client, type DbClient, type Migrator,
@@ -220,17 +220,20 @@ export function inlineSqlWords(seg: Segment): Word[] {
 }
 
 const readWord = (w: Word): boolean => !w.dynamic && isReadSql(w.text);
+/** A file option (`-f`, sqlite3's `-init`) or PSQLRC (m4: it runs a file like -f). */
+const fileOption = (k: ClientCall, seg: Segment): boolean => k.c.files.some(f => k.sc.flags.has(f)) || (k.name === 'psql' && !!seg.env.PSQLRC);
+/** M5: SQL the hook does not see feeds the client: a file option, PSQLRC, a `<` redirect or a pipe. */
+const fedUnseen = (k: ClientCall, seg: Segment): boolean => fileOption(k, seg) || seg.after === '|' || seg.redirects.some(r => r.op === '<');
 
 /** Whether a client call only reads: it prints and exits, or (M5: with no file, `<` or pipe feeding it) all it runs inline reads. */
 function clientReads(k: ClientCall, seg: Segment): boolean {
   const { c, sc, sql } = k;
   if (k.unknown) return false;
-  const files = c.files.some(f => sc.flags.has(f)) || (k.name === 'psql' && !!seg.env.PSQLRC); // m4: PSQLRC runs a file like -f
   // m3: sqlite3 runs -init and -cmd (and its SQL) before it prints its version
-  if (c.info.some(f => sc.flags.has(f)) && !(k.name === 'sqlite3' && (files || sql.length))) return true;
+  if (c.info.some(f => sc.flags.has(f)) && !(k.name === 'sqlite3' && (fileOption(k, seg) || sql.length))) return true;
   // an operand only the shell knows may expand to more options (`$MORE` = `-c "drop table t"`); `$PWD` is a path (T6-PWD)
   if (sc.ops.some(w => resolvePwd(w, seg).dynamic)) return false;
-  if (seg.after === '|' || seg.redirects.some(r => r.op === '<') || files) return false;
+  if (fedUnseen(k, seg)) return false;
   switch (k.name) {
     case 'psql': return sql.length ? sql.every(readWord) : sc.flags.has('-l') || sc.flags.has('--list');
     case 'pg_restore': return sc.flags.has('-l') || sc.flags.has('--list'); // lists the archive
@@ -532,7 +535,7 @@ function reachesPast(k: ClientCall, t: Target, seg: Segment, ctx: GuardCtx): boo
   return false;
 }
 
-/** m9: SQL that only creates or drops databases, by name ([] when it is anything else): judged by those names, not the database it connects to. */
+/** m9: SQL that only creates or drops databases, by name ([] when it is anything else); clientVerdict judges by them only under N1. */
 function ddlNames(k: ClientCall): string[] {
   if ((k.c.family !== 'pg' && k.c.family !== 'mysql') || !k.sql.length || k.sql.some(w => w.dynamic)) return [];
   const re = k.c.family === 'pg' ? /^(?:create|drop)\s+database\s+(?:if\s+(?:not\s+)?exists\s+)?([^\s;(]+)/ : /^(?:create|drop)\s+(?:database|schema)\s+(?:if\s+(?:not\s+)?exists\s+)?([^\s;(]+)/;
@@ -560,11 +563,12 @@ function clientVerdict(seg: Segment, ctx: GuardCtx): GuardVerdict | null {
   if (clientReads(k, seg)) return null;
   const c = clientConn(k, seg);
   if (c === null) return null;
-  const ddl = c === 'unknown' ? [] : ddlNames(k);
+  // m9 and N1: SQL that only creates or drops databases, each a registered one on a local host, with nothing unseen feeding
+  // the client, is judged by those names; anything else (a -f file, PSQLRC, `<`, a pipe) is judged by the connection's target
+  const ddl = c === 'unknown' || fedUnseen(k, seg) ? [] : ddlNames(k);
   if (c !== 'unknown' && ddl.length) {
     const host = c.hosts.find(h => !dbLocal(h)) ?? c.hosts[0] ?? null;
-    for (const name of ddl) { const v = targetVerdict({ kind: c.kind, name, host }, ctx); if (v) return v; }
-    return null;
+    if (ddl.every(name => !targetVerdict({ kind: c.kind, name, host }, ctx))) return null;
   }
   const t = c === 'unknown' ? c : toTarget(c);
   if (t === 'unknown') return U(ctx, `${k.name} writes to a database the hook cannot read`);
@@ -769,7 +773,8 @@ function mcpVerdict(input: GuardInput, ctx: GuardCtx): GuardVerdict | null {
     if (sql && !isReadSql(text)) return U(ctx, `${name} is given SQL that writes, on a database the hook cannot see`);
   }
   // a database server's tool that takes no SQL and whose name says it changes data (migrate-reset, drop-database, delete)
-  if (!fields.length && dbNamed && tool.some(w => MCP_WRITE_WORDS.has(w) || DB_TOOL_WRITES.has(w)) && !MCP_READ_FIRST.has(tool[0])) {
+  if (!fields.length && dbNamed && tool.some(w => MCP_WRITE_WORDS.has(w) || DB_TOOL_WRITES.has(w)) && !MCP_READ_FIRST.has(tool[0])
+    && !DB_TOOL_READ_LAST.has(tool[tool.length - 1])) {
     return U(ctx, `${name} changes a database the hook cannot see`);
   }
   return null;

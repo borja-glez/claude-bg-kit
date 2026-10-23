@@ -6,7 +6,8 @@
 import type { GuardCtx, GuardInput, GuardVerdict } from './guard.js';
 import { confinedIn, shellCommand, SHELL_TOOLS } from './guard.js';
 import { commandName, shellSegments, shellPath, type Dialect, type Segment, type Word } from './shell-words.js';
-import { COMPOSE_CLIS, COMPOSE_EXEC, COMPOSE_GLOBAL, COMPOSE_RUN, CONTAINER_CLIS, DOCKER_CP, DOCKER_EXEC, DOCKER_GLOBAL, DOCKER_RUN, head, scan, type OptTable } from './autonomy-tables.js';
+import { COMPOSE_CLIS, COMPOSE_EXEC, COMPOSE_GLOBAL, COMPOSE_RUN, CONTAINER_CLIS, DOCKER_CP, DOCKER_EXEC, DOCKER_GLOBAL, DOCKER_RUN, head, scan,
+  type OptTable, type OptValue } from './autonomy-tables.js';
 
 /** The dialect a shell call is read in: input.dialect when a caller set it, else bash for Bash and powershell for PowerShell. */
 const dialectOf = (input: GuardInput): Dialect => input.dialect ?? (input.tool_name === 'PowerShell' ? 'powershell' : 'bash');
@@ -123,12 +124,12 @@ function nested(words: Word[], env: Record<string, Word>, envUnk: boolean, outer
 const everyStart = (words: Word[], outer: Segment): Segment[] => words.flatMap((_, i) => nested(words.slice(i), {}, true, outer));
 
 /**
- * A container CLI call that runs something in a container: the words of its command (`inner`), its mount specs, its `-e`
- * environment; `unknown` when an option the hook does not know hides where the command starts (`inner` is then every word).
+ * A container CLI call that runs something in a container: the words of its command (`inner`), the option values before
+ * it (mounts, `-w`, `--tmpfs`, `-e`, `--cidfile`…), its `-e` environment; `unknown` when an option the hook does not know
+ * hides where the command starts (`inner` is then every word).
  */
-interface ContainerCall { inner: Word[]; mounts: Word[]; env: Record<string, Word>; envUnk: boolean; unknown: boolean }
-const MOUNT_KEYS = ['-v', '--volume', '--mount', '--volumes-from'];
-const unknownCall = (args: Word[]): ContainerCall => ({ inner: args, mounts: [], env: {}, envUnk: true, unknown: true });
+interface ContainerCall { inner: Word[]; opts: OptValue[]; env: Record<string, Word>; envUnk: boolean; unknown: boolean }
+const unknownCall = (args: Word[]): ContainerCall => ({ inner: args, opts: [], env: {}, envUnk: true, unknown: true });
 
 /** The command after the operand a container option table ends at (the image, the container, the service), with its `-e` environment. */
 function after(args: Word[], table: OptTable, outer: Segment): ContainerCall {
@@ -142,27 +143,32 @@ function after(args: Word[], table: OptTable, outer: Segment): ContainerCall {
     Object.defineProperty(env, m[1], { value: m[2] ? { ...v.w, text: m[3] } : { text: '', dynamic: true, glob: false }, enumerable: true, writable: true, configurable: true });
   }
   const entry = h.sc.vals.filter(v => v.key === '--entrypoint').map(v => v.w).slice(-1);
-  const mounts = h.sc.vals.filter(v => MOUNT_KEYS.includes(v.key)).map(v => v.w);
-  return { inner: [...entry, ...args.slice(h.at + 1)], mounts, env, envUnk: h.sc.flags.has('--env-file'), unknown: false };
+  return { inner: [...entry, ...args.slice(h.at + 1)], opts: h.sc.vals, env, envUnk: h.sc.flags.has('--env-file'), unknown: false };
 }
 
-/** The `[container] <sub>` a docker, podman or nerdctl call runs, after its global options; compose's `<sub>` after compose's. Null when the globals cannot be read. */
-function containerSub(seg: Segment): { compose: boolean; sub: string; args: Word[] } | 'unknown' | null {
+/**
+ * The `[container] <sub>` a docker, podman or nerdctl call runs, after its global options; compose's `<sub>` after
+ * compose's. `globals`: the values of those global options (compose's -f/--env-file and the like). Null when no container CLI.
+ */
+function containerSub(seg: Segment): { compose: boolean; sub: string; args: Word[]; globals: OptValue[] } | 'unknown' | null {
   if (!seg.argv.length || seg.argv[0].dynamic) return null;
   const name = commandName(seg.argv[0]), d = seg.dialect;
   let args = seg.argv.slice(1), compose = COMPOSE_CLIS.has(name);
+  const globals: OptValue[] = [];
   if (!compose) {
     if (!CONTAINER_CLIS.has(name)) return null;
     const g = head(args, DOCKER_GLOBAL, d);
     if (g.unknown) return 'unknown';
+    globals.push(...g.sc.vals);
     args = args.slice(g.at);
     if (args[0]?.text.toLowerCase() === 'container') args = args.slice(1);
-    if (args[0]?.text.toLowerCase() !== 'compose') return { compose: false, sub: args[0]?.text.toLowerCase() ?? '', args: args.slice(1) };
+    if (args[0]?.text.toLowerCase() !== 'compose') return { compose: false, sub: args[0]?.text.toLowerCase() ?? '', args: args.slice(1), globals };
     args = args.slice(1);
     compose = true;
   }
   const g = head(args, COMPOSE_GLOBAL, d);
-  return g.unknown ? 'unknown' : { compose, sub: args[g.at]?.text.toLowerCase() ?? '', args: args.slice(g.at + 1) };
+  globals.push(...g.sc.vals);
+  return g.unknown ? 'unknown' : { compose, sub: args[g.at]?.text.toLowerCase() ?? '', args: args.slice(g.at + 1), globals };
 }
 
 function containerCall(seg: Segment): ContainerCall | null {
@@ -177,7 +183,7 @@ function containerCall(seg: Segment): ContainerCall | null {
  * T6-CONTAINER-INNER: the commands a container runs, as segments the database, network and cloud rules judge: the words
  * after the image of `docker|podman|nerdctl run|create` (behind `--entrypoint` when given), after the container of `exec`,
  * and after the service of `compose run|exec`. When an option the hook does not know hides where they start, every later
- * word is read as a start. The files rule never judges them: their paths are the container's (containerWords).
+ * word is read as a start. The files rule never judges them: their paths are the container's (containerFiles).
  */
 export function containerSegments(seg: Segment): Segment[] {
   const c = containerCall(seg);
@@ -185,21 +191,31 @@ export function containerSegments(seg: Segment): Segment[] {
 }
 
 /**
- * T6-CONTAINER-FILES: the words of a container CLI call that the files rule leaves alone: the command a container runs and
- * the mount specs (T6-DOCKER-MOUNTS judges what a container reaches on the host); for `cp`, every operand but a host
- * destination (a host source is only read). Null when the call cannot be read, so the files rule judges every word.
+ * T6-CONTAINER-FILES and N2: what the files rule reads of a container CLI call. `skip`: the words it leaves alone (the
+ * command a container runs; every option value of `run|create|exec` and of compose's `run|exec`, since a mount source is
+ * T6-DOCKER-MOUNTS' and `-w`, `--tmpfs`, `--name`, `-e` are no host paths, while `--env-file`/`--label-file` are reads; the
+ * global options' values, compose's -f/--env-file being reads; for `cp`, every operand but a host destination, a host
+ * source being only read). `writes`: the host files the call writes (`--cidfile`, in any spelling). Null when the call
+ * cannot be read, so the files rule judges every word.
  */
-export function containerWords(seg: Segment): Set<Word> | null {
+export function containerFiles(seg: Segment): { skip: Set<Word>; writes: Word[] } | null {
   const c = containerSub(seg);
   if (c === null || c === 'unknown') return null;
+  const skip = new Set<Word>(c.globals.map(v => v.w));
   if (!c.compose && c.sub === 'cp') {
     const sc = scan(c.args, DOCKER_CP, seg.dialect), dest = sc.ops[sc.ops.length - 1];
     if (sc.unknown) return null;
     // `<container>:<path>` (two letters or more: one is a drive) is the container's side
-    return new Set(sc.ops.filter(w => w !== dest || /^[^:/\\]{2,}:/.test(w.text)));
+    for (const w of sc.ops) if (w !== dest || /^[^:/\\]{2,}:/.test(w.text)) skip.add(w);
+    return { skip, writes: [] };
   }
   const call = containerCall(seg);
-  return call && !call.unknown ? new Set([...call.inner, ...call.mounts]) : null;
+  if (!call) return c.compose ? { skip, writes: [] } : null;
+  if (call.unknown) return null;
+  const writes: Word[] = [];
+  for (const w of call.inner) skip.add(w);
+  for (const v of call.opts) { if (v.key === '--cidfile') writes.push(v.w); else skip.add(v.w); }
+  return { skip, writes };
 }
 
 /** A segment and the commands its containers run, nested up to three deep (`docker exec c docker run …`). */
