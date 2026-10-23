@@ -286,6 +286,17 @@ describe('a v2 keeps its original\'s standing (I-2)', () => {
     expect([outcome(ofDecided), outcome(ofMissing)]).toEqual(['waits-owner', 'waits-owner']);
     expect([loadProposal(root, ofDecided)?.status, loadProposal(root, ofMissing)?.status, decisions()]).toEqual(['proposed', 'proposed', []]);
   });
+  it("a v2 from someone's comment on forge's proposal, added as source: user with the comment's author, waits for the owner (T6B2-COMMENT-V2)", () => {
+    const orig = add({ title: 'Big shop' });
+    writeFileSync(path.join(root, 'v2.json'), JSON.stringify({ category: 'feature', risk: 'high', title: 'Cosmetic shop', rationale: `r (v2 of ${orig})`, evidence: 'e', pillar: 'Juice', source: 'user' }));
+    const v2 = JSON.parse(run(['proposals', 'add', '--file', 'v2.json', '--revises', orig, '--author', 'user:editor'], io()).stdout).id as string;
+    expect(loadProposal(root, v2)).toMatchObject({ source: 'user', author: 'user:editor' });
+    // --pending leaves it out (its original, forge's own, is still taken), and judge, given a keep, says it waits.
+    expect(JSON.parse(run(['proposals', 'batch', '--pending', '--out', 'b.json'], io()).stdout).ids).toEqual([orig]);
+    verdicts({ id: v2, verdict: 'keep', why: 'small and fun' });
+    expect(JSON.parse(judge(v2).stdout)).toMatchObject({ outcome: 'waits-owner', write: null, approval: null });
+    expect([loadProposal(root, v2)?.status, loadProposal(root, orig)?.status, decisions()]).toEqual(['proposed', 'proposed', []]);
+  });
 });
 
 describe('proposals judge: the run around it', () => {

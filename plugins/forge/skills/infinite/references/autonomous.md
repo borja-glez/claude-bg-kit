@@ -27,6 +27,7 @@ The design and plan steps (3 to 5) run before `start --profile`, so before the g
 ## Each cycle
 
 The cycle of §3, with these changes:
+- **A v2 from a comment (§3.1).** A v2 that §3.1 writes from someone's comment on forge's own proposal (not on a parked thread: that one is `references/ideas.md`'s) is that person's: write it with `source: user` and add it with `FORGE proposals add --file <f> --revises <id> --author <the comment's author>`. It waits for the owner's mark, as §3.1 says: `--pending` leaves it out, and `judge` would give `waits-owner`.
 - **Tasks.** Each task works as §3.3 «Without an execution» says, through `/forge:run --auto`: its **Large triage** takes the `autonomy: auto` path. Its base is the run's branch, not main: `/waypoint:work` gives `waypoint next` `--base forge/<p>-<n>` (its `MAIN_BRANCH` in this worktree), so a task whose dependency of another track is done on this branch can start.
 - **Ideas that become tasks.** When §3.2's `to-task` makes a task of a `source: user` proposal, answer its thread (`references/ideas.md`) with that task's `phase` in `<plan>`.
 - **Sync.** `/waypoint:plan`'s sync (§3.2, and wherever a reference sends it to the main checkout) runs from this worktree: it is the main checkout of its project.
