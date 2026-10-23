@@ -2121,7 +2121,7 @@ describe('forge waypoint-cli', () => {
         const a = 'p20261011100000aaaa', b = 'p20261011100000bbbb';
         saveApproval(root, b, MARK(b, 'approved', 'forge:decide'));
         const r = pullDb({ [a]: { ...prop, ts: '', status: 'approved', author: 'session' } }, { [a]: MARK(a, 'approved'), junk: MARK(a, 'approved'), [`${b}x`]: 5 }, { version: '0.26.0', rules: 2, publishedAt: 'T' });
-        expect(r).toEqual({ proposals: 1, approvals: 1, removed: 1, rules: 2, ownerRule: true });
+        expect(r).toEqual({ proposals: 1, approvals: 1, removed: 1, rules: 2, ownerRule: true, owner: null });
         expect(Object.keys(loadApprovals(root))).toEqual([a]);
         expect(run(['proposals', 'pull', '--dir', 'db/proposals'], io).stdout.trim()).toBe('1');
       });
@@ -2129,7 +2129,7 @@ describe('forge waypoint-cli', () => {
         const a = 'p20261011100000aaaa';
         saveApproval(root, a, MARK(a, 'approved', 'forge:decide'));
         expect(pullDb({ [a]: { ...prop, ts: '', status: 'approved', author: 'session' } }, { [a]: MARK(a, 'approved') }, undefined))
-          .toEqual({ proposals: 1, approvals: 0, removed: 1, rules: 0, ownerRule: false });
+          .toEqual({ proposals: 1, approvals: 0, removed: 1, rules: 0, ownerRule: false, owner: null });
         expect(loadApprovals(root)).toEqual({});
         expect(pullDb({}, { [a]: MARK(a, 'approved') }, { version: '0.25.0', rules: 1, publishedAt: 'T' })).toMatchObject({ approvals: 0, ownerRule: false });
         writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');

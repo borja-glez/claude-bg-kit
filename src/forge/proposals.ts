@@ -140,11 +140,13 @@ export type AddOutcome = { ok: true; id: string; doc: ProposalDoc } | { ok: fals
  * A new proposal (`proposals add`, and the defects verify-close turns into proposals, K2-12): `raw` normalized as a pending
  * one with no decision. Refused (ProposalInputError) when it is not a valid proposal, or is a scout one without a pillar or
  * evidence; not added when it says the same as a rejected one without new evidence, or as one still open (but the one it
- * `revises`). Saved in .forge/proposals/ and logged as a proposal event: with `from` when given (a verify defect, which
- * carries no digest, so `proposals policy` answers origin and only the owner approves), else with the digest of its text.
+ * `revises`). Saved in .forge/proposals/ and logged as a proposal event with the digest of its text, and its `from` when
+ * given. 6b-2: a person's idea (`from` a note or the chat) also logs `owner`, whether it is the roadmap owner's, and keeps
+ * the digest, so judge's edited-text rule applies to it; a verify defect (`from` without `owner`) carries no digest. Neither
+ * ever goes through `proposals policy`, which answers origin to any `from`: only the owner, or a profile's judge, decides it.
  */
 export function addProposal(root: string, raw: Record<string, unknown>,
-  ctx: { ts: string; author: unknown; now: Date; rand: () => number; revises?: string; from?: string }): AddOutcome {
+  ctx: { ts: string; author: unknown; now: Date; rand: () => number; revises?: string; from?: string; owner?: boolean }): AddOutcome {
   // A new proposal carries no decision, and no parked mark either (6b-2: only a judge parks, and a parked one fills no queue).
   const doc = normalizeProposal({ ...raw, ts: typeof raw.ts === 'string' ? raw.ts : ctx.ts, status: 'proposed', decidedBy: undefined, decidedAt: undefined,
     reason: undefined, taskId: undefined, history: undefined, parked: undefined, author: ctx.author });
@@ -157,8 +159,9 @@ export function addProposal(root: string, raw: Record<string, unknown>,
   if (open) return { ok: false, why: 'open', similar: open };
   const id = proposalId(ctx.now, ctx.rand);
   saveProposal(root, id, doc);
-  appendEvent(root, { ts: ctx.ts, kind: 'proposal', action: 'add', id, ...(ctx.from ? { from: ctx.from } : { digest: proposalDigest(id, doc) }),
-    ...(ctx.revises ? { revises: ctx.revises } : {}) });
+  const digest = !ctx.from || ctx.owner !== undefined ? { digest: proposalDigest(id, doc) } : {};
+  appendEvent(root, { ts: ctx.ts, kind: 'proposal', action: 'add', id, ...(ctx.from ? { from: ctx.from } : {}),
+    ...(ctx.owner !== undefined ? { owner: ctx.owner } : {}), ...digest, ...(ctx.revises ? { revises: ctx.revises } : {}) });
   return { ok: true, id, doc };
 }
 

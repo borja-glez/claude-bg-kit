@@ -13,9 +13,11 @@ import {
   type Decision, type ProposalDoc, type ApprovalDoc,
 } from '../../../lib/proposals.js';
 import { PAGE_RULES } from '../../../lib/publish.js';
+import { NOTE_ID } from '../../../lib/notes.js';
 import { autoApprovable } from '../../policy.js';
 import { proposalBatch, readVerdicts } from '../../critic.js';
-import { judgeProposal, JudgeError, type Judged } from '../../judge.js';
+import { judgeProposal, unparkProposal, JudgeError, type Judged, type Unparked } from '../../judge.js';
+import { convertedFrom, ideaLink, ideaNote, ideaOrigin, normalizeOwner, pendingIdeas, roadmapOwner, saveOwner, type RoadmapOwner } from '../../ideas.js';
 import { parseRun, readRunText, type RunState } from '../../run.js';
 import { mainCheckout } from '../../local.js';
 import { addDecision, decisionNoteId, decisionWrites, markPublished } from '../../decisions.js';
@@ -30,6 +32,11 @@ function activeAutonomous(cwd: string, main = mainCheckout(cwd)): (RunState & { 
   const run = parseRun(readRunText(runRootOf(cwd, main)));
   return run?.active && run.autonomous ? { ...run, autonomous: run.autonomous } : null;
 }
+
+/** Whether a locale is Spanish, as the run's `locale` says it. */
+const spanish = (locale: string | null | undefined): boolean => (locale ?? '').toLowerCase().startsWith('es');
+/** A waypoint session id, as `--session` takes it. */
+const SESSION_ID = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
 
 /** Why `proposals decide` refused, naming who decided and when, or what blocks the reopen. */
 function decideRefusal(id: string, doc: ProposalDoc, error: DecideError): string {
@@ -95,6 +102,14 @@ export const command: Command = (args, ctx) => {
     case 'add': {
       const file = subFlag('file');
       if (!file) throw new UsageError('proposals add: --file is required');
+      // 6b-2: a person's idea (src/forge/ideas.ts), from a note of the roadmap's listing --db or from this conversation. The CLI
+      // fixes only its source, author, origin and default evidence: the proposal's text is the session's.
+      const noteId = subFlag('from-note');
+      const chat = has('from-chat');
+      const db = subFlag('db');
+      if (has('from-note') && chat) throw new UsageError('proposals add: --from-note and --from-chat exclude each other');
+      if (has('from-note') && (!noteId || !NOTE_ID.test(noteId))) throw new UsageError('proposals add: --from-note needs a note id');
+      if (noteId && !db) throw new UsageError('proposals add: --from-note needs --db, the listed roadmap database');
       let raw: unknown;
       try { raw = JSON.parse(readText(file, '--file')); } catch (e) { if (e instanceof UsageError) throw e; throw new UsageError('proposals add: --file must be a JSON object'); }
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new UsageError('proposals add: --file must be a JSON object');
@@ -102,19 +117,40 @@ export const command: Command = (args, ctx) => {
       // A v2 names the proposal it revises with --revises, and only that one is exempt from the open-proposal check.
       const revises = subFlag('revises');
       if (has('revises') && (!revises || !PROPOSAL_ID.test(revises))) throw new UsageError('proposals add: --revises needs a proposal id');
+      if (noteId && revises) throw new UsageError('proposals add: a note becomes a new proposal, never a v2: --from-note takes no --revises');
+      let idea: { fields: Record<string, unknown>; author: string; from: string; owner: boolean } | null = null;
+      if (noteId && db) {
+        const note = ideaNote(io.cwd, db, noteId);
+        if (!note) throw new UsageError(`proposals add: note ${noteId} of ${db} is not a person's idea without a proposal`);
+        // A note becomes one proposal at most: the ledger remembers it before the roadmap has the note's link.
+        const already = convertedFrom(io.cwd, noteId);
+        if (already) return { code: 3, stdout: '', stderr: `proposals add: note ${noteId} is already proposal ${already}\n` };
+        const es = spanish(parseRun(readRunText(runRootOf(io.cwd)))?.locale);
+        const evidence = typeof o.evidence === 'string' && o.evidence.trim() ? o.evidence
+          : es ? `Idea de ${note.author} (nota ${noteId})` : `Idea by ${note.author} (note ${noteId})`;
+        idea = { fields: { source: 'user', evidence }, author: note.author, from: `note:${noteId}`, owner: note.author === roadmapOwner(io.cwd) };
+      } else if (chat) {
+        // An idea of this conversation is the owner's (spec «Ideas de la persona»): the session talks with whoever runs it.
+        idea = { fields: { source: 'user' }, author: roadmapOwner(io.cwd) ?? 'owner', from: 'chat', owner: true };
+      }
+      // L-15: a v2 of a person's idea logs that idea's origin, its original's `from` and `owner`, whatever its flags say.
+      const origin = revises && loadProposal(io.cwd, revises)?.source === 'user' ? ideaOrigin(io.cwd, revises) : idea ? { from: idea.from, owner: idea.owner } : {};
       let r: AddOutcome;
       try {
-        r = addProposal(io.cwd, o, { ts: ts(), author: subFlag('author') ?? o.author ?? 'session', now: io.now(), rand: io.rand ?? Math.random, ...(revises ? { revises } : {}) });
+        r = addProposal(io.cwd, { ...o, ...idea?.fields }, {
+          ts: ts(), author: idea?.author ?? subFlag('author') ?? o.author ?? 'session', now: io.now(), rand: io.rand ?? Math.random, ...(revises ? { revises } : {}), ...origin,
+        });
       } catch (e) {
         if (e instanceof ProposalInputError) throw new UsageError(`proposals add: ${e.message}`);
         throw e;
       }
       if (!r.ok) {
-        // Anti-repetition: a rejected one without new evidence, or one still open whatever its evidence.
+        // Anti-repetition: a rejected one without new evidence, or one still open whatever its evidence (a chat idea close to
+        // an open one is answered in the open one's thread).
         const why = r.why === 'rejected' ? `similar to rejected proposal ${r.similar} and without new evidence` : `similar to open proposal ${r.similar}`;
         return { code: 3, stdout: '', stderr: `proposals add: ${why}\n` };
       }
-      return json({ id: r.id, doc: r.doc });
+      return json({ id: r.id, doc: r.doc, ...(noteId ? { link: ideaLink(noteId, r.id) } : {}) });
     }
     case 'list': {
       const status = subFlag('status');
@@ -223,6 +259,7 @@ export const command: Command = (args, ctx) => {
       const db: Record<string, ApprovalDoc> = {};
       let rules = 0;
       let page: unknown = null;
+      let owner: RoadmapOwner | null = null;
       if (withMarks) {
         const marksDir = subFlag('approvals');
         if (!marksDir) throw new UsageError('proposals pull: --approvals needs the listed approvals folder');
@@ -241,6 +278,9 @@ export const command: Command = (args, ctx) => {
             try { a = normalizeApproval(JSON.parse(readFileSync(path.join(marksAbs, name), 'utf8'))); } catch { a = null; }
             if (a) db[id] = a;
           }
+          // 6b-2: approvals/owner, who the roadmap's owner is, as the page wrote it; like the marks, it counts only where
+          // only the owner writes approvals/.
+          try { owner = normalizeOwner(JSON.parse(readFileSync(path.join(marksAbs, 'owner.json'), 'utf8'))); } catch { owner = null; }
         }
       }
       let n = 0;
@@ -261,6 +301,7 @@ export const command: Command = (args, ctx) => {
       let removed = 0;
       for (const id of Object.keys(loadApprovals(io.cwd))) if (!db[id]) { removeApproval(io.cwd, id); removed++; }
       for (const [id, a] of Object.entries(db)) saveApproval(io.cwd, id, a);
+      saveOwner(io.cwd, owner);
       const count = Object.keys(db).length;
       // The owner rule is known here only from meta/page.rules, which an editor can also write on a roadmap that lacks it.
       // Said once per checkout and roadmap: the marker lives in .forge/. Carry 10: one source for the key, the page's
@@ -271,7 +312,7 @@ export const command: Command = (args, ctx) => {
       const warnedFor = (() => { try { return (JSON.parse(readFileSync(markerFile, 'utf8')) as { roadmap?: unknown }).roadmap; } catch { return undefined; } })();
       const warning = count > 0 && warnedFor !== roadmap ? 'proposals pull: approvals are owner-only once the roadmap is republished with this version; until then an editor could write them\n' : '';
       if (warning) { forgeDir(io.cwd); writeFileSync(markerFile, JSON.stringify({ roadmap }) + '\n'); }
-      return { ...json({ proposals: n, approvals: count, removed, rules, ownerRule: rules >= PAGE_RULES }), stderr: warning };
+      return { ...json({ proposals: n, approvals: count, removed, rules, ownerRule: rules >= PAGE_RULES, owner: owner?.user ?? null }), stderr: warning };
     }
     case 'policy': {
       const id = rest[0];
@@ -283,10 +324,11 @@ export const command: Command = (args, ctx) => {
       // Origin: only a proposal this checkout added (its ledger `add` event carries the digest of the text it added) is auto-approved;
       // one an editor wrote on the page and a pull saved, or whose text changed since, is left to the owner.
       // The policy speaks once and first: a pid already decided, reopened or converted, and a v2 (--revises), are left to the owner.
+      // An add `from` a verify defect or a person's idea (6b-2: one logs its digest too) is not forge's own: never the policy's.
       const events = readEvents(io.cwd).filter(e => e.kind === 'proposal' && e.id === id);
       const decided = doc.status !== 'proposed' || loadApproval(io.cwd, id) !== null
         || events.some(e => e.action === 'decide' || e.action === 'reopen' || e.action === 'to-task');
-      const forgeMade = events.some(e => e.action === 'add' && e.digest === proposalDigest(id, doc) && !e.revises);
+      const forgeMade = events.some(e => e.action === 'add' && e.digest === proposalDigest(id, doc) && !e.revises && e.from === undefined);
       // Carry 5: a refusal says why, so the infinite skill and the person can tell them apart: already decided (or
       // marked, or converted), not this checkout's own text, or its signals. 6b-2 H-5: while an autonomous run is active,
       // its approvals are `judge`'s, on the critic's verdict, and the policy approves nothing.
@@ -377,7 +419,7 @@ export const command: Command = (args, ctx) => {
       const critic = subFlag('critic');
       if (!critic) throw new UsageError('proposals judge: --critic <verdicts.json> is required');
       const session = subFlag('session');
-      if (has('session') && (!session || !/^[A-Za-z0-9_\-.~:@+]{1,80}$/.test(session))) throw new UsageError('proposals judge: --session needs the waypoint session id');
+      if (has('session') && (!session || !SESSION_ID.test(session))) throw new UsageError('proposals judge: --session needs the waypoint session id');
       // T6B2-ROOTS: run.json is found through runRootOf; the proposal and its mark are this checkout's, the run's worktree
       // (fix 1, m-1: judge runs nowhere else), and the decision goes to the main checkout's ledger, with the run's id.
       // T6B2-DECISION-FIRST: the main checkout is found once, before anything is written, and judgeProposal records the
@@ -392,7 +434,7 @@ export const command: Command = (args, ctx) => {
       const recorded: { n?: number; event?: LedgerEvent } = {};
       let r: Judged;
       try {
-        r = judgeProposal(io.cwd, id, verdicts, at, (run.locale ?? '').toLowerCase().startsWith('es'), d => {
+        r = judgeProposal(io.cwd, id, verdicts, at, spanish(run.locale), d => {
           Object.assign(recorded, addDecision(main, d, { ts: at, runId: run.autonomous.runId }));
         });
       } catch (e) {
@@ -406,7 +448,41 @@ export const command: Command = (args, ctx) => {
       if (publish) markPublished(main, [recorded.n]);
       return json({ id, ...out, decision: recorded.n, ...(publish ? { publish } : {}) });
     }
+    case 'ideas': {
+      // 6b-2: the roadmap's idea notes that wait to become proposals, the owner's marked (src/forge/ideas.ts).
+      const db = subFlag('db');
+      if (!db) throw new UsageError('proposals ideas: --db is required (the listed roadmap database)');
+      return json({ owner: roadmapOwner(io.cwd), ideas: pendingIdeas(io.cwd, db) });
+    }
+    case 'unpark': {
+      // 6b-2: the person's answer to a parked idea (src/forge/judge.ts): --insist integrates it, --withdraw rejects it. No active
+      // run is needed, the person may answer after it stopped; only the parked mark. Roots as judge's (T6B2-ROOTS): the
+      // proposal, its mark and its event are this checkout's, the decision goes to the main checkout's ledger.
+      const id = rest[0];
+      if (!id || !PROPOSAL_ID.test(id)) throw new UsageError('proposals unpark: a proposal id (p + 14 digits + 4 letters/digits) is required');
+      const insist = has('insist');
+      if (insist === has('withdraw')) throw new UsageError('proposals unpark: one answer is required, --insist or --withdraw');
+      const session = subFlag('session');
+      if (has('session') && (!session || !SESSION_ID.test(session))) throw new UsageError('proposals unpark: --session needs the waypoint session id');
+      const main = mainCheckout(io.cwd);
+      const run = parseRun(readRunText(runRootOf(io.cwd, main)));
+      // The answer belongs to the autonomous run that is active when it comes, if any.
+      const runId = run?.active && run.autonomous ? run.autonomous.runId : null;
+      const at = ts();
+      const recorded: { n?: number; event?: LedgerEvent } = {};
+      let r: Unparked;
+      try {
+        r = unparkProposal(io.cwd, id, insist, at, spanish(run?.locale), d => { Object.assign(recorded, addDecision(main, d, { ts: at, runId })); });
+      } catch (e) {
+        if (e instanceof JudgeError) throw new UsageError(`proposals unpark: ${e.message}`);
+        throw e;
+      }
+      const { decision: _decision, ...out } = r;
+      // The person's decision (by: user) is never one `decision publish` prints, so nothing is marked as published.
+      const publish = session && recorded.event ? decisionWrites({ event: recorded.event, session, eid: decisionNoteId(recorded.event, session) }) : null;
+      return json({ id, ...out, decision: recorded.n, ...(publish ? { publish } : {}) });
+    }
     default:
-      throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task|batch|judge> ...');
+      throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task|batch|judge|ideas|unpark> ...');
   }
 };

@@ -4,7 +4,8 @@
 // approved on its own keep in a later batch and then replaces its original (fix 1, T6B2-V2-OWN-VERDICT). An idea of someone
 // who is not the owner waits for the owner's mark, and a v2 keeps its original's standing (I-2). Everything is read and
 // written in `root`, the profile's worktree; the decision each outcome is goes first, through the caller's `record`, to the
-// main checkout's ledger (T6B2-DECISION-FIRST).
+// main checkout's ledger (T6B2-DECISION-FIRST). Task 5: `proposals unpark` applies the person's answer to a parked idea, in
+// the same order, and never judges it: insisting integrates it, withdrawing rejects it.
 import { appendEvent, readEvents, type LedgerEvent } from './ledger.js';
 import { loadApproval, loadProposal, saveApproval, saveProposal } from './proposals.js';
 import { checkDecision, DecisionInputError } from './decisions.js';
@@ -37,6 +38,8 @@ export interface Judged {
 export type RecordDecision = (decision: Record<string, unknown>) => void;
 
 const BY = 'forge:auto';
+/** Who marks the person's own answer to a parked idea: the same as /forge:decide's decisions. */
+const DECIDE = 'forge:decide';
 const DEL = { __delete__: true } as const;
 
 /** Each outcome's words and the alternative it did not take (L-13), in the run's language. Every undo names the proposal, so
@@ -45,6 +48,8 @@ const WORDS = {
   en: {
     approved: 'approve it', rejected: 'reject it', parked: 'park it', integrate: 'integrate it',
     replaced: (v2: string) => `replaced by ${v2}`,
+    withdraw: 'withdraw it', withdrawn: 'withdrawn by the person', insists: 'the person insists on it', withdrew: 'the person withdrew their idea',
+    insisted: (why: string) => `the person insists on their idea (it was parked: ${why})`,
     undo: {
       approved: (id: string) => `the person can reject it with /forge:decide ${id} reject before it becomes a task`,
       rejected: (id: string) => `the person can approve it with /forge:decide ${id} approve`,
@@ -54,6 +59,8 @@ const WORDS = {
   es: {
     approved: 'aprobarla', rejected: 'rechazarla', parked: 'aparcarla', integrate: 'integrarla',
     replaced: (v2: string) => `sustituida por ${v2}`,
+    withdraw: 'retirarla', withdrawn: 'retirada por la persona', insists: 'la persona insiste en ella', withdrew: 'la persona retiró su idea',
+    insisted: (why: string) => `la persona insiste en su idea (estaba aparcada: ${why})`,
     undo: {
       approved: (id: string) => `la persona puede rechazarla con /forge:decide ${id} reject antes de que sea una tarea`,
       rejected: (id: string) => `la persona puede aprobarla con /forge:decide ${id} approve`,
@@ -113,21 +120,30 @@ function originalStanding(root: string, events: readonly LedgerEvent[], id: stri
   return notJudgeable(root, events, id, doc) === null && !waitsOwner(id, doc, lastAdd(events, id)) ? 'open' : 'waits-owner';
 }
 
-/** The doc decided by this run, and its roadmap update: a stale reason or parked mark it no longer has is deleted. */
-function decidedDoc(doc: ProposalDoc, status: ProposalDoc['status'], at: string, extra: { reason?: string; parked?: ProposalParked }):
+/** The doc decided by this run (or, `by` forge:decide, by the person's answer), and its roadmap update: a stale reason or
+ *  parked mark it no longer has is deleted (L-7). */
+function decidedDoc(doc: ProposalDoc, status: ProposalDoc['status'], at: string, extra: { reason?: string; parked?: ProposalParked }, by: string = BY):
   { next: ProposalDoc; write: Record<string, unknown> } {
   const { reason: _reason, parked: _parked, ...rest } = doc;
-  const next: ProposalDoc = { ...rest, status, decidedBy: BY, decidedAt: at, ...extra };
-  const write: Record<string, unknown> = { status, decidedBy: BY, decidedAt: at, ...extra };
+  const next: ProposalDoc = { ...rest, status, decidedBy: by, decidedAt: at, ...extra };
+  const write: Record<string, unknown> = { status, decidedBy: by, decidedAt: at, ...extra };
   if (doc.reason && !extra.reason) write.reason = DEL;
   if (doc.parked && !extra.parked) write.parked = DEL;
   return { next, write };
 }
 
-/** The owner's mark this run writes, of the text it decided. */
-const markOf = (id: string, status: ApprovalDoc['status'], at: string, doc: ProposalDoc): ApprovalDoc =>
-  ({ status, decidedAt: at, by: BY, digest: proposalDigest(id, doc) });
+/** The owner's mark this run (or the person's answer) writes, of the text it decided. */
+const markOf = (id: string, status: ApprovalDoc['status'], at: string, doc: ProposalDoc, by: ApprovalDoc['by'] = BY): ApprovalDoc =>
+  ({ status, decidedAt: at, by, digest: proposalDigest(id, doc) });
 const markWrite = (id: string, mark: ApprovalDoc): Write => ({ op: 'set', collection: 'approvals', doc_id: id, data: { ...mark } });
+
+/** T6B2-DECISION-FIRST: a decision the record refuses (a title that cleans to nothing, say) is a refusal with nothing written. */
+function holds(id: string, decision: Record<string, unknown>): void {
+  try { checkDecision(decision); } catch (e) {
+    if (e instanceof DecisionInputError) throw new JudgeError(`the decision of ${id} does not hold: ${e.message}`);
+    throw e;
+  }
+}
 
 /**
  * Judges proposal `id` of `root` (the profile's worktree) by `verdicts` (readVerdicts of the critic's file), at `at`, in
@@ -174,12 +190,8 @@ export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[
     by: 'auto',
     undo: { type: 'none', reason: w.undo[outcome](id) },
   };
-  // T6B2-DECISION-FIRST: a decision the record refuses (a title that cleans to nothing, say) is a refusal with nothing written;
-  // a valid one is recorded before the proposal changes, so no approval is ever left without its decision.
-  try { checkDecision(decision); } catch (e) {
-    if (e instanceof DecisionInputError) throw new JudgeError(`the decision of ${id} does not hold: ${e.message}`);
-    throw e;
-  }
+  // T6B2-DECISION-FIRST: a valid decision is recorded before the proposal changes, so no approval is ever left without it.
+  holds(id, decision);
   record(decision);
   saveProposal(root, id, next);
   if (mark) saveApproval(root, id, mark);
@@ -195,4 +207,44 @@ export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[
     ...(orig ? { original: { id: orig.id, write: orig.write, approval: markWrite(orig.id, orig.mark) } } : {}),
     decision,
   };
+}
+
+export interface Unparked {
+  outcome: 'integrated' | 'withdrawn';
+  /** The update of proposals/<id> for the roadmap (the skill pins it to the version it read): its parked mark deleted (L-7). */
+  write: Record<string, unknown>;
+  /** The set of approvals/<id>: the owner's mark of the person's answer, by forge:decide. */
+  approval: Write;
+  /** The `addDecision` input, already recorded through `record`: an `idea` decision by the user, the person's own. */
+  decision: Record<string, unknown>;
+}
+
+/**
+ * 6b-2: applies the person's answer to parked idea `id` of `root` (a `discussing` proposal with `parked`), at `at`, in Spanish
+ * when `es`. Insisting (`insist`) integrates it: approved, with the owner's mark, both by forge:decide as /forge:decide marks
+ * the person's decisions. Withdrawing rejects it, with its mark. No run needs to be active: the person may answer after it
+ * stopped. T6B2-DECISION-FIRST, as judgeProposal: the decision is checked and handed to `record` before the proposal, its
+ * mark and a `proposal` `unpark` event (M-2) are written. Throws JudgeError, with nothing written, when `id` is not a parked
+ * idea or its decision does not hold. It never judges: the answer is the person's.
+ */
+export function unparkProposal(root: string, id: string, insist: boolean, at: string, es: boolean, record: RecordDecision): Unparked {
+  const doc = loadProposal(root, id);
+  if (!doc) throw new JudgeError(`${id} not found`);
+  const parked = doc.status === 'discussing' ? doc.parked : undefined;
+  if (!parked) throw new JudgeError(`${id} is ${doc.status}${doc.status === 'discussing' ? ' and not parked' : ''}: only a parked idea waits for the person's answer`);
+  const w = es ? WORDS.es : WORDS.en;
+  const status = insist ? 'approved' : 'rejected';
+  const { next, write } = decidedDoc(doc, status, at, insist ? {} : { reason: w.withdrawn }, DECIDE);
+  const mark = markOf(id, status, at, doc, DECIDE);
+  const decision = insist
+    ? { point: 'idea', what: doc.title, chosen: w.integrate, alternatives: [{ option: w.withdraw, whyNot: w.insists }], tradeoffs: parked.loses,
+      why: w.insisted(parked.why), by: 'user', undo: { type: 'none', reason: w.undo.approved(id) } }
+    : { point: 'idea', what: doc.title, chosen: w.withdraw, alternatives: [{ option: w.integrate, whyNot: parked.why, tradeoffs: parked.loses }],
+      why: w.withdrew, by: 'user', undo: { type: 'none', reason: w.undo.rejected(id) } };
+  holds(id, decision);
+  record(decision);
+  saveProposal(root, id, next);
+  saveApproval(root, id, mark);
+  appendEvent(root, { ts: at, kind: 'proposal', action: 'unpark', id, status });
+  return { outcome: insist ? 'integrated' : 'withdrawn', write, approval: markWrite(id, mark), decision };
 }
