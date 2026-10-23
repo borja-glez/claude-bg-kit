@@ -14,9 +14,13 @@ import { commandName, GIT_VALUED, isNullSink, shellPath, type Dialect, type Segm
 import { bashSegments, deny, insideRoots, segmentPath } from './autonomy-shared.js';
 import { copyEnds, isPsPipeItem, knownWriteCommand, newItemName, plainOperands, writeInfo } from './autonomy-parse.js';
 
-// Task 5 (T5-FILE): the rules for writes off the machine live in autonomy-net.ts (it never imports this file); re-exported
-// here so the hook assembles every rule from one module and the tests import them from autonomy-rules.js.
+// Task 5 (T5-FILE): the rules for writes off the machine live in autonomy-net.ts, and Task 6's database rule in
+// autonomy-db.ts (neither imports this file); re-exported here, and listed in AUTONOMY_RULES at the end, so the hook
+// assembles every rule from one module and the tests import them from autonomy-rules.js.
+import { networkRule, cloudRule, mcpWriteRule } from './autonomy-net.js';
+import { databaseRule } from './autonomy-db.js';
 export { networkRule, cloudRule, mcpWriteRule } from './autonomy-net.js';
+export { databaseRule } from './autonomy-db.js';
 
 // A write target kept for compatibility with the review probes; the rules read writeInfo directly.
 export function writeTargets(seg: Segment): Word[] { return writeInfo(seg).targets; }
@@ -680,3 +684,8 @@ export const gitRule: GuardRule = {
     return null;
   },
 };
+
+// ---- all eight ------------------------------------------------------------------------------------------------------
+
+/** The autonomy rules in the order the hook runs them (the first deny wins): self first, so nothing switches the guard off. */
+export const AUTONOMY_RULES: readonly GuardRule[] = [selfRule, filesRule, installRule, gitRule, networkRule, cloudRule, mcpWriteRule, databaseRule];

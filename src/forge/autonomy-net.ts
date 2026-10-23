@@ -73,7 +73,8 @@ const isWriteMethod = (m: string): boolean => m !== '' && !WRITE_METHODS.include
 
 // ---- runners --------------------------------------------------------------------------------------------------------
 
-type Eff = { name: string; args: Word[] };
+/** The command a segment runs once its runners are unwrapped (Task 6 reuses it for the migrators behind a launcher, T6-LAUNCHER-REUSE). */
+export type Eff = { name: string; args: Word[] };
 /**
  * T5-RUNNER-TABLES: each runner's own options before the package operand — the ones that take a value, its switches, and
  * the ones that name a package (read with PKG_BIN under T5-PKG-FLAG). An option outside its table cancels (unknown target).
@@ -102,6 +103,8 @@ const RUNNER_TABLES: Record<string, RunnerTable> = {
   'pdm run': RT('-p --project', '-l --list -s --site-packages --recreate -g --global'),
   'hatch run': RT('-e --env -p --project', ''),
   'pipx run': RT('--spec --python --pip-args --index-url', '--no-cache --fetch-missing-python --system-site-packages --path', '--spec'),
+  // T6-LAUNCHER-REUSE: Bundler's runner (`bundle exec rails db:drop`).
+  'bundle exec': RT('--gemfile', '--keep-file-descriptors --no-color -V'),
 };
 // Package specs whose installed bin differs from the package name.
 const PKG_BIN: Record<string, string> = {
@@ -125,7 +128,7 @@ function pkgToBin(spec: string): string {
   return alias(PKG_BIN[s] ?? commandName({ text: s, dynamic: false, glob: false }));
 }
 /** A runner line the hook cannot read: the reason becomes the network rule's `unknown target`. */
-type Cancel = { cancel: string };
+export type Cancel = { cancel: string };
 const UNKNOWN_RUNNER_OPT: Cancel = { cancel: 'a runner option the hook does not know hides the command it runs' };
 /** Skip a runner's own options (its table) to its package operand, collecting the package-naming values; a Cancel when an option outside the table comes first. */
 function runnerRest(args: Word[], table: RunnerTable): { rest: Word[]; pkgs: Word[] } | Cancel {
@@ -174,14 +177,17 @@ function runnerOf(name: string, args: Word[]): { key: string; skip: number } | n
   if (name === 'npm' && (a0 === 'exec' || a0 === 'x')) return { key: 'npm exec', skip: 1 };
   if (name === 'uv' && a0 === 'tool' && a1 === 'run') return { key: 'uv tool run', skip: 2 };
   if (['uv', 'poetry', 'pdm', 'hatch', 'pipx'].includes(name) && a0 === 'run') return { key: `${name} run`, skip: 1 };
+  if (name === 'bundle' && a0 === 'exec') return { key: 'bundle exec', skip: 1 };
   return null;
 }
 function unwrapRunner(name: string, args: Word[]): Eff | Cancel | null {
   const r = runnerOf(name, args);
   if (r) return innerOf(runnerRest(args.slice(r.skip), RUNNER_TABLES[r.key]));
   if (/^(?:python[0-9.]*|py)$/.test(name)) {
-    const mi = args.findIndex(w => w.text === '-m');
-    if (mi >= 0 && args[mi + 1] && !args[mi + 1].dynamic) return { name: pkgToBin(args[mi + 1].text.toLowerCase()), args: args.slice(mi + 2) };
+    // `-m <module>`, or the module glued (`-malembic`, T6-LAUNCHER-REUSE)
+    const mi = args.findIndex(w => /^-m/.test(w.text)), glued = mi >= 0 && args[mi].text.length > 2;
+    const mod = glued ? { ...args[mi], text: args[mi].text.slice(2) } : args[mi + 1];
+    if (mi >= 0 && mod && !mod.dynamic) return { name: pkgToBin(mod.text.toLowerCase()), args: args.slice(mi + (glued ? 1 : 2)) };
   }
   // pnpm <bin> / yarn <bin> that is not a manager command: unwrap only when the bin is a cloud or publisher CLI (bounded).
   if ((name === 'pnpm' || name === 'yarn') && args[0] && !args[0].text.startsWith('-') && !args[0].dynamic && !PKG_BUILTINS.has(args[0].text.toLowerCase())) {
@@ -190,8 +196,11 @@ function unwrapRunner(name: string, args: Word[]): Eff | Cancel | null {
   }
   return null;
 }
-/** The command a segment runs: its name and arguments, runners unwrapped (up to three deep: `uv run python -m twine`). */
-function effectiveCommand(seg: Segment): Eff | Cancel | null {
+/**
+ * The command a segment runs: its name and arguments, runners unwrapped (up to three deep: `uv run python -m twine`).
+ * `./node_modules/.bin/<x>` needs no unwrap: commandName already names it `<x>`. Exported for the database rule (Task 6).
+ */
+export function effectiveCommand(seg: Segment): Eff | Cancel | null {
   if (!seg.argv.length || seg.argv[0].dynamic) return null;
   let eff: Eff = { name: alias(commandName(seg.argv[0])), args: seg.argv.slice(1) };
   for (let depth = 0; depth < 3; depth++) {
