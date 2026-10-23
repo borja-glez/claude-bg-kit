@@ -6,14 +6,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { PROFILES, isAutonomousName, type AutonomousRun, type Profile } from '../lib/forge-run.js';
 import { excludeWorktrees } from '../lib/git-info.js';
-import { samePath } from '../lib/worktree.js';
+import { BRANCH_RE, samePath } from '../lib/worktree.js';
 import { UsageError } from './cli/errors.js';
 import { defaultGit } from './cli/exec.js';
 import { forgeDir } from './ledger.js';
 import { autonomousDir } from './resources.js';
 import { runMainsOf } from './autonomous.js';
 import { confinedIn, isInside } from './guard.js';
-import { parseRun, readRunText } from './run.js';
+import { parseRun, readRunText, runFile, type RunState } from './run.js';
 
 export function profileNames(main: string, profile: Profile, name: string): { runId: string; branch: string; worktree: string } {
   const runId = `${profile}-${name}`;
@@ -25,17 +25,33 @@ export const startFile = (main: string, runId: string): string => path.join(auto
 
 export interface StartRecord { startBranch: string; defaultBranch: string | null; at: string }
 
-/** start.json as prepare wrote it; null when there is none. One that does not hold a record is refused: a start branch is never guessed. */
+/**
+ * start.json as prepare wrote it; null when there is none. One that does not hold a record, or whose start branch BRANCH_RE
+ * refuses (m-5: it reaches git as an argument), is refused: a start branch is never guessed.
+ */
 export function readStart(main: string, runId: string): StartRecord | null {
   const file = startFile(main, runId);
   if (!existsSync(file)) return null;
   let o: Partial<Record<keyof StartRecord, unknown>> | null = null;
   try { o = JSON.parse(readFileSync(file, 'utf8')); } catch { o = null; }
-  if (!o || typeof o !== 'object' || typeof o.startBranch !== 'string' || o.startBranch === '' || typeof o.at !== 'string'
+  if (!o || typeof o !== 'object' || typeof o.startBranch !== 'string' || !BRANCH_RE.test(o.startBranch) || typeof o.at !== 'string'
     || (o.defaultBranch !== null && typeof o.defaultBranch !== 'string')) {
-    throw new UsageError(`${file} does not hold { startBranch, defaultBranch, at }; fix it, or remove it so the next prepare records the current branch`);
+    throw new UsageError(`${file} does not hold { startBranch, defaultBranch, at } with a start branch of letters, digits and _ - . / ~ : @ +; `
+      + 'fix it, or remove it so the next prepare records the current branch');
   }
   return { startBranch: o.startBranch, defaultBranch: o.defaultBranch as string | null, at: o.at };
+}
+
+/**
+ * m-3: run.json's run, null when there is none. A run.json that is there and does not read or parse is refused, naming the
+ * file: the guard holds its sessions closed, and a profile replacing it would free them.
+ */
+export function readableRun(root: string, cmd: string): RunState | null {
+  const run = parseRun(readRunText(root));
+  if (run === null && existsSync(runFile(root))) {
+    throw new UsageError(`${cmd}: ${runFile(root)} does not read as a run, and the guard keeps its sessions closed; fix it or remove it from a conversation outside the run`);
+  }
+  return run;
 }
 
 /** The branches a profile never touches: the start branch, main and the repository's default branch, once each, in that order. */
@@ -50,20 +66,24 @@ export function profileArgs(cmd: string, profile: unknown, name: unknown): { pro
   return { profile: profile as Profile, name };
 }
 
-/** The checkouts of `git worktree list --porcelain`: each one's path and the branch it holds (null when detached). */
-function checkoutsOf(porcelain: string | null): { dir: string; branch: string | null }[] {
-  const out: { dir: string; branch: string | null }[] = [];
+interface Checkout { dir: string; branch: string | null; locked: boolean }
+
+/** The checkouts of `git worktree list --porcelain`: each one's path, the branch it holds (null when detached) and whether it is locked. */
+function checkoutsOf(porcelain: string | null): Checkout[] {
+  const out: Checkout[] = [];
   for (const line of (porcelain ?? '').split(/\r?\n/)) {
-    if (line.startsWith('worktree ')) out.push({ dir: line.slice('worktree '.length).trim(), branch: null });
-    else if (line.startsWith('branch refs/heads/') && out.length > 0) out[out.length - 1].branch = line.slice('branch refs/heads/'.length);
+    const last = out[out.length - 1];
+    if (line.startsWith('worktree ')) out.push({ dir: line.slice('worktree '.length).trim(), branch: null, locked: false });
+    else if (line.startsWith('branch refs/heads/') && last) last.branch = line.slice('branch refs/heads/'.length);
+    else if ((line === 'locked' || line.startsWith('locked ')) && last) last.locked = true;
   }
   return out;
 }
 
 /**
  * Creates or reuses the profile's branch and worktree. The start branch is start.json's when there is one, else the branch
- * `cwd` is on. Each refusal is a UsageError and touches nothing: every check comes first, then info/exclude, the worktree
- * and, last, start.json (L-5).
+ * `cwd` is on. Each refusal is a UsageError that names its cause and touches nothing: every check comes first (m-1), then
+ * info/exclude, the clearing of the profile's own stale entry, the worktree and, last, start.json (L-5).
  */
 export function prepareProfile(main: string, cwd: string, profile: Profile, name: string, at: string): { runId: string; worktree: string; branch: string; startBranch: string; created: boolean } {
   const args = profileArgs('infinite prepare', profile, name);
@@ -74,26 +94,36 @@ export function prepareProfile(main: string, cwd: string, profile: Profile, name
   if (!startBranch) throw new UsageError(`infinite prepare: git cannot say which branch ${cwd} is on`);
   if (startBranch === 'HEAD') throw new UsageError('infinite prepare: the checkout is detached (HEAD); switch to the branch the profile should start from');
   if (startBranch === branch) throw new UsageError(`infinite prepare: ${branch} is the profile's own branch; run this from the branch it should start from`);
+  // m-5: the rule readStart applies to start.json, so prepare never records a start branch the next prepare refuses.
+  if (!BRANCH_RE.test(startBranch)) throw new UsageError(`infinite prepare: the start branch ${startBranch} is outside forge's branch rule (letters, digits and _ - . / ~ : @ +)`);
   const checkouts = checkoutsOf(git(['worktree', 'list', '--porcelain']));
   const exists = existsSync(worktree);
-  if (exists) {
-    const on = checkouts.find(c => samePath(c.dir, worktree));
-    if (on?.branch !== branch) {
-      const what = on ? `on ${on.branch ?? 'a detached HEAD'}` : 'and is no worktree of this repository';
-      throw new UsageError(`infinite prepare: ${worktree} exists ${what}, not on ${branch}; remove it or choose another --name`);
-    }
-  } else {
-    // A checkout whose folder is gone is not in the way: the prune below forgets it.
-    const holder = checkouts.find(c => c.branch === branch && existsSync(c.dir));
-    if (holder) throw new UsageError(`infinite prepare: ${branch} is checked out in ${holder.dir}; switch that checkout to another branch first`);
+  const own = checkouts.find(c => samePath(c.dir, worktree));
+  if (exists && own?.branch !== branch) {
+    const what = own ? `on ${own.branch ?? 'a detached HEAD'}` : 'and is no worktree of this repository';
+    throw new UsageError(`infinite prepare: ${worktree} exists ${what}, not on ${branch}; remove it or choose another --name`);
+  }
+  // L-5-AMEND: the profile's own entry whose folder is gone is cleared below; no other entry of the repository is touched.
+  const stale = exists ? null : own ?? null;
+  if (stale?.locked) {
+    throw new UsageError(`infinite prepare: ${worktree} is registered and locked, but its folder is missing; bring the folder back, or unlock it (git worktree unlock) and run this again`);
+  }
+  const holder = exists ? null : checkouts.find(c => c.branch === branch && !samePath(c.dir, worktree));
+  if (holder && existsSync(holder.dir)) throw new UsageError(`infinite prepare: ${branch} is checked out in ${holder.dir}; switch that checkout to another branch first`);
+  if (holder) {
+    throw new UsageError(`infinite prepare: ${branch} is held by the worktree ${holder.dir}, whose folder is missing; bring it back, or remove that entry (git worktree remove --force)`);
   }
   const hasBranch = git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
+  if (!exists && !hasBranch && git(['rev-parse', '--verify', '-q', `${startBranch}^{commit}`]) === null) {
+    throw new UsageError(`infinite prepare: the start branch ${startBranch} no longer exists, and neither does ${branch}; restore one of them, or remove ${startFile(main, runId)}`);
+  }
   excludeWorktrees(git);
+  if (stale && git(['worktree', 'remove', '--force', worktree]) === null) {
+    throw new UsageError(`infinite prepare: git could not clear the entry of ${worktree}, whose folder is missing (git worktree remove --force)`);
+  }
   if (!exists) {
-    // A worktree folder deleted by hand stays registered, and git worktree add refuses its path until it is pruned.
-    git(['worktree', 'prune']);
     const added = hasBranch ? git(['worktree', 'add', worktree, branch]) : git(['worktree', 'add', '-b', branch, worktree, startBranch]);
-    if (added === null) throw new UsageError(`infinite prepare: git could not add the worktree ${worktree} on ${branch}`);
+    if (added === null) throw new UsageError(`infinite prepare: git could not add the worktree ${worktree} on ${branch}${hasBranch ? '' : ` from ${startBranch}`}`);
   }
   if (!recorded) {
     const defaultBranch = git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])?.trim().replace(/^origin\//, '') || null;

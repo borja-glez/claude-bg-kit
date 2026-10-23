@@ -29,7 +29,9 @@ const PERSONAL_REDIS_PORTS = [6379, 6380, 6381];
 export const dbPrefix = (runId: string): string => `fg_${runId.replace(/[^a-z0-9]/g, '_')}__`;
 /** The start of every container, volume and compose project name of the run (the double `-` ends the run id, M3). */
 export const dockerPrefix = (runId: string): string => `fg-${runId}--`;
-export const autonomousDir = (main: string, runId: string): string => path.join(main, '.forge', 'autonomous', runId);
+/** The parent of every run's autonomousDir. */
+export const autonomousRoot = (main: string): string => path.join(main, '.forge', 'autonomous');
+export const autonomousDir = (main: string, runId: string): string => path.join(autonomousRoot(main), runId);
 export const resourcesFile = (main: string, runId: string): string => path.join(autonomousDir(main, runId), 'resources.json');
 /** The temporary folder of the run: the one place outside its worktree where it may create files. */
 export const runTmp = (runId: string): string => path.join(os.tmpdir(), `forge-${runId}`);

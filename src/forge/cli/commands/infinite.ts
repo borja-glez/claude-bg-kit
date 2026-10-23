@@ -8,7 +8,7 @@ import { claudeSessionId, noClaudeSession } from '../../../lib/claude-session.js
 import { UsageError } from '../errors.js';
 import { infinitePublish } from '../../infinite-doc.js';
 import { mainCheckout } from '../../local.js';
-import { prepareProfile, profileArgs, profileBlock } from '../../profile.js';
+import { activeProfileAt, prepareProfile, profileArgs, profileBlock, readableRun } from '../../profile.js';
 import { autonomousFor, recordSessions } from '../../autonomous.js';
 import { stopContext, unownedOf, runRootOf, runReply } from '../shared.js';
 
@@ -17,6 +17,10 @@ export const command: Command = (args, ctx) => {
   const sub = args[0];
   if (sub === 'prepare') {
     const { profile, name } = profileArgs('infinite prepare', flag('profile'), flag('name'));
+    readableRun(runRootOf(io.cwd), 'infinite prepare');
+    // From inside an active run's worktree (its own session included), nothing is prepared: the swarm start refusal's check.
+    const inside = activeProfileAt(io.cwd);
+    if (inside) throw new UsageError(`infinite prepare: ${io.cwd} is inside the worktree of the active autonomous run ${inside.runId}; prepare a profile from outside it`);
     const out = prepareProfile(mainCheckout(io.cwd), io.cwd, profile, name, ts());
     // M-10: where the session goes next, by path, since the start runs only from there.
     const next = `enter the worktree ${out.worktree} (EnterWorktree with this path), then run infinite start --profile ${profile} --name ${name} from it`;
@@ -48,14 +52,15 @@ export const command: Command = (args, ctx) => {
     // K2-01: the run lives in the main checkout, whichever worktree starts it; an older run left in this
     // directory still counts as the active one.
     const runRoot = runRootOf(io.cwd);
-    const current = parseRun(readRunText(runRoot));
+    // m-3: a profile never replaces a run.json the guard holds closed (it does not read, or its block does not parse).
+    const current = profiled ? readableRun(runRoot, 'infinite start') : parseRun(readRunText(runRoot));
     if (profiled) {
-      // L-9: a profile never replaces another one that is active, and a stopped run's sessions stay its own (still guarded).
-      const runId = `${profiled.profile}-${profiled.name}`;
-      if (current?.active && current.autonomous && current.autonomous.runId !== runId) {
-        throw new UsageError(`infinite start: the autonomous run ${current.autonomous.runId} is active; stop it first (forge stop)`);
+      // L-9, m-2: an active autonomous run, of any runId and whatever its stop reason, is continued, never restarted (its own
+      // session cannot give itself a fresh budget); and the sessions of a stopped one stay its own, still guarded.
+      if (current?.active && current.autonomous) {
+        throw new UsageError(`infinite start: a run is active: continue it, or stop it and start from a new conversation (autonomous run ${current.autonomous.runId})`);
       }
-      if (!current?.active && autonomousFor(runRoot, { session_id: session })) {
+      if (autonomousFor(runRoot, { session_id: session })) {
         throw new UsageError('infinite start: this conversation belongs to a stopped autonomous run and stays guarded; open a new conversation to start a profile');
       }
     }

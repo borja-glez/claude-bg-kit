@@ -9,7 +9,7 @@ import path from 'node:path';
 import { parseRun, runFile, type RunState } from './run.js';
 import { executionFile, runWorktree } from './execution.js';
 import { listMembers } from './members.js';
-import { autonomousDir, readResources, runTmp, type Resource } from './resources.js';
+import { autonomousDir, autonomousRoot, readResources, runTmp, type Resource } from './resources.js';
 import { isInside, evaluateGuard, forgeCalls, shellCommand, CWD_FLAG, TRUST_RULES, type GuardCtx, type GuardInput, type GuardRule, type GuardVerdict } from './guard.js';
 import { AUTONOMY_RULES } from './autonomy-rules.js';
 import { parseExecution, type ExecutionState } from '../lib/execution-state.js';
@@ -94,7 +94,7 @@ export function recordSessions(main: string, runId: string, ids: string[], workt
 /** Every session id of every sessions.json under .forge/autonomous/, each once: the run.json that would say which is current does not read. */
 function recordedIds(main: string): string[] {
   let names: string[];
-  try { names = readdirSync(path.join(main, '.forge', 'autonomous')); } catch { return []; } // no folder: no profile started a run here
+  try { names = readdirSync(autonomousRoot(main)); } catch { return []; } // no folder: no profile started a run here
   const ids: string[] = [];
   for (const name of names) {
     try {

@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
-import { parseRun, readRunText } from '../src/forge/run.js';
+import { parseRun, readRunText, runFile, startRun } from '../src/forge/run.js';
+import { samePath } from '../src/lib/worktree.js';
 import { activeProfileAt, profileNames, protectedBranchesOf, startFile } from '../src/forge/profile.js';
 import { autonomousFor, sessionsFile } from '../src/forge/autonomous.js';
 import { isAutonomousName } from '../src/lib/forge-run.js';
@@ -89,12 +90,90 @@ describe('infinite prepare', () => {
     expect(existsSync(profileNames(main, 'spike', 'tetris').worktree)).toBe(false);
     expect(existsSync(path.join(main, '.forge'))).toBe(false);
   });
-  it('a worktree folder deleted by hand is pruned and added again (L-5)', () => {
-    cli(main, ['prepare', '--profile', 'spike', '--name', 'tetris']);
+  it('clears only its own stale entry: another worktree whose folder is away stays registered, with its index (I-1, L-5-AMEND)', () => {
+    const away = tmp('away-');
+    const usb = path.join(away, 'usb');
+    const person = path.join(usb, 'person-wt');
+    g(main, 'worktree', 'add', '-q', '-b', 'person-feature', person);
+    writeFileSync(path.join(person, 'b.txt'), 'b'); g(person, 'add', 'b.txt');
+    renameSync(usb, path.join(away, 'unplugged'));
+    const listed = () => g(main, 'worktree', 'list', '--porcelain').split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice('worktree '.length));
+    expect(cli(main, ['prepare', '--profile', 'spike', '--name', 'tetris']).code).toBe(0);
     const { worktree } = profileNames(main, 'spike', 'tetris');
     rmSync(worktree, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     expect(JSON.parse(cli(main, ['prepare', '--profile', 'spike', '--name', 'tetris']).stdout)).toMatchObject({ created: true, startBranch: 'main' });
     expect(g(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('forge/spike-tetris');
+    expect(listed().some(d => samePath(d, person))).toBe(true);
+    renameSync(path.join(away, 'unplugged'), usb);
+    expect(g(person, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('person-feature');
+    expect(g(person, 'diff', '--cached', '--name-only')).toBe('b.txt');
+  });
+  it('leaves the main checkout\'s HEAD, branch and index as they were (m-4)', () => {
+    writeFileSync(path.join(main, 'b.txt'), 'b'); g(main, 'add', 'b.txt');
+    const head = g(main, 'rev-parse', 'HEAD');
+    expect(cli(main, ['prepare', '--profile', 'spike', '--name', 'tetris']).code).toBe(0);
+    expect(g(main, 'rev-parse', 'HEAD')).toBe(head);
+    expect(g(main, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
+    expect(g(main, 'diff', '--cached', '--name-only')).toBe('b.txt');
+  });
+  it('refuses, before it writes anything, a start branch outside the rule, a bad start.json, a folder that is no worktree and a branch held elsewhere (m-1, m-4, m-5)', () => {
+    g(main, 'config', 'core.excludesFile', path.join(main, 'no-global-ignore'));
+    const exclude = path.join(main, '.git', 'info', 'exclude');
+    const before = existsSync(exclude) ? readFileSync(exclude, 'utf8') : null;
+    const refused = (name: string, cause: RegExp) => {
+      const r = cli(main, ['prepare', '--profile', 'spike', '--name', name]);
+      expect(r.code, name).toBe(2);
+      expect(r.stderr, name).toMatch(cause);
+    };
+    g(main, 'checkout', '-q', '-b', 'feat#1');
+    refused('hash', /outside forge's branch rule/);
+    g(main, 'checkout', '-q', 'main');
+    for (const [name, text] of [['bad', 'not json'], ['dash', JSON.stringify({ startBranch: '-x', defaultBranch: null, at: T0.toISOString() })]]) {
+      mkdirSync(path.dirname(startFile(main, `spike-${name}`)), { recursive: true });
+      writeFileSync(startFile(main, `spike-${name}`), text);
+      refused(name, /does not hold \{ startBranch, defaultBranch, at \}/);
+    }
+    mkdirSync(profileNames(main, 'spike', 'plain').worktree, { recursive: true });
+    refused('plain', /is no worktree of this repository/);
+    const elsewhere = path.join(main, '.claude', 'worktrees', 'elsewhere');
+    g(main, 'worktree', 'add', '-q', '-b', 'forge/spike-held', elsewhere);
+    refused('held', /forge\/spike-held is checked out in/);
+    renameSync(elsewhere, path.join(tmp('away-'), 'elsewhere'));
+    refused('held', /whose folder is missing/);
+    expect(g(main, 'worktree', 'list', '--porcelain')).toContain('branch refs/heads/forge/spike-held');
+    expect(existsSync(exclude) ? readFileSync(exclude, 'utf8') : null).toBe(before);
+    for (const name of ['hash', 'plain', 'held']) expect(existsSync(startFile(main, `spike-${name}`)), name).toBe(false);
+  });
+  it('refuses a locked stale entry of its own and a start point that is gone, and leaves both as they are (m-1)', () => {
+    cli(main, ['prepare', '--profile', 'spike', '--name', 'locked']);
+    const locked = profileNames(main, 'spike', 'locked').worktree;
+    g(main, 'worktree', 'lock', locked);
+    rmSync(locked, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    const r = cli(main, ['prepare', '--profile', 'spike', '--name', 'locked']);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/registered and locked, but its folder is missing/);
+    expect(existsSync(locked)).toBe(false);
+    expect(g(main, 'worktree', 'list', '--porcelain')).toContain('branch refs/heads/forge/spike-locked');
+    g(main, 'checkout', '-q', '-b', 'feature');
+    cli(main, ['prepare', '--profile', 'spike', '--name', 'gone']);
+    const gone = profileNames(main, 'spike', 'gone').worktree;
+    g(main, 'worktree', 'remove', '--force', gone);
+    g(main, 'checkout', '-q', 'main');
+    g(main, 'branch', '-q', '-D', 'feature', 'forge/spike-gone');
+    const r2 = cli(main, ['prepare', '--profile', 'spike', '--name', 'gone']);
+    expect(r2.code).toBe(2);
+    expect(r2.stderr).toMatch(/the start branch feature no longer exists, and neither does forge\/spike-gone/);
+    expect(existsSync(gone)).toBe(false);
+  });
+  it('says so when git cannot name the branch it starts from, or cannot add the worktree (m-4)', () => {
+    const outside = cli(tmp('nogit-'), ['prepare', '--profile', 'spike', '--name', 'tetris']);
+    expect(outside.code).toBe(2);
+    expect(outside.stderr).toMatch(/git cannot say which branch/);
+    writeFileSync(path.join(main, '.claude'), 'a file where the worktrees folder would go');
+    const r = cli(main, ['prepare', '--profile', 'spike', '--name', 'tetris']);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/git could not add the worktree .* on forge\/spike-tetris from main/);
+    expect(existsSync(startFile(main, 'spike-tetris'))).toBe(false);
   });
 });
 
@@ -160,6 +239,64 @@ describe('infinite start --profile', () => {
       expect(own.stderr).toMatch(/open a new conversation/);
     }
     expect(JSON.parse(start(shop, 'product', 'shop', 'coord-2').stdout).autonomous.runId).toBe('product-shop');
+  });
+  it('never restarts an active run, its own session included and also once its budget is due (m-2)', () => {
+    cli(main, ['prepare', '--profile', 'spike', '--name', 'tetris']);
+    const { worktree } = profileNames(main, 'spike', 'tetris');
+    expect(cli(worktree, ['start', '--profile', 'spike', '--name', 'tetris', '--hours', '1', '--session', 'coord-1']).code).toBe(0);
+    for (const at of [T0, new Date(T0.getTime() + 2 * 3600_000)]) {
+      for (const session of ['coord-1', 'coord-2']) {
+        const r = run(['infinite', 'start', '--profile', 'spike', '--name', 'tetris', '--hours', '2', '--session', session], { cwd: worktree, now: () => at, env: {} });
+        expect(r.code, `${session} at ${at.toISOString()}`).toBe(2);
+        expect(r.stderr).toContain('a run is active: continue it, or stop it and start from a new conversation');
+      }
+    }
+    expect(parseRun(readRunText(main))).toMatchObject({ startedAt: T0.toISOString(), budget: { hours: 1 }, sessionId: 'coord-1' });
+  });
+  it('prepare refuses inside an active run\'s worktree; both refuse a run.json that does not read or whose block does not parse (m-3)', () => {
+    cli(main, ['prepare', '--profile', 'spike', '--name', 'tetris']);
+    const { worktree } = profileNames(main, 'spike', 'tetris');
+    cli(worktree, ['start', '--profile', 'spike', '--name', 'tetris', '--hours', '2', '--session', 'coord-1']);
+    const inside = cli(worktree, ['prepare', '--profile', 'spike', '--name', 'tetris']);
+    expect(inside.code).toBe(2);
+    expect(inside.stderr).toMatch(/inside the worktree of the active autonomous run spike-tetris/);
+    expect(cli(main, ['prepare', '--profile', 'product', '--name', 'shop']).code).toBe(0);
+    expect(run(['stop'], { cwd: main, now: () => T0, env: {} }).code).toBe(0);
+    expect(cli(worktree, ['prepare', '--profile', 'spike', '--name', 'tetris']).code).toBe(0);
+    const shop = profileNames(main, 'product', 'shop').worktree;
+    const broken = (setup: () => void) => {
+      setup();
+      for (const [cwd, args] of [[main, ['prepare', '--profile', 'spike', '--name', 'tetris']],
+        [shop, ['start', '--profile', 'product', '--name', 'shop', '--hours', '2', '--session', 'coord-9']]] as const) {
+        const r = cli(cwd, [...args]);
+        expect(r.code, args[0]).toBe(2);
+        expect(r.stderr, args[0]).toContain(runFile(main));
+      }
+    };
+    broken(() => { rmSync(runFile(main)); mkdirSync(runFile(main)); });
+    broken(() => {
+      rmSync(runFile(main), { recursive: true });
+      writeFileSync(runFile(main), JSON.stringify({ ...startRun(T0, { hours: 1 }, 10, 'coord-1'), autonomous: { profile: 'nope' } }));
+    });
+  });
+  it('a profile started from a feature branch protects it first, then main (m-4)', () => {
+    g(main, 'checkout', '-q', '-b', 'feature');
+    cli(main, ['prepare', '--profile', 'spike', '--name', 'tetris']);
+    const { worktree } = profileNames(main, 'spike', 'tetris');
+    const r = JSON.parse(cli(worktree, ['start', '--profile', 'spike', '--name', 'tetris', '--hours', '2', '--session', 'coord-1']).stdout);
+    expect(r.autonomous).toMatchObject({ startBranch: 'feature', protectedBranches: ['feature', 'main'] });
+  });
+  it('start refuses a start.json that does not hold a record, and a block that would not read back (m-4)', () => {
+    cli(main, ['prepare', '--profile', 'spike', '--name', 'tetris']);
+    const { worktree } = profileNames(main, 'spike', 'tetris');
+    const start = () => cli(worktree, ['start', '--profile', 'spike', '--name', 'tetris', '--hours', '2', '--session', 'coord-1']);
+    writeFileSync(startFile(main, 'spike-tetris'), 'not json');
+    expect(start().stderr).toMatch(/does not hold \{ startBranch, defaultBranch, at \}/);
+    writeFileSync(startFile(main, 'spike-tetris'), JSON.stringify({ startBranch: 'a..b', defaultBranch: null, at: T0.toISOString() }));
+    const r = start();
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/the autonomous block of spike-tetris does not read back/);
+    expect(readRunText(main)).toBeNull();
   });
   it('swarm start refuses inside the active profile\'s worktree, and says why (T6B2-NO-EXECUTION)', () => {
     cli(main, ['prepare', '--profile', 'spike', '--name', 'tetris']);
