@@ -11,9 +11,9 @@ import type { Io } from '../run.js';
 import { planTask, spTaskNumber, tddFor } from '../shared.js';
 
 // The TDD line of a brief: an invalid config or a missing superpowers leaves it out (the brief never fails on it), and
-// superpowers is looked for only with tdd: superpowers.
+// nothing is looked for with tdd: off.
 function briefTdd(io: Io, dir: string): string | null {
-  try { return loadConfig(dir).tdd === 'superpowers' ? tddFor(io, dir).line : null; } catch { return null; }
+  try { return loadConfig(dir).tdd !== 'off' ? tddFor(io, dir).line : null; } catch { return null; }
 }
 
 // K4-02: the threat model section a plan task's brief carries, from the config of the code's checkout (none on any error).

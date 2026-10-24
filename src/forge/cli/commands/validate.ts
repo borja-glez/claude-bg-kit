@@ -9,7 +9,7 @@ import { UsageError } from '../errors.js';
 import { restoringRegenerated } from '../swarm.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../../validate-cache.js';
 import {
-  detectValidators, selectValidators, runValidators, markPreexisting, blocking, baselineFailing, runOptions, validateEvent, planAffected,
+  detectValidators, selectValidators, runValidators, markPreexisting, blocking, baselineFailing, baseFailingNames, runOptions, validateEvent, planAffected,
   type Scope, type Validator, type ValidatorResult,
 } from '../../validators.js';
 import { mainCheckout } from '../../local.js';
@@ -96,6 +96,15 @@ export const command: Command = (args, ctx) => {
   if (has('baseline') && results.some(r => !r.ok)) {
     const names = (pick: (r: ValidatorResult) => boolean) => results.filter(r => !r.ok && pick(r)).map(r => r.validator).join(', ') || 'none';
     out.stderr += `new failures: ${names(blocking)}; already failing on the base (not yours): ${names(r => !blocking(r))}\n`;
+  }
+  // A9: with tdd: verified, name the tests of each red validator the base already failed.
+  if (config.tdd === 'verified' && has('baseline')) {
+    for (const r of results) {
+      if (r.ok) continue;
+      const was = new Set(baseFailingNames(baseline, r.validator));
+      const names = (r.failing ?? []).filter(n => was.has(n));
+      if (names.length) out.stderr += `already failing on the base by name (not yours): ${r.validator}: ${names.slice(0, 10).join('; ')}${names.length > 10 ? ` (+${names.length - 10} more)` : ''}\n`;
+    }
   }
   if (denied) out.stderr += 'configCommands: denied — only the validators forge detects ran\n';
   if (restored.length) out.stderr += `restored ${restored.length} tracked file(s) the validators regenerated: ${restored.join(', ')}\n`;

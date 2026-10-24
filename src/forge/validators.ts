@@ -398,7 +398,8 @@ export function runOptions(config: Pick<ForgeConfig, 'validate'>, events: Ledger
  */
 const normLine = (l: string) => l.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
 const isTimeout = (r: ValidatorResult) => r.failures.some(f => /^timeout after \d+ s$/.test(f));
-export function markPreexisting(results: ValidatorResult[], baseline: unknown): ValidatorResult[] {
+// The validators a baseline had failing, by name, with what it recorded of each; read with one tolerance for both readers.
+function baselineFailures(baseline: unknown): Map<string, { failing: string[]; known: boolean; failures: string[] }> {
   const strs = (a: unknown) => (Array.isArray(a) ? a.filter((s): s is string => typeof s === 'string') : []);
   const before = new Map<string, { failing: string[]; known: boolean; failures: string[] }>();
   for (const b of Array.isArray(baseline) ? baseline : []) {
@@ -407,6 +408,15 @@ export function markPreexisting(results: ValidatorResult[], baseline: unknown): 
     if (typeof x.validator !== 'string' || x.ok !== false) continue;
     before.set(x.validator, { failing: strs(x.failing), known: x.failingKnown === true, failures: strs(x.failures) });
   }
+  return before;
+}
+/** The `failing` names the baseline gives `validator` when it failed there with every name read (failingKnown); [] otherwise. */
+export function baseFailingNames(baseline: unknown, validator: string): string[] {
+  const b = baselineFailures(baseline).get(validator);
+  return b && b.known ? b.failing : [];
+}
+export function markPreexisting(results: ValidatorResult[], baseline: unknown): ValidatorResult[] {
+  const before = baselineFailures(baseline);
   return results.map(r => {
     const b = r.ok ? undefined : before.get(r.validator);
     if (!b || isTimeout(r)) return r;

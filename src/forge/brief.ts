@@ -10,6 +10,12 @@ export function taskText(task: PlanTask): string {
 export const tddLine = (skillPath: string): string =>
   `TDD: required. Read and follow \`${skillPath}\`. Report the failing run and then the passing run of the new tests.`;
 
+/** The line every implementer brief carries with `tdd: verified`: no skill to read, forge checks the new tests on BASE. */
+export const TDD_VERIFIED_LINE = 'TDD: required (verified by forge; there is no skill to read). Write each test before the code it covers and run it to see it fail, then make it pass; report the failing run and then the passing run. forge runs your new and changed test files on BASE, the commit this brief starts from: each new test must fail there, and one that passes on BASE proves nothing.';
+
+/** The line a bug task's brief carries: reproduce first, and end the report with the root cause. */
+export const BUG_LINE = 'Bug: reproduce it first. Before you change the code, add a test that fails because of this bug (forge runs it on BASE and expects it to fail there), then fix it. End your report with one line: `Root cause: <file>:<line> - <what was wrong>`.';
+
 // Every visual line break: CRLF, LF, a lone CR, NEL, LS and PS (built from code points so the source stays ASCII).
 const LINE_BREAK = new RegExp(`\\r\\n|[\\n\\r${[0x85, 0x2028, 0x2029].map(c => String.fromCharCode(c)).join('')}]`);
 

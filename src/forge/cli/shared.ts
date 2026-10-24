@@ -12,7 +12,7 @@ import {
   PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult,
 } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
-import { taskText, tddLine } from '../brief.js';
+import { taskText, tddLine, TDD_VERIFIED_LINE } from '../brief.js';
 import { loadConfig, agentFor } from '../config.js';
 import type { VerifyFile } from '../verdict.js';
 import { loadProposals, loadApprovals } from '../proposals.js';
@@ -150,12 +150,14 @@ export const committedAt = (io: Io, dir: string) => {
 export const declinedSpecs = (s: Record<string, unknown>): string[] =>
   Array.isArray(s.declinedSpecs) ? s.declinedSpecs.filter((x): x is string => typeof x === 'string').slice(0, 200) : [];
 
-// tdd: superpowers: the line implementer briefs carry, null when off or when superpowers or its TDD skill is missing.
+// The line implementer briefs carry: with tdd: verified, forge's own (no skill needed); with tdd: superpowers, the one
+// pointing at its TDD skill, null when superpowers or that skill is missing; null when off.
 export function tddFor(io: Io, dir: string) {
   const { tdd } = loadConfig(dir);
   const sp = superpowersOf(io, dir);
   const skill = spSkillPath(sp, 'test-driven-development');
-  return { tdd, installed: sp.installed, version: sp.version, skill, line: tdd === 'superpowers' && skill ? tddLine(skill) : null };
+  const line = tdd === 'verified' ? TDD_VERIFIED_LINE : tdd === 'superpowers' && skill ? tddLine(skill) : null;
+  return { tdd, installed: sp.installed, version: sp.version, skill, line };
 }
 
 const DECIDING = new Set(['decide', 'confirm', 'judge', 'unpark', 'retire']);

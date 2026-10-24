@@ -15,6 +15,9 @@ export type Workflow = (typeof WORKFLOWS)[number];
 /** Whether forge asks at its gates (`ask`) or decides and records it (`auto`). */
 export const AUTONOMIES = ['ask', 'auto'] as const;
 export type Autonomy = (typeof AUTONOMIES)[number];
+/** The TDD modes: `off`, `superpowers` (briefs point at its skill) and `verified` (forge itself runs the new tests on BASE). */
+export const TDD_MODES = ['off', 'superpowers', 'verified'] as const;
+export type TddMode = (typeof TDD_MODES)[number];
 export type When = 'always' | 'medium' | 'final';
 /** When a failed validator runs again (C-12): after a flaky result in the last 30 days, always, or never. */
 export type RetryPolicy = 'flaky' | 'always' | 'never';
@@ -47,7 +50,8 @@ export interface ForgeConfig {
   /** Without one, security takes the person at the keyboard and the local machine as trusted (decision of the user). */
   threatModel?: ThreatModel;
   review: ReviewConfig;
-  tdd: 'off' | 'superpowers';
+  /** `superpowers`: briefs follow its TDD skill; `verified`: forge runs the new tests on BASE (src/forge/tdd.ts). */
+  tdd: TddMode;
   workflow?: Workflow; autonomy?: Autonomy;
   /** K1-03: route-prompt's one-line hint; without it, on. */
   route?: { hint: 'on' | 'off' };
@@ -102,7 +106,7 @@ const Schema = z.object({
     parallel: z.number().int().min(1).max(8).default(3),
     retry: z.enum(['flaky', 'always', 'never']).default('flaky'),
   }).strict().default({ cache: true, parallel: 3, retry: 'flaky' }),
-  tdd: z.enum(['off', 'superpowers']).default('off'),
+  tdd: z.enum(TDD_MODES).default('off'),
   workflow: z.enum(WORKFLOWS).optional(),
   autonomy: z.enum(AUTONOMIES).optional(),
   route: z.object({
