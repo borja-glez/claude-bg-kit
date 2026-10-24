@@ -31,13 +31,19 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 ## Qué incluye
 
-`bg-kit` es un marketplace de plugins de Claude Code con tres plugins. Cada uno sirve por sí solo, y juntos funcionan mejor.
+`bg-kit` es un marketplace de plugins de Claude Code. Tres plugins dan forma a tu manera de trabajar: cada uno sirve por sí solo, y juntos funcionan mejor. Los plugins de dominio añaden skills para un tipo de proyecto.
 
 | | Plugin | Qué aporta | Más información |
 | --- | --- | --- | --- |
 | 🧭 | **waypoint** | Documentos de diseño que se pulen en rondas de crítica, un `plan.yaml` de frentes, fases y tareas, un **roadmap vivo** publicado como artifact de claude.ai y sesiones en paralelo coordinadas sobre worktrees de git. | [plugins/waypoint](plugins/waypoint/README.es.md) |
 | 🔨 | **forge** | Una forma de trabajar adaptativa: **triaje por tamaño**, el modelo adecuado para cada papel, primero tus propios validadores, **revisión independiente ponderada**, una **ejecución** de tareas en paralelo (con subagentes o con sesiones) y un **modo infinito** desatendido. | [plugins/forge](plugins/forge/README.es.md) |
 | 🔍 | **lens** | Un **panel de progreso en vivo** dentro de Claude Code: **el modelo y el esfuerzo en uso**, roadmap, etapas y ejecuciones de forge, ejecuciones de superpowers, pendientes, subagentes, tareas de Claude Code y el **consumo en tokens y dólares** comparado con trabajar sin forge. | [plugins/lens](plugins/lens/README.es.md) |
+
+**Los plugins de dominio** son solo texto, skills y sus referencias, y no necesitan ninguno de los tres anteriores:
+
+| | Plugin | Qué aporta | Más información |
+| --- | --- | --- | --- |
+| 🧪 | **ml** | Machine learning en una GPU NVIDIA local: **entornos uv y ruedas de CUDA**, presupuesto de VRAM y de calor, las APIs de trl y transformers comprobadas contra la versión instalada, particiones sin fugas, notebooks ejecutados enteros, cards de Hugging Face e inferencia ONNX en el navegador. | [plugins/ml](plugins/ml/README.es.md) |
 
 ## Combínalos a tu manera
 
@@ -80,6 +86,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install waypoint@bg-kit
 claude plugin install forge@bg-kit     # instala waypoint ^0.35.0 como dependencia
 claude plugin install lens@bg-kit
+claude plugin install ml@bg-kit        # skills de machine learning en una GPU local
 ```
 
 Dentro de una sesión, `/plugin marketplace add borja-glez/claude-bg-kit` hace lo mismo. Para recibir versiones nuevas más adelante, ejecuta `claude plugin marketplace update bg-kit`.
@@ -218,6 +225,7 @@ plugins/
   waypoint/   skills, agente design-critic, hooks, plantillas del roadmap y del diseño, CLI compilada
   forge/      skills, agentes implementadores, revisores, planificador y scout, hooks, CLI compilada
   lens/       el mod del panel (hooks/register.js) y sus tests contra el motor
+  ml/         la skill ml-local-gpu y sus referencias
 src/          fuentes TypeScript: lib/ (compartido), page/ (roadmap), mod/ (banda de waypoint), lens/, forge/
 tests/        suites de vitest
 docs/

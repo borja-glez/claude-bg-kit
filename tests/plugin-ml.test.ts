@@ -63,6 +63,18 @@ describe('plugin ml (w7 D3)', () => {
     const hub = read(`${REFS}/hub-publishing.md`);
     for (const w of ['README.md', 'HF_TOKEN']) expect(hub, w).toContain(w);
   });
+  it('the ml READMEs, in English and Spanish, link each other and bg-kit, install ml@bg-kit and name ml:ml-local-gpu', () => {
+    for (const [f, other, root] of [['plugins/ml/README.md', '[Español](README.es.md)', '../../README.md'], ['plugins/ml/README.es.md', '[English](README.md)', '../../README.es.md']]) {
+      const md = read(f);
+      for (const w of [other, root, 'claude plugin install ml@bg-kit', 'ml:ml-local-gpu', 'nvidia-smi']) expect(md, `${f}: ${w}`).toContain(w);
+    }
+  });
+  it('the root READMEs list ml with its README, its install line and its folder', () => {
+    for (const [f, readme] of [['README.md', 'plugins/ml/README.md'], ['README.es.md', 'plugins/ml/README.es.md']]) {
+      const md = read(f);
+      for (const w of [`(${readme})`, 'claude plugin install ml@bg-kit', '  ml/ ']) expect(md, `${f}: ${w}`).toContain(w);
+    }
+  });
   it('plugins/ml carries no machine data, personal path, project of the author, invisible or bidi character, nor ${CLAUDE_ outside a SKILL.md', () => {
     const BAD: [string, RegExp][] = [
       ['Windows home', /\b[A-Za-z]:[\\/]Users[\\/][^\\/\s]+/i], ['macOS home', /\/Users\/[^/\s]+/], ['Linux home', /\/home\/[^/\s]+/],
