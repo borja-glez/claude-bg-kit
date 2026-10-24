@@ -16588,7 +16588,7 @@ function sshOValueDeny(tool, w, seg, ctx) {
   if (w.dynamic) return netUnknown(`${tool} -o value the shell hides`);
   const spec = w.text, sep = spec.search(/[=\s]/), key = (sep >= 0 ? spec.slice(0, sep) : spec).toLowerCase();
   if (!SSH_O_ALLOW.has(key)) return netUnknown(`${tool} -o ${spec} sets or runs something the hook cannot read`);
-  if (key === "userknownhostsfile" || key === "identityfile") {
+  if (key === "userknownhostsfile") {
     const val3 = sep >= 0 ? spec.slice(sep + 1).trim() : "";
     if (!insidePath({ text: val3, dynamic: false, glob: false }, seg, ctx)) return netUnknown(`${tool} -o ${key} points outside the run's roots`);
   }
@@ -20827,20 +20827,36 @@ function withDelegation(r2, runId, at2, fn) {
   return { ...r2, delegated: [...(r2.delegated ?? []).filter((x) => x.runId !== runId), d].slice(-MAX_KEPT) };
 }
 var PERSON_REFUSED = "the person refused these commands; rewrite them or leave them out";
+var TRUST_CHECK_FAILED = "the trust check failed: ";
+var targetOf = (text3) => cut3(redactSecrets(text3), 300);
+var setTarget = (t) => targetOf(t.commands.map((c) => `${c.name}: ${c.cmd}`).join("; "));
+function failedClosed(main, runId, t, hash, at2, e) {
+  try {
+    const message = cut3(e instanceof Error ? e.message : String(e), 300);
+    const recorded = readBlocked(main, runId, Infinity).some((r2) => r2.rule === "trust" && r2.hash === hash && r2.reason.startsWith(TRUST_CHECK_FAILED));
+    if (!recorded) appendBlocked(main, runId, { ts: at2, rule: "trust", tool: "config", target: setTarget(t), reason: `${TRUST_CHECK_FAILED}${message}`, session: null, hash });
+  } catch {
+  }
+  return { ...t, blocked: true };
+}
 function delegatedTrust(dir, t, at2) {
   if (t.state !== "ask" && t.state !== "changed" || t.hash === null) return t;
   const hash = t.hash;
+  let found;
   try {
-    const found = profileRunAt(dir);
-    if (!found) return t;
-    const { main, run: run2 } = found;
-    const runId = run2.ctx.runId;
+    found = profileRunAt(dir);
+  } catch {
+    return t;
+  }
+  if (!found) return t;
+  const { main, run: run2 } = found;
+  const runId = run2.ctx.runId;
+  try {
     const record = readTrust(dir);
     const mine = delegationOf(record, runId);
     if (mine?.refused.includes(hash)) return { ...t, blocked: true };
     const runState = parseRun(readRunText(main));
-    const targetOf = (text3) => cut3(redactSecrets(text3), 300);
-    const denials = deniedByPerson(record.commands, hash) ? [{ rule: "trust", target: targetOf(t.commands.map((c) => `${c.name}: ${c.cmd}`).join("; ")), reason: PERSON_REFUSED }] : configGuardDenials(dir, t.commands, run2, runState?.sessionId ?? null).map(({ command: command45, verdict }) => ({ rule: verdict.rule, target: targetOf(`${command45.name}: ${command45.cmd}`), reason: verdict.reason }));
+    const denials = deniedByPerson(record.commands, hash) ? [{ rule: "trust", target: setTarget(t), reason: PERSON_REFUSED }] : configGuardDenials(dir, t.commands, run2, runState?.sessionId ?? null).map(({ command: command45, verdict }) => ({ rule: verdict.rule, target: targetOf(`${command45.name}: ${command45.cmd}`), reason: verdict.reason }));
     if (denials.length) {
       let failed = false;
       for (const { rule, target, reason } of denials) {
@@ -20856,9 +20872,10 @@ function delegatedTrust(dir, t, at2) {
       refused: d.refused,
       list: t.commands
     })));
-    return saved.ok ? { ...t, state: "allowed", changed: [] } : t;
-  } catch {
-    return t;
+    if (!saved.ok) throw new Error(`trust.json could not be written (${saved.why})`);
+    return { ...t, state: "allowed", changed: [] };
+  } catch (e) {
+    return failedClosed(main, runId, t, hash, at2, e);
   }
 }
 var trustFor = (dir, config, at2) => delegatedTrust(dir, trustIn(dir, config), at2);
@@ -26924,29 +26941,40 @@ function waitsOwner(root, id, doc, add) {
   if (idea && typeof add.author === "string" && OWNER_USER.test(add.author) && add.author !== roadmapOwner(root)) return true;
   return typeof add.digest === "string" && add.digest !== proposalDigest(id, doc);
 }
-function originalStanding(root, events, id, doc) {
-  if (!doc) return "waits-owner";
-  if (doc.status === "discussing" && doc.parked) return "parked";
-  return notJudgeable(root, events, id, doc) === null && !waitsOwner(root, id, doc, lastAdd(events, id)) ? "open" : "waits-owner";
+var revisesOf = (events, id) => {
+  const r2 = lastAdd(events, id)?.revises;
+  return typeof r2 === "string" ? r2 : null;
+};
+function ancestorsOf(events, id) {
+  const out = [];
+  for (let at2 = revisesOf(events, id); at2 !== null && at2 !== id && !out.includes(at2); at2 = revisesOf(events, at2)) out.push(at2);
+  return out;
 }
-function heldBack(root, events, id, doc) {
+function originalStanding(root, events, id, doc, seen) {
+  if (!doc || seen.has(id)) return "waits-owner";
+  if (doc.status === "discussing" && doc.parked) return "parked";
+  if (notJudgeable(root, events, id, doc) !== null) return "waits-owner";
+  return heldBack(root, events, id, doc, seen).held ?? "open";
+}
+function heldBack(root, events, id, doc, seen = /* @__PURE__ */ new Set()) {
   const add = lastAdd(events, id);
   if (waitsOwner(root, id, doc, add)) return { held: "waits-owner", revises: null, origDoc: null };
   const revises = typeof add?.revises === "string" ? add.revises : null;
   const origDoc = revises ? loadProposal(root, revises) : null;
-  const standing = revises ? originalStanding(root, events, revises, origDoc) : "open";
+  const standing = revises ? originalStanding(root, events, revises, origDoc, /* @__PURE__ */ new Set([...seen, id])) : "open";
   return { held: standing === "open" ? null : standing, revises, origDoc };
 }
 function pendingForJudge(root) {
   const events = readEvents(root).filter((e) => e.kind === "proposal");
   const all = loadProposals(root);
-  const revisedByOpen = new Set(all.filter((p) => p.status === "proposed" || p.status === "discussing").map((p) => lastAdd(events, p.id)?.revises).filter((r2) => typeof r2 === "string"));
-  return all.filter(({ id, ...doc }) => !revisedByOpen.has(id) && notJudgeable(root, events, id, doc) === null && heldBack(root, events, id, doc).held === null).map((p) => p.id).sort();
+  const heldByOpen = new Set(all.filter((p) => p.status === "proposed" || p.status === "discussing").flatMap((p) => ancestorsOf(events, p.id)));
+  return all.filter(({ id, ...doc }) => !heldByOpen.has(id) && notJudgeable(root, events, id, doc) === null && heldBack(root, events, id, doc).held === null).map((p) => p.id).sort();
 }
 function decidedDoc(doc, status, at2, extra, by = BY) {
   const { reason: _reason, parked: _parked, ...rest } = doc;
-  const next = { ...rest, status, decidedBy: by, decidedAt: at2, ...extra };
-  const write = { status, decidedBy: by, decidedAt: at2, ...extra };
+  const decided = by === null ? {} : { decidedBy: by, decidedAt: at2 };
+  const next = { ...rest, status, ...decided, ...extra };
+  const write = { status, ...decided, ...extra };
   if (doc.reason && !extra.reason) write.reason = DEL;
   if (doc.parked && !extra.parked) write.parked = DEL;
   return { next, write };
@@ -26975,10 +27003,14 @@ function judgeProposal(root, id, verdicts, at2, es2, record) {
   const w = es2 ? WORDS.es : WORDS.en;
   const parked = outcome === "parked" ? normalizeParked({ why: verdict.why, loses: verdict.loses, at: at2 }) : null;
   if (outcome === "parked" && !parked) throw new JudgeError(`the critic's clash of ${id} does not say what integrating it would lose`);
-  const { next, write } = outcome === "approved" ? decidedDoc(doc, "auto_approved", at2, {}) : outcome === "rejected" ? decidedDoc(doc, "rejected", at2, { reason: verdict.why }) : decidedDoc(doc, "discussing", at2, { parked });
+  const { next, write } = outcome === "approved" ? decidedDoc(doc, "auto_approved", at2, {}) : outcome === "rejected" ? decidedDoc(doc, "rejected", at2, { reason: verdict.why }) : decidedDoc(doc, "discussing", at2, { parked }, null);
   const mark = outcome === "parked" ? null : markOf(id, next.status === "auto_approved" ? "auto_approved" : "rejected", at2, doc);
   const origReason = outcome === "approved" ? w.replaced(id) : w.dropped;
-  const orig = outcome !== "parked" && revises && origDoc ? { id: revises, ...decidedDoc(origDoc, "rejected", at2, { reason: origReason }), mark: markOf(revises, "rejected", at2, origDoc) } : null;
+  const replaced = outcome === "parked" || !revises || !origDoc ? [] : ancestorsOf(events, id).flatMap((rid) => {
+    const rdoc = rid === revises ? origDoc : loadProposal(root, rid);
+    return rdoc && notJudgeable(root, events, rid, rdoc) === null ? [{ id: rid, ...decidedDoc(rdoc, "rejected", at2, { reason: origReason }), mark: markOf(rid, "rejected", at2, rdoc) }] : [];
+  });
+  const [orig, ...earlier] = replaced;
   const alternative = outcome === "approved" ? w.rejected : outcome === "rejected" ? w.approved : w.integrate;
   const decision = {
     point: doc.source === "user" ? "idea" : "approve",
@@ -26993,17 +27025,21 @@ function judgeProposal(root, id, verdicts, at2, es2, record) {
   record(decision);
   saveProposal(root, id, next);
   if (mark) saveApproval(root, id, mark);
-  if (orig) {
-    saveProposal(root, orig.id, orig.next);
-    saveApproval(root, orig.id, orig.mark);
+  for (const r2 of replaced) {
+    saveProposal(root, r2.id, r2.next);
+    saveApproval(root, r2.id, r2.mark);
   }
   appendEvent(root, { ts: at2, kind: "proposal", action: "judge", id, status: next.status, verdict: verdict.verdict, digest: verdict.digest });
-  if (orig) appendEvent(root, { ts: at2, kind: "proposal", action: "judge", id: orig.id, status: "rejected", ...outcome === "approved" ? { replacedBy: id } : { droppedWith: id } });
+  for (const r2 of replaced) {
+    appendEvent(root, { ts: at2, kind: "proposal", action: "judge", id: r2.id, status: "rejected", ...outcome === "approved" ? { replacedBy: id } : { droppedWith: id } });
+  }
+  const out = (r2) => ({ id: r2.id, write: r2.write, approval: markWrite(r2.id, r2.mark) });
   return {
     outcome,
     write,
     approval: mark ? markWrite(id, mark) : null,
-    ...orig ? { original: { id: orig.id, write: orig.write, approval: markWrite(orig.id, orig.mark) } } : {},
+    ...orig ? { original: out(orig) } : {},
+    ...earlier.length ? { ancestors: earlier.map(out) } : {},
     decision
   };
 }
@@ -27012,6 +27048,7 @@ function unparkProposal(root, id, insist, at2, es2, record) {
   if (!doc) throw new JudgeError(`${id} not found`);
   const parked = doc.status === "discussing" ? doc.parked : void 0;
   if (!parked) throw new JudgeError(`${id} is ${doc.status}${doc.status === "discussing" ? " and not parked" : ""}: only a parked idea waits for the person's answer`);
+  if (loadApproval(root, id)) throw new JudgeError(`${id} has the owner's mark (approvals/${id}): the owner decided it`);
   const w = es2 ? WORDS.es : WORDS.en;
   const status = insist ? "approved" : "rejected";
   const { next, write } = decidedDoc(doc, status, at2, insist ? {} : { reason: w.withdrawn }, DECIDE);
