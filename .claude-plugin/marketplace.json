@@ -17,6 +17,11 @@
       "name": "forge",
       "source": "./plugins/forge",
       "description": "An adaptive way of working for Claude Code: triage by size, models by role, tool-first validation and weighted independent review."
+    },
+    {
+      "name": "java",
+      "source": "./plugins/java",
+      "description": "Java and Spring Boot: the DDD and hexagonal rules of a service, the upkeep of Java libraries and an on-demand architecture reviewer."
     }
   ]
 }
