@@ -65,6 +65,10 @@ describe('secretsRule: the credentials of the machine and the .env files (w7 A4,
     const grep = (agent: string | undefined, input: Record<string, unknown>) => secretsRule.check(call('Grep', { pattern: 'KEY', ...input }, agent), CTX);
     const glob = (agent: string | undefined, input: Record<string, unknown>) => secretsRule.check(call('Glob', input, agent), CTX);
     for (const p of [path.join(HOME, '.aws'), HOME, path.dirname(HOME)]) expect(ruleOf(grep(IMPL, { path: p })), p).toBe('secrets');
+    expect(ruleOf(grep(IMPL, { path: path.join(HOME, '.config') }))).toBe('secrets');
+    expect(ruleOf(glob(IMPL, { pattern: `${sh(path.join(HOME, '.config'))}/**` }))).toBe('secrets');
+    expect(ruleOf(glob(IMPL, { pattern: '**/hosts.yml', path: path.join(HOME, '.config') }))).toBe('secrets');
+    expect(grep(IMPL, { path: path.join(HOME, '.config', 'other') })).toBeNull();
     expect(grep(IMPL, { path: MAIN })).toBeNull();
     expect(grep(IMPL, {})).toBeNull();
     expect(grep(IMPL, { path: MAIN, pattern: '.env' })).toBeNull();

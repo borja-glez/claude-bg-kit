@@ -57,6 +57,11 @@ export function secretOf(p: string, home: string): string | null {
   return null;
 }
 
+/** Whether a search rooted at p is an ancestor of (or is) a SECRET_PATHS entry: home, above it, or ~/.config (holds ~/.config/gh). */
+function reachesSecrets(p: string, home: string): boolean {
+  return SECRET_PATHS.some(entry => isInside(path.join(home, ...entry.split('/')), p));
+}
+
 const CREDS = (what: string) => `forge guard · secrets: ${what} holds this machine's credentials, which a forge agent never reads or writes. `
   + "Instead: work with the repository's files; if the task needs a credential, say so in your report";
 const SEARCH = (base: string) => `forge guard · secrets: a search of ${base} reaches this machine's credentials folders. Instead: search inside the repository`;
@@ -116,7 +121,7 @@ export const secretsRule: GuardRule = {
     for (const { p, search, dotenv } of items) {
       const secret = secretOf(p, home);
       if (secret !== null) return deny(CREDS(secret));
-      if (search && isInside(home, p)) return deny(SEARCH(p));
+      if (search && reachesSecrets(p, home)) return deny(SEARCH(p));
       if (dotenv) {
         const v = dotenvVerdict(p, input, ctx, write);
         if (v !== null) return v;
