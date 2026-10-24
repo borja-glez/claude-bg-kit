@@ -151,15 +151,20 @@ describe('shadowReport', () => {
     ];
     const r = shadowReport(cases);
     const by = Object.fromEntries(r.map(x => [x.reviewer, x]));
-    expect(by.correctness).toMatchObject({ cases: 1, xhighBlockers: 10, recovered: 10, recoveredPct: 100, missedCritical: 0, highOnly: 0, passes: true });
-    expect(by.perf).toMatchObject({ cases: 1, xhighBlockers: 9, recovered: 8, recoveredPct: 89, missedCritical: 0, passes: false });
+    expect(by.correctness).toMatchObject({ cases: 1, xhighBlockers: 10, recovered: 10, recoveredPct: 100, missedCritical: 0, highOnly: 0, status: 'passes' });
+    expect(by.perf).toMatchObject({ cases: 1, xhighBlockers: 9, recovered: 8, recoveredPct: 89, missedCritical: 0, status: 'fails' });
     expect(by.perf.missedCases).toEqual([{ task: 'T1', missed: [blockers(9, 'p.ts')[8]] }]);
-    expect(by.security).toMatchObject({ cases: 2, xhighBlockers: 11, recovered: 10, recoveredPct: 91, missedCritical: 1, highOnly: 1, passes: false });
+    expect(by.security).toMatchObject({ cases: 2, xhighBlockers: 11, recovered: 10, recoveredPct: 91, missedCritical: 1, highOnly: 1, status: 'fails' });
     expect(by.security.missedCases).toEqual([{ task: 'T1', missed: [f('critical', 'auth bypass', 'auth.ts', 5)] }]);
   });
-  it('a reviewer with no xhigh blockers counts as 100 %', () => {
-    const [r] = shadowReport([buildCase('T1', 'perf', [], [])]);
-    expect(r).toMatchObject({ xhighBlockers: 0, recoveredPct: 100, passes: true, missedCases: [] });
+  it('a reviewer whose twins found no blocker is unverified: it neither passes nor fails (A3)', () => {
+    const [r] = shadowReport([buildCase('T1', 'perf', [], []), buildCase('T2', 'perf', [f('important', 'only high', 'p.ts', 3)], [])]);
+    expect(r).toMatchObject({ cases: 2, xhighBlockers: 0, recovered: 0, recoveredPct: null, missedCritical: 0, highOnly: 1, missedCases: [], status: 'unverified' });
+    expect(r).not.toHaveProperty('passes');
+    const es = renderShadowReport([r], 'es');
+    expect(es).toContain('perf: sin verificar');
+    expect(es).not.toContain('cumple');
+    expect(renderShadowReport([r], 'en')).toContain('perf: unverified');
   });
   it('renders the report in Spanish and English', () => {
     const r = shadowReport([buildCase('T1', 'perf', [], [f('critical', 'auth bypass', 'auth.ts', 5)])]);
