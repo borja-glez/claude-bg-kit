@@ -11792,8 +11792,9 @@ var idList = (x) => Array.isArray(x) && x.length <= SATURATION_LIST_MAX && x.eve
 var oneOf2 = (list, x) => typeof x === "string" && list.includes(x);
 function saturationReportOf(x) {
   if (!isObj2(x)) return null;
-  const { saturated, at: at2, rounds, blocking: blocking2, evidence: e, waiting: w, counts: c, missing } = x;
+  const { saturated, at: at2, rounds, explored, blocking: blocking2, evidence: e, waiting: w, counts: c, missing } = x;
   if (typeof saturated !== "boolean" || typeof at2 !== "string" || !at2 || at2.length > 64 || !isCount(rounds)) return null;
+  if (explored !== void 0 && (typeof explored !== "boolean" || saturated && !explored)) return null;
   if (!Array.isArray(blocking2) || !blocking2.every((b) => oneOf2(SATURATION_BLOCKING, b)) || new Set(blocking2).size !== blocking2.length) return null;
   if (saturated !== (blocking2.length === 0) || !isObj2(e) || !isObj2(w) || !isObj2(c)) return null;
   if (!isCount(e.openFindings) || !isCount(w.questions) || !isCount(w.blocked) || !isCount(w.deferred)) return null;
@@ -11823,6 +11824,7 @@ function saturationReportOf(x) {
     saturated,
     at: at2,
     rounds,
+    ...typeof explored === "boolean" ? { explored } : {},
     blocking: [...blocking2],
     evidence: { pendingTasks: ids("pendingTasks"), validatorsFailed: ids("validatorsFailed"), openFindings: e.openFindings, openDefects: ids("openDefects"), openProposals: ids("openProposals") },
     waiting: {
@@ -11880,6 +11882,7 @@ function parseRun(text4) {
     blocksSinceCycle: o.blocksSinceCycle ?? 0
   };
   if (o.stoppedReason !== void 0) run2.stoppedReason = o.stoppedReason;
+  if (typeof o.lastErrorDigest === "string" && /^[0-9a-f]{64}$/.test(o.lastErrorDigest)) run2.lastErrorDigest = o.lastErrorDigest;
   if (isLocale(o.locale)) run2.locale = o.locale;
   if (autonomous) run2.autonomous = autonomous;
   const explore = exploreOf(o.explore);
@@ -13373,6 +13376,119 @@ var import_node_path17 = __toESM(require("node:path"), 1);
 // src/forge/run.ts
 var import_node_fs6 = require("node:fs");
 var import_node_path7 = __toESM(require("node:path"), 1);
+
+// src/lib/sha256.ts
+var K = new Uint32Array([
+  1116352408,
+  1899447441,
+  3049323471,
+  3921009573,
+  961987163,
+  1508970993,
+  2453635748,
+  2870763221,
+  3624381080,
+  310598401,
+  607225278,
+  1426881987,
+  1925078388,
+  2162078206,
+  2614888103,
+  3248222580,
+  3835390401,
+  4022224774,
+  264347078,
+  604807628,
+  770255983,
+  1249150122,
+  1555081692,
+  1996064986,
+  2554220882,
+  2821834349,
+  2952996808,
+  3210313671,
+  3336571891,
+  3584528711,
+  113926993,
+  338241895,
+  666307205,
+  773529912,
+  1294757372,
+  1396182291,
+  1695183700,
+  1986661051,
+  2177026350,
+  2456956037,
+  2730485921,
+  2820302411,
+  3259730800,
+  3345764771,
+  3516065817,
+  3600352804,
+  4094571909,
+  275423344,
+  430227734,
+  506948616,
+  659060556,
+  883997877,
+  958139571,
+  1322822218,
+  1537002063,
+  1747873779,
+  1955562222,
+  2024104815,
+  2227730452,
+  2361852424,
+  2428436474,
+  2756734187,
+  3204031479,
+  3329325298
+]);
+var rotr = (x, n) => x >>> n | x << 32 - n;
+function sha256Hex(input) {
+  const data = typeof input === "string" ? new TextEncoder().encode(input) : input;
+  const total = Math.ceil((data.length + 9) / 64) * 64;
+  const buf = new Uint8Array(total);
+  buf.set(data);
+  buf[data.length] = 128;
+  const view = new DataView(buf.buffer);
+  view.setUint32(total - 8, Math.floor(data.length * 8 / 4294967296));
+  view.setUint32(total - 4, data.length * 8 >>> 0);
+  const state = new Uint32Array([1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225]);
+  const w = new Uint32Array(64);
+  for (let off = 0; off < total; off += 64) {
+    for (let i = 0; i < 16; i++) w[i] = view.getUint32(off + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ w[i - 15] >>> 3;
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ w[i - 2] >>> 10;
+      w[i] = w[i - 16] + s0 + w[i - 7] + s1 | 0;
+    }
+    let [a, b, c, d, e, f, g, k] = state;
+    for (let i = 0; i < 64; i++) {
+      const t1 = k + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + (e & f ^ ~e & g) + K[i] + w[i] | 0;
+      const t2 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + (a & b ^ a & c ^ b & c) | 0;
+      k = g;
+      g = f;
+      f = e;
+      e = d + t1 | 0;
+      d = c;
+      c = b;
+      b = a;
+      a = t1 + t2 | 0;
+    }
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+    state[5] += f;
+    state[6] += g;
+    state[7] += k;
+  }
+  return Array.from(state, (x) => x.toString(16).padStart(8, "0")).join("");
+}
+
+// src/forge/run.ts
 var DEFAULT_QUEUE_MAX = 10;
 var NO_PROGRESS_LIMIT = 3;
 var NO_CYCLE_BLOCKS = 2;
@@ -13395,13 +13511,17 @@ function startRun(now, budget, queueMax = DEFAULT_QUEUE_MAX, sessionId = null, l
   };
 }
 function recordCycle(run2, result) {
-  const error = clean(result.error ?? "", MAX_ERROR) || null;
+  const whole = clean(result.error ?? "", Infinity);
+  const digest2 = whole ? sha256Hex(whole) : null;
+  const before3 = run2.lastErrorDigest ?? (run2.lastError !== null ? sha256Hex(run2.lastError) : null);
+  const { lastErrorDigest: _gone, ...rest } = run2;
   return {
-    ...run2,
+    ...rest,
     cycle: run2.cycle + 1,
     noProgress: result.progress ? 0 : run2.noProgress + 1,
-    lastError: error,
-    repeatedError: error !== null && error === run2.lastError,
+    lastError: whole ? clean(whole, MAX_ERROR) : null,
+    ...digest2 ? { lastErrorDigest: digest2 } : {},
+    repeatedError: digest2 !== null && digest2 === before3,
     blocksSinceCycle: 0
   };
 }
@@ -20321,117 +20441,6 @@ function normalizeNoteDecision(x) {
   return out;
 }
 
-// src/lib/sha256.ts
-var K = new Uint32Array([
-  1116352408,
-  1899447441,
-  3049323471,
-  3921009573,
-  961987163,
-  1508970993,
-  2453635748,
-  2870763221,
-  3624381080,
-  310598401,
-  607225278,
-  1426881987,
-  1925078388,
-  2162078206,
-  2614888103,
-  3248222580,
-  3835390401,
-  4022224774,
-  264347078,
-  604807628,
-  770255983,
-  1249150122,
-  1555081692,
-  1996064986,
-  2554220882,
-  2821834349,
-  2952996808,
-  3210313671,
-  3336571891,
-  3584528711,
-  113926993,
-  338241895,
-  666307205,
-  773529912,
-  1294757372,
-  1396182291,
-  1695183700,
-  1986661051,
-  2177026350,
-  2456956037,
-  2730485921,
-  2820302411,
-  3259730800,
-  3345764771,
-  3516065817,
-  3600352804,
-  4094571909,
-  275423344,
-  430227734,
-  506948616,
-  659060556,
-  883997877,
-  958139571,
-  1322822218,
-  1537002063,
-  1747873779,
-  1955562222,
-  2024104815,
-  2227730452,
-  2361852424,
-  2428436474,
-  2756734187,
-  3204031479,
-  3329325298
-]);
-var rotr = (x, n) => x >>> n | x << 32 - n;
-function sha256Hex(input) {
-  const data = typeof input === "string" ? new TextEncoder().encode(input) : input;
-  const total = Math.ceil((data.length + 9) / 64) * 64;
-  const buf = new Uint8Array(total);
-  buf.set(data);
-  buf[data.length] = 128;
-  const view = new DataView(buf.buffer);
-  view.setUint32(total - 8, Math.floor(data.length * 8 / 4294967296));
-  view.setUint32(total - 4, data.length * 8 >>> 0);
-  const state = new Uint32Array([1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225]);
-  const w = new Uint32Array(64);
-  for (let off = 0; off < total; off += 64) {
-    for (let i = 0; i < 16; i++) w[i] = view.getUint32(off + i * 4);
-    for (let i = 16; i < 64; i++) {
-      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ w[i - 15] >>> 3;
-      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ w[i - 2] >>> 10;
-      w[i] = w[i - 16] + s0 + w[i - 7] + s1 | 0;
-    }
-    let [a, b, c, d, e, f, g, k] = state;
-    for (let i = 0; i < 64; i++) {
-      const t1 = k + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + (e & f ^ ~e & g) + K[i] + w[i] | 0;
-      const t2 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + (a & b ^ a & c ^ b & c) | 0;
-      k = g;
-      g = f;
-      f = e;
-      e = d + t1 | 0;
-      d = c;
-      c = b;
-      b = a;
-      a = t1 + t2 | 0;
-    }
-    state[0] += a;
-    state[1] += b;
-    state[2] += c;
-    state[3] += d;
-    state[4] += e;
-    state[5] += f;
-    state[6] += g;
-    state[7] += k;
-  }
-  return Array.from(state, (x) => x.toString(16).padStart(8, "0")).join("");
-}
-
 // src/forge/decisions.ts
 var DecisionInputError = class extends Error {
 };
@@ -22459,6 +22468,13 @@ function checkPlacement(plan, title, p, done, opts = {}) {
   else if (doneWhen === plain3(title)) problems.push("the done_when only repeats the title: say how the task is checked");
   if (!Number.isInteger(p.estimateMin) || p.estimateMin < 1 || p.estimateMin > MAX_ESTIMATE_MIN) problems.push(`the estimate must be 1 to ${MAX_ESTIMATE_MIN} whole minutes`);
   return problems;
+}
+function openPhases(plan, done, opts = {}) {
+  return plan.phases.filter((ph) => {
+    if (opts.product && ph.id === IMPROVEMENTS_PHASE) return false;
+    const tasks = plan.tasks.filter((t) => t.phase === ph.id);
+    return !tasks.length || tasks.some((t) => !done.has(t.id));
+  }).map((ph) => ph.id);
 }
 function proposalToTask(plan, p, opts) {
   let max = 0;
@@ -25081,7 +25097,7 @@ function tddFor(io, dir) {
   const skill = spSkillPath(sp, "test-driven-development");
   return { tdd, installed: sp.installed, version: sp.version, skill, line: tdd === "superpowers" && skill ? tddLine(skill) : null };
 }
-var DECIDING = /* @__PURE__ */ new Set(["decide", "confirm", "judge", "unpark"]);
+var DECIDING = /* @__PURE__ */ new Set(["decide", "confirm", "judge", "unpark", "retire"]);
 function lastDecisions(root) {
   const out = {};
   for (const e of readEvents(root)) {
@@ -25786,6 +25802,7 @@ function reportOf(o) {
     saturated: o.blocking.length === 0,
     at: o.at,
     rounds: o.rounds,
+    explored: o.explored,
     blocking: o.blocking,
     evidence: {
       pendingTasks: ids("pendingTasks"),
@@ -25875,6 +25892,7 @@ function saturationOf(i) {
   return reportOf({
     at: i.at,
     rounds: i.dry,
+    explored: i.explored !== false,
     blocking: blocking2,
     openFindings,
     questions,
@@ -25903,7 +25921,7 @@ function writtenAfter(file, since) {
     return true;
   }
 }
-var passes = (e) => e.kind === "proposal" && (e.action === "judge" && e.status === "auto_approved" || e.action === "add" && typeof e.revises === "string");
+var passes = (e) => e.kind === "proposal" && (e.action === "judge" && e.status === "auto_approved" || e.action === "add" && typeof e.revises === "string" && !(e.source === "user" && e.owner !== true));
 function lastExplore(events, startedAt) {
   return lastCycle(events.filter((e) => e.explore !== void 0), startedAt);
 }
@@ -26391,6 +26409,7 @@ var WORDS = {
     withdrew: "the person withdrew their idea",
     insisted: (why) => `the person insists on their idea (it was parked: ${why})`,
     adapts: (why) => `a chain of versions gets at most ${MAX_ADAPTS} adapts, and the critic asked for one more: ${why}`,
+    adaptedTwice: "adapted twice; its v2 could not be added",
     undo: {
       approved: (id) => `the person can reject it with /forge:decide ${id} reject before it becomes a task`,
       rejected: (id) => `the person can approve it with /forge:decide ${id} approve`,
@@ -26410,6 +26429,7 @@ var WORDS = {
     withdrew: "la persona retir\xF3 su idea",
     insisted: (why) => `la persona insiste en su idea (estaba aparcada: ${why})`,
     adapts: (why) => `una cadena de versiones admite como mucho ${MAX_ADAPTS} adaptaciones, y el cr\xEDtico pidi\xF3 una m\xE1s: ${why}`,
+    adaptedTwice: "adaptada dos veces; su v2 no se pudo a\xF1adir",
     undo: {
       approved: (id) => `la persona puede rechazarla con /forge:decide ${id} reject antes de que sea una tarea`,
       rejected: (id) => `la persona puede aprobarla con /forge:decide ${id} approve`,
@@ -26443,6 +26463,13 @@ function waitsOwner(root, id, doc, add) {
   if (idea && add.owner !== true) return true;
   if (idea && typeof add.author === "string" && OWNER_USER.test(add.author) && add.author !== roadmapOwner(root)) return true;
   return typeof add.digest === "string" && add.digest !== proposalDigest(id, doc);
+}
+function adaptWithoutV2(events, id, digest2) {
+  let at2 = -1;
+  events.forEach((e, i) => {
+    if (e.action === "adapt" && e.id === id && e.digest === digest2) at2 = i;
+  });
+  return at2 >= 0 && !events.slice(at2 + 1).some((e) => e.action === "add" && e.revises === id) ? events[at2] : null;
 }
 var revisesOf = (events, id) => {
   const r2 = lastAdd(events, id)?.revises;
@@ -26499,7 +26526,7 @@ function holds2(id, decision) {
     throw e;
   }
 }
-function judgeProposal(root, id, verdicts, at2, es2, record) {
+function judgeProposal(root, id, verdicts, at2, es2, record, runCycle = "") {
   const doc = loadProposal(root, id);
   if (!doc) throw new JudgeError(`${id} not found`);
   const events = readEvents(root).filter((e) => e.kind === "proposal");
@@ -26509,10 +26536,15 @@ function judgeProposal(root, id, verdicts, at2, es2, record) {
   const { held: held2, revises, origDoc } = heldBack(root, events, id, doc);
   if (held2) return { outcome: held2, write: null, approval: null, decision: null };
   const overAdapted = verdict.verdict === "adapt" && ancestorsOf(events, id).length >= MAX_ADAPTS;
-  if (verdict.verdict === "adapt" && !overAdapted) return { outcome: "adapt", write: null, approval: null, decision: null, changes: verdict.changes ?? "" };
+  const adapted = verdict.verdict === "adapt" && !overAdapted ? adaptWithoutV2(events, id, verdict.digest) : null;
+  const adaptedTwice = adapted !== null && adapted.runCycle !== runCycle;
+  if (verdict.verdict === "adapt" && !overAdapted && !adaptedTwice) {
+    if (!adapted) appendEvent(root, { ts: at2, kind: "proposal", action: "adapt", id, digest: verdict.digest, runCycle });
+    return { outcome: "adapt", write: null, approval: null, decision: null, changes: verdict.changes ?? "" };
+  }
   const outcome = verdict.verdict === "keep" ? "approved" : verdict.verdict === "clash" && doc.source === "user" ? "parked" : "rejected";
   const w = es2 ? WORDS.es : WORDS.en;
-  const why = overAdapted ? w.adapts(verdict.why) : verdict.why;
+  const why = overAdapted ? w.adapts(verdict.why) : adaptedTwice ? w.adaptedTwice : verdict.why;
   const placement = outcome === "approved" ? verdict.placement : void 0;
   const parked = outcome === "parked" ? normalizeParked({ why: verdict.why, loses: verdict.loses, at: at2 }) : null;
   if (outcome === "parked" && !parked) throw new JudgeError(`the critic's clash of ${id} does not say what integrating it would lose`);
@@ -26548,7 +26580,7 @@ function judgeProposal(root, id, verdicts, at2, es2, record) {
     action: "judge",
     id,
     status: next.status,
-    verdict: overAdapted ? "drop" : verdict.verdict,
+    verdict: overAdapted || adaptedTwice ? "drop" : verdict.verdict,
     digest: verdict.digest,
     ...placement ? { placement } : {}
   });
@@ -26607,13 +26639,21 @@ var import_node_fs35 = require("node:fs");
 var import_node_path38 = __toESM(require("node:path"), 1);
 var PHASES_REVIEWED_MAX = 200;
 var phasesFile = (main, runId) => import_node_path38.default.join(autonomousDir(main, runId), "phases.json");
-var doneTasks = (stateDir) => new Set(Object.entries(readDocs(stateDir, stateDoc).docs).filter(([, s2]) => s2.status === "done").map(([task]) => task));
+function taskFacts(stateDir) {
+  const states = Object.entries(readDocs(stateDir, stateDoc).docs);
+  return {
+    done: new Set(states.filter(([, s2]) => s2.status === "done").map(([task]) => task)),
+    forPerson: new Set(states.filter(([, s2]) => s2.status === "blocked" && (s2.blockedBy ?? []).includes("external")).map(([task]) => task))
+  };
+}
+var doneTasks = (stateDir) => new Set(taskFacts(stateDir).done);
 function stateDirOf(cwd2, db, cmd) {
   const dir = import_node_path38.default.resolve(cwd2, db, "state");
   if (!(0, import_node_fs35.existsSync)(dir)) throw new UsageError(`${cmd}: ${db} has no state listing: list state first`);
   return dir;
 }
 var doneOf = (cwd2, db, cmd) => doneTasks(stateDirOf(cwd2, db, cmd));
+var factsOf = (cwd2, db, cmd) => taskFacts(stateDirOf(cwd2, db, cmd));
 function readReviewed(main, runId) {
   const file = phasesFile(main, runId);
   if (!(0, import_node_fs35.existsSync)(file)) return [];
@@ -27494,6 +27534,7 @@ var import_node_path45 = __toESM(require("node:path"), 1);
 
 // src/forge/replan-check.ts
 var RUN_MARKS = ["forge:auto", "forge:policy"];
+var FROM_MAX = 80;
 function changeOf(op, tasks) {
   switch (op.op) {
     case "retire":
@@ -27513,7 +27554,7 @@ function notRunsOwn(root, proposals = loadProposals(root)) {
   const byId = new Map(proposals.map((p) => [p.id, p]));
   const marks = loadApprovals(root);
   const events = readEvents(root).filter((e) => e.kind === "proposal");
-  const merged = new Map(events.filter((e) => e.action === IDEA_MERGED && typeof e.id === "string").map((e) => [e.id, String(e.from ?? "a note")]));
+  const merged = new Map(events.filter((e) => e.action === IDEA_MERGED && typeof e.id === "string").map((e) => [e.id, clean(String(e.from ?? ""), FROM_MAX) || "a note"]));
   return (id) => {
     const found = byId.get(id);
     if (!found) return "is not in this checkout, so who decided it is not known";
@@ -27527,7 +27568,7 @@ function notRunsOwn(root, proposals = loadProposals(root)) {
     return null;
   };
 }
-function heldBy(root, plan, done) {
+function heldBy(root, plan, facts) {
   const proposals = loadProposals(root);
   const notOwn = notRunsOwn(root, proposals);
   const tasks = new Map(plan.tasks.map((t) => [t.id, t]));
@@ -27540,24 +27581,25 @@ function heldBy(root, plan, done) {
     return null;
   };
   return (task) => {
-    const why = [done.has(task) ? `${task} is done` : null, personOf(task)].filter((w) => w !== null);
+    const why = [facts.done.has(task) ? `${task} is done` : null, facts.forPerson.has(task) ? `${task} waits for the person` : null, personOf(task)].filter((w) => w !== null);
     return why.length ? why.join("; ") : null;
   };
 }
-function heldTasks(root, plan, done) {
-  const why = heldBy(root, plan, done);
+function heldTasks(root, plan, facts) {
+  const why = heldBy(root, plan, facts);
   return plan.tasks.flatMap((t) => {
     const reason = why(t.id);
     return reason ? [{ task: t.id, reason }] : [];
   });
 }
-function replanRefusals(root, plan, ops, done) {
-  const why = heldBy(root, plan, done);
+function replanRefusals(root, plan, ops, facts, reviewed) {
+  const why = heldBy(root, plan, facts);
   const tasks = new Map(plan.tasks.map((t) => [t.id, t]));
   const out = [];
   ops.forEach((op, i) => {
     const change = changeOf(op, tasks);
-    const reason = change ? why(change.task) : null;
+    const into = change && op.op === "move" && reviewed.includes(op.phase) ? `${op.phase} was already reviewed` : null;
+    const reason = [change ? why(change.task) : null, into].filter((w) => w !== null).join("; ");
     if (change && reason) out.push(`ops[${i}] ${change.what}: ${reason}`);
   });
   return out;
@@ -27634,7 +27676,7 @@ var command9 = (args, ctx) => {
     const planArg = flag("plan");
     const db = flag("db");
     if (!planArg || !db) throw new UsageError("usage: forge infinite phase --plan <plan.yaml> --db <DB> [--mark <phase>]");
-    const done = doneOf(io.cwd, db, "infinite phase");
+    const facts = factsOf(io.cwd, db, "infinite phase");
     let text4;
     try {
       text4 = (0, import_node_fs41.readFileSync)(import_node_path45.default.resolve(io.cwd, planArg), "utf8");
@@ -27644,8 +27686,8 @@ var command9 = (args, ctx) => {
     const plan = planOf(text4, planArg, "infinite phase: ");
     const mark = flag("mark");
     if (has("mark") && !(mark && plan.phases.some((ph) => ph.id === mark))) throw new UsageError(`infinite phase: --mark ${mark ?? ""} is not a phase of ${planArg}`);
-    const status2 = phaseStatus(plan, done, mark ? markReviewed(main, runId, mark) : readReviewed(main, runId));
-    return json4({ ...status2, held: heldTasks(io.cwd, plan, done) });
+    const reviewed = mark ? markReviewed(main, runId, mark) : readReviewed(main, runId);
+    return json4({ ...phaseStatus(plan, facts.done, reviewed), held: heldTasks(io.cwd, plan, facts), reviewed });
   }
   if (sub === "status") {
     const runRoot = runRootOf(io.cwd);
@@ -28079,11 +28121,12 @@ function readVerdicts(text4) {
 }
 function proposalBatch(root, ids) {
   const byId = new Map(loadProposals(root).map(({ id, ...doc }) => [id, doc]));
+  const events = readEvents(root).filter((e) => e.kind === "proposal");
   const proposals = [];
   const missing = [];
   for (const id of new Set(ids)) {
     const doc = byId.get(id);
-    if (doc) proposals.push({ id, digest: proposalDigest(id, doc), doc });
+    if (doc) proposals.push({ id, digest: proposalDigest(id, doc), version: ancestorsOf(events, id).length + 1, doc });
     else missing.push(id);
   }
   return { proposals, missing };
@@ -28260,9 +28303,9 @@ function planTasksFor(cwd2, planArg) {
 function heldTask(tasks, id, taskId) {
   return tasks.find((t) => proposalOfIncludes(t.includes) === id)?.id ?? (taskId !== void 0 && tasks.some((t) => t.id === taskId) ? taskId : void 0);
 }
-function judgedPlacement(cwd2, id) {
+function judgedPlacement(cwd2, id, digest2) {
   const last = readEvents(cwd2).filter((e) => e.kind === "proposal" && e.action === "judge" && e.id === id).at(-1);
-  const p = readPlacement(last?.placement);
+  const p = last?.digest === digest2 ? readPlacement(last.placement) : null;
   const estimateMin = p ? estimateMinutes(p.estimate) : null;
   return p && estimateMin !== null ? { phase: p.phase, doneWhen: p.doneWhen, dependsOn: p.dependsOn, estimateMin } : null;
 }
@@ -28602,7 +28645,11 @@ var command16 = (args, ctx) => {
       const plan = planOf(text4, planArg);
       const became = plan.tasks.find((t) => proposalsOfIncludes(t.includes).includes(id))?.id ?? (spent ? String(spent.taskId ?? "?") : void 0);
       if (became !== void 0) throw new UsageError(`proposals to-task: proposal ${id} already became ${became}: a new approval of a new proposal is needed`);
-      const judged = product && !given ? judgedPlacement(io.cwd, id) : null;
+      if (product && !openPhases(plan, done, { product }).length) {
+        const phases = plan.phases.map((ph) => ph.id).filter((p) => p !== IMPROVEMENTS_PHASE).join(", ");
+        throw new UsageError(`proposals to-task: no phase of the plan is open: every phase with tasks is done (${phases}) and none is empty; a re-plan must add a phase (add-phase) before ${id} is placed`);
+      }
+      const judged = product && !given ? judgedPlacement(io.cwd, id, proposalDigest(id, found)) : null;
       const placement = given ?? judged;
       if (product && !placement) {
         throw new UsageError(`proposals to-task: in a product run ${id} needs its placement, which no keep of the critic gave: --phase, --done-when-file and --estimate (and --depends-on when it waits for tasks)`);
@@ -28634,7 +28681,9 @@ var command16 = (args, ctx) => {
     case "replan-check": {
       const [opsFile, planArg, db] = [subFlag("ops"), subFlag("plan"), subFlag("db")];
       if (!opsFile || !planArg || !db) throw new UsageError("usage: forge proposals replan-check --ops <ops.json> --plan <plan.yaml> --db <DB>");
-      const done = doneOf(io.cwd, db, "proposals replan-check");
+      const main = mainCheckout(io.cwd);
+      const reviewed = readReviewed(main, activeProductRun(io.cwd, "proposals replan-check", "re-plans its phases", main).autonomous.runId);
+      const facts = factsOf(io.cwd, db, "proposals replan-check");
       const text4 = readText6(opsFile, "--ops");
       let raw;
       try {
@@ -28645,9 +28694,9 @@ var command16 = (args, ctx) => {
       const { ops, errors } = normalizeOps(raw);
       if (errors.length) throw new UsageError(`proposals replan-check: ${errors.join("; ")}`);
       const plan = planOf(readText6(planArg, "--plan"), planArg, "proposals replan-check: ");
-      const refused = replanRefusals(io.cwd, plan, ops, done);
+      const refused = replanRefusals(io.cwd, plan, ops, facts, reviewed);
       if (refused.length) {
-        throw new UsageError(`proposals replan-check: refused: a re-plan never retires, moves, or changes the title or done_when of a task of the person's or of a done one; these need the person:
+        throw new UsageError(`proposals replan-check: refused: a re-plan never retires, moves, or changes the title or done_when of a task of the person's, a done one or one blocked for the person, and never moves a task into a phase already reviewed; these need the person:
 - ${refused.join("\n- ")}`);
       }
       return json4({ ok: true, ops: ops.length });
@@ -28662,15 +28711,19 @@ var command16 = (args, ctx) => {
       const run2 = activeProductRun(io.cwd, "proposals retire", "re-plans its phases");
       const doc = loadProposal(io.cwd, id);
       if (!doc) throw new UsageError(`proposals retire: ${id} not found`);
+      const plan = planOf(readText6(planArg, "--plan"), planArg, "proposals retire: ");
+      const retired = (task) => task !== void 0 && (plan.retired ?? []).includes(task);
       const earlier = readEvents(io.cwd).filter((e) => e.kind === "proposal" && e.action === "retire" && e.id === id).at(-1);
-      if (earlier && doc.status === "rejected" && doc.decidedBy === "forge:auto" && typeof earlier.reason === "string" && doc.reason === earlier.reason && typeof earlier.digest === "string") {
+      const mark = loadApproval(io.cwd, id);
+      if (earlier && typeof earlier.reason === "string" && typeof earlier.digest === "string" && doc.status === "rejected" && doc.decidedBy === "forge:auto" && doc.reason === earlier.reason && doc.decidedAt === earlier.ts && proposalDigest(id, doc) === earlier.digest && mark?.status === "rejected" && mark.by === "forge:auto" && mark.digest === earlier.digest && mark.decidedAt === earlier.ts && doc.taskId === earlier.taskId && retired(doc.taskId)) {
         return json4(retireWrites(id, earlier.ts, earlier.reason, earlier.digest, earlier.parked === true));
       }
+      if (doc.status === "rejected") return { code: 4, stdout: "", stderr: `proposals retire: ${id} is rejected already: nothing to retire
+` };
       if (!isActionable(doc)) throw new UsageError(`proposals retire: ${id} is ${doc.status}: only an approved proposal is rejected when its task is retired`);
       const notOwn = notRunsOwn(io.cwd)(id);
       if (notOwn) throw new UsageError(`proposals retire: ${id} ${notOwn}: it is not the run's to reject, the person decides it`);
-      const plan = planOf(readText6(planArg, "--plan"), planArg, "proposals retire: ");
-      if (!doc.taskId || !(plan.retired ?? []).includes(doc.taskId)) {
+      if (!retired(doc.taskId)) {
         throw new UsageError(`proposals retire: the task of ${id} (${doc.taskId ?? "none"}) is not in the retired list of ${planArg}`);
       }
       const at2 = ts();
@@ -28680,7 +28733,7 @@ var command16 = (args, ctx) => {
       const out = retireWrites(id, at2, reason, digest2, parked !== void 0);
       saveProposal(io.cwd, id, { ...kept2, status: "rejected", decidedBy: "forge:auto", decidedAt: at2, reason });
       saveApproval(io.cwd, id, out.approval.data);
-      appendEvent(io.cwd, { ts: at2, kind: "proposal", action: "retire", id, taskId: doc.taskId, reason, digest: digest2, ...parked ? { parked: true } : {} });
+      appendEvent(io.cwd, { ts: at2, kind: "proposal", action: "retire", id, taskId: doc.taskId, status: "rejected", reason, digest: digest2, ...parked ? { parked: true } : {} });
       return json4(out);
     }
     case "batch": {
@@ -28719,7 +28772,7 @@ var command16 = (args, ctx) => {
       try {
         r2 = judgeProposal(io.cwd, id, verdicts, at2, spanish(run2.locale), (d) => {
           Object.assign(recorded, addDecision(main, d, { ts: at2, runId: run2.autonomous.runId }));
-        });
+        }, `${run2.startedAt}#${run2.cycle}`);
       } catch (e) {
         if (e instanceof JudgeError) throw new UsageError(`proposals judge: ${e.message}`);
         throw e;

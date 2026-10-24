@@ -12755,8 +12755,9 @@ var idList2 = (x2) => Array.isArray(x2) && x2.length <= SATURATION_LIST_MAX && x
 var oneOf = (list, x2) => typeof x2 === "string" && list.includes(x2);
 function saturationReportOf(x2) {
   if (!isObj4(x2)) return null;
-  const { saturated, at: at2, rounds, blocking, evidence: e, waiting: w, counts: c, missing } = x2;
+  const { saturated, at: at2, rounds, explored, blocking, evidence: e, waiting: w, counts: c, missing } = x2;
   if (typeof saturated !== "boolean" || typeof at2 !== "string" || !at2 || at2.length > 64 || !isCount(rounds)) return null;
+  if (explored !== void 0 && (typeof explored !== "boolean" || saturated && !explored)) return null;
   if (!Array.isArray(blocking) || !blocking.every((b) => oneOf(SATURATION_BLOCKING, b)) || new Set(blocking).size !== blocking.length) return null;
   if (saturated !== (blocking.length === 0) || !isObj4(e) || !isObj4(w) || !isObj4(c)) return null;
   if (!isCount(e.openFindings) || !isCount(w.questions) || !isCount(w.blocked) || !isCount(w.deferred)) return null;
@@ -12786,6 +12787,7 @@ function saturationReportOf(x2) {
     saturated,
     at: at2,
     rounds,
+    ...typeof explored === "boolean" ? { explored } : {},
     blocking: [...blocking],
     evidence: { pendingTasks: ids("pendingTasks"), validatorsFailed: ids("validatorsFailed"), openFindings: e.openFindings, openDefects: ids("openDefects"), openProposals: ids("openProposals") },
     waiting: {
@@ -12843,6 +12845,7 @@ function parseRun(text3) {
     blocksSinceCycle: o.blocksSinceCycle ?? 0
   };
   if (o.stoppedReason !== void 0) run2.stoppedReason = o.stoppedReason;
+  if (typeof o.lastErrorDigest === "string" && /^[0-9a-f]{64}$/.test(o.lastErrorDigest)) run2.lastErrorDigest = o.lastErrorDigest;
   if (isLocale(o.locale)) run2.locale = o.locale;
   if (autonomous) run2.autonomous = autonomous;
   const explore = exploreOf(o.explore);
