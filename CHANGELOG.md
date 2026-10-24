@@ -22,14 +22,14 @@ elsewhere and are reconstructed from their READMEs.
 #### Changed
 - `/waypoint:plan` keeps a plan's `retired` and `history` as they are, and numbers a new task past the highest id of its tasks and of `retired`.
 
-### 0.34.0 — 2026-10-23
+### 0.34.0 — 2026-10-24
 
 #### Added
 - When the roadmap's owner writes an idea or comments on a proposal, the page records `approvals/owner`, so forge can tell the owner's ideas from the others' in an autonomous run.
 - A proposal approved by an autonomous run reads «forge on its own»; a person's idea parked by one keeps its explanation (`parked`). Republish the roadmap after updating, as `waypoint:plan` says.
 - `waypoint:plan` syncs from the worktree of a forge autonomous run, where its project lives.
 
-### 0.33.0 — 2026-10-23
+### 0.33.0 — 2026-10-24
 
 #### Added
 - A decision on the roadmap shows each alternative with why it was not taken and what it gains and loses, and what the chosen option gains and loses. Plain alternatives read as before. A page published before this version drops the alternatives that carry a why-not or trade-offs, and shows a `blocked` decision as a plain note: republish it after updating, as `waypoint:plan` says.
@@ -39,7 +39,7 @@ elsewhere and are reconstructed from their READMEs.
 - A session start that records a new base keeps the reflog stat it stored, so the next commit does not read the reflog again (6a N5).
 - The README says which commits a second seat records (its own `git commit`, an amend or a merge commit it concludes, `cherry-pick`, `revert`), and `/waypoint:work` says what a rebase does to the pending lines: they move to the replayed shas, and a replay adds none (6a N2, N7).
 
-### 0.32.2 — 2026-10-22
+### 0.32.2 — 2026-10-24
 
 #### Changed
 - `post-commit` gives a task only the commits made in its worktree: the reflog entries of `HEAD` of a commit, an amend, a first commit or a merge commit, a `revert` or a `cherry-pick` after the position it last read (kept in `last-head.json`) that HEAD still reaches. What a pull, merge, rebase, reset or checkout brings is not attributed, and the first time counts from the task's claim. A rebase, also one stopped on a conflict and continued, keeps the task's own commits: each line is replaced by its replay, matched by subject, and while the rebase is stopped nothing is dropped. A pending line whose sha is not a sha is never given to git. The reflog is read only when HEAD moved or the reflog file changed. With `core.logAllRefUpdates=false` nothing is attributed. A commit that a person or process that is not a live seat makes in the same worktree counts for the task (H4).
@@ -427,7 +427,7 @@ elsewhere and are reconstructed from their READMEs.
 - `proposals to-task` takes `--db d`, required in a product run, so a phase that is done never reads as open; a new task's id comes after the plan's `retired` ids too.
 - Depends on waypoint ^0.35.0.
 
-### 0.29.0 — 2026-10-23
+### 0.29.0 — 2026-10-24
 
 #### Added
 - Autonomous profiles: `/forge:infinite --profile spike|product "<idea>"` with a budget. `infinite prepare` creates or reuses the branch `forge/<profile>-<name>` and its worktree `.claude/worktrees/<profile>-<name>` (your main checkout is never touched, apart from forge's own state in `.forge/` and one line in `.git/info/exclude`); the run writes its own design (a short one for a spike, a vision for a product), takes it through `design-critic`, approves it, plans it and starts with `infinite start --profile`. It never merges into main or the start branch and never pushes. A profile runs one task per cycle in this version: `swarm start` refuses inside its worktree, and `--parallel` does not apply. `start --profile` refuses while a run is active, or when `.forge/run.json` does not read, and the run's session ids are kept in `.forge/autonomous/<runId>/sessions.json`, so a torn run.json still guards them.
@@ -441,7 +441,7 @@ elsewhere and are reconstructed from their READMEs.
 - `proposals pull` prints the roadmap's `owner`; parked proposals no longer fill the queue.
 - Depends on waypoint ^0.34.0.
 
-### 0.28.0 — 2026-10-23
+### 0.28.0 — 2026-10-24
 
 #### Added
 - The guard (`hook guard`) gains nine rules for the sessions of an autonomous infinite run (the coordinator, its execution and its members by their ids, also once the run is inactive, and, while it is active, any session inside its worktrees): `self` (never the project's `.claude/settings*.json`, no `claude` command that switches hooks or permissions off, no new run from inside (`infinite start` without `--profile`); `stop` is allowed), `files` (no write, overwrite, link or delete outside the run's worktree, its temp folder or the scratchpad), `install` (installs only inside the worktree, no download-and-run installer), `database` (writes only on what the run registered), `network`, `cloud` and `mcp-write` (no write off the machine, by Bash or by an MCP tool whose name says it writes) and `git` (no push; main and the start branch are never checked out, rebased, fetched into or moved, and merge and reset act only inside the run's worktree, so only on its own branches; no tag deleted or moved, no `-c alias.*`, `core.sshCommand` or `core.hooksPath`; no branch deleted that is not the run's; nothing the clone shares), and `machine` (nothing of the person's processes, services or user-level setup: no kill by name, by process group or of every process, no service stopped, restarted, enabled, disabled or masked, no power-off or restart of the machine, and no change to their environment variables, scheduled jobs, registry or npm, pnpm, yarn, bun or pip config; the run stops what it started by its pid). Cloud CLIs are read by their shape (a read at the verb's position allows), migrations run only with their target on the command, a database script never does, the command inside `docker run|exec` and `compose run|exec` is judged, a container mounts only the run's volumes or folders inside its worktree (read-only mounts are free) and gets no host access (`--privileged`, `--device`, a host namespace, `--cap-add` of `ALL`, `SYS_ADMIN` and the like, an unconfined `--security-opt`), and the interaction tools of the person's signed-in browser (Claude in Chrome, the desktop app's browser) are denied. Each command is read as its shell reads it (Bash, PowerShell or cmd). A command whose target cannot be seen in one of the three dangerous classes is denied, and each denial is recorded without its secrets. In such a run the guard fails closed. The autonomous profiles that start such a run come in the next version.
@@ -461,7 +461,7 @@ elsewhere and are reconstructed from their READMEs.
 - The no-roadmap refusal of `proposals to-task` names the proposal in `/forge:decide <id> confirm` (6a N6).
 - The README says which characters after `hook answer` or `local set commands` make a text a call: a space or tab, an end of line, `;`, `|`, `&`, `<`, `>`, `(`, `)` or a backtick (6a N3).
 
-### 0.27.0 — 2026-10-22
+### 0.27.0 — 2026-10-24
 
 #### Added
 - `hook guard`, a `PreToolUse` hook on Bash, PowerShell, Edit, Write and NotebookEdit. It denies the model's Edit, Write and NotebookEdit on the authorizations of `.forge/execution/auth/`, the trust in the commands of `.forge/config.yaml` (`<git common dir>/forge/trust.json`) and `.forge/local.yaml`, and a Bash or PowerShell call of `hook answer` or `local set commands` (also with `--cwd` between the words or a shell metacharacter right after them): only the person's answer records those. It recognises patterns and is no sandbox: quoting, node flags that take a value, scripts, the `nodejs` binary name and path names only the disk resolves can get past it, a closing quote right after the word or a quoted word (`hook "answer"`) gets past it, any text that mentions such a call and has a space, an end of line, `<`, `>`, `(`, `)` or a backtick right after the words is denied (a commit message, an `echo`), if a setting ran AskUserQuestion without its dialog the model's `answers` could reach `tool_response` (the authorizations share this and do not compare the question's header and options), and with `CLAUDE_PROJECT_DIR` outside the session's repository its auth and trust rules can miss (D9).
@@ -1022,17 +1022,17 @@ elsewhere and are reconstructed from their READMEs.
 #### Changed
 - Rebuilt with the code it shares with forge 0.30.0 (the run's exploration rounds and saturation report); nothing lens shows changes.
 
-### 0.13.10 — 2026-10-23
+### 0.13.10 — 2026-10-24
 
 #### Changed
 - Rebuilt with the code it shares with forge 0.29.0 (the autonomous block of run.json with its profile, branch and worktree, and a proposal's `parked`); nothing lens shows changes. In a profile run, lens in the main checkout shows the main checkout's proposals, not the profile worktree's.
 
-### 0.13.9 — 2026-10-23
+### 0.13.9 — 2026-10-24
 
 #### Changed
 - Rebuilt with the code it shares with forge 0.28.0 (decisions with trade-offs, the autonomous block of run.json); nothing lens shows changes.
 
-### 0.13.8 — 2026-10-22
+### 0.13.8 — 2026-10-24
 
 #### Changed
 - Rebuilt with the band model of waypoint 0.32.2 (`coordinatorOpen` on the notice of a run); nothing lens shows changes.
