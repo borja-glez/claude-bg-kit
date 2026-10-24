@@ -12,7 +12,7 @@ You review the whole roadmap of a product with fresh eyes, now that one of its p
 Input from the caller:
 - the design path (the vision) and the plan path (`plan.yaml`);
 - the roadmap cache (`DB`): its `state`, `notes` and `proposals` documents;
-- the phase that closed, and the file with the output of `FORGE infinite phase` (its `held`: the tasks a re-plan may not retire, move, or change the title or `done_when` of, each with its `reason`);
+- the phase that closed, and the file with the output of `FORGE infinite phase`: its `phases`, each phase's `{id, done, total}`; its `held`, the tasks a re-plan may not retire, move, or change the title or `done_when` of, each with its `reason` (a person's task, a done one, or one that waits for the person: blocked for their answer); and its `reviewed`, the phases already reviewed;
 - the last market note (the file `FORGE market last` prints), when there is one;
 - the file with the output of `FORGE validate --all`;
 - the file with `git log --oneline -50` of the run's branch;
@@ -51,14 +51,16 @@ The re-plan, as the operations of `waypoint replan`, applied in order:
 - `{"op": "add-phase", "id": "F4", "name": "<name>", "goal": "<what the phase is for>", "after": "F3"}`: a new phase, with an id no phase has, its name and its goal;
 - `{"op": "edit-phase", "id": "F3", "name": "<name>", "goal": "<goal>"}`;
 - `{"op": "order-phases", "phases": ["F1", "F3", "F2"]}`: every phase of the plan, once each;
-- `{"op": "move", "task": "T012", "phase": "F4"}`: a task to another phase;
+- `{"op": "move", "task": "T012", "phase": "F4"}`: a task to another phase, never to one in `reviewed` (a reviewed phase is never reviewed again);
 - `{"op": "order-tasks", "phase": "F2", "tasks": ["T007", "T005"]}`: every task of that phase, once each;
 - `{"op": "edit", "task": "T005", "done_when": "<what a check sees when it is done>", "depends_on": ["T004"], "estimate_min": 45}`: a `done_when` a check can see (more than the title), its dependencies and its estimate in minutes (`title` too, when it is wrong);
 - `{"op": "retire", "task": "T009", "why": "<why the product no longer needs it>"}`: a task no other task depends on.
 
 Never a new task id: new tasks come as proposals of the explorer (your `gap`, `debt` and `bug` findings). Nothing renumbers: every id stays. At most 50 operations, and none (`"ops": []`) when the plan is right as it is.
 
-The person's work is theirs, and a done task stays as it is. Never write a `retire`, a `move`, or an `edit` of the `title` or `done_when` of a task in `held`: forge refuses the whole re-plan that does (`FORGE proposals replan-check`, by the same rule that made `held`). When such a task needs that change, write a finding with `"person": true`: the person decides it. Its dependencies and its estimate may change.
+When the phase that closed was the last one with tasks not done (in `phases`, every phase with tasks is done and none is empty) and you write a `gap`, `debt` or `bug` finding, add a phase for them, `{"op": "add-phase", "id": "<a new id>", "name": "<name>", "goal": "<what the phase is for>"}`, named and aimed for what they are: without it nothing you propose can be placed.
+
+The person's work is theirs, and a done task stays as it is, as does one that waits for the person. Never write a `retire`, a `move`, or an `edit` of the `title` or `done_when` of a task in `held`, nor a `move` into a phase in `reviewed`: forge refuses the whole re-plan that does (`FORGE proposals replan-check`, by the same rule that made `held`). When such a task needs that change, write a finding with `"person": true`: the person decides it. Its dependencies and its estimate may change.
 
 ## Vision
 

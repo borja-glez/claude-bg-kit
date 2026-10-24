@@ -2371,6 +2371,31 @@ describe('plugin layout', () => {
       for (const w of ['retired:', 'history:']) expect(read(f), `${f}: ${w}`).toContain(w);
     }
   });
+  it('the final fix wave\'s texts: the run opens a phase, a refused v2 is skipped, the close sends each note once and aborts a stuck revert (6b-3 final fix)', () => {
+    const ref = (f: string) => read(`plugins/forge/skills/infinite/references/${f}.md`);
+    // F-I1 (c): to-task's own message, then the re-plan path with its check, dry run, decision and write, once per cycle.
+    const product = ref('product');
+    for (const w of ['## When no phase is open', 'no phase of the plan is open', '.forge/work/infinite/open-phase-<cycle>/', 'open-phase-refused.json',
+      'FORGE proposals replan-check --ops OP/ops.json', '--why-file OP/why.txt --check', 'FORGE decision add --data-file OP/decision.json', '"add-phase"',
+      '`{closed, phases, held, reviewed}`']) expect(product, w).toContain(w);
+    const at = (w: string) => { const i = product.indexOf(w); expect(i, w).toBeGreaterThanOrEqual(0); return i; };
+    const order = ['FORGE proposals replan-check --ops OP/ops.json', '--why-file OP/why.txt --check', 'FORGE decision add --data-file OP/decision.json',
+      '--why-file OP/why.txt`'].map(at);
+    expect(order, 'open a phase').toEqual([...order].sort((a, b) => a - b));
+    // F-I1 (a): the review of the last open phase adds a phase for what it finds; F-M3, F-M4: `held` and `reviewed`.
+    const review = read('plugins/forge/agents/forge-phase-review.md');
+    for (const w of ['`reviewed`', 'waits for the person', '"add-phase"']) expect(review, w).toContain(w);
+    // F-I2: a v2 whose add exits 3 is skipped; T2-a: the batch's chain version; WT-1: the two ways on.
+    expect(ref('autonomous')).toContain('exits 3');
+    expect(ref('autonomous')).toContain('CLAUDE.md');
+    expect(read('plugins/forge/agents/forge-critic.md')).toContain('"version"');
+    // F-M2: the debt note of the check and the question of the vision each have a marker; F-M5, T7-O1: the revert; T7-O2: exit 4.
+    const close = ref('phase-close');
+    for (const w of ['PH/check-debt.json', 'PH/vision-question.json', 'git revert --abort', 'Exit 4', 'git diff --quiet <the sha of PH/vision-base.txt>']) {
+      expect(close, w).toContain(w);
+    }
+    expect(close).not.toContain('is rejected:');
+  });
   it('the READMEs describe the product pilot, saturation and waypoint replan (6b-3)', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);

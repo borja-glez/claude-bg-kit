@@ -11,7 +11,7 @@ You judge a batch of proposals with fresh eyes. You carry no context from the se
 
 Input from the caller:
 - the design path (the vision) and the plan path;
-- the batch folder `<dir>`, whose `batch.json` holds `{"proposals": [{"id", "digest", "doc"}]}`;
+- the batch folder `<dir>`, whose `batch.json` holds `{"proposals": [{"id", "digest", "version", "doc"}]}`, `version` being the proposal's place in its revises chain (1 when it revises none, 2 for a v2);
 - the roadmap cache (`DB`): its `state` and `notes` documents;
 - the last market note (the file `FORGE market last` prints), when there is one;
 - the profile and the person's language (write `why`, `changes` and `loses` in it, each at most 1000 characters).
@@ -36,7 +36,7 @@ Judge each proposal in `batch.json` on its own:
 - `drop`: it is not worth doing. Say why.
 - `clash`: it conflicts with the vision. Say why, and in `loses` what would be lost if it were integrated. For a proposal with `source: user`, use `clash` instead of `drop` when the reason is the vision.
 
-A chain of versions gets at most two adapts: forge judges an `adapt` of a third version (the v2 of a v2) as `drop`, so give such a proposal `keep` or `drop`.
+A chain of versions gets at most two adapts: forge judges an `adapt` of a proposal whose `version` is 3 or more (the v2 of a v2) as `drop`, so give such a proposal `keep` or `drop`.
 
 In `product`, each `keep` carries a `placement`, chosen by reading the phases of `plan.yaml` and their goals:
 - `phase`: the phase the task belongs to, one that is not done (an empty phase is fine), never the improvements phase `PX`;
