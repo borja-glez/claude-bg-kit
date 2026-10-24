@@ -27,7 +27,7 @@ describe('crew plugin (w7 D4)', () => {
       const t = readFileSync(f, 'utf8');
       expect(t, f).not.toMatch(/[A-Za-z]:[\\/]Users[\\/]|\/Users\/|\/home\/|E:[\\/]work|(?<![\w.])\/[a-z]\/work(?![\w-])/i);
       // The same invisible and bidi set as A7's plugin-hygiene test.
-      expect(t, f).not.toMatch(/[­؜ᅟᅠ᠎​-‏‪-‮⁠-⁤⁦-⁩ㅤ﻿ﾠ]/);
+      expect(t, f).not.toMatch(/[\u00AD\u061C\u115F\u1160\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u3164\uFEFF\uFFA0]/);
     }
   });
 });
