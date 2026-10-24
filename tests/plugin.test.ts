@@ -18,8 +18,6 @@ const INFINITE_REFS = new URL('../plugins/forge/skills/infinite/references/', im
 /** forge:infinite as a session reads it: the core and the references it points to (6b-1 moved its tails there). */
 const infiniteText = () => [read('plugins/forge/skills/infinite/SKILL.md'),
   ...(existsSync(INFINITE_REFS) ? readdirSync(INFINITE_REFS).sort().map(f => read(`plugins/forge/skills/infinite/references/${f}`)) : [])].join('\n');
-// J-12: what /waypoint:work can read: its core and the multi-session protocol it reads when next says multi.
-const workText = () => `${read('plugins/waypoint/skills/work/SKILL.md')}\n${read('plugins/waypoint/skills/work/references/multisession.md')}`;
 // J-12: 60 % of waypoint:work as wave 5c found it (35 073 bytes): the cap only goes down.
 const WORK_CAP = 21043;
 // J-12: 80 % of forge:run as wave 5c found it (22 479 bytes): the cap only goes down.
@@ -34,6 +32,10 @@ const SKILL_CAP = 16000;
 const skillText = (dir: string): string => [read(`${dir}/SKILL.md`), ...(existsSync(new URL(`../${dir}/references/`, import.meta.url))
   ? readdirSync(new URL(`../${dir}/references/`, import.meta.url)).filter(f => f.endsWith('.md')).sort().map(f => read(`${dir}/references/${f}`)) : [])].join('\n');
 const runText = () => skillText('plugins/forge/skills/run');
+// J-12: what /waypoint:work can read: its core and every reference (setup, notes, complete, multisession).
+const workText = () => skillText('plugins/waypoint/skills/work');
+/** A reference of waypoint:work (plugins/waypoint/skills/work/references/<name>.md). */
+const workRef = (name: string) => read(`plugins/waypoint/skills/work/references/${name}.md`);
 /** I-17: the floor of a dependency range (`^5.0.5`, `~5.0.5`, `5.0.5`) is `min` or later. */
 const floorAtLeast = (range: string | undefined, min: string): boolean => {
   const m = /^[\^~]?(\d+)\.(\d+)\.(\d+)$/.exec(range ?? '');
@@ -106,7 +108,7 @@ describe('plugin layout', () => {
     for (const w of ['SendMessage', 'ListAgents', ' inbox ', ' recover ', ' conflicts ', 'seen.json', 'MAIN_REPO']) expect(md).toContain(w);
   });
   it('work skill reads and writes roadmap notes', () => {
-    const md = read('plugins/waypoint/skills/work/SKILL.md');
+    const md = workText();
     for (const w of ['"<WP>" notes', 'lastNoteTs', 'notes/<EID>', 'session:<SID>']) expect(md).toContain(w);
     expect(read('plugins/waypoint/README.md')).toContain('Notes');
   });
@@ -289,7 +291,7 @@ describe('plugin layout', () => {
     for (const s of ['`round R: rewrite', 'waypoint critique-dismiss DESIGN --round <R> <numbers>']) expect(design).toContain(s);
     expect(read('plugins/waypoint/agents/design-critic.md')).toContain('still open from earlier rounds');
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('--publish-info');
-    expect(read('plugins/waypoint/skills/work/SKILL.md')).toContain('print each of its `say` lines as it is');
+    expect(workRef('notes')).toContain('print each of its `say` lines as it is');
     expect(read('plugins/forge/skills/verify/SKILL.md')).toContain('Only the person grants one');
   });
   it('READMEs describe routing and auto mode', () => {
@@ -760,7 +762,7 @@ describe('plugin layout', () => {
     expect(read('plugins/forge/skills/member/SKILL.md')).toContain('A run member never integrates and never merges');
     const manual = runRef('manual-member');
     for (const s of ['FORGE swarm report <T> --session <SID>', 'FORGE swarm join --session <SID> --role manual', 'FORGE swarm next --plan <plan> --db DB --session <SID>']) expect(manual).toContain(s);
-    expect(read('plugins/waypoint/skills/work/SKILL.md')).toContain('join the execution as a manual member: invoke /forge:run --join and follow its ### Manual member');
+    expect(workRef('setup')).toContain('join the execution as a manual member: invoke /forge:run --join and follow its ### Manual member');
     expect(read('plugins/forge/skills/stop/SKILL.md')).toContain('[forge run] stop after your current step');
   });
   it('the task steps live in references/task-steps.md and forge:run no longer repeats them', () => {
@@ -1214,9 +1216,8 @@ describe('plugin layout', () => {
     for (const w of ['--swarm', '→ Run member', 'swarm member', 'launchedBy', '§0.6', '§0 item 6']) {
       expect(files.filter(f => readFileSync(f, 'utf8').includes(w)).map(f => path.relative(plugins, f)), w).toEqual([]);
     }
-    const work = read('plugins/waypoint/skills/work/SKILL.md');
-    expect(work).toMatch(/\n5\. \*\*forge execution\.\*\*/);
-    expect(work).not.toMatch(/\n6\. \*\*forge execution\.\*\*/);
+    expect(workRef('setup')).toMatch(/\n5\. \*\*forge execution\.\*\*/);
+    expect(workText()).not.toMatch(/\n6\. \*\*forge execution\.\*\*/);
   });
 
   it('the planner reads the measured fixed cost and marks delicate tasks (C-07, J-14)', () => {
@@ -1996,7 +1997,7 @@ describe('plugin layout', () => {
       .slice('allowed-tools:'.length).match(/[A-Za-z_]+\([^)]*\)|[A-Za-z_]+/g) ?? []);
     for (const s of readdirSync(dir).filter(n => existsSync(path.join(dir, n, 'SKILL.md')))) {
       const text = read(`plugins/waypoint/skills/${s}/SKILL.md`);
-      const body = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+      const body = skillText(`plugins/waypoint/skills/${s}`).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
       const allowed = allowedOf(text);
       expect(TOOLS.filter(t => new RegExp(`\\b${t}\\b`).test(body) && !allowed.has(t)), s).toEqual([]);
     }
@@ -2047,6 +2048,26 @@ describe('plugin layout', () => {
     expect(partsIn(failed).length).toBeGreaterThan(0);
     for (const n of partsIn(failed)) expect(part(n), `the §${n} part`).toContain('version_mismatch');
     for (const w of ['## 6. Messages between sessions', '## 7. Release', 'node "<WP>" inbox', 'node "<WP>" recover']) expect(work, w).not.toContain(w);
+  });
+
+  it('waypoint:work reads its setup, its notes and the close of a task from references/, under the compaction cap (w7 A2)', () => {
+    const work = read('plugins/waypoint/skills/work/SKILL.md');
+    expect(Buffer.byteLength(work, 'utf8')).toBeLessThanOrEqual(SKILL_CAP);
+    const lines = work.split(/\r?\n/);
+    const first = (h: string) => lines.slice(lines.indexOf(h) + 1).find(l => l.trim() !== '')!;
+    const pointer = (r: string) => new RegExp(`Read \`references/${r}\\.md\` now, and again every time you get here: your memory of it does not survive compaction\\.`);
+    expect(first('## 0. Setup (once per session)')).toMatch(new RegExp(`^${pointer('setup').source}`));
+    expect(first('## 4. Commit and complete')).toMatch(new RegExp(`^${pointer('complete').source}`));
+    expect(lines.find(l => l.startsWith('4. **Notes.** '))).toMatch(pointer('notes'));
+    expect(work).toContain('`CSID` = `${CLAUDE_SESSION_ID}`');
+    const setup = workRef('setup');
+    for (const w of ['bind <plan> --via work --claude <CSID>', '--second-seat', '--takeover', 'heartbeat --register', 'invoke /forge:run --join']) expect(setup, w).toContain(w);
+    expect(setup).toMatch(/\n5\. \*\*forge execution\.\*\*/);
+    for (const w of ['"<WP>" notes --notes DB/notes', 'lastNoteTs', 'print each of its `say` lines as it is']) expect(workRef('notes'), w).toContain(w);
+    for (const w of ['"<WP>" done <plan> --db DB', '--summary-file <SEAT>/summary.txt', 'meta/metrics', '**Phase close.**', 'the §4 part of `references/multisession.md`']) {
+      expect(workRef('complete'), w).toContain(w);
+    }
+    for (const w of ['heartbeat --register', '"<WP>" notes --notes', '"<WP>" done <plan>']) expect(work, w).not.toContain(w);
   });
   it('a run member never reads forge:run SKILL.md: the close of a review round is references/review-close.md, cited by Medium and the task steps (J-12)', () => {
     const steps = runRef('task-steps');
