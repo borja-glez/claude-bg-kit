@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parsePlan } from '../src/lib/plan.js';
 import { stateDoc } from '../src/page/normalize.js';
@@ -42,8 +42,10 @@ describe('saturationOf (6b-3)', () => {
     const open = saturationOf({ ...base, states: { ...done, T002: stateDoc({ status: 'done', forge: forge('fix') })! } });
     expect(open).toMatchObject({ saturated: false, blocking: ['findings'], evidence: { openFindings: 2 }, waiting: { deferred: 1 } });
     expect(saturationOf({ ...base, states: { ...done, T002: stateDoc({ status: 'done', forge: forge('accept') })! } })).toMatchObject({ saturated: true, waiting: { deferred: 1 } });
-    // Only the plan's tasks count: a state the plan no longer has (a retired task) holds nothing open.
-    expect(saturationOf({ ...base, states: { ...done, T009: stateDoc({ status: 'orphaned', forge: forge('fix') })! } })).toMatchObject({ saturated: true, waiting: { deferred: 0 } });
+    // A state the plan no longer has (a retired task) blocks nothing, but its open findings are told (fix 1, orphanFindings).
+    expect(saturationOf({ ...base, states: { ...done, T009: stateDoc({ status: 'orphaned', forge: forge('fix') })! } }))
+      .toMatchObject({ saturated: true, blocking: [], evidence: { openFindings: 0 }, waiting: { deferred: 0, orphanFindings: ['T009'] }, counts: { orphanFindings: 1 } });
+    expect(saturationOf({ ...base, states: { ...done, T009: stateDoc({ status: 'orphaned', forge: forge('accept') })! } }).waiting.orphanFindings).toEqual([]);
   });
 });
 
@@ -76,7 +78,50 @@ describe('saturationOf: what still moves, what waits, and how much it keeps (6b-
     const r = saturationOf({ ...base, plan: big, states: {}, toJudge });
     expect(r.evidence.pendingTasks).toEqual(ids.slice(0, 20));
     expect(r.evidence.openProposals).toEqual(toJudge.slice(0, 20));
-    expect(r.counts).toEqual({ pendingTasks: 25, validatorsFailed: 0, openDefects: 0, openProposals: 30, parked: 0, waitsOwner: 0, unowned: 0 });
+    expect(r.counts).toEqual({ pendingTasks: 25, validatorsFailed: 0, openDefects: 0, openProposals: 30, parked: 0, waitsOwner: 0, unowned: 0,
+      blockedTasks: 0, unplaced: 0, orphanFindings: 0 });
+  });
+});
+
+describe('saturationOf: what waits for the person never blocks, and a missing input leaves the rest computed (6b-3 fix 1)', () => {
+  const chain = parsePlan('project: g\nlocale: en\nversion: "0.1"\ntracks:\n  - { id: core, name: Core, color: blue }\nphases:\n  - { id: F1, name: Base }\ntasks:\n'
+    + '  - { id: T001, title: a, track: core, phase: F1, done_when: x }\n  - { id: T002, title: b, track: core, phase: F1, done_when: x, depends_on: [T001] }\n'
+    + '  - { id: T003, title: c, track: core, phase: F1, done_when: x }\n  - { id: T004, title: d, track: core, phase: F1, done_when: x, depends_on: [T001, T003] }\n');
+  const s = (o: Record<string, unknown>) => stateDoc(o)!;
+  it('a task blocked for the person, and every task that waits only on it, waits apart (T6B3-SAT-WAITING)', () => {
+    const external = s({ status: 'blocked', blockedBy: ['external'] });
+    const r = saturationOf({ ...base, plan: chain, states: { T001: external, T002: s({ status: 'free' }), T003: s({ status: 'done' }), T004: s({ status: 'free' }) } });
+    expect(r).toMatchObject({ saturated: true, blocking: [], evidence: { pendingTasks: [] }, waiting: { blockedTasks: ['T001', 'T002', 'T004'] }, counts: { blockedTasks: 3 } });
+    // A task that also waits on open work is open work, and so is that work.
+    const open = saturationOf({ ...base, plan: chain, states: { T001: external, T002: s({ status: 'free' }), T003: s({ status: 'free' }), T004: s({ status: 'free' }) } });
+    expect(open).toMatchObject({ saturated: false, blocking: ['pending-tasks'], evidence: { pendingTasks: ['T003', 'T004'] }, waiting: { blockedTasks: ['T001', 'T002'] } });
+    // Positive control: a task blocked by a task id, not by the person, still blocks, with what waits on it.
+    const byTask = saturationOf({ ...base, plan: chain, states: { T001: s({ status: 'blocked', blockedBy: ['T003'] }), T002: s({ status: 'free' }), T003: s({ status: 'done' }), T004: s({ status: 'done' }) } });
+    expect(byTask).toMatchObject({ saturated: false, blocking: ['pending-tasks'], evidence: { pendingTasks: ['T001', 'T002'] }, waiting: { blockedTasks: [] } });
+  });
+  it('an approval the run could not place, named by its own debt note, waits apart; a person\'s debt note does not move it (T6B3-SAT-WAITING)', () => {
+    const approved = P({ id: 'p20261022100000aaaa', status: 'auto_approved' });
+    const debt = (author: string, o: Record<string, unknown> = {}) => ({ ts: 't', type: 'debt' as const, author, text: 'p20261022100000aaaa could not be placed', ...o });
+    expect(saturationOf({ ...base, proposals: [approved], notes: [debt('session:S')] }))
+      .toMatchObject({ saturated: true, evidence: { openProposals: [] }, waiting: { unplaced: ['p20261022100000aaaa'] } });
+    expect(saturationOf({ ...base, proposals: [approved], notes: [debt('session:S', { text: 'could not be placed', proposalId: 'p20261022100000aaaa' })] }).waiting.unplaced)
+      .toEqual(['p20261022100000aaaa']);
+    // Positive control: the same note by a person, or a debt note of another proposal, leaves it open work.
+    expect(saturationOf({ ...base, proposals: [approved], notes: [debt('user:u1')] })).toMatchObject({ blocking: ['proposals'], waiting: { unplaced: [] } });
+    expect(saturationOf({ ...base, proposals: [approved], notes: [debt('session:S', { text: 'p20261022100000bbbb could not be placed' })] }).blocking).toEqual(['proposals']);
+  });
+  it('a proposed proposal that already holds the owner\'s approving mark is open work (fix 1)', () => {
+    const mark = (status: 'approved' | 'rejected') => ({ status, decidedAt: 't', by: 'page' as const, digest: 'f'.repeat(64) });
+    const p = P({ id: 'p9' });
+    expect(saturationOf({ ...base, proposals: [p], marks: { p9: mark('approved') } })).toMatchObject({ saturated: false, blocking: ['proposals'], evidence: { openProposals: ['p9'] } });
+    // Positive control: a rejecting mark is the owner's no, and no work.
+    expect(saturationOf({ ...base, proposals: [p], marks: { p9: mark('rejected') } }).saturated).toBe(true);
+  });
+  it('a missing input is named and blocks; what does not need it is still computed (L-10, fix 1)', () => {
+    expect(saturationOf({ ...base, validators: null, missing: ['--validate'] })).toMatchObject({ saturated: false, blocking: ['inputs'], missing: ['--validate'], evidence: { validatorsFailed: [] } });
+    expect(saturationOf({ ...base, states: {}, notes: [{ ts: 't', type: 'question', author: 'session:S', text: '?' }], missing: ['--db'] }))
+      .toMatchObject({ blocking: ['inputs'], evidence: { pendingTasks: [] }, waiting: { questions: 0 } });
+    expect(saturationOf({ ...base, missing: ['--plan'], toJudge: ['p3'] })).toMatchObject({ blocking: ['proposals', 'inputs'], evidence: { openProposals: ['p3'] } });
   });
 });
 
@@ -91,8 +136,14 @@ describe('FORGE cycle --explore (6b-3)', () => {
   const at = () => new Date(clock).toISOString();
   const auto = (worktree: string) => ({ profile: 'product' as const, name: 'g', runId: 'product-g', worktree, branch: 'forge/product-g', startBranch: 'main', protectedBranches: ['main'] });
   const start = (worktree = root) => saveRun(root, { ...startRun(new Date(clock), { cycles: 50 }, 10, 's1'), autonomous: auto(worktree) });
-  // Each cycle a minute after the last event, so the ledger's times tell one round from the next.
-  const cycle = (extra: string[]) => { clock += 60_000; return run(['cycle', '--progress', 'yes', ...extra], io()); };
+  // Each cycle a minute after the last event, so the ledger's times tell one round from the next. A fresh cycle has its
+  // validate file written in it, as the scout's step writes one: newer than the last exploration round (fix 1).
+  const cycle = (extra: string[], fresh = true) => {
+    clock += 60_000;
+    const written = new Date(clock - 1000);
+    if (fresh) utimesSync(path.join(root, 'validate.json'), written, written);
+    return run(['cycle', '--progress', 'yes', ...extra], io());
+  };
   const explore = (extra = inputs) => {
     const r = cycle(['--explore', ...extra]);
     expect(r.code, r.stderr).toBe(0);
@@ -111,13 +162,13 @@ describe('FORGE cycle --explore (6b-3)', () => {
     writeFileSync(path.join(root, 'validate.json'), JSON.stringify(green));
   });
 
-  it('--explore is a bare flag of an autonomous run, its inputs go with it, and a --db without its state listing is refused (H-2, M-11)', () => {
+  it('--explore is a bare flag and its inputs belong to an autonomous run; a --db without its state listing is refused (H-2, M-11)', () => {
     saveRun(root, startRun(new Date(clock), { cycles: 50 }, 10, 's1'));
     expect(cycle(['--explore']).code).toBe(2);
+    expect(cycle(['--plan', 'plan.yaml']).code).toBe(2);
     start();
     expect(cycle(['--explore', '2']).code).toBe(2);
-    expect(cycle(['--plan', 'plan.yaml']).code).toBe(2);
-    expect(cycle(['--explore', '--plan', 'missing.yaml']).code).toBe(2);
+    expect(cycle(['--explore', '--db']).code).toBe(2);
     const noState = cycle(['--explore', '--plan', 'plan.yaml', '--db', 'nodb', '--validate', 'validate.json']);
     expect(noState.code).toBe(2);
     expect(noState.stderr).toContain('list state first');
@@ -179,14 +230,50 @@ describe('FORGE cycle --explore (6b-3)', () => {
     expect(status().stopReason).toBeNull();
   });
 
-  it('a round past the count without its inputs is recorded, with a report that names what is missing (L-10)', () => {
+  it('a pass in a cycle without the scout counts for the next round (T6B3-SAT-WINDOW)', () => {
     start();
-    explore([]);
+    explore();
+    explore();
+    // The critic judges every cycle: here it approves in a cycle where the scout did not run.
+    clock += 1000;
+    appendEvent(root, { ts: at(), kind: 'proposal', action: 'judge', id: 'p20261022100000aaaa', status: 'auto_approved', verdict: 'keep' });
+    expect(JSON.parse(cycle([]).stdout)).toMatchObject({ explore: { rounds: 2, dry: 2 }, saturation: null });
+    expect(explore().explore).toEqual({ rounds: 3, dry: 0 });
+    expect(cycles().at(-1)).toMatchObject({ explore: { passed: 1, dry: 0 } });
+    // Positive control: the round after it, with nothing new, is dry again.
+    expect(explore().explore).toEqual({ rounds: 4, dry: 1 });
+  });
+
+  it('a cycle without the scout refreshes the report past the count and keeps the dry count (fix 1)', () => {
+    start();
+    writeFileSync(path.join(root, 'db', 'state', 'T001.json'), JSON.stringify({ status: 'in_progress' }));
+    explore();
+    explore();
+    expect(explore()).toMatchObject({ explore: { rounds: 3, dry: 3 }, saturation: { saturated: false, blocking: ['pending-tasks'], evidence: { pendingTasks: ['T001'] } } });
+    // T001 is done in a cycle without the scout: the report says so at once, with this cycle's time.
+    writeFileSync(path.join(root, 'db', 'state', 'T001.json'), JSON.stringify({ status: 'done' }));
+    const r = cycle(inputs, false);
+    expect(r.code, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ explore: { rounds: 3, dry: 3 }, saturation: { saturated: false, at: at(), evidence: { pendingTasks: [] } } });
+    // Its validate file is the round's, older than the round: it never reads green, so this cycle cannot stop the run.
+    expect(JSON.parse(r.stdout).saturation).toMatchObject({ blocking: ['inputs'], missing: ['--validate'] });
+    expect(status().stopReason).toBeNull();
+  });
+
+  it('a round past the count without its inputs is recorded, with a report that names what is missing (L-10, fix 1)', () => {
+    start();
+    // An unreadable plan is a missing input, never a refusal.
+    expect(explore(['--plan', 'missing.yaml', '--db', 'db', '--validate', 'validate.json'])).toMatchObject({ explore: { dry: 1 }, saturation: null });
     explore([]);
     const r = cycle(['--explore', '--plan', 'plan.yaml', '--db', 'db']);
     expect(r.code, r.stderr).toBe(0);
     expect(JSON.parse(r.stdout)).toMatchObject({ cycle: 3, explore: { dry: 3 }, saturation: { saturated: false, blocking: ['inputs'], missing: ['--validate'] } });
     expect(status().stopReason).toBeNull();
+    expect(explore(['--plan', 'missing.yaml', '--db', 'db', '--validate', 'validate.json']).saturation)
+      .toMatchObject({ saturated: false, blocking: ['inputs'], missing: ['--plan'] });
+    // A validate file from before the last round is a missing input: a stale file never reads green.
+    const stale = cycle(['--explore', ...inputs], false);
+    expect(JSON.parse(stale.stdout).saturation).toMatchObject({ saturated: false, blocking: ['inputs'], missing: ['--validate'], evidence: { validatorsFailed: [] } });
     // A validate file that does not read is no green.
     writeFileSync(path.join(root, 'validate.json'), 'not json');
     expect(explore()).toMatchObject({ saturation: { saturated: false, blocking: ['validators'], evidence: { validatorsFailed: ['(no validate output)'] } } });

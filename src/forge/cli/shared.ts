@@ -230,12 +230,12 @@ export function stopContext(cwd: string, now: Date): StopContext {
 }
 
 /** Wave 4: approved proposals without a task that lack the roadmap owner's mark, whose text changed since the mark, or whose
- *  lone mark counts for nothing on a roadmap without the owner rule (D3): they never become tasks. The reason says which. */
-export function unownedReasons(root: string, now: Date): Record<string, Exclude<OwnerStanding, 'ok'>> {
-  const marks = loadApprovals(root);
+ *  lone mark counts for nothing on a roadmap without the owner rule (D3): they never become tasks. The reason says which.
+ *  6b-3 fix 1: `proposals` and `marks` of `root`, when the caller has them loaded (a saturation report loads them once). */
+export function unownedReasons(root: string, now: Date, proposals = loadProposals(root), marks = loadApprovals(root)): Record<string, Exclude<OwnerStanding, 'ok'>> {
   const octx = ownerCtx(root, now);
   const out: Record<string, Exclude<OwnerStanding, 'ok'>> = {};
-  for (const p of loadProposals(root)) {
+  for (const p of proposals) {
     if (!isActionable(p) || p.taskId !== undefined) continue;
     const c = ownerStanding(p.id, p, marks[p.id], octx);
     if (c !== 'ok') out[p.id] = c;

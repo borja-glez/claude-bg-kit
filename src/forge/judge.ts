@@ -194,20 +194,25 @@ function heldBack(root: string, events: readonly LedgerEvent[], id: string, doc:
  * run must judge is kept on disk, so a compaction between two cycles loses none of it.
  */
 export function pendingForJudge(root: string): string[] {
-  return undecided(root).filter(p => p.held === null).map(p => p.id).sort();
+  return judgeQueue(root).pending;
 }
 
-/** 6b-3 L-18: the proposals of `root` still to decide, as pendingForJudge takes them, that judge would answer `waits-owner`
- *  (heldBack): only the owner's mark moves them, so a saturation report lists them apart, as waiting for the person. */
-export function waitingForOwner(root: string): string[] {
-  return undecided(root).filter(p => p.held === 'waits-owner').map(p => p.id).sort();
+/**
+ * The proposals of `root` still to decide (notJudgeable) with no open descendant in their revises chain, by what judge would
+ * answer of each without its verdict (heldBack), by id: `pending`, which the verdict decides (pendingForJudge), and (6b-3
+ * L-18) `waitsOwner`, which only the owner's mark moves, so a saturation report lists them apart, as waiting for the person.
+ * `all`: the proposals of `root`, when the caller has them loaded (fix 1: a report loads them once).
+ */
+export function judgeQueue(root: string, all: (ProposalDoc & { id: string })[] = loadProposals(root)): { pending: string[]; waitsOwner: string[] } {
+  const queue = undecided(root, all);
+  const ids = (held: 'waits-owner' | null) => queue.filter(p => p.held === held).map(p => p.id).sort();
+  return { pending: ids(null), waitsOwner: ids('waits-owner') };
 }
 
-/** The proposals of `root` still to decide (notJudgeable) and with no open descendant in their revises chain, each with what
- *  heldBack answers of it: pendingForJudge and waitingForOwner share it. */
-function undecided(root: string): { id: string; held: 'waits-owner' | 'parked' | null }[] {
+/** The proposals of `all` still to decide (notJudgeable) and with no open descendant in their revises chain, each with what
+ *  heldBack answers of it. */
+function undecided(root: string, all: (ProposalDoc & { id: string })[]): { id: string; held: 'waits-owner' | 'parked' | null }[] {
   const events = readEvents(root).filter(e => e.kind === 'proposal');
-  const all = loadProposals(root);
   const heldByOpen = new Set(all.filter(p => p.status === 'proposed' || p.status === 'discussing').flatMap(p => ancestorsOf(events, p.id)));
   return all
     .filter(({ id, ...doc }) => !heldByOpen.has(id) && notJudgeable(root, events, id, doc) === null)

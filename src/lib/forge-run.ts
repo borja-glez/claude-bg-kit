@@ -15,27 +15,34 @@ export interface RunState {
   saturation?: SaturationReport | null;       // 6b-3: the last report, once `dry` reached SATURATION_ROUNDS; null below it
 }
 
-/** 6b-3: what keeps an autonomous run from being saturated. `inputs`: the round lacked what the report is computed from. */
+/** 6b-3: what keeps an autonomous run from being saturated. `inputs`: an input of the report is missing, unreadable or stale. */
 export const SATURATION_BLOCKING = ['rounds', 'pending-tasks', 'validators', 'findings', 'defects', 'proposals', 'inputs'] as const;
 export type SaturationBlocking = (typeof SATURATION_BLOCKING)[number];
 /** 6b-3 M-10: the id lists of a report, each kept to SATURATION_LIST_MAX ids, with its full length in `counts`. */
-export const SATURATION_LISTS = ['pendingTasks', 'validatorsFailed', 'openDefects', 'openProposals', 'parked', 'waitsOwner', 'unowned'] as const;
+export const SATURATION_LISTS = [
+  'pendingTasks', 'validatorsFailed', 'openDefects', 'openProposals', 'parked', 'waitsOwner', 'unowned', 'blockedTasks', 'unplaced', 'orphanFindings',
+] as const;
 export type SaturationList = (typeof SATURATION_LISTS)[number];
 export const SATURATION_LIST_MAX = 20;
-/** 6b-3 L-10: the inputs of `cycle --explore` a report can name as missing. */
+/** 6b-3 L-10: the inputs of `FORGE cycle` a report can name as missing. */
 export const SATURATION_INPUTS = ['--plan', '--db', '--validate'] as const;
 export type SaturationInput = (typeof SATURATION_INPUTS)[number];
 
 /**
  * 6b-3, spec «Parada por saturación»: why the run is or is not saturated, with its evidence. `saturated` is `blocking` empty.
- * `waiting` is what waits for the person, listed apart and never blocking: parked ideas, open questions, blocked actions,
- * deferred findings, the proposals that wait for the owner's mark and the approvals without it. `missing` (L-10) only on a
- * report the round could not compute.
+ * `waiting` is listed apart and never blocks (spec: what waits for the person does not keep the run going): parked ideas,
+ * open questions, blocked actions, deferred findings, the proposals that wait for the owner's mark and the approvals without
+ * it (L-18), the plan's tasks blocked for the person and those that wait only on them, the approvals the run could not place
+ * (fix 1, T6B3-SAT-WAITING), and the tasks the plan no longer has that kept open findings (information only). `missing`
+ * (L-10) names the inputs the report lacked; what needs them is not computed.
  */
 export interface SaturationReport {
   saturated: boolean; at: string; rounds: number; blocking: SaturationBlocking[];
   evidence: { pendingTasks: string[]; validatorsFailed: string[]; openFindings: number; openDefects: string[]; openProposals: string[] };
-  waiting: { parked: string[]; questions: number; blocked: number; deferred: number; waitsOwner: string[]; unowned: string[] };
+  waiting: {
+    parked: string[]; questions: number; blocked: number; deferred: number; waitsOwner: string[]; unowned: string[];
+    blockedTasks: string[]; unplaced: string[]; orphanFindings: string[];
+  };
   counts: Record<SaturationList, number>;
   missing?: SaturationInput[];
 }
@@ -106,7 +113,7 @@ function saturationReportOf(x: unknown): SaturationReport | null {
   if (!isCount(e.openFindings) || !isCount(w.questions) || !isCount(w.blocked) || !isCount(w.deferred)) return null;
   const lists: Record<SaturationList, unknown> = {
     pendingTasks: e.pendingTasks, validatorsFailed: e.validatorsFailed, openDefects: e.openDefects, openProposals: e.openProposals,
-    parked: w.parked, waitsOwner: w.waitsOwner, unowned: w.unowned,
+    parked: w.parked, waitsOwner: w.waitsOwner, unowned: w.unowned, blockedTasks: w.blockedTasks, unplaced: w.unplaced, orphanFindings: w.orphanFindings,
   };
   const counts = {} as Record<SaturationList, number>;
   for (const k of SATURATION_LISTS) {
@@ -120,7 +127,10 @@ function saturationReportOf(x: unknown): SaturationReport | null {
   return {
     saturated, at, rounds, blocking: [...blocking] as SaturationBlocking[],
     evidence: { pendingTasks: ids('pendingTasks'), validatorsFailed: ids('validatorsFailed'), openFindings: e.openFindings, openDefects: ids('openDefects'), openProposals: ids('openProposals') },
-    waiting: { parked: ids('parked'), questions: w.questions, blocked: w.blocked, deferred: w.deferred, waitsOwner: ids('waitsOwner'), unowned: ids('unowned') },
+    waiting: {
+      parked: ids('parked'), questions: w.questions, blocked: w.blocked, deferred: w.deferred, waitsOwner: ids('waitsOwner'), unowned: ids('unowned'),
+      blockedTasks: ids('blockedTasks'), unplaced: ids('unplaced'), orphanFindings: ids('orphanFindings'),
+    },
     counts,
     ...(missing !== undefined ? { missing: [...missing] as SaturationInput[] } : {}),
   };

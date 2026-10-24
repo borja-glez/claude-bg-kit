@@ -13,8 +13,9 @@ const T0 = new Date('2026-10-11T10:00:00.000Z');
 const ctx = (over: Partial<{ now: Date; stopFile: boolean; approvedPending: number; pendingProposals: number }> = {}) =>
   ({ now: T0, stopFile: false, approvedPending: 0, pendingProposals: 0, ...over });
 // 6b-3: the parts of a saturation report the rulings added to the plan's (H-2's openProposals, L-18's waitsOwner and unowned,
-// M-10's counts), empty.
-const noCounts = { pendingTasks: 0, validatorsFailed: 0, openDefects: 0, openProposals: 0, parked: 0, waitsOwner: 0, unowned: 0 };
+// M-10's counts, fix 1's blockedTasks, unplaced and orphanFindings), empty.
+const noCounts = { pendingTasks: 0, validatorsFailed: 0, openDefects: 0, openProposals: 0, parked: 0, waitsOwner: 0, unowned: 0, blockedTasks: 0, unplaced: 0, orphanFindings: 0 };
+const noWaiting = { parked: [], questions: 0, blocked: 0, deferred: 0, waitsOwner: [], unowned: [], blockedTasks: [], unplaced: [], orphanFindings: [] };
 
 describe('parseRun', () => {
   it('reads a valid run', () => {
@@ -76,7 +77,7 @@ describe('parseRun', () => {
   });
   it('keeps explore and saturation when they read, and drops them otherwise (6b-3)', () => {
     const sat = { saturated: false, at: 't', rounds: 2, blocking: ['rounds'], evidence: { pendingTasks: ['T1'], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
-      waiting: { parked: [], questions: 0, blocked: 0, deferred: 0, waitsOwner: [], unowned: [] }, counts: { ...noCounts, pendingTasks: 1 } };
+      waiting: noWaiting, counts: { ...noCounts, pendingTasks: 1 } };
     const ok = parseRun(JSON.stringify({ ...startRun(T0, { cycles: 3 }), explore: { rounds: 2, dry: 2 }, saturation: sat }))!;
     expect(ok).toMatchObject({ explore: { rounds: 2, dry: 2 }, saturation: sat });
     const bad = parseRun(JSON.stringify({ ...startRun(T0, { cycles: 3 }), explore: { rounds: -1 }, saturation: { saturated: 'yes' } }))!;
@@ -85,14 +86,14 @@ describe('parseRun', () => {
   });
   it('drops a report that does not hold together, never the run (6b-3, M-10)', () => {
     const sat = { saturated: true, at: 't', rounds: 3, blocking: [], evidence: { pendingTasks: [], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
-      waiting: { parked: [], questions: 0, blocked: 0, deferred: 0, waitsOwner: [], unowned: [] }, counts: noCounts };
+      waiting: noWaiting, counts: noCounts };
     const read = (o: Record<string, unknown>) => parseRun(JSON.stringify({ ...startRun(T0, { cycles: 3 }), ...o }));
     const ids = (n: number) => Array.from({ length: n }, (_, i) => `T${100 + i}`);
     for (const saturation of [
       { ...sat, blocking: ['rounds'] }, { ...sat, saturated: false }, { ...sat, blocking: ['later'] },
       { ...sat, saturated: false, blocking: ['pending-tasks'], evidence: { ...sat.evidence, pendingTasks: ids(21) }, counts: { ...noCounts, pendingTasks: 21 } },
       { ...sat, saturated: false, blocking: ['pending-tasks'], evidence: { ...sat.evidence, pendingTasks: ids(3) } },
-      { ...sat, counts: { ...noCounts, unowned: undefined } }, { ...sat, missing: ['--other'] },
+      { ...sat, counts: { ...noCounts, unowned: undefined } }, { ...sat, missing: ['--other'] }, { ...sat, waiting: { ...noWaiting, unplaced: undefined } },
       { ...sat, saturated: false, blocking: ['validators'], evidence: { ...sat.evidence, validatorsFailed: [`unit${String.fromCharCode(0x202e)}`] }, counts: { ...noCounts, validatorsFailed: 1 } },
     ]) {
       const r = read({ saturation });
@@ -171,7 +172,7 @@ describe('stopReason', () => {
   it('stops on saturated only in an autonomous run, after the budgets and before no-progress (6b-3)', () => {
     const auto = { profile: 'spike' as const, name: 'x', runId: 'spike-x', worktree: path.resolve('/w'), branch: 'forge/spike-x', startBranch: 'main', protectedBranches: ['main'] };
     const sat = { saturated: true, at: 't', rounds: 3, blocking: [], evidence: { pendingTasks: [], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
-      waiting: { parked: [], questions: 0, blocked: 0, deferred: 0, waitsOwner: [], unowned: [] }, counts: noCounts };
+      waiting: noWaiting, counts: noCounts };
     expect(stopReason({ ...r, autonomous: auto, saturation: sat, noProgress: 3 }, ctx())).toBe('saturated');
     expect(stopReason({ ...r, saturation: sat }, ctx())).toBeNull();
     expect(stopReason({ ...r, autonomous: auto, saturation: sat, cycle: 3 }, ctx())).toBe('budget-cycles');
@@ -228,7 +229,7 @@ describe('infiniteDocOf: meta/infinite with its coordinator (G-08)', () => {
     const o = { now, sid: null, sleepUntil: null, lastCycleAt: null };
     expect(infiniteDocOf({ ...base, autonomous: auto }, o)).toMatchObject({ profile: 'product', saturation: null });
     const sat = { saturated: false, at: 't', rounds: 3, blocking: ['pending-tasks' as const], evidence: { pendingTasks: ['T1'], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
-      waiting: { parked: [], questions: 0, blocked: 0, deferred: 0, waitsOwner: [], unowned: [] }, counts: { ...noCounts, pendingTasks: 1 } };
+      waiting: noWaiting, counts: { ...noCounts, pendingTasks: 1 } };
     expect(infiniteDocOf({ ...base, autonomous: auto, saturation: sat }, o).saturation).toEqual(sat);
     // Positive control: a run without a profile carries neither key (the exact object above).
     expect(infiniteDocOf({ ...base, saturation: sat }, o)).not.toHaveProperty('saturation');
