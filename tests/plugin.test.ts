@@ -544,7 +544,7 @@ describe('plugin layout', () => {
       'forge-review-correctness': ['opus', 'high'], 'forge-review-security': ['opus', 'high'], 'forge-review-perf': ['opus', 'high'], 'forge-fable': ['fable', 'high'],
       'forge-review-final': ['opus', 'xhigh'],
       'forge-planner': ['opus', 'xhigh'], 'forge-scout': ['opus', 'medium'], 'forge-verify': ['sonnet', 'high'], 'forge-verify-heavy': ['opus', 'high'],
-      'forge-critic': ['opus', 'high'], 'forge-market': ['sonnet', 'medium'],
+      'forge-critic': ['opus', 'high'], 'forge-market': ['sonnet', 'medium'], 'forge-phase-review': ['opus', 'xhigh'],
     };
     const agents = readdirSync(new URL('../plugins/forge/agents/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3));
     expect(agents.length).toBeGreaterThan(0);
@@ -2310,5 +2310,18 @@ describe('plugin layout', () => {
     expect(md).toContain('load it with ToolSearch first');
     for (const w of ['market.json', '"noWeb"', '"sources"', '"summary"', '"findings"']) expect(md, w).toContain(w);
     for (const a of ['forge-scout', 'forge-critic', 'forge-planner']) expect(read(`plugins/forge/agents/${a}.md`), a).toContain('FORGE market last');
+  });
+  it('forge-phase-review reads the whole roadmap and writes a re-plan waypoint can apply (6b-3)', () => {
+    const md = read('plugins/forge/agents/forge-phase-review.md');
+    expect(md.split(/\r?\n---\r?\n/)[0]).toMatch(/\ntools: Read, Grep, Glob, Write\r?\n/);
+    for (const w of ['replan.json', '"ops"', '"vision"', '"findings"', 'add-phase', 'move', 'order-phases', 'order-tasks', 'retire', 'FORGE market last']) expect(md, w).toContain(w);
+    // H-7: a gap, debt or bug finding carries what its proposal needs; B-2: the CLI holds the person's tasks.
+    for (const w of ['"category"', '"pillar"', 'FORGE proposals replan-check', 'source: user', 'parked']) expect(md, w).toContain(w);
+  });
+  it('the session finds the replan and vision points and their undo (6b-3 M-5)', () => {
+    expect(runRef('decisions')).toMatch(/"point": "<[a-z|-]*\|replan\|vision\|[a-z|-]*>"/);
+    const rows = runRef('autonomy').split('\n');
+    expect(rows.find(l => l.startsWith('| `replan` |')), 'replan').toMatch(/\| `git-revert`[^|]*\|$/);
+    expect(rows.find(l => l.startsWith('| `vision` |')), 'vision').toMatch(/\| `design-reopen`[^|]*\|$/);
   });
 });

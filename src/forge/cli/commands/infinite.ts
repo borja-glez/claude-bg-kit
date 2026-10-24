@@ -1,6 +1,9 @@
 import type { Command } from '../context.js';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
+import path from 'node:path';
 import { forgeDir } from '../../ledger.js';
+import { parsePlan, PlanError } from '../../../lib/plan.js';
+import { doneOf, markReviewed, phaseStatus, readReviewed } from '../../phases.js';
 import { parseRun, startRun, stopReason, readRunText, saveRun, stopFile, type RunState } from '../../run.js';
 import { UNBOUND_WARNING } from '../../hook.js';
 import { isLocale } from '../../../lib/forge-run.js';
@@ -93,6 +96,30 @@ export const command: Command = (args, ctx) => {
     }
     return json({ ...run, publish: { infinite: infinitePublish(main, run, io.now()) }, ...(trust ? { trust } : {}) });
   }
+  if (sub === 'phase') {
+    // 6b-3, spec «Fases que se replanifican»: the first phase of the plan, in its order, whose tasks the roadmap's state says are
+    // all done and that was not reviewed yet (src/forge/phases.ts); --mark records its review. Only a product run reviews its
+    // phases (L-16: a spike has no phase review). H-6: the reviewed phases are phases.json's, in the main checkout.
+    const main = mainCheckout(io.cwd);
+    const run = parseRun(readRunText(runRootOf(io.cwd, main)));
+    if (!run?.active || !run.autonomous) throw new UsageError('infinite phase: no autonomous run is active (infinite start --profile product)');
+    const { profile, runId } = run.autonomous;
+    if (profile !== 'product') throw new UsageError(`infinite phase: ${runId} is a ${profile} run, and only a product run reviews its phases`);
+    const planArg = flag('plan');
+    const db = flag('db');
+    if (!planArg || !db) throw new UsageError('usage: forge infinite phase --plan <plan.yaml> --db <DB> [--mark <phase>]');
+    const done = doneOf(io.cwd, db, 'infinite phase');
+    let text: string;
+    try { text = readFileSync(path.resolve(io.cwd, planArg), 'utf8'); } catch { throw new UsageError(`infinite phase: cannot read ${planArg}`); }
+    let plan: ReturnType<typeof parsePlan>;
+    try { plan = parsePlan(text); } catch (e) {
+      if (e instanceof PlanError) throw new UsageError(`infinite phase: ${planArg}: ${e.issues.join('; ')}`);
+      throw e;
+    }
+    const mark = flag('mark');
+    if (has('mark') && !(mark && plan.phases.some(ph => ph.id === mark))) throw new UsageError(`infinite phase: --mark ${mark ?? ''} is not a phase of ${planArg}`);
+    return json(phaseStatus(plan, done, mark ? markReviewed(main, runId, mark) : readReviewed(main, runId)));
+  }
   if (sub === 'status') {
     const runRoot = runRootOf(io.cwd);
     const text = readRunText(runRoot);
@@ -105,5 +132,5 @@ export const command: Command = (args, ctx) => {
     return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run),
       ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}), unowned: unownedOf(runRoot, io.now()), publish });
   }
-  throw new UsageError('usage: forge infinite <prepare --profile spike|product --name N|start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE] [--profile P --name N]|status>');
+  throw new UsageError('usage: forge infinite <prepare --profile spike|product --name N|start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE] [--profile P --name N]|phase --plan P --db D [--mark F]|status>');
 };

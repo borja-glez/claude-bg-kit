@@ -124,6 +124,10 @@ function isIdea(doc: ProposalDoc, add: LedgerEvent | null): boolean {
   return doc.source === 'user' || add?.source === 'user' || from.startsWith('note:') || from === 'chat';
 }
 
+/** 6b-3 B-2: whether proposal `id` is a person's idea (isIdea), by its doc and its last add event among the `proposal` `events`:
+ *  `proposals replan-check` never lets a re-plan override the task it became. */
+export const personsIdea = (events: readonly LedgerEvent[], id: string, doc: ProposalDoc): boolean => isIdea(doc, lastAdd(events, id));
+
 /**
  * Whether the proposal waits for the owner's mark:
  * - T6B2-SOURCE-USER: a person's idea (isIdea) whose add event does not say it is the owner's (`owner: true`, which only

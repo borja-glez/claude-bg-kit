@@ -21,6 +21,8 @@ forge asks at its gates unless autonomy is `auto`. It is `auto` when `FORGE begi
 | `plan-confirm` | confirm the planner's phase outline | `plan-edit` with the new task ids |
 | `mode` | the mode and N that `FORGE swarm propose` recommends | `none` |
 | `ruling` | with blocking findings (`breaker` or `stalled`): a ruling, the task blocked with a question note, and the other tasks go on | `none` |
+| `replan` | in a `product` run of `/forge:infinite`, when a phase closes: the re-plan `forge-phase-review` proposes, once `FORGE proposals replan-check` passes it (keeping the plan as it is is always one alternative) | `git-revert` of the plan commit, with its sha |
+| `vision` | in that phase close, the change to the vision the review proposes, through `/waypoint:design reopen --auto` and the design loop below (keeping the vision as it is is always one alternative) | `design-reopen` |
 
 - **The design loop in auto** (`references/large.md` step 1, and `/forge:infinite` after it reopens the design). `<design>` is `docs/waypoint/<project>/design.md`.
   1. `/waypoint:design round --auto`: the first round reviews everything (after a reopen, what changed), with the full budget. Then `/waypoint:design apply <the numbers of its critical and major proposals> --auto` and record `design-apply` (`undo` `git-revert` from the commit before the apply to the one after, with `shas`: the apply's commits, each read with `git rev-parse HEAD` right after it; the critique has its own commit before it). When it had `minor` proposals, write `auto: minor` to `.forge/work/<project>/dismiss-reason.txt` and run `node "<WP>" critique-dismiss <design> --round <R> <their numbers> --reason-file .forge/work/<project>/dismiss-reason.txt`, so they do not stay pending.

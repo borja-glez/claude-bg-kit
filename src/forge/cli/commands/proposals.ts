@@ -24,8 +24,9 @@ import { parseRun, readRunText, type RunState } from '../../run.js';
 import { mainCheckout } from '../../local.js';
 import { addDecision, decisionNoteId, decisionWrites, markPublished } from '../../decisions.js';
 import { clean } from '../../../lib/decisions.js';
-import { readDocs } from '../../../lib/read-docs.js';
-import { stateDoc } from '../../../page/normalize.js';
+import { normalizeOps } from '../../../lib/replan.js';
+import { doneOf, doneTasks } from '../../phases.js';
+import { replanRefusals } from '../../replan-check.js';
 import { checkPlacement, estimateMinutes, proposalToTask, proposalOfIncludes, proposalsOfIncludes, type Placement } from '../../to-task.js';
 import type { PlanTask } from '../../../lib/types.js';
 import { parseDocument } from 'yaml';
@@ -94,10 +95,6 @@ function judgedPlacement(cwd: string, id: string): Placement | null {
   const estimateMin = p ? estimateMinutes(p.estimate) : null;
   return p && estimateMin !== null ? { phase: p.phase, doneWhen: p.doneWhen, dependsOn: p.dependsOn, estimateMin } : null;
 }
-
-/** The tasks the roadmap's state listing (`<DB>/state`) says are done. */
-const doneTasks = (stateDir: string): Set<string> =>
-  new Set(Object.entries(readDocs(stateDir, stateDoc).docs).filter(([, s]) => s.status === 'done').map(([task]) => task));
 
 export const command: Command = (args, ctx) => {
   const { io, has, ok, json, ts } = ctx;
@@ -471,6 +468,31 @@ export const command: Command = (args, ctx) => {
       appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'to-task', id, taskId: task.id });
       return json({ id, taskId: task.id, write: { taskId: task.id } });
     }
+    case 'replan-check': {
+      // 6b-3 B-2, M-8: before every `waypoint replan --check` and `waypoint replan`, whether the re-plan would retire, move or
+      // retitle a task of the person's or a done one (src/forge/replan-check.ts), from this checkout's proposals, marks and
+      // ledger. Exit 2 with every reason; it never writes. M-11: the state listing is required, read as empty it hides done tasks.
+      const [opsFile, planArg, db] = [subFlag('ops'), subFlag('plan'), subFlag('db')];
+      if (!opsFile || !planArg || !db) throw new UsageError('usage: forge proposals replan-check --ops <ops.json> --plan <plan.yaml> --db <DB>');
+      const done = doneOf(io.cwd, db, 'proposals replan-check');
+      // Read as waypoint replan reads it: a UTF-8 BOM is no part of the JSON, and the other keys of the file are ignored.
+      const text = readText(opsFile, '--ops');
+      let raw: unknown;
+      try { raw = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); } catch { throw new UsageError(`proposals replan-check: ${opsFile} is not JSON`); }
+      const { ops, errors } = normalizeOps(raw);
+      if (errors.length) throw new UsageError(`proposals replan-check: ${errors.join('; ')}`);
+      let plan;
+      try { plan = parsePlan(readText(planArg, '--plan')); } catch (e) {
+        if (e instanceof PlanError) throw new UsageError(`${planArg}: ${e.issues.join('; ')}`);
+        throw e;
+      }
+      const refused = replanRefusals(io.cwd, plan, ops, done);
+      if (refused.length) {
+        throw new UsageError('proposals replan-check: refused: a re-plan never retires, moves, or changes the title or done_when of a task of the '
+          + `person's or of a done one; these need the person:\n- ${refused.join('\n- ')}`);
+      }
+      return json({ ok: true, ops: ops.length });
+    }
     case 'batch': {
       // The ids are every argument but --out and its value (and --pending): an id after a flag still counts, and any other
       // flag is refused. Task 7 fix 1: --pending takes, instead, every proposal still to judge (pendingForJudge), from disk.
@@ -580,6 +602,6 @@ export const command: Command = (args, ctx) => {
       return json({ id, ...out, decision: recorded.n, ...(publish ? { publish } : {}) });
     }
     default:
-      throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task|batch|judge|ideas|unpark> ...');
+      throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task|replan-check|batch|judge|ideas|unpark> ...');
   }
 };

@@ -127,6 +127,10 @@ describe('alternatives with why not and trade-offs (6b-1)', () => {
   it('blocked is a minor point', () => {
     expect(weightOf('blocked')).toBe('minor');
   });
+  it('a re-plan and a vision change are major decisions (6b-3)', () => {
+    expect(weightOf('replan')).toBe('major');
+    expect(weightOf('vision')).toBe('major');
+  });
   it('lens reads the summary of a decision with structured alternatives', () => {
     const doc = nextDecisionsDoc(null, normalizeDecision({ ...NEW, alternatives: [{ option: 'redis', whyNot: 'w' }] })!, 1);
     expect(decisionsSummary(JSON.stringify(doc), Date.parse(TS))).toEqual({ count: 1, autonomy: 'auto', lastMajor: 'diseño aprobado (v4)' });
