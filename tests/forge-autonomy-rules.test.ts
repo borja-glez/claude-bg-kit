@@ -8,6 +8,9 @@ import { runTmp } from '../src/forge/resources.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { MAIN, WT, TMP, CTX, ATTENDED, withAuto, sh, bash, pwsh, edit, mcp, B, P } from './helpers/autonomy.js';
 
+// cmd and robocopy read a leading `/` as a switch, and they exist only on Windows, where an absolute path starts with a
+// drive: their rows with an absolute path run on win32, the only platform whose paths they can name (Linux CI).
+const WIN = process.platform === 'win32';
 const OUT = (f: string) => sh(path.join(MAIN, f));
 const PM = (f: string) => path.join(MAIN, f);
 const W = (f: string) => sh(path.join(WT, f));
@@ -140,7 +143,7 @@ describe('fix round 1 · files', () => {
     B(`cd ${sh(MAIN)} && tar -xf ${sh(path.join(WT, 'a.tgz'))}`), B(`sort -o ${OUT('x')} a.txt`), B(`unzip a.zip -d ${sh(MAIN)}`), B(`7z x a.7z -o${sh(MAIN)}`),
     B(`install -t ${sh(MAIN)} a`), B(`patch -d ${sh(MAIN)} -p1`), B(`wget -P ${sh(MAIN)} https://x`), B(`cd ${sh(MAIN)} && curl -O https://x/f`), B(`cd ${sh(MAIN)} && wget https://x/f`),
     // item 3: copy-like destination (robocopy's 2nd positional, rsync past a valued option)
-    P(`robocopy src ${PM('dst')} /E /XD node_modules`), P(`robocopy src ${PM('dst')} *.ts`), B(`cmd /c "robocopy src ${PM('dst')} /E /XD node_modules"`),
+    P(`robocopy src ${PM('dst')} /E /XD node_modules`), P(`robocopy src ${PM('dst')} *.ts`), ...(WIN ? [B(`cmd /c "robocopy src ${PM('dst')} /E /XD node_modules"`)] : []),
     B(`rsync -a --delete src/ ${OUT('dst')}/ --exclude node_modules`), B(`rsync -a --delete src/ ${sh(MAIN)}/`),
     // item 4: PowerShell named parameters, glued and abbreviated, read by name
     P(`Remove-Item -Recurse -Path:${PM('x')}`), P(`Set-Content -Path:${PM('a.txt')} -Value x`), P(`Invoke-WebRequest https://x -OutFile:${PM('a')}`), P(`Invoke-WebRequest https://x -OutF ${PM('a')}`),
@@ -152,7 +155,7 @@ describe('fix round 1 · files', () => {
     // item 30 / 31: find with a leading option, touch, mkdir, a symlink judged from its own folder
     B(`find -L ${sh(MAIN)} -name x -delete`), B(`touch ${OUT('x')}`), B(`mkdir -p ${OUT('x')}`), B(`ln -s ../x ${sh(WT)}/link`, path.join(WT, 'sub')),
     B(`fsutil hardlink create l ${sh(path.join(MAIN, 'x'))}`), B(`ruby -i -pe 'x' ${sh(path.join(MAIN, 'a'))}`), B(`shred ${sh(path.join(MAIN, 'a'))}`),
-    B(`cmd /c "attrib +r ${PM('a')}"`), B(`cmd /c "icacls ${PM('a')} /grant x:F"`),
+    ...(WIN ? [B(`cmd /c "attrib +r ${PM('a')}"`)] : []), B(`cmd /c "icacls ${PM('a')} /grant x:F"`),
   ])('denies a write outside the roots however it is spelled: %s', (_, input) => expect(filesRule.check(input, CTX)).toMatchObject({ decision: 'deny', rule: 'files' }));
 
   it.each([
@@ -323,7 +326,7 @@ describe('fix round 3 · files', () => {
     B(`curl --trace ${OUT('t')} https://x`), B(`curl --stderr ${OUT('e')} https://x`), B(`curl --libcurl ${OUT('c.c')} https://x`), B(`curl --etag-save ${OUT('e')} https://x`), B(`curl --hsts ${OUT('h')} https://x`), B(`curl --trace-ascii ${OUT('t')} https://x`),
     B(`wget -o ${OUT('log')} https://x`), B(`sort -uo ${OUT('x')} a.txt`), B(`patch -p1 -d${sh(MAIN)} < ${W('x.diff')}`), B(`cp -al ${OUT('src')} dst`), B(`find . -fprint ${OUT('x')}`),
     // T4-UNKNOWN-CMD: write-class commands in no table
-    B(`zip -r ${OUT('o.zip')} src`), B(`gzip ${OUT('README.md')}`), B(`split -b 1M big ${OUT('part-')}`), B(`link ${OUT('x')} y`), B(`cmd /c "md ${PM('x')}"`), B(`cmd /c "rename ${PM('a')} b"`),
+    B(`zip -r ${OUT('o.zip')} src`), B(`gzip ${OUT('README.md')}`), B(`split -b 1M big ${OUT('part-')}`), B(`link ${OUT('x')} y`), ...(WIN ? [B(`cmd /c "md ${PM('x')}"`), B(`cmd /c "rename ${PM('a')} b"`)] : []),
     P(`Start-Transcript -Path ${PM('t.txt')}`), P('Set-ItemProperty -Path HKCU:\\Software\\x -Name a -Value 1'), P(`Remove-Item build,${PM('src')} -Recurse`), B(`sed -i -l 80 's/a/b/' ${OUT('a')}`),
     // T4-PIPE-FED: a PowerShell item cmdlet fed by the pipeline; FC2 perl -l/-0 bundles
     P(`Get-ChildItem -Path ${PM('')} -Filter *.log -Recurse | Remove-Item -Force`), P(`Get-ChildItem ${PM('build')} | Move-Item -Destination dst`), P(`Get-Item ${PM('x')} | Remove-Item`),
@@ -389,10 +392,10 @@ describe('fix round 4 · files', () => {
     B(`cd ${sh(MAIN)} && curl --unknown https://x`), B(`curl --unknown -K ${OUT('rc')} https://x`), B(`cd ${sh(MAIN)} && sort --unknown in.txt`), B(`wget --unknown -i ${OUT('urls')} https://x`),
     // the tables name write targets the old parsers missed
     B(`sort -o out.txt -T ${sh(MAIN)} in.txt`), B(`tar -czf out.tgz --listed-incremental=${OUT('snap')} src`), B(`tar -xf a.tgz -C build x -C ${sh(MAIN)} y`), B(`rsync -a --log-file=${OUT('r.log')} src/ dst/`),
-    P(`robocopy src dst /MIR /LOG:${PM('r.log')}`), B(`icacls build /save ${OUT('acl')} /T`), B(`curl --ssl-sessions ${OUT('s')} https://x`), B(`wget --save-cookies ${OUT('c.txt')} https://x`),
+    ...(WIN ? [P(`robocopy src dst /MIR /LOG:${PM('r.log')}`)] : []), B(`icacls build /save ${OUT('acl')} /T`), B(`curl --ssl-sessions ${OUT('s')} https://x`), B(`wget --save-cookies ${OUT('c.txt')} https://x`),
     B(`fsutil file createnew ${OUT('x')} 0`), B(`7z x -w${sh(MAIN)} a.7z`), B(`install -d ${OUT('x')} y`), B(`patch -r ${OUT('rej')} -p1 < x.diff`),
     // `cmd` is a wrapper whose inner command IS judged
-    B(`cmd /c "rd /s /q ${PM('x')}"`), B(`cmd /c "del /f ${PM('a')}"`), B(`cmd /c "copy a ${PM('b')}"`),
+    ...(WIN ? [B(`cmd /c "rd /s /q ${PM('x')}"`), B(`cmd /c "del /f ${PM('a')}"`), B(`cmd /c "copy a ${PM('b')}"`)] : []),
     // `out` is a read verb only for the cmdlets that never write: Out-File stays a writer
     P(`Out-File -FilePath ${PM('x')}`), P(`Out-File ${PM('x')} -InputObject $r`), P(`"x" | Out-File -LiteralPath ${PM('x')} -NoClobber`),
     // `..` means a segment equal to `..`: Go's `...` is no path, but a real `..` is still judged
@@ -540,10 +543,15 @@ describe('post-breaker fix · self (T4-GLOB-SHORT)', () => {
   it.each([
     // rr5-self D rows: a glob that stands for .claude, as an operand, a redirect target or a Copy-Item destination; and the other spellings
     B('cp evil.json .cl*de/settings.json'), B('cp evil.json .claud?/settings.json'), B("cp evil.json '.[c]laude/settings.json'"), B('echo {} > .cl*de/settings.json'), P('Copy-Item evil.json .cl*de\\settings.json'),
-    B('ln -s .claude cfg'), P('New-Item -ItemType Junction -Path cfg -Target .claude'), B('cmd /c mklink /J cfg .claude'), B('cp evil.json sub/../.claude/settings.json'), B(`cp evil.json ${W('.CLAUDE/Settings.JSON')}`),
+    B('ln -s .claude cfg'), P('New-Item -ItemType Junction -Path cfg -Target .claude'), B('cmd /c mklink /J cfg .claude'), B('cp evil.json sub/../.claude/settings.json'),
+    // the settings name in another case is the same file only where names fold case (win32, darwin)
+    ...(process.platform !== 'linux' ? [B(`cp evil.json ${W('.CLAUDE/Settings.JSON')}`)] : []),
     B('git -C sub checkout forge/x -- ../.claude/settings.json'), B('cp evil.json ./.claude./settings.json'), B('cd sub && cp ../evil.json ../.claude/settings.local.json'), B('ln -s ../../x .claude'),
     B(`echo x > ${W('.cl*de/settings.json')}`), B('rm -rf .cl*'),
   ])('denies reaching the project settings: %s', (_, input) => expect(selfOrFiles(input)).toMatchObject({ decision: 'deny' }));
+  it.runIf(process.platform === 'linux')('on linux a .CLAUDE folder inside the worktree is another folder, not the settings', () => {
+    expect(selfOrFiles(bash(`cp evil.json ${W('.CLAUDE/Settings.JSON')}`))).toBeNull();
+  });
   it.runIf(process.platform === 'win32')('on win32 an 8.3 short name of .claude under a root counts, for the shell and the file tools', () => {
     expect(selfRule.check(bash('cp evil.json CLAUDE~1/settings.json'), CTX)).toMatchObject({ decision: 'deny', rule: 'self' });
     expect(selfRule.check(bash('cp evil.json cl8f3a~2/settings.json'), CTX)).toMatchObject({ decision: 'deny', rule: 'self' });
