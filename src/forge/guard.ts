@@ -16,7 +16,11 @@ import type { Dialect } from './shell-words.js';
  * The fields of Claude Code's PreToolUse input the guard reads. `dialect`: the shell of the command, set only by a caller
  * that runs evaluateGuard itself (forge's own commands); without it Bash reads as bash and PowerShell as powershell.
  */
-export interface GuardInput { tool_name: string; tool_input: Record<string, unknown>; session_id?: string; cwd?: string; scratchpad_dir?: string; dialect?: Dialect }
+export interface GuardInput {
+  tool_name: string; tool_input: Record<string, unknown>; session_id?: string; cwd?: string; scratchpad_dir?: string; dialect?: Dialect;
+  /** Claude Code's agent_type: inside a subagent, or on the main thread of an --agent session. */
+  agent_type?: string;
+}
 export type GuardVerdict = { decision: 'allow' } | { decision: 'deny'; rule: string; reason: string };
 /**
  * Where the rules look: the main checkout, the git common dir (null outside git) and the autonomous run (null when attended).
@@ -25,6 +29,8 @@ export type GuardVerdict = { decision: 'allow' } | { decision: 'deny'; rule: str
 export interface GuardCtx {
   main: string; gitCommonDir: string | null; autonomous: AutonomousCtx | null;
   mainOf?(p: string): string; gitCommonDirOf?(p: string): string | null;
+  /** The home folder the secrets rule anchors its paths in; os.homedir() when absent (tests set it). */
+  home?: string;
 }
 /** A rule: null when it does not apply to the call. */
 export interface GuardRule { id: string; check(input: GuardInput, ctx: GuardCtx): GuardVerdict | null }
@@ -41,6 +47,7 @@ export function parseGuardInput(x: unknown): GuardInput | null {
     tool_name: x.tool_name, tool_input: x.tool_input,
     ...(typeof x.session_id === 'string' ? { session_id: x.session_id } : {}), ...(typeof x.cwd === 'string' ? { cwd: x.cwd } : {}),
     ...(typeof x.scratchpad_dir === 'string' ? { scratchpad_dir: x.scratchpad_dir } : {}),
+    ...(typeof x.agent_type === 'string' ? { agent_type: x.agent_type } : {}),
   };
 }
 
