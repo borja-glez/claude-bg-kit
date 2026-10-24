@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { findingsMatch } from './finding-match.js';
 import { globMatch } from './validators.js';
+import { oneLine } from '../lib/one-line.js';
 
 export type ReviewerName = 'correctness' | 'security' | 'perf' | 'verify';
 // origin (fix rounds, delta mode): previous = an earlier finding still open, fix = introduced by the fix,
@@ -8,7 +9,7 @@ export type ReviewerName = 'correctness' | 'security' | 'perf' | 'verify';
 export type Origin = 'previous' | 'fix' | 'untouched';
 const ORIGINS = ['previous', 'fix', 'untouched'] as const;
 /** Why a critical or important finding does not block (C-04, §4.7): the CLI sets it. */
-export type Residual = 'untouched' | 'hardening' | 'late-round' | 'cap' | 'docs' | 'out-of-model' | 'architecture' | 'env-unverified';
+export type Residual = 'untouched' | 'hardening' | 'late-round' | 'cap' | 'docs' | 'out-of-model' | 'architecture' | 'env-unverified' | 'declined';
 export interface Finding {
   severity: 'critical' | 'important' | 'minor'; file?: string; line?: number; problem: string; fix?: string; origin?: Origin;
   /** The finding's stable id within its brief (F1, F2…): a delta reviewer copies it; the CLI assigns it (J-06). */
@@ -30,7 +31,10 @@ export interface Finding {
 /** A finding an earlier review of the brief closed; `round` is the last review that had it open (J-06, hardening). */
 export interface ClosedFinding extends Finding { id: string; round: number }
 // abstained (K2-09): the reviewer said it could not judge (a verify agent's blocked), with its reason: an abstention, never invalid output to respawn.
-export interface Review { verdict: 'pass' | 'fail' | 'abstain'; confidence: number; findings: Finding[]; approach?: 'ok' | 'wrong'; invalid?: boolean; dropped?: number; incomplete?: boolean; abstained?: true; reason?: string }
+/** A7: a part of the work the reviewer considered and chose not to judge, and why (one line each). */
+export interface Declined { what: string; why: string }
+export const DECLINED_MAX = 20;
+export interface Review { declined?: Declined[]; verdict: 'pass' | 'fail' | 'abstain'; confidence: number; findings: Finding[]; approach?: 'ok' | 'wrong'; invalid?: boolean; dropped?: number; incomplete?: boolean; abstained?: true; reason?: string }
 export interface FailingValidator { validator: string; failures: string[]; failing?: string[] }
 export interface Weights { correctness: number; security: number; perf: number; verify: number }
 export type Action = 'accept' | 'fix' | 'redo';
@@ -203,7 +207,27 @@ export function parseReview(text: string | null): Review {
   if (r.approach === 'ok' || r.approach === 'wrong') review.approach = r.approach;
   if (dropped > 0) { review.dropped = dropped; review.invalid = true; }
   if (r.complete === false || (typeof r.complete === 'string' && r.complete.trim().toLowerCase() === 'false')) review.incomplete = true;
+  const declined = declinedOf(r.declined);
+  if (declined.length) review.declined = declined;
   return review;
+}
+
+// A7: the reviewer's declined list, read leniently: strings and {what, why} objects, one line each, never a reason to invalidate.
+function declinedOf(raw: unknown): Declined[] {
+  if (!Array.isArray(raw)) return [];
+  const cut = (s: string, n: number) => Array.from(oneLine(s)).slice(0, n).join('');
+  const out: Declined[] = [];
+  for (const e of raw) {
+    let what: unknown; let why: unknown = '';
+    if (typeof e === 'string') what = e;
+    else if (e && typeof e === 'object' && !Array.isArray(e)) { what = (e as Record<string, unknown>).what; why = (e as Record<string, unknown>).why; }
+    if (typeof what !== 'string') continue;
+    const w = cut(what, 200);
+    if (!w) continue;
+    out.push({ what: w, why: typeof why === 'string' ? cut(why, 300) : '' });
+    if (out.length >= DECLINED_MAX) break;
+  }
+  return out;
 }
 
 export function weightsFor(opts: { sensitive: boolean; perf: boolean }): Weights {
@@ -437,6 +461,12 @@ export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weigh
     important = [...important, ...residual.filter(f => RIDES_ALONG.includes(f.residual!))];
     deferred = residual.filter(f => !RIDES_ALONG.includes(f.residual!));
   }
+  // A7: what a reviewer that answered declined to judge goes to the person as deferred, whatever the action: it never rides
+  // along to the implementer, never blocks and is never in the signature.
+  const declined: Finding[] = answered.flatMap(n => (rv[n]!.declined ?? []).map(d => ({
+    severity: 'minor' as const, problem: `declined to judge: ${d.what}${d.why ? ` (${d.why})` : ''}`, reviewer: n, residual: 'declined' as const,
+  })));
+  if (declined.length) { deferred.push(...declined); reasons.push(`${declined.length} part(s) declined to judge, listed in deferred`); }
   // J-06: what blocks, by severity and stable id (file and problem for a finding without one), and the failing validators
   // by their failing tests, in any order (their failure lines when those are unknown). Prefixed v2: so a signature from
   // forge 0.17 or older, made of the problem's text, never matches; empty when nothing blocks.
