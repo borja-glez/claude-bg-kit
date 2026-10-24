@@ -17,6 +17,11 @@
       "name": "forge",
       "source": "./plugins/forge",
       "description": "An adaptive way of working for Claude Code: triage by size, models by role, tool-first validation and weighted independent review."
+    },
+    {
+      "name": "ml",
+      "source": "./plugins/ml",
+      "description": "Machine learning on a local NVIDIA GPU: uv environments and CUDA wheels, VRAM and heat budgets, trl and transformers APIs checked against the installed version, leak-free splits, notebooks run whole, Hugging Face cards and in-browser ONNX inference."
     }
   ]
 }
