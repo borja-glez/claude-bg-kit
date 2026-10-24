@@ -47,10 +47,10 @@ var require_identity = __commonJS({
     var NODE_TYPE = /* @__PURE__ */ Symbol.for("yaml.node.type");
     var isAlias = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === ALIAS;
     var isDocument = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === DOC;
-    var isMap = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
+    var isMap2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
     var isPair = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === PAIR;
-    var isScalar = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
-    var isSeq = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
+    var isScalar2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
+    var isSeq2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
     function isCollection(node) {
       if (node && typeof node === "object")
         switch (node[NODE_TYPE]) {
@@ -71,7 +71,7 @@ var require_identity = __commonJS({
         }
       return false;
     }
-    var hasAnchor = (node) => (isScalar(node) || isCollection(node)) && !!node.anchor;
+    var hasAnchor = (node) => (isScalar2(node) || isCollection(node)) && !!node.anchor;
     exports2.ALIAS = ALIAS;
     exports2.DOC = DOC;
     exports2.MAP = MAP;
@@ -83,11 +83,11 @@ var require_identity = __commonJS({
     exports2.isAlias = isAlias;
     exports2.isCollection = isCollection;
     exports2.isDocument = isDocument;
-    exports2.isMap = isMap;
+    exports2.isMap = isMap2;
     exports2.isNode = isNode;
     exports2.isPair = isPair;
-    exports2.isScalar = isScalar;
-    exports2.isSeq = isSeq;
+    exports2.isScalar = isScalar2;
+    exports2.isSeq = isSeq2;
   }
 });
 
@@ -99,7 +99,7 @@ var require_visit = __commonJS({
     var BREAK = /* @__PURE__ */ Symbol("break visit");
     var SKIP = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove node");
-    function visit(node, visitor) {
+    function visit2(node, visitor) {
       const visitor_ = initVisitor(visitor);
       if (identity.isDocument(node)) {
         const cd = visit_(null, node.contents, visitor_, Object.freeze([node]));
@@ -108,9 +108,9 @@ var require_visit = __commonJS({
       } else
         visit_(null, node, visitor_, Object.freeze([]));
     }
-    visit.BREAK = BREAK;
-    visit.SKIP = SKIP;
-    visit.REMOVE = REMOVE;
+    visit2.BREAK = BREAK;
+    visit2.SKIP = SKIP;
+    visit2.REMOVE = REMOVE;
     function visit_(key, node, visitor, path11) {
       const ctrl = callVisitor(key, node, visitor, path11);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
@@ -244,7 +244,7 @@ var require_visit = __commonJS({
         throw new Error(`Cannot replace node with ${pt2} parent`);
       }
     }
-    exports2.visit = visit;
+    exports2.visit = visit2;
     exports2.visitAsync = visitAsync;
   }
 });
@@ -254,7 +254,7 @@ var require_directives = __commonJS({
   "node_modules/yaml/dist/doc/directives.js"(exports2) {
     "use strict";
     var identity = require_identity();
-    var visit = require_visit();
+    var visit2 = require_visit();
     var escapeChars = {
       "!": "%21",
       ",": "%2C",
@@ -398,7 +398,7 @@ var require_directives = __commonJS({
         let tagNames;
         if (doc && tagEntries.length > 0 && identity.isNode(doc.contents)) {
           const tags = {};
-          visit.visit(doc.contents, (_key, node) => {
+          visit2.visit(doc.contents, (_key, node) => {
             if (identity.isNode(node) && node.tag)
               tags[node.tag] = true;
           });
@@ -425,7 +425,7 @@ var require_anchors = __commonJS({
   "node_modules/yaml/dist/doc/anchors.js"(exports2) {
     "use strict";
     var identity = require_identity();
-    var visit = require_visit();
+    var visit2 = require_visit();
     function anchorIsValid(anchor) {
       if (/[\x00-\x19\s,[\]{}]/.test(anchor)) {
         const sa = JSON.stringify(anchor);
@@ -436,7 +436,7 @@ var require_anchors = __commonJS({
     }
     function anchorNames(root) {
       const anchors = /* @__PURE__ */ new Set();
-      visit.visit(root, {
+      visit2.visit(root, {
         Value(_key, node) {
           if (node.anchor)
             anchors.add(node.anchor);
@@ -616,7 +616,7 @@ var require_Alias = __commonJS({
   "node_modules/yaml/dist/nodes/Alias.js"(exports2) {
     "use strict";
     var anchors = require_anchors();
-    var visit = require_visit();
+    var visit2 = require_visit();
     var identity = require_identity();
     var Node = require_Node();
     var toJS = require_toJS();
@@ -642,7 +642,7 @@ var require_Alias = __commonJS({
           nodes = ctx.aliasResolveCache;
         } else {
           nodes = [];
-          visit.visit(doc, {
+          visit2.visit(doc, {
             Node: (_key, node) => {
               if (identity.isAlias(node) || identity.hasAnchor(node))
                 nodes.push(node);
@@ -1001,14 +1001,14 @@ var require_foldFlowLines = __commonJS({
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
     var FOLD_QUOTED = "quoted";
-    function foldFlowLines(text2, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+    function foldFlowLines(text3, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
       if (!lineWidth || lineWidth < 0)
-        return text2;
+        return text3;
       if (lineWidth < minContentWidth)
         minContentWidth = 0;
       const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent.length);
-      if (text2.length <= endStep)
-        return text2;
+      if (text3.length <= endStep)
+        return text3;
       const folds = [];
       const escapedFolds = {};
       let end = lineWidth - indent.length;
@@ -1025,14 +1025,14 @@ var require_foldFlowLines = __commonJS({
       let escStart = -1;
       let escEnd = -1;
       if (mode === FOLD_BLOCK) {
-        i = consumeMoreIndentedLines(text2, i, indent.length);
+        i = consumeMoreIndentedLines(text3, i, indent.length);
         if (i !== -1)
           end = i + endStep;
       }
-      for (let ch; ch = text2[i += 1]; ) {
+      for (let ch; ch = text3[i += 1]; ) {
         if (mode === FOLD_QUOTED && ch === "\\") {
           escStart = i;
-          switch (text2[i + 1]) {
+          switch (text3[i + 1]) {
             case "x":
               i += 3;
               break;
@@ -1049,12 +1049,12 @@ var require_foldFlowLines = __commonJS({
         }
         if (ch === "\n") {
           if (mode === FOLD_BLOCK)
-            i = consumeMoreIndentedLines(text2, i, indent.length);
+            i = consumeMoreIndentedLines(text3, i, indent.length);
           end = i + indent.length + endStep;
           split = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
-            const next = text2[i + 1];
+            const next = text3[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
               split = i;
           }
@@ -1066,12 +1066,12 @@ var require_foldFlowLines = __commonJS({
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
-                ch = text2[i += 1];
+                ch = text3[i += 1];
                 overflow = true;
               }
               const j2 = i > escEnd + 1 ? i - 2 : escStart - 1;
               if (escapedFolds[j2])
-                return text2;
+                return text3;
               folds.push(j2);
               escapedFolds[j2] = true;
               end = j2 + endStep;
@@ -1086,39 +1086,39 @@ var require_foldFlowLines = __commonJS({
       if (overflow && onOverflow)
         onOverflow();
       if (folds.length === 0)
-        return text2;
+        return text3;
       if (onFold)
         onFold();
-      let res = text2.slice(0, folds[0]);
+      let res = text3.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
         const fold = folds[i2];
-        const end2 = folds[i2 + 1] || text2.length;
+        const end2 = folds[i2 + 1] || text3.length;
         if (fold === 0)
           res = `
-${indent}${text2.slice(0, end2)}`;
+${indent}${text3.slice(0, end2)}`;
         else {
           if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text2[fold]}\\`;
+            res += `${text3[fold]}\\`;
           res += `
-${indent}${text2.slice(fold + 1, end2)}`;
+${indent}${text3.slice(fold + 1, end2)}`;
         }
       }
       return res;
     }
-    function consumeMoreIndentedLines(text2, i, indent) {
+    function consumeMoreIndentedLines(text3, i, indent) {
       let end = i;
       let start = i + 1;
-      let ch = text2[start];
+      let ch = text3[start];
       while (ch === " " || ch === "	") {
         if (i < start + indent) {
-          ch = text2[++i];
+          ch = text3[++i];
         } else {
           do {
-            ch = text2[++i];
+            ch = text3[++i];
           } while (ch && ch !== "\n");
           end = i;
           start = i + 1;
-          ch = text2[start];
+          ch = text3[start];
         }
       }
       return end;
@@ -4195,9 +4195,9 @@ var require_resolve_flow_collection = __commonJS({
     var blockMsg = "Block collections are not allowed within flow collections";
     var isBlock = (token) => token && (token.type === "block-map" || token.type === "block-seq");
     function resolveFlowCollection({ composeNode, composeEmptyNode }, ctx, fc, onError, tag) {
-      const isMap = fc.start.source === "{";
-      const fcName = isMap ? "flow map" : "flow sequence";
-      const NodeClass = tag?.nodeClass ?? (isMap ? YAMLMap.YAMLMap : YAMLSeq.YAMLSeq);
+      const isMap2 = fc.start.source === "{";
+      const fcName = isMap2 ? "flow map" : "flow sequence";
+      const NodeClass = tag?.nodeClass ?? (isMap2 ? YAMLMap.YAMLMap : YAMLSeq.YAMLSeq);
       const coll = new NodeClass(ctx.schema);
       coll.flow = true;
       const atRoot = ctx.atRoot;
@@ -4233,7 +4233,7 @@ var require_resolve_flow_collection = __commonJS({
             offset = props.end;
             continue;
           }
-          if (!isMap && ctx.options.strict && utilContainsNewline.containsNewline(key))
+          if (!isMap2 && ctx.options.strict && utilContainsNewline.containsNewline(key))
             onError(
               key,
               // checked by containsNewline()
@@ -4273,7 +4273,7 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep && !props.found) {
+        if (!isMap2 && !sep && !props.found) {
           const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
@@ -4296,7 +4296,7 @@ var require_resolve_flow_collection = __commonJS({
             startOnNewline: false
           });
           if (valueProps.found) {
-            if (!isMap && !props.found && ctx.options.strict) {
+            if (!isMap2 && !props.found && ctx.options.strict) {
               if (sep)
                 for (const st2 of sep) {
                   if (st2 === valueProps.found)
@@ -4328,7 +4328,7 @@ var require_resolve_flow_collection = __commonJS({
           const pair = new Pair.Pair(keyNode, valueNode);
           if (ctx.options.keepSourceTokens)
             pair.srcToken = collItem;
-          if (isMap) {
+          if (isMap2) {
             const map = coll;
             if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
               onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
@@ -4344,7 +4344,7 @@ var require_resolve_flow_collection = __commonJS({
           offset = valueNode ? valueNode.range[2] : valueProps.end;
         }
       }
-      const expectedEnd = isMap ? "}" : "]";
+      const expectedEnd = isMap2 ? "}" : "]";
       const [ce2, ...ee2] = fc.end;
       let cePos = offset;
       if (ce2?.source === expectedEnd)
@@ -5564,15 +5564,15 @@ var require_cst_visit = __commonJS({
     var BREAK = /* @__PURE__ */ Symbol("break visit");
     var SKIP = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove item");
-    function visit(cst, visitor) {
+    function visit2(cst, visitor) {
       if ("type" in cst && cst.type === "document")
         cst = { start: cst.start, value: cst.value };
       _visit(Object.freeze([]), cst, visitor);
     }
-    visit.BREAK = BREAK;
-    visit.SKIP = SKIP;
-    visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path11) => {
+    visit2.BREAK = BREAK;
+    visit2.SKIP = SKIP;
+    visit2.REMOVE = REMOVE;
+    visit2.itemAtPath = (cst, path11) => {
       let item = cst;
       for (const [field2, index] of path11) {
         const tok = item?.[field2];
@@ -5583,8 +5583,8 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path11) => {
-      const parent = visit.itemAtPath(cst, path11.slice(0, -1));
+    visit2.parentCollection = (cst, path11) => {
+      const parent = visit2.itemAtPath(cst, path11.slice(0, -1));
       const field2 = path11[path11.length - 1][0];
       const coll = parent?.[field2];
       if (coll && "items" in coll)
@@ -5615,7 +5615,7 @@ var require_cst_visit = __commonJS({
       }
       return typeof ctrl === "function" ? ctrl(item, path11) : ctrl;
     }
-    exports2.visit = visit;
+    exports2.visit = visit2;
   }
 });
 
@@ -5631,7 +5631,7 @@ var require_cst = __commonJS({
     var FLOW_END = "";
     var SCALAR = "";
     var isCollection = (token) => !!token && "items" in token;
-    var isScalar = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    var isScalar2 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
         case BOM3:
@@ -5715,7 +5715,7 @@ var require_cst = __commonJS({
     exports2.FLOW_END = FLOW_END;
     exports2.SCALAR = SCALAR;
     exports2.isCollection = isCollection;
-    exports2.isScalar = isScalar;
+    exports2.isScalar = isScalar2;
     exports2.prettyToken = prettyToken;
     exports2.tokenType = tokenType;
   }
@@ -7245,7 +7245,7 @@ var require_public_api = __commonJS({
         return docs;
       return Object.assign([], { empty: true }, composer$1.streamInfo());
     }
-    function parseDocument(source, options = {}) {
+    function parseDocument2(source, options = {}) {
       const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
       const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
       const composer$1 = new composer.Composer(options);
@@ -7271,7 +7271,7 @@ var require_public_api = __commonJS({
       } else if (options === void 0 && reviver && typeof reviver === "object") {
         options = reviver;
       }
-      const doc = parseDocument(src, options);
+      const doc = parseDocument2(src, options);
       if (!doc)
         return null;
       doc.warnings.forEach((warning) => log.warn(doc.options.logLevel, warning));
@@ -7307,7 +7307,7 @@ var require_public_api = __commonJS({
     }
     exports2.parse = parse4;
     exports2.parseAllDocuments = parseAllDocuments;
-    exports2.parseDocument = parseDocument;
+    exports2.parseDocument = parseDocument2;
     exports2.stringify = stringify2;
   }
 });
@@ -7331,7 +7331,7 @@ var require_dist = __commonJS({
     var lineCounter = require_line_counter();
     var parser = require_parser();
     var publicApi = require_public_api();
-    var visit = require_visit();
+    var visit2 = require_visit();
     exports2.Composer = composer.Composer;
     exports2.Document = Document.Document;
     exports2.Schema = Schema.Schema;
@@ -7359,8 +7359,8 @@ var require_dist = __commonJS({
     exports2.parseAllDocuments = publicApi.parseAllDocuments;
     exports2.parseDocument = publicApi.parseDocument;
     exports2.stringify = publicApi.stringify;
-    exports2.visit = visit.visit;
-    exports2.visitAsync = visit.visitAsync;
+    exports2.visit = visit2.visit;
+    exports2.visitAsync = visit2.visitAsync;
   }
 });
 
@@ -7980,18 +7980,18 @@ var ParseStatus = class _ParseStatus {
     if (this.value !== "aborted")
       this.value = "aborted";
   }
-  static mergeArray(status, results) {
+  static mergeArray(status2, results) {
     const arrayValue = [];
     for (const s of results) {
       if (s.status === "aborted")
         return INVALID;
       if (s.status === "dirty")
-        status.dirty();
+        status2.dirty();
       arrayValue.push(s.value);
     }
-    return { status: status.value, value: arrayValue };
+    return { status: status2.value, value: arrayValue };
   }
-  static async mergeObjectAsync(status, pairs) {
+  static async mergeObjectAsync(status2, pairs) {
     const syncPairs = [];
     for (const pair of pairs) {
       const key = await pair.key;
@@ -8001,9 +8001,9 @@ var ParseStatus = class _ParseStatus {
         value
       });
     }
-    return _ParseStatus.mergeObjectSync(status, syncPairs);
+    return _ParseStatus.mergeObjectSync(status2, syncPairs);
   }
-  static mergeObjectSync(status, pairs) {
+  static mergeObjectSync(status2, pairs) {
     const finalObject = {};
     for (const pair of pairs) {
       const { key, value } = pair;
@@ -8012,14 +8012,14 @@ var ParseStatus = class _ParseStatus {
       if (value.status === "aborted")
         return INVALID;
       if (key.status === "dirty")
-        status.dirty();
+        status2.dirty();
       if (value.status === "dirty")
-        status.dirty();
+        status2.dirty();
       if (key.value !== "__proto__" && (typeof value.value !== "undefined" || pair.alwaysSet)) {
         finalObject[key.value] = value.value;
       }
     }
-    return { status: status.value, value: finalObject };
+    return { status: status2.value, value: finalObject };
   }
 };
 var INVALID = Object.freeze({
@@ -8479,7 +8479,7 @@ var ZodString = class _ZodString extends ZodType {
       });
       return INVALID;
     }
-    const status = new ParseStatus();
+    const status2 = new ParseStatus();
     let ctx = void 0;
     for (const check of this._def.checks) {
       if (check.kind === "min") {
@@ -8493,7 +8493,7 @@ var ZodString = class _ZodString extends ZodType {
             exact: false,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "max") {
         if (input.data.length > check.value) {
@@ -8506,7 +8506,7 @@ var ZodString = class _ZodString extends ZodType {
             exact: false,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "length") {
         const tooBig = input.data.length > check.value;
@@ -8532,7 +8532,7 @@ var ZodString = class _ZodString extends ZodType {
               message: check.message
             });
           }
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "email") {
         if (!emailRegex.test(input.data)) {
@@ -8542,7 +8542,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "emoji") {
         if (!emojiRegex) {
@@ -8555,7 +8555,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "uuid") {
         if (!uuidRegex.test(input.data)) {
@@ -8565,7 +8565,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "nanoid") {
         if (!nanoidRegex.test(input.data)) {
@@ -8575,7 +8575,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "cuid") {
         if (!cuidRegex.test(input.data)) {
@@ -8585,7 +8585,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "cuid2") {
         if (!cuid2Regex.test(input.data)) {
@@ -8595,7 +8595,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "ulid") {
         if (!ulidRegex.test(input.data)) {
@@ -8605,7 +8605,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "url") {
         try {
@@ -8617,7 +8617,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "regex") {
         check.regex.lastIndex = 0;
@@ -8629,7 +8629,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "trim") {
         input.data = input.data.trim();
@@ -8641,7 +8641,7 @@ var ZodString = class _ZodString extends ZodType {
             validation: { includes: check.value, position: check.position },
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "toLowerCase") {
         input.data = input.data.toLowerCase();
@@ -8655,7 +8655,7 @@ var ZodString = class _ZodString extends ZodType {
             validation: { startsWith: check.value },
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "endsWith") {
         if (!input.data.endsWith(check.value)) {
@@ -8665,7 +8665,7 @@ var ZodString = class _ZodString extends ZodType {
             validation: { endsWith: check.value },
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "datetime") {
         const regex = datetimeRegex(check);
@@ -8676,7 +8676,7 @@ var ZodString = class _ZodString extends ZodType {
             validation: "datetime",
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "date") {
         const regex = dateRegex;
@@ -8687,7 +8687,7 @@ var ZodString = class _ZodString extends ZodType {
             validation: "date",
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "time") {
         const regex = timeRegex(check);
@@ -8698,7 +8698,7 @@ var ZodString = class _ZodString extends ZodType {
             validation: "time",
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "duration") {
         if (!durationRegex.test(input.data)) {
@@ -8708,7 +8708,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "ip") {
         if (!isValidIP(input.data, check.version)) {
@@ -8718,7 +8718,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "jwt") {
         if (!isValidJWT(input.data, check.alg)) {
@@ -8728,7 +8728,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "cidr") {
         if (!isValidCidr(input.data, check.version)) {
@@ -8738,7 +8738,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "base64") {
         if (!base64Regex.test(input.data)) {
@@ -8748,7 +8748,7 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "base64url") {
         if (!base64urlRegex.test(input.data)) {
@@ -8758,13 +8758,13 @@ var ZodString = class _ZodString extends ZodType {
             code: ZodIssueCode.invalid_string,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else {
         util.assertNever(check);
       }
     }
-    return { status: status.value, value: input.data };
+    return { status: status2.value, value: input.data };
   }
   _regex(regex, validation, message) {
     return this.refinement((data) => regex.test(data), {
@@ -9040,7 +9040,7 @@ var ZodNumber = class _ZodNumber extends ZodType {
       return INVALID;
     }
     let ctx = void 0;
-    const status = new ParseStatus();
+    const status2 = new ParseStatus();
     for (const check of this._def.checks) {
       if (check.kind === "int") {
         if (!util.isInteger(input.data)) {
@@ -9051,7 +9051,7 @@ var ZodNumber = class _ZodNumber extends ZodType {
             received: "float",
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "min") {
         const tooSmall = check.inclusive ? input.data < check.value : input.data <= check.value;
@@ -9065,7 +9065,7 @@ var ZodNumber = class _ZodNumber extends ZodType {
             exact: false,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "max") {
         const tooBig = check.inclusive ? input.data > check.value : input.data >= check.value;
@@ -9079,7 +9079,7 @@ var ZodNumber = class _ZodNumber extends ZodType {
             exact: false,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "multipleOf") {
         if (floatSafeRemainder(input.data, check.value) !== 0) {
@@ -9089,7 +9089,7 @@ var ZodNumber = class _ZodNumber extends ZodType {
             multipleOf: check.value,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "finite") {
         if (!Number.isFinite(input.data)) {
@@ -9098,13 +9098,13 @@ var ZodNumber = class _ZodNumber extends ZodType {
             code: ZodIssueCode.not_finite,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else {
         util.assertNever(check);
       }
     }
-    return { status: status.value, value: input.data };
+    return { status: status2.value, value: input.data };
   }
   gte(value, message) {
     return this.setLimit("min", value, true, errorUtil.toString(message));
@@ -9269,7 +9269,7 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
       return this._getInvalidInput(input);
     }
     let ctx = void 0;
-    const status = new ParseStatus();
+    const status2 = new ParseStatus();
     for (const check of this._def.checks) {
       if (check.kind === "min") {
         const tooSmall = check.inclusive ? input.data < check.value : input.data <= check.value;
@@ -9282,7 +9282,7 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
             inclusive: check.inclusive,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "max") {
         const tooBig = check.inclusive ? input.data > check.value : input.data >= check.value;
@@ -9295,7 +9295,7 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
             inclusive: check.inclusive,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "multipleOf") {
         if (input.data % check.value !== BigInt(0)) {
@@ -9305,13 +9305,13 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
             multipleOf: check.value,
             message: check.message
           });
-          status.dirty();
+          status2.dirty();
         }
       } else {
         util.assertNever(check);
       }
     }
-    return { status: status.value, value: input.data };
+    return { status: status2.value, value: input.data };
   }
   _getInvalidInput(input) {
     const ctx = this._getOrReturnCtx(input);
@@ -9469,7 +9469,7 @@ var ZodDate = class _ZodDate extends ZodType {
       });
       return INVALID;
     }
-    const status = new ParseStatus();
+    const status2 = new ParseStatus();
     let ctx = void 0;
     for (const check of this._def.checks) {
       if (check.kind === "min") {
@@ -9483,7 +9483,7 @@ var ZodDate = class _ZodDate extends ZodType {
             minimum: check.value,
             type: "date"
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (check.kind === "max") {
         if (input.data.getTime() > check.value) {
@@ -9496,14 +9496,14 @@ var ZodDate = class _ZodDate extends ZodType {
             maximum: check.value,
             type: "date"
           });
-          status.dirty();
+          status2.dirty();
         }
       } else {
         util.assertNever(check);
       }
     }
     return {
-      status: status.value,
+      status: status2.value,
       value: new Date(input.data.getTime())
     };
   }
@@ -9689,7 +9689,7 @@ ZodVoid.create = (params) => {
 };
 var ZodArray = class _ZodArray extends ZodType {
   _parse(input) {
-    const { ctx, status } = this._processInputParams(input);
+    const { ctx, status: status2 } = this._processInputParams(input);
     const def = this._def;
     if (ctx.parsedType !== ZodParsedType.array) {
       addIssueToContext(ctx, {
@@ -9712,7 +9712,7 @@ var ZodArray = class _ZodArray extends ZodType {
           exact: true,
           message: def.exactLength.message
         });
-        status.dirty();
+        status2.dirty();
       }
     }
     if (def.minLength !== null) {
@@ -9725,7 +9725,7 @@ var ZodArray = class _ZodArray extends ZodType {
           exact: false,
           message: def.minLength.message
         });
-        status.dirty();
+        status2.dirty();
       }
     }
     if (def.maxLength !== null) {
@@ -9738,20 +9738,20 @@ var ZodArray = class _ZodArray extends ZodType {
           exact: false,
           message: def.maxLength.message
         });
-        status.dirty();
+        status2.dirty();
       }
     }
     if (ctx.common.async) {
       return Promise.all([...ctx.data].map((item, i) => {
         return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, i));
       })).then((result2) => {
-        return ParseStatus.mergeArray(status, result2);
+        return ParseStatus.mergeArray(status2, result2);
       });
     }
     const result = [...ctx.data].map((item, i) => {
       return def.type._parseSync(new ParseInputLazyPath(ctx, item, ctx.path, i));
     });
-    return ParseStatus.mergeArray(status, result);
+    return ParseStatus.mergeArray(status2, result);
   }
   get element() {
     return this._def.type;
@@ -9840,7 +9840,7 @@ var ZodObject = class _ZodObject extends ZodType {
       });
       return INVALID;
     }
-    const { status, ctx } = this._processInputParams(input);
+    const { status: status2, ctx } = this._processInputParams(input);
     const { shape, keys: shapeKeys } = this._getCached();
     const extraKeys = [];
     if (!(this._def.catchall instanceof ZodNever && this._def.unknownKeys === "strip")) {
@@ -9875,7 +9875,7 @@ var ZodObject = class _ZodObject extends ZodType {
             code: ZodIssueCode.unrecognized_keys,
             keys: extraKeys
           });
-          status.dirty();
+          status2.dirty();
         }
       } else if (unknownKeys === "strip") {
       } else {
@@ -9909,10 +9909,10 @@ var ZodObject = class _ZodObject extends ZodType {
         }
         return syncPairs;
       }).then((syncPairs) => {
-        return ParseStatus.mergeObjectSync(status, syncPairs);
+        return ParseStatus.mergeObjectSync(status2, syncPairs);
       });
     } else {
-      return ParseStatus.mergeObjectSync(status, pairs);
+      return ParseStatus.mergeObjectSync(status2, pairs);
     }
   }
   get shape() {
@@ -10390,7 +10390,7 @@ function mergeValues(a, b) {
 }
 var ZodIntersection = class extends ZodType {
   _parse(input) {
-    const { status, ctx } = this._processInputParams(input);
+    const { status: status2, ctx } = this._processInputParams(input);
     const handleParsed = (parsedLeft, parsedRight) => {
       if (isAborted(parsedLeft) || isAborted(parsedRight)) {
         return INVALID;
@@ -10403,9 +10403,9 @@ var ZodIntersection = class extends ZodType {
         return INVALID;
       }
       if (isDirty(parsedLeft) || isDirty(parsedRight)) {
-        status.dirty();
+        status2.dirty();
       }
-      return { status: status.value, value: merged.data };
+      return { status: status2.value, value: merged.data };
     };
     if (ctx.common.async) {
       return Promise.all([
@@ -10443,7 +10443,7 @@ ZodIntersection.create = (left, right, params) => {
 };
 var ZodTuple = class _ZodTuple extends ZodType {
   _parse(input) {
-    const { status, ctx } = this._processInputParams(input);
+    const { status: status2, ctx } = this._processInputParams(input);
     if (ctx.parsedType !== ZodParsedType.array) {
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -10471,7 +10471,7 @@ var ZodTuple = class _ZodTuple extends ZodType {
         exact: false,
         type: "array"
       });
-      status.dirty();
+      status2.dirty();
     }
     const items = [...ctx.data].map((item, itemIndex) => {
       const schema = this._def.items[itemIndex] || this._def.rest;
@@ -10481,10 +10481,10 @@ var ZodTuple = class _ZodTuple extends ZodType {
     }).filter((x2) => !!x2);
     if (ctx.common.async) {
       return Promise.all(items).then((results) => {
-        return ParseStatus.mergeArray(status, results);
+        return ParseStatus.mergeArray(status2, results);
       });
     } else {
-      return ParseStatus.mergeArray(status, items);
+      return ParseStatus.mergeArray(status2, items);
     }
   }
   get items() {
@@ -10516,7 +10516,7 @@ var ZodRecord = class _ZodRecord extends ZodType {
     return this._def.valueType;
   }
   _parse(input) {
-    const { status, ctx } = this._processInputParams(input);
+    const { status: status2, ctx } = this._processInputParams(input);
     if (ctx.parsedType !== ZodParsedType.object) {
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -10536,9 +10536,9 @@ var ZodRecord = class _ZodRecord extends ZodType {
       });
     }
     if (ctx.common.async) {
-      return ParseStatus.mergeObjectAsync(status, pairs);
+      return ParseStatus.mergeObjectAsync(status2, pairs);
     } else {
-      return ParseStatus.mergeObjectSync(status, pairs);
+      return ParseStatus.mergeObjectSync(status2, pairs);
     }
   }
   get element() {
@@ -10569,7 +10569,7 @@ var ZodMap = class extends ZodType {
     return this._def.valueType;
   }
   _parse(input) {
-    const { status, ctx } = this._processInputParams(input);
+    const { status: status2, ctx } = this._processInputParams(input);
     if (ctx.parsedType !== ZodParsedType.map) {
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -10596,11 +10596,11 @@ var ZodMap = class extends ZodType {
             return INVALID;
           }
           if (key.status === "dirty" || value.status === "dirty") {
-            status.dirty();
+            status2.dirty();
           }
           finalMap.set(key.value, value.value);
         }
-        return { status: status.value, value: finalMap };
+        return { status: status2.value, value: finalMap };
       });
     } else {
       const finalMap = /* @__PURE__ */ new Map();
@@ -10611,11 +10611,11 @@ var ZodMap = class extends ZodType {
           return INVALID;
         }
         if (key.status === "dirty" || value.status === "dirty") {
-          status.dirty();
+          status2.dirty();
         }
         finalMap.set(key.value, value.value);
       }
-      return { status: status.value, value: finalMap };
+      return { status: status2.value, value: finalMap };
     }
   }
 };
@@ -10629,7 +10629,7 @@ ZodMap.create = (keyType, valueType, params) => {
 };
 var ZodSet = class _ZodSet extends ZodType {
   _parse(input) {
-    const { status, ctx } = this._processInputParams(input);
+    const { status: status2, ctx } = this._processInputParams(input);
     if (ctx.parsedType !== ZodParsedType.set) {
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -10649,7 +10649,7 @@ var ZodSet = class _ZodSet extends ZodType {
           exact: false,
           message: def.minSize.message
         });
-        status.dirty();
+        status2.dirty();
       }
     }
     if (def.maxSize !== null) {
@@ -10662,7 +10662,7 @@ var ZodSet = class _ZodSet extends ZodType {
           exact: false,
           message: def.maxSize.message
         });
-        status.dirty();
+        status2.dirty();
       }
     }
     const valueType = this._def.valueType;
@@ -10672,10 +10672,10 @@ var ZodSet = class _ZodSet extends ZodType {
         if (element.status === "aborted")
           return INVALID;
         if (element.status === "dirty")
-          status.dirty();
+          status2.dirty();
         parsedSet.add(element.value);
       }
-      return { status: status.value, value: parsedSet };
+      return { status: status2.value, value: parsedSet };
     }
     const elements = [...ctx.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath(ctx, item, ctx.path, i)));
     if (ctx.common.async) {
@@ -11006,15 +11006,15 @@ var ZodEffects = class extends ZodType {
     return this._def.schema._def.typeName === ZodFirstPartyTypeKind.ZodEffects ? this._def.schema.sourceType() : this._def.schema;
   }
   _parse(input) {
-    const { status, ctx } = this._processInputParams(input);
+    const { status: status2, ctx } = this._processInputParams(input);
     const effect = this._def.effect || null;
     const checkCtx = {
       addIssue: (arg) => {
         addIssueToContext(ctx, arg);
         if (arg.fatal) {
-          status.abort();
+          status2.abort();
         } else {
-          status.dirty();
+          status2.dirty();
         }
       },
       get path() {
@@ -11026,7 +11026,7 @@ var ZodEffects = class extends ZodType {
       const processed = effect.transform(ctx.data, checkCtx);
       if (ctx.common.async) {
         return Promise.resolve(processed).then(async (processed2) => {
-          if (status.value === "aborted")
+          if (status2.value === "aborted")
             return INVALID;
           const result = await this._def.schema._parseAsync({
             data: processed2,
@@ -11037,12 +11037,12 @@ var ZodEffects = class extends ZodType {
             return INVALID;
           if (result.status === "dirty")
             return DIRTY(result.value);
-          if (status.value === "dirty")
+          if (status2.value === "dirty")
             return DIRTY(result.value);
           return result;
         });
       } else {
-        if (status.value === "aborted")
+        if (status2.value === "aborted")
           return INVALID;
         const result = this._def.schema._parseSync({
           data: processed,
@@ -11053,7 +11053,7 @@ var ZodEffects = class extends ZodType {
           return INVALID;
         if (result.status === "dirty")
           return DIRTY(result.value);
-        if (status.value === "dirty")
+        if (status2.value === "dirty")
           return DIRTY(result.value);
         return result;
       }
@@ -11078,17 +11078,17 @@ var ZodEffects = class extends ZodType {
         if (inner.status === "aborted")
           return INVALID;
         if (inner.status === "dirty")
-          status.dirty();
+          status2.dirty();
         executeRefinement(inner.value);
-        return { status: status.value, value: inner.value };
+        return { status: status2.value, value: inner.value };
       } else {
         return this._def.schema._parseAsync({ data: ctx.data, path: ctx.path, parent: ctx }).then((inner) => {
           if (inner.status === "aborted")
             return INVALID;
           if (inner.status === "dirty")
-            status.dirty();
+            status2.dirty();
           return executeRefinement(inner.value).then(() => {
-            return { status: status.value, value: inner.value };
+            return { status: status2.value, value: inner.value };
           });
         });
       }
@@ -11106,13 +11106,13 @@ var ZodEffects = class extends ZodType {
         if (result instanceof Promise) {
           throw new Error(`Asynchronous transform encountered during synchronous parse operation. Use .parseAsync instead.`);
         }
-        return { status: status.value, value: result };
+        return { status: status2.value, value: result };
       } else {
         return this._def.schema._parseAsync({ data: ctx.data, path: ctx.path, parent: ctx }).then((base) => {
           if (!isValid(base))
             return INVALID;
           return Promise.resolve(effect.transform(base.value, checkCtx)).then((result) => ({
-            status: status.value,
+            status: status2.value,
             value: result
           }));
         });
@@ -11291,7 +11291,7 @@ var ZodBranded = class extends ZodType {
 };
 var ZodPipeline = class _ZodPipeline extends ZodType {
   _parse(input) {
-    const { status, ctx } = this._processInputParams(input);
+    const { status: status2, ctx } = this._processInputParams(input);
     if (ctx.common.async) {
       const handleAsync = async () => {
         const inResult = await this._def.in._parseAsync({
@@ -11302,7 +11302,7 @@ var ZodPipeline = class _ZodPipeline extends ZodType {
         if (inResult.status === "aborted")
           return INVALID;
         if (inResult.status === "dirty") {
-          status.dirty();
+          status2.dirty();
           return DIRTY(inResult.value);
         } else {
           return this._def.out._parseAsync({
@@ -11322,7 +11322,7 @@ var ZodPipeline = class _ZodPipeline extends ZodType {
       if (inResult.status === "aborted")
         return INVALID;
       if (inResult.status === "dirty") {
-        status.dirty();
+        status2.dirty();
         return {
           status: "dirty",
           value: inResult.value
@@ -11490,6 +11490,8 @@ var NEVER = INVALID;
 // src/lib/types.ts
 var TASK_STATUSES = ["free", "claimed", "in_progress", "blocked", "done", "orphaned"];
 var TRACK_COLORS = ["blue", "mauve", "teal", "pink", "sky", "flamingo"];
+var PHASE_GOAL_MAX = 300;
+var PLAN_HISTORY_MAX = { entries: 30, why: 300, changes: 20, change: 200 };
 var STAGES = ["brief", "implement", "validate", "verify", "review", "verdict", "integrate"];
 
 // src/lib/ids.ts
@@ -11514,6 +11516,76 @@ function eventIds(d, sessionId, n, rand = Math.random) {
 var realDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && (/* @__PURE__ */ new Date(`${v}T00:00:00Z`)).toISOString().slice(0, 10) === v;
 var PLAN_ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 var isPlanId = (s) => PLAN_ID_RE.test(s) && s !== "." && s !== "..";
+
+// src/lib/decisions.ts
+var DECISION_POINTS = [
+  "route",
+  "triage",
+  "design-apply",
+  "design-approve",
+  "plan-confirm",
+  "mode",
+  "ruling",
+  "safe-path",
+  "takeover",
+  "revert",
+  "blocked",
+  "trust",
+  "approve",
+  "idea",
+  "replan",
+  "vision",
+  "other"
+];
+var LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300, whyNot: 300, tradeoffs: 300 };
+var DECISIONS_MAX = 16 * 1024;
+var DECISIONS_WINDOW_MS = 24 * 36e5;
+var FUTURE_SKEW_MS = 5 * 6e4;
+var isObj = (x2) => !!x2 && typeof x2 === "object" && !Array.isArray(x2);
+var str = (x2) => typeof x2 === "string";
+var cp = (n) => String.fromCharCode(n);
+var UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(8234)}-${cp(8238)}${cp(8294)}-${cp(8297)}]`, "g");
+var clean = (s, max) => {
+  const t = s.replace(UNSAFE, " ").replace(/\s+/g, " ").trim();
+  return t.length <= max ? t : Array.from(t).slice(0, max).join("");
+};
+var text = (x2, max) => str(x2) ? clean(x2, max) || null : null;
+function normalizeAlternative(x2) {
+  if (str(x2)) {
+    const option2 = clean(x2, LIMITS.alternative);
+    return option2 ? { option: option2 } : null;
+  }
+  if (!isObj(x2)) return null;
+  const option = text(x2.option, LIMITS.alternative);
+  if (!option) return null;
+  const whyNot = text(x2.whyNot, LIMITS.whyNot);
+  const tradeoffs = text(x2.tradeoffs, LIMITS.tradeoffs);
+  return { option, ...whyNot ? { whyNot } : {}, ...tradeoffs ? { tradeoffs } : {} };
+}
+
+// src/lib/plan-history.ts
+function fitText(s, max) {
+  const t = clean(s, max);
+  if (t.length <= max) return t;
+  let out = "";
+  for (const ch of t) {
+    if (out.length + ch.length > max) break;
+    out += ch;
+  }
+  return out;
+}
+function historyOf(x2) {
+  if (!Array.isArray(x2)) return void 0;
+  const out = [];
+  for (const e of x2) {
+    if (!e || typeof e !== "object" || Array.isArray(e)) continue;
+    const { at: at2, why, changes } = e;
+    if (typeof at2 !== "string" || typeof why !== "string" || !Array.isArray(changes)) continue;
+    const lines2 = changes.filter((c) => typeof c === "string").slice(0, PLAN_HISTORY_MAX.changes);
+    out.push({ at: at2, why: fitText(why, PLAN_HISTORY_MAX.why), changes: lines2.map((c) => fitText(c, PLAN_HISTORY_MAX.change)) });
+  }
+  return out.slice(-PLAN_HISTORY_MAX.entries);
+}
 
 // src/lib/plan.ts
 function planSchemas() {
@@ -11546,9 +11618,12 @@ function planSchemas() {
       id,
       name: external_exports.string().min(1),
       plan_status: external_exports.enum(["committed", "provisional"]).default("committed"),
-      goal: external_exports.string().max(300).optional()
+      goal: external_exports.string().max(PHASE_GOAL_MAX).optional()
     })).min(1),
-    tasks: external_exports.array(TaskSchema).min(1)
+    tasks: external_exports.array(TaskSchema).min(1),
+    // T6B3-RETIRED-IDS: the tasks `waypoint replan` retired, whose ids are never minted again. The history (what replan
+    // changed and why) is read apart by historyOf, leniently; the roadmap's documents leave both out.
+    retired: external_exports.array(id).optional()
   });
   return { TaskSchema, PlanSchema };
 }
@@ -11563,16 +11638,17 @@ var PlanError = class extends Error {
   }
   issues;
 };
-function parsePlan(text2) {
+function parsePlan(text3) {
   let raw;
   try {
-    raw = (0, import_yaml.parse)(text2);
+    raw = (0, import_yaml.parse)(text3);
   } catch (e) {
     throw new PlanError([`YAML: ${e.message}`]);
   }
   const r2 = schemas().PlanSchema.safeParse(raw);
   if (!r2.success) throw new PlanError(r2.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`));
-  const plan = r2.data;
+  const history = historyOf(raw.history);
+  const plan = history ? { ...r2.data, history } : r2.data;
   const issues = checkReferences(plan);
   if (issues.length) throw new PlanError(issues);
   return plan;
@@ -11596,6 +11672,7 @@ function checkReferences(plan) {
     for (const d of t.depends_on) if (!tasks.has(d)) issues.push(`task ${t.id}: unknown dependency ${d}`);
   }
   for (const v of plan.versions) for (const p of v.phases) if (!phases.has(p)) issues.push(`version ${v.id}: unknown phase ${p}`);
+  for (const id of plan.retired ?? []) if (tasks.has(id)) issues.push(`task ${id}: the id is retired (a replan took that task out): give the task a new id`);
   const cycle = findCycle(plan);
   if (cycle) issues.push(`dependency cycle: ${cycle.join(" -> ")}`);
   return issues;
@@ -11604,13 +11681,13 @@ function findCycle(plan) {
   const deps = new Map(plan.tasks.map((t) => [t.id, t.depends_on]));
   const mark = /* @__PURE__ */ new Map();
   const stack = [];
-  const visit = (n) => {
+  const visit2 = (n) => {
     if (mark.get(n) === 2) return null;
     if (mark.get(n) === 1) return [...stack.slice(stack.indexOf(n)), n];
     mark.set(n, 1);
     stack.push(n);
     for (const d of deps.get(n) ?? []) {
-      const c = visit(d);
+      const c = visit2(d);
       if (c) return c;
     }
     stack.pop();
@@ -11618,17 +11695,339 @@ function findCycle(plan) {
     return null;
   };
   for (const t of plan.tasks) {
-    const c = visit(t.id);
+    const c = visit2(t.id);
     if (c) return c;
   }
   return null;
+}
+
+// src/lib/replan.ts
+var import_yaml2 = __toESM(require_dist(), 1);
+var REPLAN_OPS = ["add-phase", "edit-phase", "order-phases", "move", "order-tasks", "edit", "retire"];
+var MAX_OPS = 50;
+var TEXT_MAX = { name: 200, doneWhen: 500, why: 200 };
+var PHASE_FIELDS = ["name", "goal", "plan_status"];
+var TASK_FIELDS = ["title", "done_when", "depends_on", "estimate_min"];
+var EMPTY = "ops: empty (keeping the plan as it is needs no replan)";
+var TOO_MANY = (n) => `ops: ${n} operations, at most ${MAX_OPS}`;
+var ReplanError = class extends Error {
+  constructor(issues) {
+    super(`replan: refused, the plan is unchanged:
+- ${issues.join("\n- ")}`);
+    this.issues = issues;
+    this.name = "ReplanError";
+  }
+  issues;
+};
+var isObj2 = (x2) => !!x2 && typeof x2 === "object" && !Array.isArray(x2);
+var planId = (x2) => typeof x2 === "string" && isPlanId(x2);
+var text2 = (max) => (x2) => typeof x2 === "string" ? fitText(x2, max) || null : null;
+var idList = (x2) => Array.isArray(x2) && x2.every(planId) ? x2 : null;
+var status = (x2) => x2 === "committed" || x2 === "provisional" ? x2 : null;
+var minutes = (x2) => typeof x2 === "number" && Number.isFinite(x2) && x2 > 0 ? x2 : null;
+var dropUndefined = (x2) => Object.fromEntries(Object.entries(x2).filter(([, v]) => v !== void 0));
+function readOp(o) {
+  if (!isObj2(o)) return { error: "not an object" };
+  const kind = o.op;
+  if (typeof kind !== "string" || !REPLAN_OPS.includes(kind)) {
+    return { error: `unknown op ${typeof kind === "string" ? JSON.stringify(clean(kind, 40)) : "(none)"}` };
+  }
+  const wrong = [];
+  const id = (k3) => {
+    const v = o[k3];
+    if (planId(v)) return v;
+    wrong.push(`${k3} must be a plan id`);
+    return "";
+  };
+  const required = (k3, max) => {
+    const v = text2(max)(o[k3]);
+    if (v === null) wrong.push(`${k3} must be a non-empty text`);
+    return v ?? "";
+  };
+  const order = (k3) => {
+    const v = idList(o[k3]);
+    if (!v?.length) wrong.push(`${k3} must be a non-empty list of plan ids`);
+    return v ?? [];
+  };
+  const optional = (k3, read2, what) => {
+    if (o[k3] === void 0) return void 0;
+    const v = read2(o[k3]);
+    if (v === null) wrong.push(`${k3} ${what}`);
+    return v ?? void 0;
+  };
+  const optText = (k3, max) => optional(k3, text2(max), "must be a non-empty text");
+  const optStatus = () => optional("plan_status", status, "must be committed or provisional");
+  const none = (fields) => {
+    if (fields.every((f) => o[f] === void 0)) wrong.push(`nothing to change: give ${fields.join(", ")}`);
+  };
+  let op;
+  const k2 = kind;
+  switch (k2) {
+    case "add-phase":
+      op = {
+        op: k2,
+        id: id("id"),
+        name: required("name", TEXT_MAX.name),
+        goal: optText("goal", PHASE_GOAL_MAX),
+        after: optional("after", (x2) => planId(x2) ? x2 : null, "must be a plan id"),
+        plan_status: optStatus()
+      };
+      break;
+    case "edit-phase":
+      op = { op: k2, id: id("id"), name: optText("name", TEXT_MAX.name), goal: optText("goal", PHASE_GOAL_MAX), plan_status: optStatus() };
+      none(PHASE_FIELDS);
+      break;
+    case "order-phases":
+      op = { op: k2, phases: order("phases") };
+      break;
+    case "move":
+      op = { op: k2, task: id("task"), phase: id("phase") };
+      break;
+    case "order-tasks":
+      op = { op: k2, phase: id("phase"), tasks: order("tasks") };
+      break;
+    case "edit": {
+      const deps = optional("depends_on", idList, "must be a list of plan ids");
+      op = {
+        op: k2,
+        task: id("task"),
+        title: optText("title", TEXT_MAX.name),
+        done_when: optText("done_when", TEXT_MAX.doneWhen),
+        depends_on: deps && [...new Set(deps)],
+        estimate_min: optional("estimate_min", minutes, "must be a positive number of minutes")
+      };
+      none(TASK_FIELDS);
+      break;
+    }
+    case "retire":
+      op = { op: k2, task: id("task"), why: required("why", TEXT_MAX.why) };
+      break;
+  }
+  return wrong.length ? { error: wrong.join("; "), kind: k2 } : dropUndefined(op);
+}
+function normalizeOps(x2) {
+  if (Array.isArray(x2)) return { ops: [], errors: ['ops: the file must be { "ops": [...] }, not a bare list'] };
+  const list = isObj2(x2) ? x2.ops : void 0;
+  if (!Array.isArray(list)) return { ops: [], errors: ["ops: not a list"] };
+  if (!list.length) return { ops: [], errors: [EMPTY] };
+  if (list.length > MAX_OPS) return { ops: [], errors: [TOO_MANY(list.length)] };
+  const ops = [];
+  const errors = [];
+  list.forEach((o, i) => {
+    const r2 = readOp(o);
+    if ("error" in r2) errors.push(`ops[${i}]${r2.kind ? ` ${r2.kind}` : ""}: ${r2.error}`);
+    else ops.push(r2);
+  });
+  return { ops, errors };
+}
+function nodesOf(doc) {
+  let alias = false;
+  (0, import_yaml2.visit)(doc, { Alias: () => {
+    alias = true;
+    return import_yaml2.visit.BREAK;
+  } });
+  if (alias) throw new ReplanError(["plan: it uses an alias (*name), which a replan cannot keep in place: write the value out in plan.yaml"]);
+  const maps = (s) => (0, import_yaml2.isSeq)(s) && s.items.every(import_yaml2.isMap);
+  const phases = doc.get("phases", true), tasks = doc.get("tasks", true), versions = doc.get("versions", true);
+  if (!maps(phases) || !maps(tasks) || versions !== void 0 && !maps(versions)) {
+    throw new ReplanError(["plan: phases, tasks and versions must be lists of maps"]);
+  }
+  const lists = versions === void 0 ? [] : versions.items.map((v) => v.get("phases", true));
+  if (!lists.every((l3) => (0, import_yaml2.isSeq)(l3) && l3.items.every(import_yaml2.isScalar))) throw new ReplanError(["plan: the phases of each version must be a list of ids"]);
+  return { phases, tasks, versions: lists };
+}
+var idOf = (n) => (0, import_yaml2.isMap)(n) ? String(n.get("id")) : "";
+var scalarOf = (n) => (0, import_yaml2.isScalar)(n) ? String(n.value) : "";
+var indexOf = (seq, id) => seq.items.findIndex((n) => idOf(n) === id);
+var mapOf = (seq, id) => seq.items.find((n) => idOf(n) === id) ?? null;
+var depsOf = (task) => {
+  const d = (0, import_yaml2.isMap)(task) ? task.get("depends_on", true) : void 0;
+  return (0, import_yaml2.isSeq)(d) ? d.items.map(scalarOf) : [];
+};
+function notEachOnce(given, current, one, many) {
+  const seen = /* @__PURE__ */ new Set();
+  const twice = /* @__PURE__ */ new Set();
+  for (const id of given) {
+    if (seen.has(id)) twice.add(id);
+    seen.add(id);
+  }
+  const missing = current.filter((id) => !seen.has(id));
+  const extra = [...seen].filter((id) => !current.includes(id));
+  const parts = [
+    missing.length ? `missing ${missing.join(", ")}` : "",
+    extra.length ? `${extra.join(", ")} ${extra.length === 1 ? `is not a ${one}` : `are not ${many}`}` : "",
+    twice.size ? `${[...twice].join(", ")} twice` : ""
+  ].filter(Boolean);
+  return parts.length ? `the list must name every ${one} once: ${parts.join("; ")}` : null;
+}
+function applyOp(doc, n, op, retired) {
+  switch (op.op) {
+    case "add-phase": {
+      if (indexOf(n.phases, op.id) >= 0) return { issue: `phase ${op.id} already exists` };
+      let at2 = n.phases.items.length;
+      if (op.after !== void 0) {
+        const i = indexOf(n.phases, op.after);
+        if (i < 0) return { issue: `phase ${op.after} not found` };
+        at2 = i + 1;
+      }
+      const node = doc.createNode(dropUndefined({ id: op.id, name: op.name, plan_status: op.plan_status, goal: op.goal }));
+      const like = n.phases.items[at2 - 1] ?? n.phases.items[at2];
+      if ((0, import_yaml2.isMap)(like) && like.flow) node.flow = true;
+      n.phases.items.splice(at2, 0, node);
+      const home = op.after === void 0 ? void 0 : n.versions.find((l3) => l3.items.some((x2) => scalarOf(x2) === op.after));
+      const list = home ?? n.versions.at(-1);
+      if (list) list.items.splice(home ? home.items.findIndex((x2) => scalarOf(x2) === op.after) + 1 : list.items.length, 0, doc.createNode(op.id));
+      return { change: `+${op.id} ${op.name}` };
+    }
+    case "edit-phase": {
+      const node = mapOf(n.phases, op.id);
+      if (!node) return { issue: `phase ${op.id} not found` };
+      const now = (k2) => node.get(k2) ?? (k2 === "plan_status" ? "committed" : void 0);
+      const fields = PHASE_FIELDS.filter((k2) => op[k2] !== void 0 && op[k2] !== now(k2));
+      if (!fields.length) return { change: null };
+      for (const k2 of fields) node.set(k2, op[k2]);
+      return { change: `${op.id}: ${fields.join(", ")}` };
+    }
+    case "order-phases": {
+      const wrong = notEachOnce(op.phases, n.phases.items.map(idOf), "phase", "phases");
+      if (wrong) return { issue: wrong };
+      const shape = () => JSON.stringify([n.phases.items.map(idOf), n.versions.map((l3) => l3.items.map(scalarOf))]);
+      const before = shape();
+      const byId = new Map(n.phases.items.map((x2) => [idOf(x2), x2]));
+      n.phases.items = op.phases.map((id) => byId.get(id));
+      const rank = (x2) => op.phases.indexOf(scalarOf(x2));
+      for (const l3 of n.versions) l3.items.sort((a, b) => rank(a) - rank(b));
+      return { change: shape() === before ? null : `phases: ${op.phases.join(", ")}` };
+    }
+    case "move": {
+      const node = mapOf(n.tasks, op.task);
+      if (!node) return { issue: `task ${op.task} not found` };
+      if (indexOf(n.phases, op.phase) < 0) return { issue: `phase ${op.phase} not found` };
+      const from = String(node.get("phase"));
+      if (from === op.phase) return { change: null };
+      node.set("phase", op.phase);
+      return { change: `${op.task}: ${from} \u2192 ${op.phase}` };
+    }
+    case "order-tasks": {
+      if (indexOf(n.phases, op.phase) < 0) return { issue: `phase ${op.phase} not found` };
+      const slots = n.tasks.items.flatMap((x2, i) => (0, import_yaml2.isMap)(x2) && String(x2.get("phase")) === op.phase ? [i] : []);
+      const byId = new Map(slots.map((i) => [idOf(n.tasks.items[i]), n.tasks.items[i]]));
+      const wrong = notEachOnce(op.tasks, [...byId.keys()], `task of ${op.phase}`, `tasks of ${op.phase}`);
+      if (wrong) return { issue: wrong };
+      if ([...byId.keys()].join() === op.tasks.join()) return { change: null };
+      op.tasks.forEach((id, k2) => {
+        n.tasks.items[slots[k2]] = byId.get(id);
+      });
+      return { change: `${op.phase}: ${op.tasks.join(", ")}` };
+    }
+    case "edit": {
+      const node = mapOf(n.tasks, op.task);
+      if (!node) return { issue: `task ${op.task} not found` };
+      const sameSet = (a, b) => {
+        const s = new Set(a);
+        return s.size === new Set(b).size && b.every((x2) => s.has(x2));
+      };
+      const same = (k2) => k2 === "depends_on" ? sameSet(depsOf(node), op.depends_on ?? []) : node.get(k2) === op[k2];
+      const fields = TASK_FIELDS.filter((k2) => op[k2] !== void 0 && !same(k2));
+      if (!fields.length) return { change: null };
+      for (const k2 of fields) {
+        if (k2 !== "depends_on") {
+          node.set(k2, op[k2]);
+          continue;
+        }
+        const deps = doc.createNode(op.depends_on ?? []);
+        deps.flow = true;
+        node.set(k2, deps);
+      }
+      return { change: `${op.task}: ${fields.join(", ")}` };
+    }
+    case "retire": {
+      const i = indexOf(n.tasks, op.task);
+      if (i < 0) return { issue: `task ${op.task} not found` };
+      n.tasks.items.splice(i, 1);
+      retired.push(op.task);
+      return { change: `\u2212${op.task} (${fitText(op.why, PLAN_HISTORY_MAX.change - op.task.length - 4)})` };
+    }
+  }
+}
+function checked(text3) {
+  try {
+    return parsePlan(text3);
+  } catch (e) {
+    if (e instanceof PlanError) throw new ReplanError(e.issues);
+    throw e;
+  }
+}
+var shapeOf = (p) => JSON.stringify({ ...p, history: void 0 });
+function serialize(doc, eol) {
+  let out;
+  try {
+    out = doc.toString({ lineWidth: 0 });
+  } catch (e) {
+    throw new ReplanError([`plan: yaml cannot write the result: ${e.message}`]);
+  }
+  return eol === "\n" ? out : out.replace(/\n/g, eol);
+}
+function addRetired(doc, ids) {
+  const list = doc.get("retired", true);
+  if (!(0, import_yaml2.isSeq)(list)) {
+    const node = doc.createNode(ids);
+    node.flow = true;
+    doc.set("retired", node);
+    return;
+  }
+  for (const id of ids) if (!list.items.some((x2) => scalarOf(x2) === id)) list.items.push(doc.createNode(id));
+}
+function entryChanges(all) {
+  const max = PLAN_HISTORY_MAX.changes;
+  return all.length <= max ? all : [...all.slice(0, max - 1), `\u2026 ${all.length - max + 1} more`];
+}
+function addHistory(doc, entry) {
+  const history = doc.get("history", true);
+  if (!(0, import_yaml2.isSeq)(history)) {
+    doc.set("history", doc.createNode([entry]));
+    return;
+  }
+  history.flow = false;
+  doc.addIn(["history"], doc.createNode(entry));
+  history.items.splice(0, Math.max(0, history.items.length - PLAN_HISTORY_MAX.entries));
+}
+function applyReplan(text3, ops, why, at2) {
+  if (!ops.length) throw new ReplanError([EMPTY]);
+  if (ops.length > MAX_OPS) throw new ReplanError([TOO_MANY(ops.length)]);
+  const reason = fitText(why, PLAN_HISTORY_MAX.why);
+  if (!reason) throw new ReplanError(["why: empty (the why is part of the history)"]);
+  const before = checked(text3);
+  const doc = (0, import_yaml2.parseDocument)(text3);
+  const nodes = nodesOf(doc);
+  const issues = [];
+  const changes = [];
+  const retired = [];
+  ops.forEach((op, i) => {
+    const r2 = applyOp(doc, nodes, op, retired);
+    if ("issue" in r2) issues.push(`ops[${i}] ${op.op}: ${r2.issue}`);
+    else if (r2.change !== null) changes.push(fitText(r2.change, PLAN_HISTORY_MAX.change));
+  });
+  for (const id of retired) {
+    const users = nodes.tasks.items.filter((t) => depsOf(t).includes(id)).map(idOf);
+    if (users.length) issues.push(`retire ${id}: ${users.join(", ")} still depend${users.length === 1 ? "s" : ""} on it`);
+  }
+  if (issues.length) throw new ReplanError(issues);
+  if (!changes.length) return { text: text3, changes: [] };
+  if (retired.length) addRetired(doc, retired);
+  const eol = (text3.match(/\r\n/g) ?? []).length * 2 > (text3.match(/\n/g) ?? []).length ? "\r\n" : "\n";
+  if (shapeOf(checked(serialize(doc, eol))) === shapeOf(before)) return { text: text3, changes: [] };
+  addHistory(doc, { at: at2, why: reason, changes: entryChanges(changes) });
+  const next = serialize(doc, eol);
+  checked(next);
+  return { text: next, changes };
 }
 
 // src/lib/sync.ts
 var import_node_crypto = require("node:crypto");
 
 // src/lib/waypoint-version.ts
-var WAYPOINT_VERSION = true ? "0.34.0" : "0.0.0";
+var WAYPOINT_VERSION = true ? "0.35.0" : "0.0.0";
 var VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})/;
 var partsOf = (v) => {
   const m = typeof v === "string" ? VERSION.exec(v) : null;
@@ -11768,62 +12167,47 @@ function chunk(writes, files, max = 50, maxBytes = 9e5) {
   return out;
 }
 
-// src/lib/decisions.ts
-var DECISION_POINTS = [
-  "route",
-  "triage",
-  "design-apply",
-  "design-approve",
-  "plan-confirm",
-  "mode",
-  "ruling",
-  "safe-path",
-  "takeover",
-  "revert",
-  "blocked",
-  "trust",
-  "approve",
-  "idea",
-  "other"
-];
-var LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300, whyNot: 300, tradeoffs: 300 };
-var DECISIONS_MAX = 16 * 1024;
-var DECISIONS_WINDOW_MS = 24 * 36e5;
-var FUTURE_SKEW_MS = 5 * 6e4;
-var isObj = (x2) => !!x2 && typeof x2 === "object" && !Array.isArray(x2);
-var str = (x2) => typeof x2 === "string";
-var cp = (n) => String.fromCharCode(n);
-var UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(8234)}-${cp(8238)}${cp(8294)}-${cp(8297)}]`, "g");
-var clean = (s, max) => {
-  const t = s.replace(UNSAFE, " ").replace(/\s+/g, " ").trim();
-  return t.length <= max ? t : Array.from(t).slice(0, max).join("");
-};
-var text = (x2, max) => str(x2) ? clean(x2, max) || null : null;
-function normalizeAlternative(x2) {
-  if (str(x2)) {
-    const option2 = clean(x2, LIMITS.alternative);
-    return option2 ? { option: option2 } : null;
-  }
-  if (!isObj(x2)) return null;
-  const option = text(x2.option, LIMITS.alternative);
-  if (!option) return null;
-  const whyNot = text(x2.whyNot, LIMITS.whyNot);
-  const tradeoffs = text(x2.tradeoffs, LIMITS.tradeoffs);
-  return { option, ...whyNot ? { whyNot } : {}, ...tradeoffs ? { tradeoffs } : {} };
-}
-
 // src/lib/notes.ts
 var NOTE_TYPES = ["decision", "idea", "debt", "question"];
+var NOTE_KINDS = [...NOTE_TYPES, "market"];
 var MAX_NOTE = 2e3;
+var MAX_SOURCES = 20;
+var MAX_URL = 2e3;
+var MAX_SOURCE_TITLE = 200;
 var MAX_NAME = 80;
 var SAY_MAX = 200;
 var str2 = (x2) => typeof x2 === "string";
 var NOTE_ID = /^[A-Za-z0-9_.:~@+-]{1,160}$/;
 var clipPoints = (s, max) => s.length <= max ? s : Array.from(s).slice(0, max).join("");
+function webHref(url) {
+  if (!url || url.length > MAX_URL || /\s/.test(url) || clean(url, MAX_URL) !== url) return null;
+  try {
+    const u = new URL(url);
+    return (u.protocol === "http:" || u.protocol === "https:") && !u.username && !u.password ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+function normalizeSources(x2) {
+  if (!Array.isArray(x2)) return [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const s of x2) {
+    if (out.length >= MAX_SOURCES) break;
+    if (!s || typeof s !== "object" || Array.isArray(s)) continue;
+    const o = s;
+    const url = str2(o.url) ? o.url.trim() : "";
+    const href = webHref(url);
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    out.push({ title: (str2(o.title) ? clean(o.title, MAX_SOURCE_TITLE) : "") || clean(url, MAX_SOURCE_TITLE), url });
+  }
+  return out;
+}
 function normalizeNote(x2) {
   if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
   const o = x2;
-  if (!str2(o.type) || !NOTE_TYPES.includes(o.type)) return null;
+  if (!str2(o.type) || !NOTE_KINDS.includes(o.type)) return null;
   if (!str2(o.author) || !str2(o.text)) return null;
   const out = { ts: str2(o.ts) ? o.ts : "", type: o.type, author: o.author, text: clipPoints(o.text, MAX_NOTE) };
   if (str2(o.taskId)) out.taskId = o.taskId;
@@ -11836,6 +12220,8 @@ function normalizeNote(x2) {
   if (str2(o.proposalId) && o.proposalId && !o.proposalId.includes("/")) out.proposalId = o.proposalId;
   const decision = normalizeNoteDecision(o.decision);
   if (decision) out.decision = decision;
+  const sources = out.type === "market" ? normalizeSources(o.sources) : [];
+  if (sources.length) out.sources = sources;
   return out;
 }
 function normalizeNoteDecision(x2) {
@@ -11878,12 +12264,12 @@ function notesSince(notes, since) {
 }
 var SAY = {
   es: {
-    note: (who, text2) => `Nota de ${who ?? "una persona"} en el roadmap: \xAB${text2}\xBB`,
-    answer: (who, text2) => `Respuesta de ${who ?? "una persona"} en el roadmap: \xAB${text2}\xBB`
+    note: (who, text3) => `Nota de ${who ?? "una persona"} en el roadmap: \xAB${text3}\xBB`,
+    answer: (who, text3) => `Respuesta de ${who ?? "una persona"} en el roadmap: \xAB${text3}\xBB`
   },
   en: {
-    note: (who, text2) => `${who ? `${who}'s` : "Someone's"} note on the roadmap: "${text2}"`,
-    answer: (who, text2) => `${who ? `${who}'s` : "Someone's"} answer on the roadmap: "${text2}"`
+    note: (who, text3) => `${who ? `${who}'s` : "Someone's"} note on the roadmap: "${text3}"`,
+    answer: (who, text3) => `${who ? `${who}'s` : "Someone's"} answer on the roadmap: "${text3}"`
   }
 };
 function sayText(s) {
@@ -11895,9 +12281,9 @@ function noteLines(notes, since, locale, taskIds) {
   const fresh = (ts) => Number.isNaN(s) || time(ts) > s;
   const say = [];
   const mentions = [];
-  const add = (line3, text2) => {
+  const add = (line3, text3) => {
     say.push(line3);
-    mentions.push([...new Set([...text2.matchAll(/\bT\d{3,}\b/g)].map((m) => m[0]))].filter((id) => taskIds.has(id)));
+    mentions.push([...new Set([...text3.matchAll(/\bT\d{3,}\b/g)].map((m) => m[0]))].filter((id) => taskIds.has(id)));
   };
   for (const n of notes) {
     if (n.author.startsWith("user:") && fresh(n.ts)) add(SAY[locale].note(n.authorName, sayText(n.text)), n.text);
@@ -11913,9 +12299,9 @@ function isUnlocked(task, states) {
 }
 function isAvailable(task, states) {
   const st2 = states[task.id];
-  const status = statusOf(states, task.id);
-  if (status === "free") return true;
-  if (status !== "blocked") return false;
+  const status2 = statusOf(states, task.id);
+  if (status2 === "free") return true;
+  if (status2 !== "blocked") return false;
   const by = st2?.blockedBy ?? [];
   return by.length > 0 && !by.includes("external") && by.every((b) => statusOf(states, b) === "done");
 }
@@ -12032,8 +12418,8 @@ function leaseOf(s, beatMinutes = LEASE_MINUTES) {
   const all = [t(s.leaseUntil), beat + beatMinutes * 6e4, busy - beat <= LEASE_CAP_MINUTES * 6e4 ? busy : NaN].filter(Number.isFinite);
   return all.length ? Math.max(...all) : null;
 }
-function isIdle(s, now, minutes = IDLE_MINUTES) {
-  return !s || s.status === "idle" || liveness(now, leaseOf(s, Math.max(0, minutes - SILENT_MINUTES))) === "stopped";
+function isIdle(s, now, minutes2 = IDLE_MINUTES) {
+  return !s || s.status === "idle" || liveness(now, leaseOf(s, Math.max(0, minutes2 - SILENT_MINUTES))) === "stopped";
 }
 function liveness(now, leaseUntil) {
   const until = typeof leaseUntil === "number" ? leaseUntil : typeof leaseUntil === "string" ? Date.parse(leaseUntil) : NaN;
@@ -12041,8 +12427,8 @@ function liveness(now, leaseUntil) {
   if (now < until) return "alive";
   return now - until < SILENT_MINUTES * 6e4 ? "silent" : "stopped";
 }
-function recoverableTasks(plan, states, sessions, now, minutes = IDLE_MINUTES) {
-  return plan.tasks.filter((t) => ACTIVE.includes(statusOf(states, t.id)) && states[t.id]?.owner && isIdle(sessions[states[t.id].owner], now, minutes)).map((t) => ({ taskId: t.id, owner: states[t.id].owner }));
+function recoverableTasks(plan, states, sessions, now, minutes2 = IDLE_MINUTES) {
+  return plan.tasks.filter((t) => ACTIVE.includes(statusOf(states, t.id)) && states[t.id]?.owner && isIdle(sessions[states[t.id].owner], now, minutes2)).map((t) => ({ taskId: t.id, owner: states[t.id].owner }));
 }
 function inboxFor(messages, sessionId) {
   return Object.entries(messages).filter((e) => !!e[1]).filter(([, m]) => m.status === "open" && m.from !== sessionId && (m.to === sessionId || m.to === "*")).map(([id, m]) => ({ ...m, id })).sort((a, b) => {
@@ -12079,7 +12465,7 @@ function escalationCandidates(messages) {
 // src/lib/one-line.ts
 var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
 var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
-var oneLine = (text2) => String(text2).replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim();
+var oneLine = (text3) => String(text3).replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim();
 
 // src/lib/batches.ts
 var REASON_MAX = 300;
@@ -12087,9 +12473,9 @@ var SUMMARY_MAX = 300;
 var DEL2 = { __delete__: true };
 var MIN = 6e4;
 var iso = (ms) => new Date(ms).toISOString();
-var clipPoints2 = (text2, max) => text2.length <= max ? text2 : Array.from(text2).slice(0, max).join("");
-function cleanText(text2, max) {
-  return clipPoints2(oneLine(text2), max);
+var clipPoints2 = (text3, max) => text3.length <= max ? text3 : Array.from(text3).slice(0, max).join("");
+function cleanText(text3, max) {
+  return clipPoints2(oneLine(text3), max);
 }
 var event = (doc_id, data) => ({ op: "set", collection: "events", doc_id, data });
 function claimBatch(i) {
@@ -12188,7 +12574,7 @@ var DEFERRED_MAX = 10;
 var NOTE_MAX = 120;
 var PROBLEM_MAX = 160;
 var UNCHECKED_MAX = 10;
-var TEXT_MAX = 200;
+var TEXT_MAX2 = 200;
 var NAME_MAX = 80;
 var REVIEWER_MAX = 40;
 var REVIEWERS_MAX = 6;
@@ -12197,7 +12583,7 @@ var DOC_PATHS = ["trivial", "small", "medium", "large"];
 var DOC_STAGES = [...STAGES, "triage", "done", "blocked", "stopped"];
 var ACTIONS = ["accept", "fix", "redo"];
 var STAGE_KEYS = [...STAGES, "triage"];
-var isObj2 = (x2) => typeof x2 === "object" && x2 !== null && !Array.isArray(x2);
+var isObj3 = (x2) => typeof x2 === "object" && x2 !== null && !Array.isArray(x2);
 var kindOf = (v) => v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
 var int = (v, min, max) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
 var iso2 = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v) && !Number.isNaN(Date.parse(v));
@@ -12207,7 +12593,7 @@ var CONTROL2 = /[\u0000-\u001f\u007f-\u009f]/g;
 var clip = (v, max) => v.length <= max ? v : Array.from(v).slice(0, max).join("");
 var line = (v, max) => clip(v.replace(CONTROL2, " ").replace(BIDI2, "").trim(), max);
 function validatorOf(v) {
-  if (!isObj2(v) || typeof v.name !== "string" || !v.name.trim() || typeof v.ok !== "boolean") return null;
+  if (!isObj3(v) || typeof v.name !== "string" || !v.name.trim() || typeof v.ok !== "boolean") return null;
   const out = { name: line(v.name, NAME_MAX), ok: v.ok };
   if (v.flaky === true) out.flaky = true;
   if (typeof v.skipped === "string" && v.skipped.trim()) out.skipped = line(v.skipped, NAME_MAX);
@@ -12218,8 +12604,8 @@ function validatorOf(v) {
   return out;
 }
 function roundOf(r2) {
-  if (!isObj2(r2) || !int(r2.brief, 1, 9999) || !int(r2.n, 1, 99) || !isAction(r2.action) || typeof r2.note !== "string" || !iso2(r2.at)) return null;
-  const f = isObj2(r2.findings) ? r2.findings : {};
+  if (!isObj3(r2) || !int(r2.brief, 1, 9999) || !int(r2.n, 1, 99) || !isAction(r2.action) || typeof r2.note !== "string" || !iso2(r2.at)) return null;
+  const f = isObj3(r2.findings) ? r2.findings : {};
   const c = (k2) => int(f[k2], 0, COUNT_MAX) ? f[k2] : null;
   const findings = { critical: c("critical"), important: c("important"), minor: c("minor"), deferred: c("deferred") };
   if (Object.values(findings).some((x2) => x2 === null)) return null;
@@ -12227,9 +12613,9 @@ function roundOf(r2) {
   return { brief: r2.brief, n: r2.n, action: r2.action, note: line(r2.note, NOTE_MAX), findings, reviewers, at: r2.at };
 }
 function deferredOf(d) {
-  if (!isObj2(d) || typeof d.problem !== "string" || !d.problem.trim()) return null;
+  if (!isObj3(d) || typeof d.problem !== "string" || !d.problem.trim()) return null;
   const out = { problem: line(d.problem, PROBLEM_MAX) };
-  if (typeof d.file === "string" && d.file.trim()) out.file = line(d.file, TEXT_MAX);
+  if (typeof d.file === "string" && d.file.trim()) out.file = line(d.file, TEXT_MAX2);
   if (int(d.line, 1, 1e7)) out.line = d.line;
   return out;
 }
@@ -12243,7 +12629,7 @@ function verifyOf(v, report) {
     result: v.result === "pass" || v.result === "fail" || v.result === "blocked" ? v.result : null,
     passed: int(v.passed, 0, 1e3) ? v.passed : null,
     total: int(v.total, 0, 1e3) ? v.total : null,
-    skipped: typeof v.skipped === "string" && v.skipped.trim() ? line(v.skipped, TEXT_MAX) : null,
+    skipped: typeof v.skipped === "string" && v.skipped.trim() ? line(v.skipped, TEXT_MAX2) : null,
     surfaces: (Array.isArray(v.surfaces) ? v.surfaces : []).filter((s) => typeof s === "string" && !!s.trim()).map((s) => line(s, NAME_MAX)).slice(0, 10)
   };
 }
@@ -12253,7 +12639,7 @@ function integrationOf(v, report) {
     report?.("forge.integration", "coerced", "branch, target or merged");
     return null;
   }
-  return { branch: line(v.branch, TEXT_MAX), sha: typeof v.sha === "string" && SHA.test(v.sha) ? v.sha : null, merged: v.merged, target: line(v.target, TEXT_MAX) };
+  return { branch: line(v.branch, TEXT_MAX2), sha: typeof v.sha === "string" && SHA.test(v.sha) ? v.sha : null, merged: v.merged, target: line(v.target, TEXT_MAX2) };
 }
 function stagesOf(x2) {
   const out = {};
@@ -12268,15 +12654,15 @@ function parseForgeDocV2(x2, report) {
     report?.("forge.v", "dropped", why);
     return null;
   };
-  if (!isObj2(x2)) return bad(kindOf(x2));
+  if (!isObj3(x2)) return bad(kindOf(x2));
   if (x2.v !== 2) return bad("no v: 2");
   if (!DOC_PATHS.includes(x2.path)) return bad("path");
   if (!DOC_STAGES.includes(x2.stage)) return bad("stage");
   if (typeof x2.phase !== "string") return bad("phase");
   if (!int(x2.brief, 1, 9999)) return bad("brief");
-  if (!Array.isArray(x2.rounds) || !Array.isArray(x2.validators) || !Array.isArray(x2.deferred) || !isObj2(x2.stages)) return bad("rounds, validators, deferred or stages");
-  if (x2.verify !== null && !isObj2(x2.verify)) return bad("verify");
-  if (x2.integration !== null && !isObj2(x2.integration)) return bad("integration");
+  if (!Array.isArray(x2.rounds) || !Array.isArray(x2.validators) || !Array.isArray(x2.deferred) || !isObj3(x2.stages)) return bad("rounds, validators, deferred or stages");
+  if (x2.verify !== null && !isObj3(x2.verify)) return bad("verify");
+  if (x2.integration !== null && !isObj3(x2.integration)) return bad("integration");
   if (x2.acceptedRound !== null && !int(x2.acceptedRound, 1, 99)) return bad("acceptedRound");
   if (typeof x2.overCap !== "boolean" || !iso2(x2.updatedAt)) return bad("overCap or updatedAt");
   const keep = (list, of, field2, max, newest2 = false) => {
@@ -12307,7 +12693,7 @@ function parseForgeDocV2(x2, report) {
   const coerced = (field2, v) => report?.(`forge.${field2}`, "coerced", kindOf(v));
   if (typeof x2.agent === "string" && x2.agent.trim()) doc.agent = line(x2.agent, NAME_MAX);
   else if (x2.agent !== void 0) coerced("agent", x2.agent);
-  if (isObj2(x2.verdict) && isAction(x2.verdict.action)) {
+  if (isObj3(x2.verdict) && isAction(x2.verdict.action)) {
     doc.verdict = { action: x2.verdict.action, score: typeof x2.verdict.score === "number" && Number.isFinite(x2.verdict.score) ? x2.verdict.score : null };
     if (doc.verdict.score === null && x2.verdict.score !== null) coerced("verdict", x2.verdict.score);
   } else if (x2.verdict !== void 0) coerced("verdict", x2.verdict);
@@ -12319,8 +12705,158 @@ function parseForgeDocV2(x2, report) {
   return doc;
 }
 
+// src/lib/forge-run.ts
+var SATURATION_BLOCKING = ["rounds", "pending-tasks", "validators", "findings", "defects", "proposals", "inputs"];
+var SATURATION_LISTS = [
+  "pendingTasks",
+  "validatorsFailed",
+  "openDefects",
+  "openProposals",
+  "parked",
+  "waitsOwner",
+  "unowned",
+  "blockedTasks",
+  "unplaced",
+  "orphanFindings"
+];
+var SATURATION_LIST_MAX = 20;
+var SATURATION_INPUTS = ["--plan", "--db", "--validate"];
+var PROFILES = ["spike", "product"];
+var AUTONOMOUS_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+var MAX_AUTONOMOUS_NAME = 40;
+var isAutonomousName = (x2) => typeof x2 === "string" && x2.length <= MAX_AUTONOMOUS_NAME && AUTONOMOUS_NAME.test(x2);
+var isBranchName = (x2) => typeof x2 === "string" && x2 !== "" && !x2.includes("..") && !x2.startsWith("-") && !/[\s\u0000-\u001f\u007f]/.test(x2);
+var isAbsolutePath = (x2) => typeof x2 === "string" && /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(x2);
+function autonomousOf(x2) {
+  if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
+  const a = x2;
+  if (!PROFILES.includes(a.profile)) return null;
+  const profile = a.profile;
+  if (!isAutonomousName(a.name)) return null;
+  const runId = `${profile}-${a.name}`;
+  if (a.runId !== runId || a.branch !== `forge/${runId}` || !isAbsolutePath(a.worktree) || !isBranchName(a.startBranch)) return null;
+  const pb = a.protectedBranches;
+  if (!Array.isArray(pb) || pb.length < 1 || pb.length > 10 || !pb.every(isBranchName)) return null;
+  return { profile, name: a.name, runId, worktree: a.worktree, branch: a.branch, startBranch: a.startBranch, protectedBranches: [...pb] };
+}
+var LOCALE = /^[a-z]{2,3}([-_][A-Za-z0-9]{2,8})?$/;
+var isLocale = (x2) => typeof x2 === "string" && LOCALE.test(x2);
+var isCount = (x2) => typeof x2 === "number" && Number.isInteger(x2) && x2 >= 0;
+var isPositiveInt = (x2) => isCount(x2) && x2 > 0;
+var isPositive = (x2) => typeof x2 === "number" && Number.isFinite(x2) && x2 > 0;
+var isObj4 = (x2) => !!x2 && typeof x2 === "object" && !Array.isArray(x2);
+function exploreOf(x2) {
+  if (!isObj4(x2) || !isCount(x2.rounds) || !isCount(x2.dry) || x2.dry > x2.rounds) return null;
+  return { rounds: x2.rounds, dry: x2.dry };
+}
+var cp2 = (n) => String.fromCharCode(n);
+var REPORT_ID = new RegExp(`^[^${cp2(0)}-${cp2(31)}${cp2(127)}-${cp2(159)}${cp2(8234)}-${cp2(8238)}${cp2(8294)}-${cp2(8297)}]{1,80}$`, "u");
+var idList2 = (x2) => Array.isArray(x2) && x2.length <= SATURATION_LIST_MAX && x2.every((v) => typeof v === "string" && REPORT_ID.test(v));
+var oneOf = (list, x2) => typeof x2 === "string" && list.includes(x2);
+function saturationReportOf(x2) {
+  if (!isObj4(x2)) return null;
+  const { saturated, at: at2, rounds, blocking, evidence: e, waiting: w, counts: c, missing } = x2;
+  if (typeof saturated !== "boolean" || typeof at2 !== "string" || !at2 || at2.length > 64 || !isCount(rounds)) return null;
+  if (!Array.isArray(blocking) || !blocking.every((b) => oneOf(SATURATION_BLOCKING, b)) || new Set(blocking).size !== blocking.length) return null;
+  if (saturated !== (blocking.length === 0) || !isObj4(e) || !isObj4(w) || !isObj4(c)) return null;
+  if (!isCount(e.openFindings) || !isCount(w.questions) || !isCount(w.blocked) || !isCount(w.deferred)) return null;
+  const lists = {
+    pendingTasks: e.pendingTasks,
+    validatorsFailed: e.validatorsFailed,
+    openDefects: e.openDefects,
+    openProposals: e.openProposals,
+    parked: w.parked,
+    waitsOwner: w.waitsOwner,
+    unowned: w.unowned,
+    blockedTasks: w.blockedTasks,
+    unplaced: w.unplaced,
+    orphanFindings: w.orphanFindings
+  };
+  const counts = {};
+  for (const k2 of SATURATION_LISTS) {
+    const list = lists[k2];
+    const n = c[k2];
+    if (!idList2(list) || !isCount(n) || n < list.length) return null;
+    counts[k2] = n;
+  }
+  if (missing !== void 0 && !(Array.isArray(missing) && missing.length && missing.every((m) => oneOf(SATURATION_INPUTS, m)))) return null;
+  if (blocking.includes("inputs") !== (missing !== void 0)) return null;
+  const ids = (k2) => [...lists[k2]];
+  return {
+    saturated,
+    at: at2,
+    rounds,
+    blocking: [...blocking],
+    evidence: { pendingTasks: ids("pendingTasks"), validatorsFailed: ids("validatorsFailed"), openFindings: e.openFindings, openDefects: ids("openDefects"), openProposals: ids("openProposals") },
+    waiting: {
+      parked: ids("parked"),
+      questions: w.questions,
+      blocked: w.blocked,
+      deferred: w.deferred,
+      waitsOwner: ids("waitsOwner"),
+      unowned: ids("unowned"),
+      blockedTasks: ids("blockedTasks"),
+      unplaced: ids("unplaced"),
+      orphanFindings: ids("orphanFindings")
+    },
+    counts,
+    ...missing !== void 0 ? { missing: [...missing] } : {}
+  };
+}
+function parseRun(text3) {
+  if (text3 === null) return null;
+  let o;
+  try {
+    const x2 = JSON.parse(text3);
+    if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
+    o = x2;
+  } catch {
+    return null;
+  }
+  if (o.mode !== "infinite" || typeof o.active !== "boolean" || typeof o.repeatedError !== "boolean") return null;
+  if (typeof o.startedAt !== "string" || Number.isNaN(Date.parse(o.startedAt))) return null;
+  if (!isCount(o.cycle) || !isCount(o.noProgress) || !isPositiveInt(o.queueMax)) return null;
+  if (o.lastError !== null && typeof o.lastError !== "string") return null;
+  if (o.lastBlockEvents !== null && !isCount(o.lastBlockEvents)) return null;
+  if (o.stoppedReason !== void 0 && typeof o.stoppedReason !== "string") return null;
+  if (o.sessionId !== null && (typeof o.sessionId !== "string" || !o.sessionId)) return null;
+  if (o.blocksSinceCycle !== void 0 && !isCount(o.blocksSinceCycle)) return null;
+  const autonomous = o.autonomous === void 0 ? void 0 : autonomousOf(o.autonomous);
+  if (autonomous === null) return null;
+  const b = o.budget;
+  if (!b || typeof b !== "object" || Array.isArray(b)) return null;
+  const { cycles, hours } = b;
+  if (cycles !== void 0 && !isPositiveInt(cycles)) return null;
+  if (hours !== void 0 && !isPositive(hours)) return null;
+  const run2 = {
+    mode: "infinite",
+    active: o.active,
+    startedAt: o.startedAt,
+    budget: { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {} },
+    cycle: o.cycle,
+    noProgress: o.noProgress,
+    lastError: o.lastError,
+    repeatedError: o.repeatedError,
+    lastBlockEvents: o.lastBlockEvents,
+    queueMax: o.queueMax,
+    sessionId: o.sessionId,
+    blocksSinceCycle: o.blocksSinceCycle ?? 0
+  };
+  if (o.stoppedReason !== void 0) run2.stoppedReason = o.stoppedReason;
+  if (isLocale(o.locale)) run2.locale = o.locale;
+  if (autonomous) run2.autonomous = autonomous;
+  const explore = exploreOf(o.explore);
+  if (explore) run2.explore = explore;
+  if (o.saturation === null) run2.saturation = null;
+  else {
+    const saturation = saturationReportOf(o.saturation);
+    if (saturation) run2.saturation = saturation;
+  }
+  return run2;
+}
+
 // src/page/normalize.ts
-var isObj3 = (x2) => typeof x2 === "object" && x2 !== null && !Array.isArray(x2);
+var isObj5 = (x2) => typeof x2 === "object" && x2 !== null && !Array.isArray(x2);
 var str3 = (v) => String(v ?? "");
 var optStr = (v) => typeof v === "string" ? v : void 0;
 var arr = (v) => Array.isArray(v) ? v : [];
@@ -12337,18 +12873,18 @@ function keepAll(list, keep, field2, report) {
 var LINK_MAX = 500;
 var NOT_IN_URL = new RegExp(`[\\s\\u0000-\\u001f\\u007f-\\u009f${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`);
 function linksOf(x2) {
-  if (!isObj3(x2)) return {};
+  if (!isObj5(x2)) return {};
   const links = {};
   if (typeof x2.design === "string" && x2.design.startsWith("https://") && x2.design.length <= LINK_MAX && !NOT_IN_URL.test(x2.design)) links.design = x2.design;
   if (typeof x2.designVersion === "number" && Number.isInteger(x2.designVersion) && x2.designVersion > 0) links.designVersion = x2.designVersion;
   return Object.keys(links).length ? { links } : {};
 }
 function normalizeMeta(x2, report) {
-  if (!isObj3(x2)) return null;
-  const mt2 = isObj3(x2.metrics) ? x2.metrics : {};
+  if (!isObj5(x2)) return null;
+  const mt2 = isObj5(x2.metrics) ? x2.metrics : {};
   const metrics = { ...mt2 };
   const lc = mt2.lastCommit;
-  if (isObj3(lc) && typeof lc.sha === "string" && typeof lc.ts === "string") metrics.lastCommit = { sha: lc.sha, ts: lc.ts };
+  if (isObj5(lc) && typeof lc.sha === "string" && typeof lc.ts === "string") metrics.lastCommit = { sha: lc.sha, ts: lc.ts };
   else {
     delete metrics.lastCommit;
     if (lc !== void 0) report?.("metrics.lastCommit", "dropped", kindOf2(lc));
@@ -12358,9 +12894,9 @@ function normalizeMeta(x2, report) {
     locale: str3(x2.locale),
     version: str3(x2.version),
     planHash: str3(x2.planHash),
-    tracks: keepAll(arr(x2.tracks), (t) => isObj3(t) && typeof t.id === "string" && typeof t.name === "string", "tracks", report),
+    tracks: keepAll(arr(x2.tracks), (t) => isObj5(t) && typeof t.id === "string" && typeof t.name === "string", "tracks", report),
     // G-25: a version's target is a date; any other value is dropped (and reported).
-    versions: arr(x2.versions).filter(isObj3).map((v, i) => {
+    versions: arr(x2.versions).filter(isObj5).map((v, i) => {
       if (v.target === void 0 || typeof v.target === "string" && realDate(v.target)) return v;
       report?.(`versions[${i}].target`, "dropped", kindOf2(v.target));
       const { target: _t, ...rest } = v;
@@ -12378,7 +12914,7 @@ function normalizeTask(t) {
   return { ...t, id: t.id, title: t.title, depends_on: strs(t.depends_on), zones: strs(t.zones), done_when: typeof t.done_when === "string" ? t.done_when : "", track: str3(t.track), phase: str3(t.phase) };
 }
 function normalizePhase(x2, report) {
-  if (!isObj3(x2) || typeof x2.id !== "string") return null;
+  if (!isObj5(x2) || typeof x2.id !== "string") return null;
   const out = {
     ...x2,
     id: x2.id,
@@ -12386,7 +12922,7 @@ function normalizePhase(x2, report) {
     order: typeof x2.order === "number" && Number.isFinite(x2.order) ? x2.order : 0,
     // The plan's own default (plan.ts: committed); any other value would reach a class name in the views.
     plan_status: x2.plan_status === "provisional" ? "provisional" : "committed",
-    tasks: keepAll(arr(x2.tasks), (t) => isObj3(t) && typeof t.id === "string" && typeof t.title === "string", "tasks", report).map(normalizeTask)
+    tasks: keepAll(arr(x2.tasks), (t) => isObj5(t) && typeof t.id === "string" && typeof t.title === "string", "tasks", report).map(normalizeTask)
   };
   if (x2.plan_status !== void 0 && x2.plan_status !== "committed" && x2.plan_status !== "provisional") report?.("plan_status", "coerced", kindOf2(x2.plan_status));
   const goal = typeof x2.goal === "string" ? cleanText(x2.goal, 300) : "";
@@ -12398,9 +12934,9 @@ function normalizePhase(x2, report) {
   return out;
 }
 function normalizeState(x2, report) {
-  const o = isObj3(x2) ? x2 : {};
+  const o = isObj5(x2) ? x2 : {};
   const s = { ...o };
-  s.commits = keepAll(arr(o.commits), (c) => isObj3(c) && typeof c.sha === "string" && typeof c.title === "string", "commits", report);
+  s.commits = keepAll(arr(o.commits), (c) => isObj5(c) && typeof c.sha === "string" && typeof c.title === "string", "commits", report);
   if (!("commits" in o) || o.commits === void 0) delete s.commits;
   s.blockedBy = Array.isArray(o.blockedBy) ? strs(o.blockedBy) : void 0;
   const reason = typeof o.blockedReason === "string" ? cleanText(o.blockedReason, REASON_MAX) : "";
@@ -12428,7 +12964,7 @@ function normalizeExec(x2, report) {
     report?.("exec", "dropped", why);
     return void 0;
   };
-  if (!isObj3(x2)) return drop(kindOf2(x2));
+  if (!isObj5(x2)) return drop(kindOf2(x2));
   if (typeof x2.runId !== "string") return drop("no runId");
   if (typeof x2.by !== "string") return drop("no by");
   const since = isoOrNull(x2.since), leaseUntil = isoOrNull(x2.leaseUntil);
@@ -12442,7 +12978,7 @@ function normalizeExec(x2, report) {
 }
 var finite = (v) => typeof v === "number" && Number.isFinite(v);
 function normalizeForge(x2, report) {
-  if (isObj3(x2) && x2.v === 2) {
+  if (isObj5(x2) && x2.v === 2) {
     const v2 = parseForgeDocV2(x2, report);
     if (v2) return v2;
   }
@@ -12450,8 +12986,8 @@ function normalizeForge(x2, report) {
 }
 function normalizeForgeV1(x2, report) {
   if (x2 === void 0) return void 0;
-  if (!isObj3(x2) || typeof x2.path !== "string" || typeof x2.phase !== "string") {
-    report?.("forge", "dropped", isObj3(x2) ? "no path or phase" : kindOf2(x2));
+  if (!isObj5(x2) || typeof x2.path !== "string" || typeof x2.phase !== "string") {
+    report?.("forge", "dropped", isObj5(x2) ? "no path or phase" : kindOf2(x2));
     return void 0;
   }
   const f = { path: x2.path, phase: x2.phase };
@@ -12462,18 +12998,18 @@ function normalizeForgeV1(x2, report) {
       if (typeof v === "string" && v) {
         vals.push({ name: v.slice(0, 80), ok: null });
         report?.(`forge.validators[${i}]`, "coerced", "string");
-      } else if (isObj3(v) && typeof v.name === "string" && (typeof v.ok === "boolean" || v.ok === null)) vals.push({ name: v.name, ok: v.ok });
+      } else if (isObj5(v) && typeof v.name === "string" && (typeof v.ok === "boolean" || v.ok === null)) vals.push({ name: v.name, ok: v.ok });
       else report?.(`forge.validators[${i}]`, "dropped", kindOf2(v));
     });
     f.validators = vals;
   }
-  if (isObj3(x2.verdict) && typeof x2.verdict.action === "string") f.verdict = { action: x2.verdict.action, score: finite(x2.verdict.score) ? x2.verdict.score : null };
+  if (isObj5(x2.verdict) && typeof x2.verdict.action === "string") f.verdict = { action: x2.verdict.action, score: finite(x2.verdict.score) ? x2.verdict.score : null };
   if (finite(x2.round)) f.round = x2.round;
   if (finite(x2.cap)) f.cap = x2.cap;
   return f;
 }
 function normalizeSession(x2, report) {
-  const o = isObj3(x2) ? x2 : {};
+  const o = isObj5(x2) ? x2 : {};
   let runId;
   if (safeId(o.runId)) runId = o.runId;
   else if (o.runId != null) report?.("runId", "dropped", typeof o.runId === "string" ? "not a run id" : kindOf2(o.runId));
@@ -12492,10 +13028,10 @@ function normalizeSession(x2, report) {
     leaseUntil: optStr(o.leaseUntil)
   };
 }
-var stateDoc = (x2) => isObj3(x2) ? normalizeState(x2) : null;
-var sessionDoc = (x2) => isObj3(x2) ? normalizeSession(x2) : null;
+var stateDoc = (x2) => isObj5(x2) ? normalizeState(x2) : null;
+var sessionDoc = (x2) => isObj5(x2) ? normalizeSession(x2) : null;
 function normalizeMessage(x2) {
-  if (!isObj3(x2)) return null;
+  if (!isObj5(x2)) return null;
   return {
     ts: str3(x2.ts),
     from: str3(x2.from),
@@ -12512,8 +13048,8 @@ var safeId = (v) => typeof v === "string" && SAFE_ID.test(v) && v !== "." && v !
 var safeUrl = (u) => typeof u === "string" && (u.startsWith("https://claude.ai/") || /^\/_blob\/[\w-]+$/.test(u)) ? u : void 0;
 function normalizeEvidence(x2, report) {
   if (x2 === void 0) return void 0;
-  if (!isObj3(x2) || x2.result !== "pass" && x2.result !== "fail" && x2.result !== "blocked") {
-    report?.("evidence", "dropped", isObj3(x2) ? `result ${String(x2.result).slice(0, 20)}` : kindOf2(x2));
+  if (!isObj5(x2) || x2.result !== "pass" && x2.result !== "fail" && x2.result !== "blocked") {
+    report?.("evidence", "dropped", isObj5(x2) ? `result ${String(x2.result).slice(0, 20)}` : kindOf2(x2));
     return void 0;
   }
   const e = {
@@ -12522,7 +13058,7 @@ function normalizeEvidence(x2, report) {
     passed: finite(x2.passed) ? x2.passed : 0,
     total: finite(x2.total) ? x2.total : 0,
     shots: arr(x2.shots).flatMap((v, i) => {
-      if (!isObj3(v) || typeof v.ok !== "boolean") {
+      if (!isObj5(v) || typeof v.ok !== "boolean") {
         report?.(`evidence.shots[${i}]`, "dropped", kindOf2(v));
         return [];
       }
@@ -12585,7 +13121,7 @@ function readDocs(dir, normalize) {
 }
 
 // src/lib/design.ts
-var import_yaml2 = __toESM(require_dist(), 1);
+var import_yaml3 = __toESM(require_dist(), 1);
 var ID = /^[A-Za-z0-9_.-]{1,64}$/;
 var DESIGN_STATUSES = ["draft", "approved", "parked"];
 function designSchemas() {
@@ -12615,15 +13151,15 @@ var DesignError = class extends Error {
 };
 var FM = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?([\s\S]*)$/;
 var BOM = String.fromCharCode(65279);
-function frontMatterOf(text2) {
-  return FM.exec(text2.startsWith(BOM) ? text2.slice(1) : text2);
+function frontMatterOf(text3) {
+  return FM.exec(text3.startsWith(BOM) ? text3.slice(1) : text3);
 }
-function parseDesign(text2) {
-  const m = frontMatterOf(text2);
+function parseDesign(text3) {
+  const m = frontMatterOf(text3);
   if (!m) throw new DesignError(["missing front matter block (--- ... ---) at the top of design.md"]);
   let raw;
   try {
-    raw = (0, import_yaml2.parse)(m[1] ?? "");
+    raw = (0, import_yaml3.parse)(m[1] ?? "");
   } catch (e) {
     throw new DesignError([`YAML: ${e.message}`]);
   }
@@ -12632,32 +13168,32 @@ function parseDesign(text2) {
   const body = m[2];
   return { meta: r2.data, body, sections: sectionsOf(body), words: wordCount(body) };
 }
-function setDesignStatus(text2, status) {
-  const bom = text2.startsWith(BOM) ? BOM : "";
-  const rest = bom ? text2.slice(1) : text2;
+function setDesignStatus(text3, status2) {
+  const bom = text3.startsWith(BOM) ? BOM : "";
+  const rest = bom ? text3.slice(1) : text3;
   const m = /^(---\r?\n)([\s\S]*?)(\r?\n---(?:\r?\n|$))/.exec(rest);
   if (!m) throw new DesignError(["missing front matter block (--- ... ---) at the top of design.md"]);
   const eol = m[1].endsWith("\r\n") ? "\r\n" : "\n";
   const lines2 = m[2].split(/\r?\n/);
   const at2 = lines2.findIndex((l3) => /^status\s*:/.test(l3));
-  if (at2 >= 0) lines2[at2] = `status: ${status}`;
-  else lines2.push(`status: ${status}`);
+  if (at2 >= 0) lines2[at2] = `status: ${status2}`;
+  else lines2.push(`status: ${status2}`);
   return `${bom}${m[1]}${lines2.join(eol)}${m[3]}${rest.slice(m[0].length)}`;
 }
 var SLUG_MAX = 80;
 var cutSlug = (slug, max) => slug.slice(0, max).replace(/-+$/, "");
-function designBody(text2) {
-  const t = text2.startsWith(BOM) ? text2.slice(1) : text2;
+function designBody(text3) {
+  const t = text3.startsWith(BOM) ? text3.slice(1) : text3;
   const m = FM.exec(t);
   return m ? m[2] : t;
 }
-function designStatus(text2) {
-  const m = FM.exec(text2.startsWith(BOM) ? text2.slice(1) : text2);
+function designStatus(text3) {
+  const m = FM.exec(text3.startsWith(BOM) ? text3.slice(1) : text3);
   if (!m) return null;
   try {
-    const raw = (0, import_yaml2.parse)(m[1] ?? "");
-    const status = raw && typeof raw === "object" ? raw.status : void 0;
-    return typeof status === "string" ? status : null;
+    const raw = (0, import_yaml3.parse)(m[1] ?? "");
+    const status2 = raw && typeof raw === "object" ? raw.status : void 0;
+    return typeof status2 === "string" ? status2 : null;
   } catch {
     return null;
   }
@@ -12674,11 +13210,11 @@ var LINE_BREAK = new RegExp(`[\\r${String.fromCharCode(8232, 8233)}]`);
 function headingOf(line3) {
   const level = line3.startsWith("###") ? 3 : line3.startsWith("##") ? 2 : 0;
   if (!level || !/\s/.test(line3.charAt(level))) return null;
-  let text2 = line3.slice(level).trim();
-  let end = text2.length;
-  while (end > 0 && text2.charCodeAt(end - 1) === 35) end--;
-  if (end > 0 && end < text2.length && /\s/.test(text2.charAt(end - 1))) text2 = text2.slice(0, end).trimEnd();
-  return text2 && !LINE_BREAK.test(text2) ? { level, text: text2 } : null;
+  let text3 = line3.slice(level).trim();
+  let end = text3.length;
+  while (end > 0 && text3.charCodeAt(end - 1) === 35) end--;
+  if (end > 0 && end < text3.length && /\s/.test(text3.charAt(end - 1))) text3 = text3.slice(0, end).trimEnd();
+  return text3 && !LINE_BREAK.test(text3) ? { level, text: text3 } : null;
 }
 function parseSections(body) {
   const out = [];
@@ -12729,25 +13265,25 @@ function changedSections(prev, next) {
   const before = new Map([["_intro", norm2(p.intro)], ...p.sections.map((s) => [s.slug, norm2(s.text)])]);
   const after = [["_intro", norm2(n.intro)], ...n.sections.map((s) => [s.slug, norm2(s.text)])];
   const changed = [];
-  for (const [slug, text2] of after) {
+  for (const [slug, text3] of after) {
     const old = before.get(slug);
-    if (slug === "_intro" ? (old ?? "") !== text2 : old !== text2) changed.push(slug);
+    if (slug === "_intro" ? (old ?? "") !== text3 : old !== text3) changed.push(slug);
   }
   const kept = new Set(n.sections.map((s) => s.slug));
   return { changed, removed: p.sections.map((s) => s.slug).filter((s) => !kept.has(s)) };
 }
 
 // src/lib/design-import.ts
-var import_yaml3 = __toESM(require_dist(), 1);
+var import_yaml4 = __toESM(require_dist(), 1);
 var SpecImportError = class extends Error {
 };
 var SUMMARY_MAX2 = 400;
 var BOM2 = String.fromCharCode(65279);
 var PURPOSE = /prop[oó]sito|purpose|overview|resumen|summary|objetivo|goal/i;
-function linesOf(text2) {
+function linesOf(text3) {
   const out = [];
   let fence = null;
-  for (const piece of text2.split(/(?<=\n)/)) {
+  for (const piece of text3.split(/(?<=\n)/)) {
     const t = piece.replace(/\r?\n$/, "");
     if (fence) {
       out.push({ text: t, fenced: true });
@@ -12778,8 +13314,8 @@ function firstParagraph(lines2) {
   if (!para.length) return null;
   return para.join(" ").replace(/\s+/g, " ").trim().slice(0, SUMMARY_MAX2).trimEnd();
 }
-function importSpec(text2, opts) {
-  const src = text2.startsWith(BOM2) ? text2.slice(1) : text2;
+function importSpec(text3, opts) {
+  const src = text3.startsWith(BOM2) ? text3.slice(1) : text3;
   const lines2 = linesOf(src);
   const h1 = lines2.findIndex((l3) => !l3.fenced && /^#\s+\S/.test(l3.text));
   if (h1 < 0) throw new SpecImportError('the spec has no "# " title');
@@ -12797,7 +13333,7 @@ function importSpec(text2, opts) {
   const meta = { title, project: opts.project, locale: opts.locale, summary, pillars: [], start_prompt: "/waypoint:work <track>", status: "draft", source: opts.source };
   const body = src.split(/(?<=\n)/).slice(h1 + 1).join("").replace(/^(?:[ \t]*\r?\n)+/, "");
   return `---
-${(0, import_yaml3.stringify)(meta, { lineWidth: 0 })}---
+${(0, import_yaml4.stringify)(meta, { lineWidth: 0 })}---
 
 ${body}`;
 }
@@ -12842,10 +13378,10 @@ var CritiqueError = class extends Error {
 function verdictOf(c) {
   return c.proposals.some((p) => p.severity !== "minor") ? "changes" : "ready";
 }
-function parseCritique(text2) {
+function parseCritique(text3) {
   let raw;
   try {
-    raw = JSON.parse(text2);
+    raw = JSON.parse(text3);
   } catch {
     throw new CritiqueError(["critique is not valid JSON"]);
   }
@@ -12981,11 +13517,11 @@ function nextVersion(files) {
   const v = listVersions(files);
   return v.length ? v[v.length - 1] + 1 : 1;
 }
-function parseChangelog(text2) {
-  if (!text2 || !text2.trim()) return [];
+function parseChangelog(text3) {
+  if (!text3 || !text3.trim()) return [];
   let raw;
   try {
-    raw = JSON.parse(text2);
+    raw = JSON.parse(text3);
   } catch {
     throw new Error("changelog.json is not valid JSON");
   }
@@ -13074,11 +13610,11 @@ function appliedVersion(changelog, round, n) {
 function resolvedIn(changelog, round) {
   return new Set(changelog.flatMap((e) => (e.resolved ?? []).filter((x2) => x2.round === round).map((x2) => x2.n)));
 }
-function parseDismissed(text2) {
-  if (text2 && text2.length > DISMISSED_MAX_CHARS) return {};
+function parseDismissed(text3) {
+  if (text3 && text3.length > DISMISSED_MAX_CHARS) return {};
   let raw;
   try {
-    raw = JSON.parse(text2 ?? "");
+    raw = JSON.parse(text3 ?? "");
   } catch {
     return {};
   }
@@ -14549,9 +15085,9 @@ function renderMarkdown(md) {
   const marked = new F({ gfm: true, async: false });
   marked.use({
     renderer: {
-      html({ text: text2, block }) {
-        return block ? `<p>${esc(text2)}</p>
-` : esc(text2);
+      html({ text: text3, block }) {
+        return block ? `<p>${esc(text3)}</p>
+` : esc(text3);
       },
       heading(token) {
         const { tokens: tokens2, depth } = token;
@@ -14568,13 +15104,13 @@ function renderMarkdown(md) {
 `;
       },
       link({ href, title, tokens: tokens2 }) {
-        const text2 = this.parser.parseInline(tokens2);
-        if (!SAFE.test(href.trim())) return text2;
-        return `<a href="${esc(href)}"${title ? ` title="${esc(title)}"` : ""} rel="noopener noreferrer">${text2}</a>`;
+        const text3 = this.parser.parseInline(tokens2);
+        if (!SAFE.test(href.trim())) return text3;
+        return `<a href="${esc(href)}"${title ? ` title="${esc(title)}"` : ""} rel="noopener noreferrer">${text3}</a>`;
       },
-      image({ href, text: text2 }) {
-        if (!/^https?:/i.test(href.trim())) return esc(text2);
-        return `<img src="${esc(href)}" alt="${esc(text2)}" loading="lazy">`;
+      image({ href, text: text3 }) {
+        if (!/^https?:/i.test(href.trim())) return esc(text3);
+        return `<img src="${esc(href)}" alt="${esc(text3)}" loading="lazy">`;
       }
     }
   });
@@ -14679,75 +15215,6 @@ var import_node_fs3 = require("node:fs");
 var import_node_path3 = __toESM(require("node:path"), 1);
 var import_node_child_process = require("node:child_process");
 
-// src/lib/forge-run.ts
-var PROFILES = ["spike", "product"];
-var AUTONOMOUS_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-var MAX_AUTONOMOUS_NAME = 40;
-var isAutonomousName = (x2) => typeof x2 === "string" && x2.length <= MAX_AUTONOMOUS_NAME && AUTONOMOUS_NAME.test(x2);
-var isBranchName = (x2) => typeof x2 === "string" && x2 !== "" && !x2.includes("..") && !x2.startsWith("-") && !/[\s\u0000-\u001f\u007f]/.test(x2);
-var isAbsolutePath = (x2) => typeof x2 === "string" && /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(x2);
-function autonomousOf(x2) {
-  if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
-  const a = x2;
-  if (!PROFILES.includes(a.profile)) return null;
-  const profile = a.profile;
-  if (!isAutonomousName(a.name)) return null;
-  const runId = `${profile}-${a.name}`;
-  if (a.runId !== runId || a.branch !== `forge/${runId}` || !isAbsolutePath(a.worktree) || !isBranchName(a.startBranch)) return null;
-  const pb = a.protectedBranches;
-  if (!Array.isArray(pb) || pb.length < 1 || pb.length > 10 || !pb.every(isBranchName)) return null;
-  return { profile, name: a.name, runId, worktree: a.worktree, branch: a.branch, startBranch: a.startBranch, protectedBranches: [...pb] };
-}
-var LOCALE = /^[a-z]{2,3}([-_][A-Za-z0-9]{2,8})?$/;
-var isLocale = (x2) => typeof x2 === "string" && LOCALE.test(x2);
-var isCount = (x2) => typeof x2 === "number" && Number.isInteger(x2) && x2 >= 0;
-var isPositiveInt = (x2) => isCount(x2) && x2 > 0;
-var isPositive = (x2) => typeof x2 === "number" && Number.isFinite(x2) && x2 > 0;
-function parseRun(text2) {
-  if (text2 === null) return null;
-  let o;
-  try {
-    const x2 = JSON.parse(text2);
-    if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
-    o = x2;
-  } catch {
-    return null;
-  }
-  if (o.mode !== "infinite" || typeof o.active !== "boolean" || typeof o.repeatedError !== "boolean") return null;
-  if (typeof o.startedAt !== "string" || Number.isNaN(Date.parse(o.startedAt))) return null;
-  if (!isCount(o.cycle) || !isCount(o.noProgress) || !isPositiveInt(o.queueMax)) return null;
-  if (o.lastError !== null && typeof o.lastError !== "string") return null;
-  if (o.lastBlockEvents !== null && !isCount(o.lastBlockEvents)) return null;
-  if (o.stoppedReason !== void 0 && typeof o.stoppedReason !== "string") return null;
-  if (o.sessionId !== null && (typeof o.sessionId !== "string" || !o.sessionId)) return null;
-  if (o.blocksSinceCycle !== void 0 && !isCount(o.blocksSinceCycle)) return null;
-  const autonomous = o.autonomous === void 0 ? void 0 : autonomousOf(o.autonomous);
-  if (autonomous === null) return null;
-  const b = o.budget;
-  if (!b || typeof b !== "object" || Array.isArray(b)) return null;
-  const { cycles, hours } = b;
-  if (cycles !== void 0 && !isPositiveInt(cycles)) return null;
-  if (hours !== void 0 && !isPositive(hours)) return null;
-  const run2 = {
-    mode: "infinite",
-    active: o.active,
-    startedAt: o.startedAt,
-    budget: { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {} },
-    cycle: o.cycle,
-    noProgress: o.noProgress,
-    lastError: o.lastError,
-    repeatedError: o.repeatedError,
-    lastBlockEvents: o.lastBlockEvents,
-    queueMax: o.queueMax,
-    sessionId: o.sessionId,
-    blocksSinceCycle: o.blocksSinceCycle ?? 0
-  };
-  if (o.stoppedReason !== void 0) run2.stoppedReason = o.stoppedReason;
-  if (isLocale(o.locale)) run2.locale = o.locale;
-  if (autonomous) run2.autonomous = autonomous;
-  return run2;
-}
-
 // src/lib/execution-state.ts
 var SAFE_ID2 = /^[A-Za-z0-9_\-.]{1,120}$/;
 var isSafeId = (s) => typeof s === "string" && SAFE_ID2.test(s) && s !== "." && s !== "..";
@@ -14756,7 +15223,7 @@ var isRunBranch = (s) => typeof s === "string" && RUN_BRANCH.test(s) && !s.inclu
 var TASK_STATUSES2 = ["running", "accepted", "integrated", "conflict", "blocked", "stopped"];
 var STOPS = ["finished", "stalled", "stopped", "budget", "migrated"];
 var MAX_TASKS = 500;
-var isObj4 = (x2) => !!x2 && typeof x2 === "object" && !Array.isArray(x2);
+var isObj6 = (x2) => !!x2 && typeof x2 === "object" && !Array.isArray(x2);
 var str4 = (x2) => typeof x2 === "string" && x2 ? x2 : null;
 var iso3 = (x2) => typeof x2 === "string" && !Number.isNaN(Date.parse(x2)) ? x2 : null;
 var FUTURE_SKEW_MS2 = 12e4;
@@ -14766,20 +15233,20 @@ var finishedOf = (x2, now) => {
   return now !== void 0 && Number.isFinite(now) && Date.parse(v) - now > FUTURE_SKEW_MS2 ? null : v;
 };
 var int2 = (x2, min, max, dflt) => typeof x2 === "number" && Number.isInteger(x2) ? Math.min(max, Math.max(min, x2)) : dflt;
-var oneOf = (list, x2) => list.includes(x2) ? x2 : null;
+var oneOf2 = (list, x2) => list.includes(x2) ? x2 : null;
 var cleanTitle = (x2) => typeof x2 === "string" ? x2.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 200) : "";
 function normalizeTask2(x2, now) {
-  if (!isObj4(x2)) return null;
-  const status = oneOf(TASK_STATUSES2, x2.status);
-  const stage = oneOf(STAGES, x2.stage);
-  const executor = oneOf(["subagents", "sessions", "manual"], x2.executor);
+  if (!isObj6(x2)) return null;
+  const status2 = oneOf2(TASK_STATUSES2, x2.status);
+  const stage = oneOf2(STAGES, x2.stage);
+  const executor = oneOf2(["subagents", "sessions", "manual"], x2.executor);
   const worktree = typeof x2.worktree === "string" ? x2.worktree : null;
   const branch = str4(x2.branch);
   const startedAt = iso3(x2.startedAt);
-  if (!status || !stage || !executor || worktree === null || !branch || !startedAt) return null;
+  if (!status2 || !stage || !executor || worktree === null || !branch || !startedAt) return null;
   const title = cleanTitle(x2.title);
   return {
-    status,
+    status: status2,
     stage,
     executor,
     worktree,
@@ -14800,21 +15267,21 @@ function normalizeTask2(x2, now) {
 var SURFACE = /^[A-Za-z0-9_.:-]{1,64}$/;
 var surfaceList = (x2) => Array.isArray(x2) ? [...new Set(x2.filter((s) => typeof s === "string" && SURFACE.test(s) && s !== "." && s !== ".."))].slice(0, 100) : null;
 var flowOf = (x2) => {
-  if (!isObj4(x2) || typeof x2.sha !== "string" || !/^[0-9a-f]{7,64}$/i.test(x2.sha) || !iso3(x2.at)) return null;
-  const result = oneOf(["pass", "fail", "blocked"], x2.result);
+  if (!isObj6(x2) || typeof x2.sha !== "string" || !/^[0-9a-f]{7,64}$/i.test(x2.sha) || !iso3(x2.at)) return null;
+  const result = oneOf2(["pass", "fail", "blocked"], x2.result);
   const since = typeof x2.since === "string" && /^[0-9a-f]{7,64}$/i.test(x2.since) ? x2.since : null;
   return result ? { sha: x2.sha, at: x2.at, result, ...since ? { since } : {}, ...x2.whole === true ? { whole: true } : {} } : null;
 };
 function normalizeExecution(x2, now) {
-  if (!isObj4(x2)) return null;
-  const mode = oneOf(["subagents", "sessions"], x2.mode);
-  const kind = oneOf(["plan", "ephemeral"], x2.kind) ?? "plan";
+  if (!isObj6(x2)) return null;
+  const mode = oneOf2(["subagents", "sessions"], x2.mode);
+  const kind = oneOf2(["plan", "ephemeral"], x2.kind) ?? "plan";
   const runId = str4(x2.runId), project = str4(x2.project), base = str4(x2.base), branch = str4(x2.branch), coordinator = str4(x2.coordinator);
   const startedAt = iso3(x2.startedAt);
   if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
   if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch) || !isSafeId(project)) return null;
   const tasks = {};
-  if (isObj4(x2.tasks)) {
+  if (isObj6(x2.tasks)) {
     for (const [id, t] of Object.entries(x2.tasks).slice(0, MAX_TASKS)) {
       const n = isPlanId(id) ? normalizeTask2(t, now) : null;
       if (n) tasks[id] = n;
@@ -14834,14 +15301,14 @@ function normalizeExecution(x2, now) {
     mergeOnFinish: x2.mergeOnFinish === true,
     hookSession: isSafeId(x2.hookSession) ? x2.hookSession : null,
     active: x2.active === true,
-    stopReason: oneOf(STOPS, x2.stopReason),
+    stopReason: oneOf2(STOPS, x2.stopReason),
     stallReason: typeof x2.stallReason === "string" ? x2.stallReason.slice(0, 1e3) : null,
     lastStepAt: iso3(x2.lastStepAt),
     lastBlockStep: iso3(x2.lastBlockStep),
     sleepUntil: iso3(x2.sleepUntil),
     // C2: closedBy only means something with a closedAt; an older file has neither.
     closedAt: iso3(x2.closedAt),
-    closedBy: iso3(x2.closedAt) ? oneOf(["merge", "close"], x2.closedBy) : null,
+    closedBy: iso3(x2.closedAt) ? oneOf2(["merge", "close"], x2.closedBy) : null,
     ...typeof x2.planned === "number" && Number.isInteger(x2.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x2.planned)) } : {},
     ...x2.autonomy === "auto" ? { autonomy: "auto" } : {},
     ...isLocale(x2.locale) ? { locale: x2.locale } : {},
@@ -14849,10 +15316,10 @@ function normalizeExecution(x2, now) {
     ...x2.flow !== void 0 ? { flow: flowOf(x2.flow) } : {}
   };
 }
-function parseExecution(text2, now) {
-  if (typeof text2 !== "string") return null;
+function parseExecution(text3, now) {
+  if (typeof text3 !== "string") return null;
   try {
-    return normalizeExecution(JSON.parse(text2), now);
+    return normalizeExecution(JSON.parse(text3), now);
   } catch {
     return null;
   }
@@ -14862,11 +15329,11 @@ var LIVE_STOPPED_MINUTES = 12;
 var LIVE_MAX_AGE_HOURS = 24;
 var FORGE_DOC_MAX_BYTES = 8 * 1024;
 function normalizeLive(x2) {
-  if (!isObj4(x2)) return null;
+  if (!isObj6(x2)) return null;
   const sessionId = str4(x2.sessionId), ts = iso3(x2.ts);
-  const role = oneOf(["coordinator", "executor", "manual"], x2.role);
+  const role = oneOf2(["coordinator", "executor", "manual"], x2.role);
   if (!sessionId || !ts || !role) return null;
-  const agents = Array.isArray(x2.agents) ? x2.agents.filter(isObj4).map((a) => ({ id: str4(a.id), type: str4(a.type) ?? "", since: iso3(a.since) })).filter((a) => !!a.id && !!a.since).slice(0, 20) : [];
+  const agents = Array.isArray(x2.agents) ? x2.agents.filter(isObj6).map((a) => ({ id: str4(a.id), type: str4(a.type) ?? "", since: iso3(a.since) })).filter((a) => !!a.id && !!a.since).slice(0, 20) : [];
   return { sessionId, role, ts, agents, runId: str4(x2.runId), task: str4(x2.task), event: (str4(x2.event) ?? "").slice(0, 40), ended: x2.ended === true };
 }
 
@@ -14911,10 +15378,10 @@ function bindingLive(b, now) {
   const seen = Date.parse(b.seenAt);
   return b.endedAt === null && Number.isFinite(seen) && now < seen + BOUND_LEASE_MS;
 }
-function parseBound(text2, now) {
-  if (typeof text2 !== "string" || !text2 || text2.length > BOUND_MAX_BYTES) return null;
+function parseBound(text3, now) {
+  if (typeof text3 !== "string" || !text3 || text3.length > BOUND_MAX_BYTES) return null;
   try {
-    return normalizeBound(JSON.parse(text2), now);
+    return normalizeBound(JSON.parse(text3), now);
   } catch {
     return null;
   }
@@ -15059,17 +15526,17 @@ function readText(file, max) {
   }
 }
 function readBound(file, now) {
-  const text2 = readText(file, BOUND_MAX_BYTES);
-  const b = parseBound(text2, now);
-  if (b || text2 === null) return b;
+  const text3 = readText(file, BOUND_MAX_BYTES);
+  const b = parseBound(text3, now);
+  if (b || text3 === null) return b;
   pause(BOUND_REREAD_MS);
   return parseBound(readText(file, BOUND_MAX_BYTES), now);
 }
-function writeAtomic(file, text2) {
+function writeAtomic(file, text3) {
   (0, import_node_fs3.mkdirSync)(import_node_path3.default.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs3.writeFileSync)(tmp, text2);
+    (0, import_node_fs3.writeFileSync)(tmp, text3);
     for (let i = 1; ; i++) {
       try {
         (0, import_node_fs3.renameSync)(tmp, file);
@@ -15207,14 +15674,14 @@ function rebaseInProgress(top) {
   }
 }
 function readReflog(top, max = REFLOG_SCAN) {
-  let text2;
+  let text3;
   try {
-    text2 = (0, import_node_child_process.execFileSync)("git", ["-C", top, "log", "-g", "--date=unix", "--format=%gd%x09%H%x09%gs", "-n", String(max), "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    text3 = (0, import_node_child_process.execFileSync)("git", ["-C", top, "log", "-g", "--date=unix", "--format=%gd%x09%H%x09%gs", "-n", String(max), "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   } catch {
     return [];
   }
   const out = [];
-  for (const line3 of text2.split(/\r?\n/)) {
+  for (const line3 of text3.split(/\r?\n/)) {
     const [gd, sha, ...subject] = line3.split("	");
     const m = /^HEAD@\{(\d+)\}$/.exec(gd ?? "");
     if (!m || !sha || !SHA2.test(sha)) continue;
@@ -15244,10 +15711,10 @@ function commitsSince(entries2, pos, since, max) {
 }
 function taskSinceOf(wpDir, task) {
   if (!isPlanId(task)) return null;
-  const text2 = readText(import_node_path3.default.join(wpDir, "dbcache", "state", `${task}.json`), 64 * 1024);
-  if (text2 === null) return null;
+  const text3 = readText(import_node_path3.default.join(wpDir, "dbcache", "state", `${task}.json`), 64 * 1024);
+  if (text3 === null) return null;
   try {
-    const st2 = JSON.parse(text2);
+    const st2 = JSON.parse(text3);
     for (const v of [st2?.claimedAt, st2?.startedAt]) {
       const t = typeof v === "string" ? Date.parse(v) : NaN;
       if (Number.isFinite(t)) return t;
@@ -15257,10 +15724,10 @@ function taskSinceOf(wpDir, task) {
   return null;
 }
 function readLastHead(seatDir) {
-  const text2 = readText(lastHeadFile(seatDir), 64 * 1024);
-  if (text2 === null) return null;
+  const text3 = readText(lastHeadFile(seatDir), 64 * 1024);
+  if (text3 === null) return null;
   try {
-    const o = JSON.parse(text2);
+    const o = JSON.parse(text3);
     if (!o || !isSafeId(o.session) || !o.heads || typeof o.heads !== "object" || Array.isArray(o.heads)) return null;
     const heads = {};
     for (const [k2, v] of Object.entries(o.heads).slice(-HEADS_MAX)) if (typeof v === "string" && SHA2.test(v)) heads[k2] = v;
@@ -15585,16 +16052,16 @@ var BRANCH_RE = /^[A-Za-z0-9_.\/~:@+][A-Za-z0-9_\-.\/~:@+]{0,199}$/;
 // src/lib/git-info.ts
 var import_node_fs5 = require("node:fs");
 var import_node_path6 = __toESM(require("node:path"), 1);
-var hasLine = (text2, line3) => text2.split(/\r?\n/).some((l3) => l3.trim() === line3);
+var hasLine = (text3, line3) => text3.split(/\r?\n/).some((l3) => l3.trim() === line3);
 function appendOnce(file, line3) {
-  let text2 = "";
+  let text3 = "";
   try {
-    text2 = (0, import_node_fs5.readFileSync)(file, "utf8");
+    text3 = (0, import_node_fs5.readFileSync)(file, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
-  if (hasLine(text2, line3)) return;
-  (0, import_node_fs5.appendFileSync)(file, `${text2 && !text2.endsWith("\n") ? "\n" : ""}${line3}
+  if (hasLine(text3, line3)) return;
+  (0, import_node_fs5.appendFileSync)(file, `${text3 && !text3.endsWith("\n") ? "\n" : ""}${line3}
 `);
 }
 var gitToplevel = (git) => git(["rev-parse", "--show-toplevel"])?.trim() || null;
@@ -15634,7 +16101,7 @@ var import_node_crypto2 = require("node:crypto");
 // src/lib/locale.ts
 var import_node_fs6 = require("node:fs");
 var import_node_path7 = __toESM(require("node:path"), 1);
-var import_yaml4 = __toESM(require_dist(), 1);
+var import_yaml5 = __toESM(require_dist(), 1);
 var NAMES = {
   es: "Spanish",
   en: "English",
@@ -15660,7 +16127,7 @@ function planLocale(root, project) {
     for (const p of projects) {
       const file = import_node_path7.default.join(docs, p, "plan.yaml");
       if (!(0, import_node_fs6.existsSync)(file)) continue;
-      const raw = (0, import_yaml4.parse)((0, import_node_fs6.readFileSync)(file, "utf8"));
+      const raw = (0, import_yaml5.parse)((0, import_node_fs6.readFileSync)(file, "utf8"));
       const locale = raw && typeof raw === "object" && !Array.isArray(raw) ? raw.locale : null;
       return isLocale(locale) ? locale : null;
     }
@@ -15908,7 +16375,7 @@ function sessionStart(io, input) {
   const ctx = contextOf(io, input);
   if (!ctx) return "";
   const source = SOURCES.includes(input.source) ? input.source : "startup";
-  const say = (text2) => text2 ? JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text2 } }) : "";
+  const say = (text3) => text3 ? JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text3 } }) : "";
   const v = ctx.viewer;
   renewOwn(ctx, io, source === "resume" || source === "compact");
   if (v.subject === "execution") return "";
@@ -16036,12 +16503,12 @@ function postCommit(io, input) {
     if (git(["merge-base", "--is-ancestor", last, at2.head]) === null) {
       if (rebaseInProgress(at2.top)) return "";
       const all = lines(file);
-      let checked = 0;
+      let checked2 = 0;
       const replays = replaysSince(reflog, pos);
       const kept = all.flatMap((l3) => {
         const s = field(l3, "sha");
-        if (!s || !SHA3.test(s) || checked >= MAX_COMMITS) return [l3];
-        checked++;
+        if (!s || !SHA3.test(s) || checked2 >= MAX_COMMITS) return [l3];
+        checked2++;
         if (git(["merge-base", "--is-ancestor", s, at2.head]) !== null) return [l3];
         const subject = replays.length ? git(["log", "-1", "--format=%s", s])?.trim() : void 0;
         const k2 = subject ? replays.findIndex((r3) => r3.subject === subject && git(["merge-base", "--is-ancestor", r3.sha, at2.head]) !== null) : -1;
@@ -16183,7 +16650,7 @@ var noClaudeSession = (cmd, flagName) => `${cmd}: no Claude session id: pass ${f
 
 // src/cli/run.ts
 var nodeSpawn = (command, options) => (0, import_node_child_process4.spawn)(command, options);
-var USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
+var USAGE = `usage: waypoint <validate|replan|hash|clean-cache|page|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
 function run(argv, io) {
   const [cmd, ...args] = argv;
   const flag = (name) => {
@@ -16248,14 +16715,14 @@ function run(argv, io) {
     return { sid, task, v };
   };
   const readDesignArg = (cmd2, arg) => {
-    let text2;
+    let text3;
     try {
-      text2 = (0, import_node_fs8.readFileSync)(abs(arg), "utf8");
+      text3 = (0, import_node_fs8.readFileSync)(abs(arg), "utf8");
     } catch (e) {
       return fail(`${cmd2}: cannot read the design ${arg}: ${e.message}`, 2);
     }
     try {
-      return parseDesign(text2);
+      return parseDesign(text3);
     } catch (e) {
       return fail(`${cmd2}: ${arg} is not a design: ${e.message}`, 2);
     }
@@ -16301,6 +16768,49 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
           }
         }
         return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}${refs}`);
+      }
+      case "replan": {
+        const stray = [];
+        for (let i = 1; i < args.length; i++) {
+          if (args[i] === "--ops" || args[i] === "--why-file") i++;
+          else if (args[i] !== "--check") stray.push(JSON.stringify(args[i].slice(0, 80)));
+        }
+        if (stray.length) return fail(`replan: unknown argument ${stray.join(", ")} (it takes <plan.yaml> --ops <f> --why-file <f> [--check])`, 2);
+        const opsFile = flag("ops"), whyFile = flag("why-file");
+        if (!args[0] || args[0].startsWith("--") || !opsFile || !whyFile) return fail("usage: waypoint replan <plan.yaml> --ops <ops.json> --why-file <why.txt> [--check]", 2);
+        const file = abs(args[0]);
+        const read2 = (f) => {
+          const s = (0, import_node_fs8.readFileSync)(abs(f), "utf8");
+          return s.charCodeAt(0) === 65279 ? s.slice(1) : s;
+        };
+        let text3, raw, why;
+        try {
+          text3 = (0, import_node_fs8.readFileSync)(file, "utf8");
+        } catch {
+          return fail(`replan: cannot read ${args[0]}`, 2);
+        }
+        try {
+          raw = JSON.parse(read2(opsFile));
+        } catch {
+          return fail(`replan: cannot read ${opsFile} as JSON`, 2);
+        }
+        try {
+          why = read2(whyFile);
+        } catch {
+          return fail(`replan: cannot read ${whyFile}`, 2);
+        }
+        const { ops, errors } = normalizeOps(raw);
+        if (errors.length) return fail(new ReplanError(errors).message, 2);
+        let r2;
+        try {
+          r2 = applyReplan(text3, ops, why, io.now().toISOString());
+        } catch (e) {
+          if (e instanceof ReplanError) return fail(e.message, 2);
+          throw e;
+        }
+        if (args.includes("--check")) return ok(JSON.stringify({ changes: r2.changes }));
+        if (r2.text !== text3) writeAtomic(file, r2.text);
+        return ok(JSON.stringify({ changes: r2.changes, history: parsePlan(r2.text).history?.length ?? 0 }));
       }
       case "clean-cache": {
         const p = loadPlan();
@@ -16457,13 +16967,13 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
           if (!flag(f) || !(0, import_node_fs8.existsSync)(abs(flag(f)))) return fail(`recover: --${f} cache missing \u2014 list it first`);
         }
         const { view } = loadView();
-        const minutes = Number(flag("minutes") ?? IDLE_MINUTES);
+        const minutes2 = Number(flag("minutes") ?? IDLE_MINUTES);
         return ok(JSON.stringify(recoverableTasks(
           view,
           docs("states", stateDoc),
           docs("sessions", sessionDoc),
           io.now().getTime(),
-          Number.isFinite(minutes) ? minutes : IDLE_MINUTES
+          Number.isFinite(minutes2) ? minutes2 : IDLE_MINUTES
         )));
       }
       case "notes": {
@@ -16807,16 +17317,16 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
       case "design-park": {
         if (!args[0] || args[0].startsWith("--")) return fail("usage: waypoint design-park <design.md>", 2);
         const file = abs(args[0]);
-        let text2;
+        let text3;
         try {
-          text2 = (0, import_node_fs8.readFileSync)(file, "utf8");
+          text3 = (0, import_node_fs8.readFileSync)(file, "utf8");
         } catch {
           return fail(`design-park: cannot read ${args[0]}`, 2);
         }
-        const d = parseDesign(text2);
+        const d = parseDesign(text3);
         if (d.meta.status === "parked") return ok(JSON.stringify({ path: file, status: "parked", changed: false }));
         if (d.meta.status !== "draft") return fail(`design-park: only a draft design can be parked (this one is ${d.meta.status})`, 2);
-        const next = setDesignStatus(text2, "parked");
+        const next = setDesignStatus(text3, "parked");
         parseDesign(next);
         writeAtomic(file, next);
         return ok(JSON.stringify({ path: file, status: "parked", changed: true }));
@@ -16829,9 +17339,9 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
         if (!/^[A-Za-z0-9_.-]{1,64}$/.test(project) || project === "." || project === "..") return fail(`design-import: invalid project id ${project}`, 2);
         const target = abs(out2);
         if ((0, import_node_fs8.existsSync)(target)) return fail(`design-import: ${out2} already exists; an import never overwrites a design`, 2);
-        let text2;
+        let text3;
         try {
-          text2 = (0, import_node_fs8.readFileSync)(abs(spec), "utf8");
+          text3 = (0, import_node_fs8.readFileSync)(abs(spec), "utf8");
         } catch {
           return fail(`design-import: cannot read ${spec}`, 2);
         }
@@ -16844,7 +17354,7 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
         }
         let design;
         try {
-          design = importSpec(text2, { project, locale: flag("locale") ?? "en", source });
+          design = importSpec(text3, { project, locale: flag("locale") ?? "en", source });
         } catch (e) {
           if (e instanceof SpecImportError) return fail(`design-import: ${e.message}`, 2);
           throw e;
@@ -16878,8 +17388,8 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
           }
         }
         if (!note) return fail("design-snapshot: --note or --note-file is required", 2);
-        const text2 = (0, import_node_fs8.readFileSync)(file, "utf8");
-        const d = parseDesign(text2);
+        const text3 = (0, import_node_fs8.readFileSync)(file, "utf8");
+        const d = parseDesign(text3);
         const base = import_node_path9.default.join(import_node_path9.default.dirname(file), "design");
         const histDir = import_node_path9.default.join(base, "history");
         const log = readChangelog(import_node_path9.default.dirname(file));
@@ -16946,7 +17456,7 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
         (0, import_node_fs8.mkdirSync)(histDir, { recursive: true });
         const dest = import_node_path9.default.join(histDir, `v${version}.md`);
         try {
-          (0, import_node_fs8.writeFileSync)(dest, text2, { flag: "wx" });
+          (0, import_node_fs8.writeFileSync)(dest, text3, { flag: "wx" });
         } catch (e) {
           if (e.code === "EEXIST") return fail(`design-snapshot: ${dest} already exists; history is immutable`);
           throw e;
@@ -16956,8 +17466,8 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
       }
       case "design-changed": {
         const file = abs(args[0]);
-        const text2 = (0, import_node_fs8.readFileSync)(file, "utf8");
-        const d = parseDesign(text2);
+        const text3 = (0, import_node_fs8.readFileSync)(file, "utf8");
+        const d = parseDesign(text3);
         const histDir = import_node_path9.default.join(import_node_path9.default.dirname(file), "design", "history");
         const versions = listVersions((0, import_node_fs8.existsSync)(histDir) ? (0, import_node_fs8.readdirSync)(histDir) : []);
         const sinceFlag = flag("since");
@@ -16975,16 +17485,16 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
       case "design-gate": {
         if (!args[0] || args[0].startsWith("--")) return fail("usage: waypoint design-gate <design.md>", 2);
         const file = abs(args[0]);
-        const text2 = (0, import_node_fs8.readFileSync)(file, "utf8");
-        const d = parseDesign(text2);
+        const text3 = (0, import_node_fs8.readFileSync)(file, "utf8");
+        const d = parseDesign(text3);
         const files = designFilesOf(file, d.meta.project);
-        return ok(JSON.stringify(designGate(readChangelog(files.dir), readCritiques(files), readDismissedOf(files), { history: readHistory(files.dir), current: text2 })));
+        return ok(JSON.stringify(designGate(readChangelog(files.dir), readCritiques(files), readDismissedOf(files), { history: readHistory(files.dir), current: text3 })));
       }
       case "critique-next": {
         if (!args[0] || args[0].startsWith("--")) return fail("usage: waypoint critique-next <design.md> [--verify] [--full]", 2);
         const file = abs(args[0]);
-        const text2 = (0, import_node_fs8.readFileSync)(file, "utf8");
-        const d = parseDesign(text2);
+        const text3 = (0, import_node_fs8.readFileSync)(file, "utf8");
+        const d = parseDesign(text3);
         const files = designFilesOf(file, d.meta.project);
         const critiques = readCritiques(files);
         const verify = args.includes("--verify");
@@ -16993,7 +17503,7 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
           changelog: readChangelog(files.dir),
           critiques,
           history: readHistory(files.dir),
-          current: text2,
+          current: text3,
           sections: d.sections.map((s) => s.slug),
           verify,
           full: args.includes("--full")
@@ -17111,8 +17621,8 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
               if (!allowed.includes(p.section)) warnings.push(`warning: proposal ${p.n} reviews "${line2(p.section)}", outside the changed sections (${line2(allowed.join(", "))})`);
             }
           }
-          const text2 = formatProposals(c, flag("locale") ?? "en", headings);
-          return { code: 0, stdout: text2.endsWith("\n") ? text2 : `${text2}
+          const text3 = formatProposals(c, flag("locale") ?? "en", headings);
+          return { code: 0, stdout: text3.endsWith("\n") ? text3 : `${text3}
 `, stderr: warnings.length ? `${warnings.join("\n")}
 ` : "" };
         } catch (e) {
