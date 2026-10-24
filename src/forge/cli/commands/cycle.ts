@@ -7,7 +7,7 @@ import { UsageError } from '../errors.js';
 import { infinitePublish } from '../../infinite-doc.js';
 import { mainCheckout } from '../../local.js';
 import { proposalsRootOf, runRootOf, runReply, unownedReasons } from '../shared.js';
-import { explorePassed, lastExplore, readValidateFile, saturationOf, writtenAfter, SATURATION_ROUNDS } from '../../saturation.js';
+import { explorePassed, lastCycle, readValidateFile, saturationOf, writtenAfter, SATURATION_ROUNDS } from '../../saturation.js';
 import { SATURATION_INPUTS, type SaturationInput, type SaturationReport } from '../../../lib/forge-run.js';
 import { parsePlan } from '../../../lib/plan.js';
 import type { Plan, PlanView } from '../../../lib/types.js';
@@ -38,9 +38,11 @@ function cycleInputs(cwd: string, flag: Flag): Inputs {
 /**
  * The saturation report of a cycle whose run's `dry` reached SATURATION_ROUNDS: from the run's proposals and marks (its
  * worktree, L-12; loaded once), the listings of --db, the --validate file and the actions the guard blocked. L-10, fix 1: an
- * input not given or not read, and a validate file not written after `since` (the last exploration round), is named missing.
+ * input not given or not read, and (fix 2) a validate file not written after `since` (the previous cycle), is named missing.
+ * T6B3-SAT-EXPLORE-ONLY: `explored` false (a cycle without the scout) never concludes saturated.
  */
-function reportFor(o: { runRoot: string; main: string; run: RunState; dry: number; at: string; now: Date; since: string } & Inputs): SaturationReport {
+function reportFor(o: { runRoot: string; main: string; run: RunState; dry: number; at: string; now: Date; since: string; explored: boolean } & Inputs):
+  SaturationReport {
   const fresh = o.validate !== null && writtenAfter(o.validate, o.since);
   const have: Record<SaturationInput, boolean> = { '--plan': o.plan !== null, '--db': o.db !== null, '--validate': fresh };
   const missing = SATURATION_INPUTS.filter(f => !have[f]);
@@ -56,7 +58,7 @@ function reportFor(o: { runRoot: string; main: string; run: RunState; dry: numbe
     notes: o.db ? Object.values(readDocs(path.join(o.db, 'notes'), normalizeNote).docs) : [],
     blocked: o.run.autonomous ? readBlocked(o.main, o.run.autonomous.runId, Infinity).length : 0,
     toJudge: queue.pending, waitsOwner: queue.waitsOwner, unowned: Object.keys(unownedReasons(root, o.now, proposals, marks)),
-    ...(missing.length ? { missing } : {}),
+    ...(missing.length ? { missing } : {}), explored: o.explored,
   });
 }
 
@@ -82,9 +84,10 @@ export const command: Command = (args, ctx) => {
   const inputs = cycleInputs(io.cwd, flag);
   const main = mainCheckout(io.cwd);
   const at = ts();
-  // T6B3-SAT-WINDOW: the last exploration round, read before this cycle's own event is appended. Its time is the window of what
-  // passed and the time a validate file must be newer than (the run's start before the first round).
-  const since = (current.autonomous ? lastExplore(readEvents(runRoot), current.startedAt)?.ts : undefined) ?? current.startedAt;
+  // T6B3-SAT-EXPLORE-ONLY: the previous cycle, read before this cycle's own event is appended. A validate file must be newer
+  // than it (the run's start before the first cycle), so written in this cycle. What passed is counted from the last
+  // exploration round instead (explorePassed, T6B3-SAT-WINDOW).
+  const since = (current.autonomous ? lastCycle(readEvents(runRoot), current.startedAt)?.ts : undefined) ?? current.startedAt;
   let next = recordCycle(current, { progress: progress === 'yes', ...(error !== undefined ? { error } : {}) });
   let round: { passed: number; dry: number } | null = null;
   if (explore) {
@@ -93,9 +96,13 @@ export const command: Command = (args, ctx) => {
     round = { passed, dry: next.explore!.dry };
   }
   // Fix 1: past the count every cycle computes the report again, with the scout or without it, so it stays fresh; only a round
-  // changes `dry`. Below the count (a round that passed something included) there is none.
+  // changes `dry`, and (fix 2) only a round may conclude saturated. Below the count (a round that passed something included)
+  // there is none.
   const dry = next.explore?.dry;
-  if (dry !== undefined) next = { ...next, saturation: dry < SATURATION_ROUNDS ? null : reportFor({ runRoot, main, run: next, dry, at, now: io.now(), since, ...inputs }) };
+  if (dry !== undefined) {
+    const o = { runRoot, main, run: next, dry, at, now: io.now(), since, explored: explore, ...inputs };
+    next = { ...next, saturation: dry < SATURATION_ROUNDS ? null : reportFor(o) };
+  }
   saveRun(runRoot, next);
   appendEvent(runRoot, { ts: at, kind: 'cycle', cycle: next.cycle, progress: progress === 'yes', ...(next.lastError ? { error: next.lastError } : {}),
     ...(round ? { explore: round } : {}) });

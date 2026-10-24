@@ -137,6 +137,31 @@ describe('recordCycle', () => {
     r = recordCycle(recordCycle(r, { progress: false, error: '  ' }), { progress: false, error: '  ' });
     expect(r.repeatedError).toBe(false);
   });
+  it('stores the error as one clean line of at most 1000 characters, so run.json stays within lens\'s read (6b-3 N-2)', () => {
+    const ctl = String.fromCharCode(1);
+    // 2000 characters of control characters: nothing readable is left, so no error.
+    expect(recordCycle(startRun(T0, {}), { progress: false, error: ctl.repeat(2000) }).lastError).toBeNull();
+    // Control characters between backslashes, the worst case of JSON's escapes: one clean line, clipped.
+    const noisy = recordCycle(startRun(T0, {}), { progress: false, error: `${ctl}\\`.repeat(1000) }).lastError!;
+    expect(noisy).toMatch(/^[\\ ]+$/);
+    expect(Array.from(noisy).length).toBe(1000);
+    expect(recordCycle(startRun(T0, {}), { progress: false, error: 'tests broke\nat line 3\n' }).lastError).toBe('tests broke at line 3');
+    // A run with that error and a saturation report whose ten lists are full: within the 16 KiB lens reads (src/lens/model.ts).
+    const ids = (shape: (i: number) => string) => Array.from({ length: 20 }, (_, i) => shape(i));
+    const task = (k: string) => ids(i => `${k}${i}`.padEnd(64, 'x'));
+    const prop = (k: string) => ids(i => `p2026102210000${k}${String(i).padStart(4, '0')}`);
+    const sat = { saturated: false, at: T0.toISOString(), rounds: 3, blocking: ['rounds', 'pending-tasks', 'validators', 'findings', 'defects', 'proposals', 'inputs'],
+      evidence: { pendingTasks: task('a'), validatorsFailed: ids(i => `v${i}`.padEnd(80, 'v')), openFindings: 999, openDefects: prop('1'), openProposals: prop('2') },
+      waiting: { parked: prop('3'), questions: 999, blocked: 999, deferred: 999, waitsOwner: prop('4'), unowned: prop('5'), blockedTasks: task('b'), unplaced: prop('6'), orphanFindings: task('c') },
+      counts: Object.fromEntries(Object.keys(noCounts).map(k => [k, 9999])), missing: ['--plan', '--db', '--validate'] };
+    const run = { ...recordCycle(startRun(T0, { cycles: 99, hours: 99 }, 10, 's'.repeat(80), 'pt-BR'), { progress: false, error: `${ctl}\\`.repeat(1000) }),
+      autonomous: { profile: 'product' as const, name: 'n'.repeat(40), runId: `product-${'n'.repeat(40)}`, worktree: path.resolve('/w', 'x'.repeat(200)),
+        branch: `forge/product-${'n'.repeat(40)}`, startBranch: 'b'.repeat(100), protectedBranches: ids(i => `p${i}`.padEnd(60, 'p')).slice(0, 10) },
+      explore: { rounds: 999, dry: 999 } };
+    const text = JSON.stringify({ ...parseRun(JSON.stringify({ ...run, saturation: sat }))! }, null, 2) + '\n';
+    expect(parseRun(text)?.saturation).toEqual(sat);
+    expect(text.length).toBeLessThanOrEqual(16 * 1024);
+  });
 });
 
 describe('stopReason', () => {

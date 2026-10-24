@@ -8,7 +8,7 @@ import { readEvents, type LedgerEvent } from './ledger.js';
 import { samePath } from '../lib/worktree.js';
 import { clean } from '../lib/decisions.js';
 import { isPlanId } from '../lib/ids.js';
-import { isActionable, type ApprovalDoc, type ProposalDoc } from '../lib/proposals.js';
+import { isActionable, proposalDigest, type ApprovalDoc, type ProposalDoc } from '../lib/proposals.js';
 import {
   SATURATION_LIST_MAX, SATURATION_LISTS, type SaturationBlocking, type SaturationInput, type SaturationList, type SaturationReport,
 } from '../lib/forge-run.js';
@@ -29,12 +29,13 @@ const BOM = String.fromCharCode(0xfeff);
 /**
  * What saturationOf reads. `toJudge` (H-2) and `waitsOwner` (L-18): judgeQueue of the run's proposals; `unowned` (L-18): the
  * approvals without the owner's mark (unownedReasons); `marks` (fix 1): the owner's marks (loadApprovals); `missing` (L-10,
- * fix 1): the inputs the cycle lacked, did not read, or (the validate file) had from an earlier round.
+ * fix 1): the inputs the cycle lacked, did not read, or (the validate file) had from an earlier cycle; `explored` (fix 2):
+ * false in a cycle without the scout, which never concludes saturated.
  */
 export interface SaturationFacts {
   dry: number; at: string; plan: PlanView; states: Record<string, TaskState>; validators: ValidatorResult[] | null;
   proposals: (ProposalDoc & { id: string })[]; notes: NoteDoc[]; blocked: number;
-  toJudge?: string[]; waitsOwner?: string[]; unowned?: string[]; marks?: Record<string, ApprovalDoc>; missing?: SaturationInput[];
+  toJudge?: string[]; waitsOwner?: string[]; unowned?: string[]; marks?: Record<string, ApprovalDoc>; missing?: SaturationInput[]; explored?: boolean;
 }
 
 interface Parts {
@@ -83,10 +84,10 @@ function heldForPerson(tasks: readonly PlanTask[], states: Record<string, TaskSt
   return held;
 }
 
-/** T6B3-SAT-WAITING: whether a debt note of the run (its author a `session:`) names proposal `id`, in its proposalId or its
- *  text: an approval whose placement the CLI refused twice, which forge:infinite leaves to the person that way. */
+/** T6B3-SAT-WAITING, fix 2: whether a debt note of the run (its author a `session:`) names proposal `id` in its proposalId (never
+ *  only in its text): an approval whose placement the CLI refused twice, which forge:infinite leaves to the person that way. */
 const namedByDebt = (notes: readonly NoteDoc[], id: string): boolean =>
-  notes.some(n => n.type === 'debt' && n.author.startsWith('session:') && (n.proposalId === id || n.text.includes(id)));
+  notes.some(n => n.type === 'debt' && n.author.startsWith('session:') && n.proposalId === id);
 
 /**
  * Why the run is or is not saturated after `dry` rounds in a row that passed nothing, with the evidence:
@@ -96,12 +97,13 @@ const namedByDebt = (notes: readonly NoteDoc[], id: string): boolean =>
  *   is not an accept; a task the plan no longer has blocks nothing and is named in `waiting.orphanFindings`;
  * - openDefects: the `source: verify` proposals proposed, under discussion and not parked, or approved without a task;
  * - openProposals (H-2, fix 1): the proposals still to judge, every approval of any source without its task, and a proposal
- *   not yet approved here whose owner's mark approves it.
+ *   not yet approved here whose owner's mark approves its present text.
  * What waits for the person is `waiting` and never blocks: parked ideas, open questions (no answer, no answering note), the
- * blocked actions (given), the deferred findings of the plan's v2 blocks, the proposals that wait for the owner's mark and
- * the approvals without it (L-18), the tasks blocked for the person and the approvals the run could not place (a debt note
- * of the run names them); a proposal of those lists is no open defect or proposal. A missing input blocks as `inputs`, and
- * what needs it is not computed: the plan's tasks without --plan or --db, notes without --db, validators without --validate.
+ * blocked actions (given), the deferred findings of the plan's v2 blocks, the proposals that wait for the owner's mark (an
+ * approving mark of an earlier text among them) and the approvals without it (L-18), the tasks blocked for the person and the
+ * approvals the run could not place (a debt note of the run names them); a proposal of those lists is no open defect or
+ * proposal. A missing input blocks as `inputs`, and what needs it is not computed: the plan's tasks without --plan or --db,
+ * notes without --db, validators without --validate. `rounds` blocks below the count and (fix 2) in a cycle without the scout.
  */
 export function saturationOf(i: SaturationFacts): SaturationReport {
   const missing = i.missing ?? [];
@@ -123,22 +125,25 @@ export function saturationOf(i: SaturationFacts): SaturationReport {
     const f = states[id].forge;
     return !inPlan.has(id) && isPlanId(id) && isV2(f) && openOf(f) > 0;
   }).sort();
-  const waitsOwner = [...new Set(i.waitsOwner ?? [])].sort();
-  const unowned = [...new Set(i.unowned ?? [])].sort();
   const marks = i.marks ?? {};
   type P = SaturationFacts['proposals'][number];
+  const undecided = (p: P) => p.status === 'proposed' || p.status === 'discussing';
+  const approving = (p: P) => undecided(p) && p.taskId === undefined && (marks[p.id]?.status === 'approved' || marks[p.id]?.status === 'auto_approved');
+  // Fix 2 (N-3): only a mark of the present text; one of an earlier text waits for the owner to mark it again.
+  const markedOpen = (p: P) => approving(p) && marks[p.id]?.digest === proposalDigest(p.id, p);
+  const waitsOwner = [...new Set([...(i.waitsOwner ?? []), ...i.proposals.filter(p => approving(p) && !markedOpen(p)).map(p => p.id)])].sort();
+  const unowned = [...new Set(i.unowned ?? [])].sort();
   const approvedUntasked = (p: P) => isActionable(p) && p.taskId === undefined && !unowned.includes(p.id);
   const unplaced = i.proposals.filter(p => approvedUntasked(p) && namedByDebt(notes, p.id)).map(p => p.id);
   const untasked = (p: P) => approvedUntasked(p) && !unplaced.includes(p.id);
-  const undecided = (p: P) => p.status === 'proposed' || p.status === 'discussing';
-  const markedOpen = (p: P) => undecided(p) && p.taskId === undefined && (marks[p.id]?.status === 'approved' || marks[p.id]?.status === 'auto_approved');
   const open = (p: P) => (p.status === 'proposed' || (p.status === 'discussing' && !p.parked)) && !waitsOwner.includes(p.id);
   const openDefects = i.proposals.filter(p => p.source === 'verify' && (open(p) || untasked(p))).map(p => p.id);
   const openProposals = [...new Set([...(i.toJudge ?? []), ...i.proposals.filter(p => untasked(p) || markedOpen(p)).map(p => p.id)])].sort();
   const parked = i.proposals.filter(p => p.status === 'discussing' && p.parked && !markedOpen(p)).map(p => p.id);
   const questions = notes.filter(n => n.type === 'question' && !n.answer && !n.answeredByNote).length;
   const blocking: SaturationBlocking[] = [];
-  if (i.dry < SATURATION_ROUNDS) blocking.push('rounds');
+  // T6B3-SAT-EXPLORE-ONLY: only an exploration round concludes; a cycle without the scout keeps `rounds`, whatever the count.
+  if (i.dry < SATURATION_ROUNDS || i.explored === false) blocking.push('rounds');
   if (pendingTasks.length) blocking.push('pending-tasks');
   if (validatorsFailed.length) blocking.push('validators');
   if (openFindings) blocking.push('findings');
@@ -164,8 +169,9 @@ export function readValidateFile(file: string): ValidatorResult[] | null {
   return reads ? (x as ValidatorResult[]) : null;
 }
 
-/** Fix 1: whether `file` was written after `since` (the run's last exploration round, or its start): a validate file of an
- *  earlier round is stale, a missing input, and never reads green. One that cannot be read is not stale: it reads as null. */
+/** Fix 1, fix 2: whether `file` was written after `since` (the run's previous recorded cycle, or its start: lastCycle), so in
+ *  this cycle. A validate file of an earlier cycle is stale, a missing input, and never reads green. One that cannot be stated
+ *  is not stale: it reads as null. */
 export function writtenAfter(file: string, since: string): boolean {
   try { return statSync(file).mtimeMs > Date.parse(since); } catch { return true; }
 }
@@ -178,7 +184,13 @@ const passes = (e: LedgerEvent): boolean => e.kind === 'proposal'
 /** T6B3-SAT-WINDOW: the run's last exploration round, the last of `events` (the ledger of run.json's directory) that is a recorded
  *  cycle (its number) with `explore`, since the run started; null before its first. */
 export function lastExplore(events: readonly LedgerEvent[], startedAt: string): LedgerEvent | null {
-  return events.filter(e => e.kind === 'cycle' && typeof e.cycle === 'number' && e.explore !== undefined && e.ts >= startedAt).at(-1) ?? null;
+  return lastCycle(events.filter(e => e.explore !== undefined), startedAt);
+}
+
+/** T6B3-SAT-EXPLORE-ONLY: the run's previous recorded cycle of any kind (a `cycle` event with its number, since the run
+ *  started), the bar a validate file must be newer than; null before its first. */
+export function lastCycle(events: readonly LedgerEvent[], startedAt: string): LedgerEvent | null {
+  return events.filter(e => e.kind === 'cycle' && typeof e.cycle === 'number' && e.ts >= startedAt).at(-1) ?? null;
 }
 
 /**

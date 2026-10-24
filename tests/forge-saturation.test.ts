@@ -99,23 +99,30 @@ describe('saturationOf: what waits for the person never blocks, and a missing in
     const byTask = saturationOf({ ...base, plan: chain, states: { T001: s({ status: 'blocked', blockedBy: ['T003'] }), T002: s({ status: 'free' }), T003: s({ status: 'done' }), T004: s({ status: 'done' }) } });
     expect(byTask).toMatchObject({ saturated: false, blocking: ['pending-tasks'], evidence: { pendingTasks: ['T001', 'T002'] }, waiting: { blockedTasks: [] } });
   });
-  it('an approval the run could not place, named by its own debt note, waits apart; a person\'s debt note does not move it (T6B3-SAT-WAITING)', () => {
-    const approved = P({ id: 'p20261022100000aaaa', status: 'auto_approved' });
-    const debt = (author: string, o: Record<string, unknown> = {}) => ({ ts: 't', type: 'debt' as const, author, text: 'p20261022100000aaaa could not be placed', ...o });
-    expect(saturationOf({ ...base, proposals: [approved], notes: [debt('session:S')] }))
-      .toMatchObject({ saturated: true, evidence: { openProposals: [] }, waiting: { unplaced: ['p20261022100000aaaa'] } });
-    expect(saturationOf({ ...base, proposals: [approved], notes: [debt('session:S', { text: 'could not be placed', proposalId: 'p20261022100000aaaa' })] }).waiting.unplaced)
-      .toEqual(['p20261022100000aaaa']);
-    // Positive control: the same note by a person, or a debt note of another proposal, leaves it open work.
-    expect(saturationOf({ ...base, proposals: [approved], notes: [debt('user:u1')] })).toMatchObject({ blocking: ['proposals'], waiting: { unplaced: [] } });
-    expect(saturationOf({ ...base, proposals: [approved], notes: [debt('session:S', { text: 'p20261022100000bbbb could not be placed' })] }).blocking).toEqual(['proposals']);
+  it('an approval the run could not place, named in the proposalId of its own debt note, waits apart; nothing else moves it (T6B3-SAT-WAITING, fix 2)', () => {
+    const id = 'p20261022100000aaaa';
+    const approved = P({ id, status: 'auto_approved' });
+    const debt = (author: string, proposalId?: string, text = 'could not be placed') => ({ ts: 't', type: 'debt' as const, author, text, ...(proposalId ? { proposalId } : {}) });
+    expect(saturationOf({ ...base, proposals: [approved], notes: [debt('session:S', id)] }))
+      .toMatchObject({ saturated: true, evidence: { openProposals: [] }, waiting: { unplaced: [id] } });
+    // Positive controls: the id only in the text, the same note by a person, or a note of another proposal leave it open work.
+    for (const note of [debt('session:S', undefined, `${id} could not be placed`), debt('user:u1', id), debt('session:S', 'p20261022100000bbbb')]) {
+      expect(saturationOf({ ...base, proposals: [approved], notes: [note] }), JSON.stringify(note)).toMatchObject({ blocking: ['proposals'], waiting: { unplaced: [] } });
+    }
   });
-  it('a proposed proposal that already holds the owner\'s approving mark is open work (fix 1)', () => {
-    const mark = (status: 'approved' | 'rejected') => ({ status, decidedAt: 't', by: 'page' as const, digest: 'f'.repeat(64) });
+  it('a proposed proposal that holds the owner\'s approving mark of its present text is open work (fix 1, fix 2)', () => {
     const p = P({ id: 'p9' });
+    const mark = (status: 'approved' | 'rejected', digest = proposalDigest('p9', p)) => ({ status, decidedAt: 't', by: 'page' as const, digest });
     expect(saturationOf({ ...base, proposals: [p], marks: { p9: mark('approved') } })).toMatchObject({ saturated: false, blocking: ['proposals'], evidence: { openProposals: ['p9'] } });
+    // A mark of an earlier text waits for the owner to mark the present one: listed apart, it never blocks.
+    expect(saturationOf({ ...base, proposals: [p], marks: { p9: mark('approved', 'f'.repeat(64)) } }))
+      .toMatchObject({ saturated: true, evidence: { openProposals: [] }, waiting: { waitsOwner: ['p9'] } });
     // Positive control: a rejecting mark is the owner's no, and no work.
-    expect(saturationOf({ ...base, proposals: [p], marks: { p9: mark('rejected') } }).saturated).toBe(true);
+    expect(saturationOf({ ...base, proposals: [p], marks: { p9: mark('rejected') } })).toMatchObject({ saturated: true, waiting: { waitsOwner: [] } });
+  });
+  it('only an exploration round concludes saturated: a cycle without the scout keeps rounds in blocking (T6B3-SAT-EXPLORE-ONLY)', () => {
+    expect(saturationOf({ ...base, explored: false })).toMatchObject({ saturated: false, blocking: ['rounds'] });
+    expect(saturationOf({ ...base, explored: true })).toMatchObject({ saturated: true, blocking: [] });
   });
   it('a missing input is named and blocks; what does not need it is still computed (L-10, fix 1)', () => {
     expect(saturationOf({ ...base, validators: null, missing: ['--validate'] })).toMatchObject({ saturated: false, blocking: ['inputs'], missing: ['--validate'], evidence: { validatorsFailed: [] } });
@@ -255,9 +262,34 @@ describe('FORGE cycle --explore (6b-3)', () => {
     const r = cycle(inputs, false);
     expect(r.code, r.stderr).toBe(0);
     expect(JSON.parse(r.stdout)).toMatchObject({ explore: { rounds: 3, dry: 3 }, saturation: { saturated: false, at: at(), evidence: { pendingTasks: [] } } });
-    // Its validate file is the round's, older than the round: it never reads green, so this cycle cannot stop the run.
-    expect(JSON.parse(r.stdout).saturation).toMatchObject({ blocking: ['inputs'], missing: ['--validate'] });
+    // Its validate file is the round's, from an earlier cycle: a missing input. And a cycle without the scout never concludes.
+    expect(JSON.parse(r.stdout).saturation).toMatchObject({ blocking: ['rounds', 'inputs'], missing: ['--validate'] });
     expect(status().stopReason).toBeNull();
+    // T6B3-SAT-EXPLORE-ONLY: even with its own green validate file and nothing open, it is no round: not saturated.
+    const own = cycle(inputs);
+    expect(JSON.parse(own.stdout)).toMatchObject({ explore: { rounds: 3, dry: 3 }, saturation: { saturated: false, blocking: ['rounds'] } });
+    expect(JSON.parse(own.stdout).saturation).not.toHaveProperty('missing');
+    expect(status().stopReason).toBeNull();
+    // Positive control: the next exploration round, with nothing left, concludes.
+    expect(explore()).toMatchObject({ explore: { rounds: 4, dry: 4 }, saturation: { saturated: true, blocking: [] } });
+    expect(status().stopReason).toBe('saturated');
+  });
+
+  it('the validate file must be this cycle\'s: one written in an earlier cycle, even after the last round, is a missing input (T6B3-SAT-EXPLORE-ONLY)', () => {
+    start();
+    writeFileSync(path.join(root, 'db', 'state', 'T001.json'), JSON.stringify({ status: 'in_progress' }));
+    explore();
+    explore();
+    expect(explore()).toMatchObject({ explore: { dry: 3 }, saturation: { saturated: false, blocking: ['pending-tasks'] } });
+    // A cycle without the scout writes the validate file; T001 is done after it.
+    cycle([]);
+    writeFileSync(path.join(root, 'db', 'state', 'T001.json'), JSON.stringify({ status: 'done' }));
+    // The next round reuses that file: newer than the last round, but from the cycle before this one.
+    const reused = cycle(['--explore', ...inputs], false);
+    expect(JSON.parse(reused.stdout)).toMatchObject({ explore: { rounds: 4, dry: 4 }, saturation: { saturated: false, blocking: ['inputs'], missing: ['--validate'] } });
+    expect(status().stopReason).toBeNull();
+    // Positive control: the round's own file concludes.
+    expect(explore().saturation).toMatchObject({ saturated: true, blocking: [] });
   });
 
   it('a round past the count without its inputs is recorded, with a report that names what is missing (L-10, fix 1)', () => {

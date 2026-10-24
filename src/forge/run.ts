@@ -2,6 +2,7 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'nod
 import path from 'node:path';
 import { forgeDir } from './ledger.js';
 import { parseRun, type RunState } from '../lib/forge-run.js';
+import { clean } from '../lib/decisions.js';
 
 export { parseRun, type RunState };
 
@@ -10,7 +11,9 @@ export interface StopContext { now: Date; stopFile: boolean; approvedPending: nu
 export const DEFAULT_QUEUE_MAX = 10;
 export const NO_PROGRESS_LIMIT = 3;
 export const NO_CYCLE_BLOCKS = 2;
-const MAX_ERROR = 2000;
+/** 6b-3 N-2: the stored error is one clean line of at most this many code points, so run.json, with a full saturation report,
+ *  stays within the 16 KiB lens reads (an error of control characters would otherwise grow six times in its JSON). */
+const MAX_ERROR = 1000;
 
 export function startRun(now: Date, budget: RunState['budget'], queueMax = DEFAULT_QUEUE_MAX, sessionId: string | null = null, locale: string | null = null): RunState {
   return {
@@ -22,7 +25,7 @@ export function startRun(now: Date, budget: RunState['budget'], queueMax = DEFAU
 }
 
 export function recordCycle(run: RunState, result: { progress: boolean; error?: string }): RunState {
-  const error = result.error?.trim().slice(0, MAX_ERROR) || null;
+  const error = clean(result.error ?? '', MAX_ERROR) || null;
   return {
     ...run,
     cycle: run.cycle + 1,
