@@ -10,6 +10,15 @@ const CREW = path.join(ROOT, 'plugins', 'crew');
 const read = (p: string) => readFileSync(path.join(ROOT, p), 'utf8');
 const files = () => walk(CREW).map(f => path.relative(CREW, f).split(path.sep).join('/'));
 
+/** An agent of crew: the whole file, its frontmatter (without the fences) and its body. */
+const agent = (name: string) => {
+  const md = read(`plugins/crew/agents/${name}.md`);
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/.exec(md);
+  return { md, head: m?.[1] ?? '', body: m?.[2] ?? '' };
+};
+const field = (head: string, key: string) => new RegExp(`^${key}: (.+)$`, 'm').exec(head)?.[1].trim();
+const toolsOf = (head: string) => field(head, 'tools')?.split(/,\s*/) ?? [];
+
 describe('crew plugin (w7 D4)', () => {
   it('a manifest with no dependencies, and a marketplace entry with its description', () => {
     const m = JSON.parse(read('plugins/crew/.claude-plugin/plugin.json'));
@@ -29,5 +38,15 @@ describe('crew plugin (w7 D4)', () => {
       // The same invisible and bidi set as A7's plugin-hygiene test.
       expect(t, f).not.toMatch(/[\u00AD\u061C\u115F\u1160\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u3164\uFEFF\uFFA0]/);
     }
+  });
+  it('novice-reader: read-only, opus at high effort, its three personas and the report it returns', () => {
+    const { md, head, body } = agent('novice-reader');
+    expect(field(head, 'name')).toBe('novice-reader');
+    expect(field(head, 'description')).toContain('never rewrites');
+    expect([field(head, 'model'), field(head, 'effort'), field(head, 'maxTurns')]).toEqual(['opus', 'high', '40']);
+    expect(toolsOf(head)).toEqual(['Read', 'Grep', 'Glob', 'WebFetch']);
+    for (const p of ['full-stack developer with no ML', 'junior Java developer', 'recruiter']) expect(body, p).toContain(p);
+    for (const w of ['## Verdict', '## Earlier points', '## Findings', '## Not checked', '[blocker]', '[major]', '[minor]', 'seam']) expect(body, w).toContain(w);
+    expect(Buffer.byteLength(md)).toBeLessThan(12000);
   });
 });
