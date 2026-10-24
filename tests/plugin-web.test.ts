@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse } from 'yaml';
 import { walk } from './helpers/files.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -31,6 +32,59 @@ describe('plugin web (w7 D2)', () => {
       expect(text, rel).not.toMatch(PERSONAL);
       expect(text, rel).not.toMatch(INVISIBLE);
       expect(text.includes('\r'), rel).toBe(false);
+    }
+  });
+});
+
+const SKILL_DIR = 'plugins/web/skills/astro-dokploy-site';
+const REFS = ['csp', 'deploy', 'islands', 'verify'];
+const POINTER = /Read `references\/([a-z-]+)\.md` now, and again every time you get here\./g;
+/** The rules a compaction must not drop (spec D2, «Contenido»): they live in SKILL.md itself. */
+const SKILL_TOKENS = ['pnpm', 'mounted', 'min-height', 'Dockerfile', 'Docker Context Path', 'security.csp', 'is:inline', '<style is:inline>',
+  'new Worker(new URL(', "{ type: 'module' }", '<Term', 'pnpm format:check', 'astro check', 'TypeScript 6', "CLAUDECODE: ''", '--ignore-lock',
+  '4321', 'reuseExistingServer: false', 'lhci', 'EPERM', 'npx lighthouse', 'numberOfRuns', 'CHROME_PATH', "channel: 'chrome'",
+  'CLAUDE.md', 'AGENTS.md', '.claude/', 'package.json', 'Context7'];
+/** The exact values each procedure needs, in the reference read at that moment. */
+const REF_TOKENS: Record<string, string[]> = {
+  deploy: ['Dockerfile path', 'Docker Context Path', 'corepack', '--frozen-lockfile', 'HEALTHCHECK', 'package.json', 'absolute_redirect off', 'add_header',
+    'include', "frame-ancestors 'none'", 'default_type text/javascript', 'application/wasm', 'gzip_static on', 'immutable', 'docker build'],
+  csp: ['security.csp', 'scriptDirective', 'hashes', 'sha256-', 'is:inline', "kind: 'attribute'", "worker-src 'self' blob:", '<style is:inline>',
+    'prefers-reduced-motion: no-preference', '<meta'],
+  islands: ['mounted', 'useEffect', 'min-height', "new Worker(new URL('./", 'import.meta.url', "{ type: 'module' }", 'data:video/mp2t', 'postbuild',
+    '<Term', '/^<Term\\b/m', '.mdx', '.astro'],
+  verify: ['pnpm format && pnpm format:check', 'pnpm check', 'TypeScript 6', "CLAUDECODE: ''", "CURSOR_TRACE_ID: ''", '--ignore-lock',
+    'process.env.PORT ?? 4321', 'reuseExistingServer: false', 'CLAUDECODE= pnpm preview', 'lhci autorun', 'numberOfRuns: 3', 'minScore', 'EPERM',
+    '--headless=new', '--remote-debugging-port=9333', '--port=9333', 'npx lighthouse', 'mcr.microsoft.com/playwright',
+    'CHROME_PATH=/ms-playwright/chromium-*/chrome-linux64/chrome', 'MSYS_NO_PATHCONV=1', 'gh run watch', "channel: 'chrome'", 'requestAnimationFrame',
+    "scrollTo({ behavior: 'instant' })", 'PID'],
+};
+
+describe('skill astro-dokploy-site (w7 D2)', () => {
+  const skill = () => read(`${SKILL_DIR}/SKILL.md`);
+  it('frontmatter: its name and a description of when to use it, valid YAML within 1,024 characters', () => {
+    const m = /^---\n([\s\S]*?)\n---\n/.exec(skill());
+    expect(m).not.toBeNull();
+    expect(m![1].length).toBeLessThanOrEqual(1024);
+    const front = parse(m![1]);
+    expect(Object.keys(front)).toEqual(['name', 'description']);
+    expect(front.name).toBe('astro-dokploy-site');
+    expect(front.description).toMatch(/^Use when /);
+  });
+  it('SKILL.md stays within 16,000 bytes, so a compaction re-attaches all of it (A2)', () => {
+    expect(Buffer.byteLength(skill(), 'utf8')).toBeLessThanOrEqual(16000);
+  });
+  it('each reference is pointed to once with the order to re-read it, and SKILL.md cites no other', () => {
+    expect(readdirSync(path.join(ROOT, SKILL_DIR, 'references')).sort()).toEqual(REFS.map(r => `${r}.md`));
+    expect([...skill().matchAll(POINTER)].map(m => m[1]).sort()).toEqual(REFS);
+    expect([...new Set([...skill().matchAll(/references\/([A-Za-z0-9_-]+)\.md/g)].map(m => m[1]))].sort()).toEqual(REFS);
+  });
+  it('SKILL.md holds the rules a compaction must not drop', () => {
+    for (const t of SKILL_TOKENS) expect(skill(), t).toContain(t);
+  });
+  it('each reference holds the exact values of its procedure', () => {
+    for (const [ref, tokens] of Object.entries(REF_TOKENS)) {
+      const md = read(`${SKILL_DIR}/references/${ref}.md`);
+      for (const t of tokens) expect(md, `${ref}: ${t}`).toContain(t);
     }
   });
 });
