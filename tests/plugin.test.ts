@@ -2357,7 +2357,7 @@ describe('plugin layout', () => {
     const stop = ref('stop');
     for (const w of ['saturated', 'run.saturation']) expect(stop, w).toContain(w);
     const core = read('plugins/forge/skills/infinite/SKILL.md');
-    for (const w of ['forge-market', 'forge-phase-review', '--explore', 'product-start.md', 'phase-close.md']) expect(core, w).not.toContain(w);
+    for (const w of ['forge-market', 'forge-phase-review', '--explore', 'product-start.md', 'phase-close.md', 'open-phase.md']) expect(core, w).not.toContain(w);
   });
   it('the texts carry what 6b-3 built: to-task with --db, the revises chain, the replan undo and a planner that keeps retired and history', () => {
     const core = read('plugins/forge/skills/infinite/SKILL.md');
@@ -2374,11 +2374,13 @@ describe('plugin layout', () => {
   it('the final fix wave\'s texts: the run opens a phase, a refused v2 is skipped, the close sends each note once and aborts a stuck revert (6b-3 final fix)', () => {
     const ref = (f: string) => read(`plugins/forge/skills/infinite/references/${f}.md`);
     // F-I1 (c): to-task's own message, then the re-plan path with its check, dry run, decision and write, once per cycle.
+    // Final re-review (5): the opening of a phase lives in its own reference, read only in that state; product.md points to it.
     const product = ref('product');
-    for (const w of ['## When no phase is open', 'no phase of the plan is open', '.forge/work/infinite/open-phase-<cycle>/', 'open-phase-refused.json',
-      'FORGE proposals replan-check --ops OP/ops.json', '--why-file OP/why.txt --check', 'FORGE decision add --data-file OP/decision.json', '"add-phase"',
-      '`{closed, phases, held, reviewed}`']) expect(product, w).toContain(w);
-    const at = (w: string) => { const i = product.indexOf(w); expect(i, w).toBeGreaterThanOrEqual(0); return i; };
+    for (const w of ['## When no phase is open', 'no phase of the plan is open', 'references/open-phase.md', '`{closed, phases, held, reviewed}`']) expect(product, w).toContain(w);
+    const open = ref('open-phase');
+    for (const w of ['.forge/work/infinite/open-phase-<cycle>/', 'open-phase-refused.json', 'FORGE proposals replan-check --ops OP/ops.json', '--why-file OP/why.txt --check',
+      'FORGE decision add --data-file OP/decision.json', '"add-phase"']) expect(open, w).toContain(w);
+    const at = (w: string) => { const i = open.indexOf(w); expect(i, w).toBeGreaterThanOrEqual(0); return i; };
     const order = ['FORGE proposals replan-check --ops OP/ops.json', '--why-file OP/why.txt --check', 'FORGE decision add --data-file OP/decision.json',
       '--why-file OP/why.txt`'].map(at);
     expect(order, 'open a phase').toEqual([...order].sort((a, b) => a - b));
