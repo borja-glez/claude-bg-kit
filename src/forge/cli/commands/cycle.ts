@@ -1,5 +1,5 @@
 import type { Command } from '../context.js';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { appendEvent, readEvents } from '../../ledger.js';
 import { parseRun, recordCycle, recordExplore, readRunText, saveRun, type RunState } from '../../run.js';
@@ -17,6 +17,7 @@ import { stateDoc } from '../../../page/normalize.js';
 import { loadApprovals, loadProposals } from '../../proposals.js';
 import { judgeQueue } from '../../judge.js';
 import { readBlocked } from '../../autonomous.js';
+import { stateDirOf } from '../../phases.js';
 
 type Flag = (name: string) => string | undefined;
 type Inputs = { plan: Plan | null; db: string | null; validate: string | null };
@@ -31,7 +32,7 @@ function cycleInputs(cwd: string, flag: Flag): Inputs {
     try { doc = parsePlan(readFileSync(path.resolve(cwd, plan), 'utf8')); } catch { doc = null; }
   }
   const db = flag('db') === undefined ? null : path.resolve(cwd, flag('db')!);
-  if (db && !existsSync(path.join(db, 'state'))) throw new UsageError(`cycle: ${flag('db')} has no state listing: list state first`);
+  if (db) stateDirOf(cwd, flag('db')!, 'cycle');
   return { plan: doc, db, validate: flag('validate') === undefined ? null : path.resolve(cwd, flag('validate')!) };
 }
 

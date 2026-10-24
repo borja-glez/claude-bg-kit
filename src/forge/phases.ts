@@ -22,13 +22,16 @@ export const phasesFile = (main: string, runId: string): string => path.join(aut
 export const doneTasks = (stateDir: string): Set<string> =>
   new Set(Object.entries(readDocs(stateDir, stateDoc).docs).filter(([, s]) => s.status === 'done').map(([task]) => task));
 
-/** M-11: the done tasks of `<db>/state` (`db` as given, from `cwd`). A listing that is not there is a UsageError of `cmd`:
+/** M-11: the state listing `<db>/state` (`db` as given, from `cwd`), resolved. One that is not there is a UsageError of `cmd`:
  *  read as empty, a closed phase would look open and a done task would look pending. */
-export function doneOf(cwd: string, db: string, cmd: string): Set<string> {
+export function stateDirOf(cwd: string, db: string, cmd: string): string {
   const dir = path.resolve(cwd, db, 'state');
   if (!existsSync(dir)) throw new UsageError(`${cmd}: ${db} has no state listing: list state first`);
-  return doneTasks(dir);
+  return dir;
 }
+
+/** The done tasks of `<db>/state`, which must be there (stateDirOf). */
+export const doneOf = (cwd: string, db: string, cmd: string): Set<string> => doneTasks(stateDirOf(cwd, db, cmd));
 
 /**
  * The phases of `runId` already reviewed, oldest first; none when its phases.json is not there. One that does not hold

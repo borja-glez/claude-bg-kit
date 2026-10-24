@@ -34,16 +34,21 @@ import { markDone, parseSpPlan, SpPlanError } from '../../lib/sp-plan.js';
 import type { Io } from './run.js';
 import { defaultGit, repoReader } from './exec.js';
 
+/** `text`, the plan read from `planArg`, parsed; a plan that does not hold is a usage error (exit 2), `<prefix><planArg>: <its
+ *  problems>`. */
+export function planOf(text: string, planArg: string, prefix = ''): ReturnType<typeof parsePlan> {
+  try { return parsePlan(text); } catch (e) {
+    if (e instanceof PlanError) throw new UsageError(`${prefix}${planArg}: ${e.issues.join('; ')}`);
+    throw e;
+  }
+}
+
 // The plan and one task of it; a usage error (exit 2) for a missing file, a broken plan or an unknown task.
 export function planTask(cwd: string, planArg: string | undefined, id: string | undefined) {
   if (!planArg || !id) throw new UsageError('--plan and --task are required');
   let text: string;
   try { text = readFileSync(path.resolve(cwd, planArg), 'utf8'); } catch { throw new UsageError(`cannot read plan ${planArg}`); }
-  let plan;
-  try { plan = parsePlan(text); } catch (e) {
-    if (e instanceof PlanError) throw new UsageError(`${planArg}: ${e.issues.join('; ')}`);
-    throw e;
-  }
+  const plan = planOf(text, planArg);
   const task = plan.tasks.find(t => t.id === id);
   if (!task) throw new UsageError(`task ${id} is not in ${planArg}`);
   return { plan, task };

@@ -25,13 +25,13 @@ import { mainCheckout } from '../../local.js';
 import { addDecision, decisionNoteId, decisionWrites, markPublished } from '../../decisions.js';
 import { clean } from '../../../lib/decisions.js';
 import { normalizeOps } from '../../../lib/replan.js';
-import { doneOf, doneTasks } from '../../phases.js';
+import { doneOf } from '../../phases.js';
 import { replanRefusals } from '../../replan-check.js';
 import { checkPlacement, estimateMinutes, proposalToTask, proposalOfIncludes, proposalsOfIncludes, type Placement } from '../../to-task.js';
 import type { PlanTask } from '../../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { UsageError } from '../errors.js';
-import { approvalsPageFile, ownerCtx, ownerStanding, runRootOf, unownedReasons } from '../shared.js';
+import { approvalsPageFile, ownerCtx, ownerStanding, planOf, runRootOf, unownedReasons } from '../shared.js';
 
 /** The active autonomous run of run.json (found as every command finds it, runRootOf), or null. `main`: mainCheckout(cwd). */
 function activeAutonomous(cwd: string, main = mainCheckout(cwd)): (RunState & { autonomous: NonNullable<RunState['autonomous']> }) | null {
@@ -404,8 +404,7 @@ export const command: Command = (args, ctx) => {
       const db = subFlag('db');
       if (has('db') && !db) throw new UsageError('proposals to-task: --db needs the listed roadmap database');
       if (product && !db) throw new UsageError('proposals to-task: in a product run --db is required: its state listing says which phases are done');
-      const stateDir = db ? path.resolve(io.cwd, db, 'state') : null;
-      if (stateDir && !existsSync(stateDir)) throw new UsageError(`proposals to-task: ${db} has no state listing: list state first`);
+      const done = db ? doneOf(io.cwd, db, 'proposals to-task') : new Set<string>();
       const found = loadProposals(io.cwd).find(p => p.id === id);
       if (!found) throw new UsageError(`proposals to-task: ${id} not found`);
       if (!isActionable(found)) throw new UsageError(`proposals to-task: ${id} is not approved`);
@@ -430,11 +429,7 @@ export const command: Command = (args, ctx) => {
       // is not turned into another by a copy that lost its taskId.
       const spent = readEvents(io.cwd).find(e => e.kind === 'proposal' && e.action === 'to-task' && e.id === id);
       const text = readText(planArg, '--plan');
-      let plan;
-      try { plan = parsePlan(text); } catch (e) {
-        if (e instanceof PlanError) throw new UsageError(`${planArg}: ${e.issues.join('; ')}`);
-        throw e;
-      }
+      const plan = planOf(text, planArg);
       const became = plan.tasks.find(t => proposalsOfIncludes(t.includes).includes(id))?.id ?? (spent ? String(spent.taskId ?? '?') : undefined);
       if (became !== undefined) throw new UsageError(`proposals to-task: proposal ${id} already became ${became}: a new approval of a new proposal is needed`);
       // B-1: in a product run, without the flags, the task goes where the critic's keep placed it (the flags override it); an
@@ -446,7 +441,7 @@ export const command: Command = (args, ctx) => {
           + '--phase, --done-when-file and --estimate (and --depends-on when it waits for tasks)');
       }
       if (placement) {
-        const problems = checkPlacement(plan, found.title, placement, stateDir ? doneTasks(stateDir) : new Set(), { product });
+        const problems = checkPlacement(plan, found.title, placement, done, { product });
         if (problems.length) {
           const from = judged ? ' (the critic\'s: place it with --phase, --done-when-file and --estimate)' : '';
           throw new UsageError(`proposals to-task: the placement of ${id}${from} does not hold: ${problems.join('; ')}`);
@@ -481,11 +476,7 @@ export const command: Command = (args, ctx) => {
       try { raw = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); } catch { throw new UsageError(`proposals replan-check: ${opsFile} is not JSON`); }
       const { ops, errors } = normalizeOps(raw);
       if (errors.length) throw new UsageError(`proposals replan-check: ${errors.join('; ')}`);
-      let plan;
-      try { plan = parsePlan(readText(planArg, '--plan')); } catch (e) {
-        if (e instanceof PlanError) throw new UsageError(`${planArg}: ${e.issues.join('; ')}`);
-        throw e;
-      }
+      const plan = planOf(readText(planArg, '--plan'), planArg, 'proposals replan-check: ');
       const refused = replanRefusals(io.cwd, plan, ops, done);
       if (refused.length) {
         throw new UsageError('proposals replan-check: refused: a re-plan never retires, moves, or changes the title or done_when of a task of the '

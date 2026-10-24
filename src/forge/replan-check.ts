@@ -1,16 +1,20 @@
 // 6b-3 B-2, M-8, T6B3-RETIRED-IDS: what of a re-plan would override the person or a done task. `FORGE proposals replan-check`
 // runs it before every `waypoint replan --check` and every `waypoint replan`, so the CLI, not the phase review's agent, holds
-// it. A re-plan never retires, moves, or changes the title or the done_when of:
-// - a task of the person's: one a proposal of theirs became (a `(proposal <id>)` line of its `includes`, or a proposal whose
-//   taskId names it) that is a person's idea, or holds a mark that is not the run's own (forge:auto, forge:policy). Failing
-//   closed, a proposal this checkout does not have, or one that holds no mark, is not the run's either;
+// it, and `FORGE infinite phase` lists the tasks it holds for that agent (T6B3-REPLAN-HELD). A re-plan never retires, moves,
+// or changes the title or the done_when of:
+// - a task of the person's: one a proposal became (a `(proposal <id>)` line of its `includes`, or a proposal whose taskId
+//   names it) that is a person's idea, or that a person's note was merged into (T6B3-REPLAN-MERGED), or holds a mark that is
+//   not the run's own (forge:auto, forge:policy), or a run's mark that no longer matches it (T6B3-REPLAN-MARK-OK: reopened or
+//   edited since). Failing closed, a proposal this checkout does not have, or one that holds no mark, is not the run's either;
 // - a done task (the roadmap's state): its phase would close at once, and its id and its state must stay together.
 // What changes nothing (a move to the phase it is in, the title it has) overrides no one. Reads only: it never writes.
 import type { Plan, PlanTask } from '../lib/types.js';
 import type { ReplanOp } from '../lib/replan.js';
+import { ownerCheck } from '../lib/proposals.js';
 import { readEvents } from './ledger.js';
 import { loadApprovals, loadProposals } from './proposals.js';
 import { personsIdea } from './judge.js';
+import { IDEA_MERGED } from './ideas.js';
 import { proposalsOfIncludes } from './to-task.js';
 
 /** The marks a run writes itself: an autonomous profile's (`proposals judge`) and the policy's. Any other is the owner's. */
@@ -32,15 +36,18 @@ function changeOf(op: ReplanOp, tasks: ReadonlyMap<string, PlanTask>): { task: s
 }
 
 /**
- * Each operation of `ops` that would override the person or a done task, as `ops[<i>] <what it would do>: <why not>`; empty
- * when none does. `root` is the checkout whose proposals, marks and ledger say where each task came from (the run's
- * worktree), `plan` the plan the operations apply to, `done` the tasks the roadmap's state says are done.
+ * Why a re-plan may not retire, move, or change the title or done_when of a task: a function of the task's id that gives the
+ * reasons (`<task> is done`, `its proposal <id> …`), or null when it may. `root` is the checkout whose proposals, marks and
+ * ledger say where each task came from (the run's worktree), `plan` the plan, `done` the tasks the roadmap's state says are
+ * done. replanRefusals and heldTasks both ask it, so the CLI's refusal and the phase review's list never disagree.
  */
-export function replanRefusals(root: string, plan: Plan, ops: readonly ReplanOp[], done: ReadonlySet<string>): string[] {
+export function heldBy(root: string, plan: Plan, done: ReadonlySet<string>): (task: string) => string | null {
   const proposals = loadProposals(root);
   const byId = new Map(proposals.map(p => [p.id, p]));
   const marks = loadApprovals(root);
   const events = readEvents(root).filter(e => e.kind === 'proposal');
+  // T6B3-REPLAN-MERGED: a person's note that said what an open proposal says joined it (`proposals add --from-note`).
+  const merged = new Map(events.filter(e => e.action === IDEA_MERGED && typeof e.id === 'string').map(e => [e.id as string, String(e.from ?? 'a note')]));
   const tasks = new Map(plan.tasks.map(t => [t.id, t]));
   /** Why `task` is the person's, by the first proposal it came from that is not the run's own; null when none is. */
   const personOf = (task: string): string | null => {
@@ -50,18 +57,41 @@ export function replanRefusals(root: string, plan: Plan, ops: readonly ReplanOp[
       if (!found) return `its proposal ${id} is not in this checkout, so who decided it is not known`;
       const { id: _id, ...doc } = found;
       if (personsIdea(events, id, doc)) return `its proposal ${id} is a person's idea (source: user)`;
+      if (merged.has(id)) return `its proposal ${id} holds a person's idea merged into it (${merged.get(id)})`;
       const mark = marks[id];
       if (!mark) return `its proposal ${id} holds no mark, so who decided it is not known`;
       if (!RUN_MARKS.includes(mark.by)) return `its proposal ${id} holds the owner's mark (by ${mark.by})`;
+      // T6B3-REPLAN-MARK-OK: the run's mark counts while it agrees with the proposal and is of its present text.
+      if (ownerCheck(id, doc, mark) !== 'ok') return `its proposal ${id}: its mark no longer matches the proposal (reopened or edited since)`;
     }
     return null;
   };
+  return task => {
+    const why = [done.has(task) ? `${task} is done` : null, personOf(task)].filter((w): w is string => w !== null);
+    return why.length ? why.join('; ') : null;
+  };
+}
+
+/** T6B3-REPLAN-HELD: the tasks of `plan`, in its order, that a re-plan may not retire, move, or change the title or done_when
+ *  of, each with why (heldBy): what `FORGE infinite phase` prints for the phase review. */
+export function heldTasks(root: string, plan: Plan, done: ReadonlySet<string>): { task: string; reason: string }[] {
+  const why = heldBy(root, plan, done);
+  return plan.tasks.flatMap(t => {
+    const reason = why(t.id);
+    return reason ? [{ task: t.id, reason }] : [];
+  });
+}
+
+/** Each operation of `ops` that would override the person or a done task (heldBy), as `ops[<i>] <what it would do>: <why not>`;
+ *  empty when none does. */
+export function replanRefusals(root: string, plan: Plan, ops: readonly ReplanOp[], done: ReadonlySet<string>): string[] {
+  const why = heldBy(root, plan, done);
+  const tasks = new Map(plan.tasks.map(t => [t.id, t]));
   const out: string[] = [];
   ops.forEach((op, i) => {
     const change = changeOf(op, tasks);
-    if (!change) return;
-    const why = [done.has(change.task) ? `${change.task} is done` : null, personOf(change.task)].filter((w): w is string => w !== null);
-    if (why.length) out.push(`ops[${i}] ${change.what}: ${why.join('; ')}`);
+    const reason = change ? why(change.task) : null;
+    if (change && reason) out.push(`ops[${i}] ${change.what}: ${reason}`);
   });
   return out;
 }

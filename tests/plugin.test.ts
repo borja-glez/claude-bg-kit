@@ -2315,8 +2315,12 @@ describe('plugin layout', () => {
     const md = read('plugins/forge/agents/forge-phase-review.md');
     expect(md.split(/\r?\n---\r?\n/)[0]).toMatch(/\ntools: Read, Grep, Glob, Write\r?\n/);
     for (const w of ['replan.json', '"ops"', '"vision"', '"findings"', 'add-phase', 'move', 'order-phases', 'order-tasks', 'retire', 'FORGE market last']) expect(md, w).toContain(w);
-    // H-7: a gap, debt or bug finding carries what its proposal needs; B-2: the CLI holds the person's tasks.
-    for (const w of ['"category"', '"pillar"', 'FORGE proposals replan-check', 'source: user', 'parked']) expect(md, w).toContain(w);
+    // H-7 and fix 1: a gap, debt or bug finding carries what its proposal needs, and one the person decides says so; B-2: the CLI
+    // holds the person's tasks, and T6B3-REPLAN-HELD: the agent reads them as `held` of `FORGE infinite phase`.
+    for (const w of ['"category"', '"risk"', '"evidence"', '"pillar"', '"person": true', 'FORGE proposals replan-check', 'FORGE infinite phase', '`held`', 'parked']) {
+      expect(md, w).toContain(w);
+    }
+    expect(md, 'the decidedBy stand-in is gone').not.toContain('decidedBy');
   });
   it('the session finds the replan and vision points and their undo (6b-3 M-5)', () => {
     expect(runRef('decisions')).toMatch(/"point": "<[a-z|-]*\|replan\|vision\|[a-z|-]*>"/);

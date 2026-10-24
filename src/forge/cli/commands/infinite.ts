@@ -2,8 +2,8 @@ import type { Command } from '../context.js';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { forgeDir } from '../../ledger.js';
-import { parsePlan, PlanError } from '../../../lib/plan.js';
 import { doneOf, markReviewed, phaseStatus, readReviewed } from '../../phases.js';
+import { heldTasks } from '../../replan-check.js';
 import { parseRun, startRun, stopReason, readRunText, saveRun, stopFile, type RunState } from '../../run.js';
 import { UNBOUND_WARNING } from '../../hook.js';
 import { isLocale } from '../../../lib/forge-run.js';
@@ -15,7 +15,7 @@ import { activeProfileAt, prepareProfile, profileArgs, profileBlock, readableRun
 import { autonomousFor, recordSessions } from '../../autonomous.js';
 import { loadConfig, type ForgeConfig } from '../../config.js';
 import { resetDelegation, trustFor, type TrustState } from '../../trust.js';
-import { stopContext, unownedOf, runRootOf, runReply } from '../shared.js';
+import { planOf, stopContext, unownedOf, runRootOf, runReply } from '../shared.js';
 
 export const command: Command = (args, ctx) => {
   const { io, flag, has, json, ts } = ctx;
@@ -100,6 +100,8 @@ export const command: Command = (args, ctx) => {
     // 6b-3, spec «Fases que se replanifican»: the first phase of the plan, in its order, whose tasks the roadmap's state says are
     // all done and that was not reviewed yet (src/forge/phases.ts); --mark records its review. Only a product run reviews its
     // phases (L-16: a spike has no phase review). H-6: the reviewed phases are phases.json's, in the main checkout.
+    // T6B3-REPLAN-HELD: `held` is what replan-check would refuse to change, by the same rule, from this checkout (the run's
+    // worktree, where the session runs both), for the phase review.
     const main = mainCheckout(io.cwd);
     const run = parseRun(readRunText(runRootOf(io.cwd, main)));
     if (!run?.active || !run.autonomous) throw new UsageError('infinite phase: no autonomous run is active (infinite start --profile product)');
@@ -111,14 +113,11 @@ export const command: Command = (args, ctx) => {
     const done = doneOf(io.cwd, db, 'infinite phase');
     let text: string;
     try { text = readFileSync(path.resolve(io.cwd, planArg), 'utf8'); } catch { throw new UsageError(`infinite phase: cannot read ${planArg}`); }
-    let plan: ReturnType<typeof parsePlan>;
-    try { plan = parsePlan(text); } catch (e) {
-      if (e instanceof PlanError) throw new UsageError(`infinite phase: ${planArg}: ${e.issues.join('; ')}`);
-      throw e;
-    }
+    const plan = planOf(text, planArg, 'infinite phase: ');
     const mark = flag('mark');
     if (has('mark') && !(mark && plan.phases.some(ph => ph.id === mark))) throw new UsageError(`infinite phase: --mark ${mark ?? ''} is not a phase of ${planArg}`);
-    return json(phaseStatus(plan, done, mark ? markReviewed(main, runId, mark) : readReviewed(main, runId)));
+    const status = phaseStatus(plan, done, mark ? markReviewed(main, runId, mark) : readReviewed(main, runId));
+    return json({ ...status, held: heldTasks(io.cwd, plan, done) });
   }
   if (sub === 'status') {
     const runRoot = runRootOf(io.cwd);
