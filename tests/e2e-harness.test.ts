@@ -4,6 +4,13 @@ import {
   type MessagesRequest, type Step,
 } from './e2e/harness/messages-server.js';
 import { announceLine, OBSERVED_WITH, parseVersion, resolveClaude, spawnSpec, type ClaudeBin } from './e2e/harness/claude-bin.js';
+import { claudeArgs, e2eEnv, E2E_MODEL, failureReport, runClaude } from './e2e/harness/session.js';
+import { E2E_KEY, makeWorkspace, PLUGIN_DIRS, readHooks, type Workspace } from './e2e/harness/workspace.js';
+import { useTempDirs } from './helpers/tmp.js';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const req = (over: Partial<MessagesRequest> = {}): MessagesRequest => ({ model: 'm', stream: true, tools: [{ name: 'Read' }], messages: [{ role: 'user', content: [{ type: 'text', text: 'E2E-X go' }] }], ...over });
 
@@ -121,5 +128,104 @@ describe('finding claude (A8)', () => {
     const bin: ClaudeBin = { file: '/b/claude', prefix: [], version: OBSERVED_WITH, viaCmd: false };
     expect(announceLine(bin)).toBe(`e2e: claude ${OBSERVED_WITH} (/b/claude)`);
     expect(announceLine({ ...bin, version: '0.0.1' })).toBe(`e2e: claude 0.0.1 (/b/claude); tests/e2e/README.md was recorded with ${OBSERVED_WITH}: a pinned scenario that fails may be a change of Claude Code`);
+  });
+});
+
+describe('the e2e session (A8)', () => {
+  const tmp = useTempDirs();
+  const fake: ClaudeBin = { file: process.execPath, prefix: [fileURLToPath(new URL('./e2e/fixtures/fake-claude.mjs', import.meta.url))], version: 'fake', viaCmd: false };
+
+  it("e2eEnv drops the parent session's, vitest's, the proxy's and forge's variables in any case, keeps PATH and the git-bash path, and points the child at the scripted API, the temp config and the temp home", () => {
+    const env = e2eEnv({
+      PATH: '/bin', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 's', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_PROJECT_DIR: '/p', CLAUDE_CODE_OAUTH_TOKEN: 't',
+      Claude_Config_Dir: '/real', ANTHROPIC_AUTH_TOKEN: 'a', ANTHROPIC_API_KEY: 'real', NODE_ENV: 'test', TEST: 'true', VITEST_POOL_ID: '1',
+      HTTPS_PROXY: 'http://p', https_proxy: 'http://p', NODE_OPTIONS: '--inspect', FORGE_ROUTE_HINT: 'off', UserProfile: 'C:\\real', CLAUDE_CODE_GIT_BASH_PATH: 'C:\\g\\bash.exe',
+    }, { home: '/h', configDir: '/h/.claude', hookLog: '/h/hooks.jsonl' }, 'http://127.0.0.1:9');
+    expect(env).toEqual({
+      PATH: '/bin', CLAUDE_CODE_GIT_BASH_PATH: 'C:\\g\\bash.exe', ANTHROPIC_BASE_URL: 'http://127.0.0.1:9', ANTHROPIC_API_KEY: E2E_KEY,
+      CLAUDE_CONFIG_DIR: '/h/.claude', HOME: '/h', USERPROFILE: '/h', BGKIT_E2E_HOOK_LOG: '/h/hooks.jsonl', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1', NO_PROXY: '127.0.0.1,localhost',
+    });
+  });
+  it('claudeArgs: print mode with stream-json both ways, hook events, the session, the model, strict MCP, the debug file, each plugin dir, the settings and each permission mode', () => {
+    const ws = { sessionId: 'u-1', debugFile: '/h/debug.log' } as Workspace;
+    expect(claudeArgs(ws, { plugins: ['/p/waypoint', '/p/forge'], permissions: 'bypass' })).toEqual([
+      '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-hook-events',
+      '--session-id', 'u-1', '--model', E2E_MODEL, '--strict-mcp-config', '--debug-file', '/h/debug.log',
+      '--plugin-dir', '/p/waypoint', '--plugin-dir', '/p/forge', '--permission-mode', 'bypassPermissions', '--permission-prompts', 'none',
+    ]);
+    expect(claudeArgs(ws, { plugins: [], permissions: 'deny-prompts', settings: '/h/s.json' }).slice(-4)).toEqual(['--settings', '/h/s.json', '--permission-prompts', 'none']);
+    expect(claudeArgs(ws, { plugins: [], permissions: 'host' }).slice(-2)).toEqual(['--permission-prompt-tool', 'stdio']);
+  });
+  it('makeWorkspace: a git repo with one commit on main, a temp home with its config dir and an onboarded .claude.json, and a fresh session UUID', () => {
+    const ws = makeWorkspace(tmp);
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: ws.repo, encoding: 'utf8' }).trim();
+    expect(git('rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
+    expect(git('rev-list', '--count', 'HEAD')).toBe('1');
+    expect(ws.configDir).toBe(path.join(ws.home, '.claude'));
+    expect(JSON.parse(readFileSync(path.join(ws.configDir, '.claude.json'), 'utf8'))).toMatchObject({ hasCompletedOnboarding: true, customApiKeyResponses: { approved: [E2E_KEY.slice(-20)] } });
+    expect(ws.sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(makeWorkspace(tmp).sessionId).not.toBe(ws.sessionId);
+  });
+  it('the probe hook appends its stdin to BGKIT_E2E_HOOK_LOG as one {event, input} line, prints nothing, and does nothing without the variable', () => {
+    const hookLog = path.join(tmp('e2e-probe-'), 'hooks.jsonl');
+    const record = path.join(PLUGIN_DIRS.probe, 'hooks', 'record.mjs');
+    const input = { hook_event_name: 'Stop', session_id: 's', stop_hook_active: false };
+    const r = spawnSync(process.execPath, [record], { input: JSON.stringify(input), encoding: 'utf8', env: { ...process.env, BGKIT_E2E_HOOK_LOG: hookLog } });
+    expect([r.status, r.stdout]).toEqual([0, '']);
+    spawnSync(process.execPath, [record], { input: 'not json', env: { ...process.env, BGKIT_E2E_HOOK_LOG: hookLog } });
+    expect(readHooks({ hookLog })).toEqual([{ event: 'Stop', input }, { event: 'unparsed', input: { text: 'not json' } }]);
+    const { BGKIT_E2E_HOOK_LOG: _no, ...bare } = process.env;
+    expect(spawnSync(process.execPath, [record], { input: JSON.stringify(input), env: bare }).status).toBe(0);
+    expect(readHooks({ hookLog })).toHaveLength(2);
+  });
+  it('runClaude sends each turn after the previous result and ends stdin after the last: the child exits 0 and every line is parsed', async () => {
+    const ws = makeWorkspace(tmp);
+    const server = await startMessagesServer([]);
+    try {
+      const r = await runClaude(fake, { ws, server, turns: ['one', 'two'], timeoutMs: 20_000, env: { ...process.env, FAKE_CLAUDE_MODE: 'echo' } });
+      expect([r.code, r.timedOut]).toEqual([0, false]);
+      expect(r.out.find(l => l.subtype === 'init')).toMatchObject({ type: 'system', session_id: ws.sessionId });
+      expect(r.out.filter(l => l.type === 'result').map(l => l.result)).toEqual(['one', 'two']);
+      expect(r.out.some(l => l.type === 'raw')).toBe(false);
+      expect(r.pid).toBeGreaterThan(0);
+    } finally { await server.close(); }
+  });
+  it('with onControl it sends initialize first and answers can_use_tool with what onControl returns', async () => {
+    const ws = makeWorkspace(tmp);
+    const server = await startMessagesServer([]);
+    const seen: (string | undefined)[] = [];
+    try {
+      const r = await runClaude(fake, {
+        ws, server, turns: ['ask'], timeoutMs: 20_000, env: { ...process.env, FAKE_CLAUDE_MODE: 'ask' },
+        onControl: c => { seen.push(c.request.tool_name); return { behavior: 'allow', updatedInput: { answers: { 'Q?': 'Yes' } } }; },
+      });
+      expect([r.code, r.timedOut]).toEqual([0, false]);
+      expect(seen).toEqual(['AskUserQuestion']);
+      const result = r.out.find(l => l.type === 'result');
+      expect(JSON.parse(String(result?.result))).toEqual({ behavior: 'allow', updatedInput: { answers: { 'Q?': 'Yes' } } });
+    } finally { await server.close(); }
+  });
+  it('a child that never ends is killed by its own pid at the timeout: timedOut, the process is gone, and the report carries the debug tail', async () => {
+    const ws = makeWorkspace(tmp);
+    const server = await startMessagesServer([]);
+    try {
+      const t0 = Date.now();
+      const r = await runClaude(fake, { ws, server, turns: ['x'], timeoutMs: 1500, env: { ...process.env, FAKE_CLAUDE_MODE: 'hang' } });
+      expect(Date.now() - t0).toBeLessThan(10_000);
+      expect(r.timedOut).toBe(true);
+      const gone = async () => {
+        for (let i = 0; i < 20; i++) {
+          try { process.kill(r.pid, 0); } catch { return true; }
+          await new Promise(res => setTimeout(res, 100));
+        }
+        return false;
+      };
+      expect(await gone()).toBe(true);
+      expect(r.debugTail).toContain('fake-claude hang');
+      const report = failureReport(r, server);
+      expect(report).toContain('timedOut: true');
+      expect(report).toContain('fake-claude hang');
+    } finally { await server.close(); }
   });
 });
