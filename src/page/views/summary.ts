@@ -44,8 +44,10 @@ export function renderAutonomous(m: Model, d: Dict, loc: string): string {
   const block = (k: SaturationBlocking): string => {
     const e = s.evidence;
     switch (k) {
-      // Task 6 fix 1: the dry rounds against their threshold, the one forge stops at.
-      case 'rounds': return `<li><b>${esc(d.num(s.rounds))}</b> ${esc(a.blocking.rounds(d.num(SATURATION_ROUNDS)))}</li>`;
+      // Task 6 fix 1: the dry rounds against their threshold, the one forge stops at; final fix F-M6: at or past it, a cycle that
+      // did not explore waits for an exploration round, the only one that concludes.
+      case 'rounds': return s.explored === false && s.rounds >= SATURATION_ROUNDS ? `<li>${esc(a.noRound)}</li>`
+        : `<li><b>${esc(d.num(s.rounds))}</b> ${esc(a.blocking.rounds(d.num(SATURATION_ROUNDS)))}</li>`;
       case 'pending-tasks': return fact(a.blocking[k], c.pendingTasks, e.pendingTasks);
       case 'validators': return fact(a.blocking[k], c.validatorsFailed, e.validatorsFailed);
       case 'findings': return fact(a.blocking[k], e.openFindings);
@@ -55,7 +57,10 @@ export function renderAutonomous(m: Model, d: Dict, loc: string): string {
     }
   };
   const when = fmt(s.at, loc);
-  const verdict = `<div class="asat${s.saturated ? ' ok' : ''}">${esc(s.saturated ? a.saturated : a.notYet)}${when ? ` <span class="k">· ${esc(when)}</span>` : ''}</div>`;
+  // Final fix T6-a: a run stopped as saturated says it in its stop line; the verdict line then keeps only the report's time.
+  const word = !inf.active && r === 'saturated' && s.saturated ? '' : s.saturated ? a.saturated : a.notYet;
+  const time = when ? `<span class="k">${word ? '· ' : ''}${esc(when)}</span>` : '';
+  const verdict = word || time ? `<div class="asat${s.saturated ? ' ok' : ''}">${esc(word)}${word && time ? ' ' : ''}${time}</div>` : '';
   // Saturated, its blocking is empty: the evidence is every count it would block on; a missing input would have blocked.
   const facts = (s.saturated ? SATURATION_BLOCKING.filter(k => k !== 'inputs') : s.blocking).map(block).join('');
   const w = s.waiting;

@@ -114,6 +114,19 @@ describe('parseRun', () => {
     const missing = { ...sat, saturated: false, blocking: ['inputs'], missing: ['--plan', '--validate'] };
     expect(read({ saturation: missing })?.saturation).toEqual(missing);
   });
+  it('keeps whether the report\'s cycle explored, and drops a report whose explored is no boolean or that is saturated without a round (final fix F-M6)', () => {
+    const sat = { saturated: true, at: 't', rounds: 3, blocking: [], evidence: { pendingTasks: [], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
+      waiting: noWaiting, counts: noCounts };
+    const read = (saturation: unknown) => parseRun(JSON.stringify({ ...startRun(T0, { cycles: 3 }), saturation }));
+    const waiting = { ...sat, saturated: false, blocking: ['rounds'], explored: false };
+    expect(read(waiting)?.saturation).toEqual(waiting);
+    expect(read({ ...sat, explored: true })?.saturation).toEqual({ ...sat, explored: true });
+    for (const bad of [{ ...sat, explored: 'no' }, { ...sat, explored: false }]) {
+      const r = read(bad);
+      expect(r, JSON.stringify(bad)).not.toBeNull();
+      expect(r, JSON.stringify(bad)).not.toHaveProperty('saturation');
+    }
+  });
 });
 
 describe('recordCycle', () => {
@@ -139,6 +152,20 @@ describe('recordCycle', () => {
     r = recordCycle(recordCycle(r, { progress: false, error: '  ' }), { progress: false, error: '  ' });
     expect(r.repeatedError).toBe(false);
   });
+  it('compares the whole cleaned error, not the 1000 characters it stores, also across run.json (final fix T4-R2-1)', () => {
+    const head = 'x'.repeat(1000);
+    let r = recordCycle(startRun(T0, {}), { progress: false, error: `${head} first` });
+    r = recordCycle(parseRun(JSON.stringify(r))!, { progress: false, error: `${head} second` });
+    expect(r).toMatchObject({ lastError: head, repeatedError: false });
+    // The same error once cleaned (other spaces and line breaks) is the same error.
+    r = recordCycle(parseRun(JSON.stringify(r))!, { progress: false, error: `${head}  second\n` });
+    expect(r.repeatedError).toBe(true);
+    // A short error still repeats, and no error clears the digest.
+    expect(recordCycle(recordCycle(startRun(T0, {}), { progress: false, error: 'boom' }), { progress: false, error: 'boom' }).repeatedError).toBe(true);
+    expect(recordCycle(r, { progress: true })).not.toHaveProperty('lastErrorDigest');
+    // A digest that does not read is dropped, never the run.
+    expect(parseRun(JSON.stringify({ ...r, lastErrorDigest: 'nope' }))).not.toHaveProperty('lastErrorDigest');
+  });
   it('stores the error as one clean line of at most 1000 characters, so run.json stays within lens\'s read (6b-3 N-2)', () => {
     const ctl = String.fromCharCode(1);
     // 2000 characters of control characters: nothing readable is left, so no error.
@@ -155,7 +182,7 @@ describe('recordCycle', () => {
     const sat = { saturated: false, at: T0.toISOString(), rounds: 3, blocking: ['rounds', 'pending-tasks', 'validators', 'findings', 'defects', 'proposals', 'inputs'],
       evidence: { pendingTasks: task('a'), validatorsFailed: ids(i => `v${i}`.padEnd(80, 'v')), openFindings: 999, openDefects: prop('1'), openProposals: prop('2') },
       waiting: { parked: prop('3'), questions: 999, blocked: 999, deferred: 999, waitsOwner: prop('4'), unowned: prop('5'), blockedTasks: task('b'), unplaced: prop('6'), orphanFindings: task('c') },
-      counts: Object.fromEntries(Object.keys(noCounts).map(k => [k, 9999])), missing: ['--plan', '--db', '--validate'] };
+      counts: Object.fromEntries(Object.keys(noCounts).map(k => [k, 9999])), missing: ['--plan', '--db', '--validate'], explored: false };
     const run = { ...recordCycle(startRun(T0, { cycles: 99, hours: 99 }, 10, 's'.repeat(80), 'pt-BR'), { progress: false, error: `${ctl}\\`.repeat(1000) }),
       autonomous: { profile: 'product' as const, name: 'n'.repeat(40), runId: `product-${'n'.repeat(40)}`, worktree: path.resolve('/w', 'x'.repeat(200)),
         branch: `forge/product-${'n'.repeat(40)}`, startBranch: 'b'.repeat(100), protectedBranches: ids(i => `p${i}`.padEnd(60, 'p')).slice(0, 10) },

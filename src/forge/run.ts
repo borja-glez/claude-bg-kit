@@ -3,6 +3,7 @@ import path from 'node:path';
 import { forgeDir } from './ledger.js';
 import { parseRun, type RunState } from '../lib/forge-run.js';
 import { clean } from '../lib/decisions.js';
+import { sha256Hex } from '../lib/sha256.js';
 
 export { parseRun, type RunState };
 
@@ -24,14 +25,21 @@ export function startRun(now: Date, budget: RunState['budget'], queueMax = DEFAU
   };
 }
 
+/** Final fix T4-R2-1: `repeated-error` compares the sha256 of the whole cleaned error, which run.json keeps beside the clipped
+ *  `lastError`, so two long errors that only share their first MAX_ERROR code points are two errors. A run.json written before
+ *  it has no digest: its `lastError` is compared, as stored. */
 export function recordCycle(run: RunState, result: { progress: boolean; error?: string }): RunState {
-  const error = clean(result.error ?? '', MAX_ERROR) || null;
+  const whole = clean(result.error ?? '', Infinity);
+  const digest = whole ? sha256Hex(whole) : null;
+  const before = run.lastErrorDigest ?? (run.lastError !== null ? sha256Hex(run.lastError) : null);
+  const { lastErrorDigest: _gone, ...rest } = run;
   return {
-    ...run,
+    ...rest,
     cycle: run.cycle + 1,
     noProgress: result.progress ? 0 : run.noProgress + 1,
-    lastError: error,
-    repeatedError: error !== null && error === run.lastError,
+    lastError: whole ? clean(whole, MAX_ERROR) : null,
+    ...(digest ? { lastErrorDigest: digest } : {}),
+    repeatedError: digest !== null && digest === before,
     blocksSinceCycle: 0,
   };
 }

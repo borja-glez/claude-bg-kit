@@ -29,10 +29,11 @@ beforeEach(() => {
 describe('infinite phase (6b-3)', () => {
   it('names the first phase all done and not reviewed yet, once; an empty phase never closes', () => {
     state('T001', 'done'); state('T002', 'in_progress');
-    // T6B3-REPLAN-HELD: `held` names the tasks a re-plan may not change, here the done one.
+    // T6B3-REPLAN-HELD: `held` names the tasks a re-plan may not change, here the done one; final fix F-M4: `reviewed` the
+    // phases already reviewed.
     expect(JSON.parse(phase().stdout)).toEqual({ closed: 'F1', phases: [{ id: 'F1', done: 1, total: 1 }, { id: 'F2', done: 0, total: 1 }, { id: 'F3', done: 0, total: 0 }],
-      held: [{ task: 'T001', reason: 'T001 is done' }] });
-    expect(JSON.parse(phase('--mark', 'F1').stdout).closed).toBeNull();
+      held: [{ task: 'T001', reason: 'T001 is done' }], reviewed: [] });
+    expect(JSON.parse(phase('--mark', 'F1').stdout)).toMatchObject({ closed: null, reviewed: ['F1'] });
     expect(reviewed()).toEqual({ reviewed: ['F1'] });
     expect(JSON.parse(phase().stdout).closed).toBeNull();
   });
@@ -178,6 +179,43 @@ describe('proposals replan-check (6b-3)', () => {
   });
   it('a proposal a person\'s note was merged into holds its task (T6B3-REPLAN-MERGED)', () => {
     refused({ op: 'move', task: 'T015', phase: 'F1' }, P.merged, 'merged');
+  });
+  it('a merged note\'s origin is cleaned and clipped in the reason, as the other reasons are (final fix T5-a)', () => {
+    appendEvent(root, { ts: T0.toISOString(), kind: 'proposal', action: IDEA_MERGED, id: P.run, from: `note:${'n'.repeat(300)}` });
+    appendEvent(root, { ts: T0.toISOString(), kind: 'proposal', action: IDEA_MERGED, id: P.policy, from: `note:a${String.fromCharCode(0x202e)}b` });
+    const held = (JSON.parse(phase().stdout) as { held: { task: string; reason: string }[] }).held;
+    expect(held.find(h => h.task === 'T004')?.reason).toContain(`(note:${'n'.repeat(75)})`);
+    expect(held.find(h => h.task === 'T010')?.reason).toContain('(note:a b)');
+    expect(refused({ op: 'retire', task: 'T004', why: 'w' }, 'merged')).not.toContain('n'.repeat(76));
+  });
+  it('a task blocked for the person is held, in replan-check and in infinite phase\'s held (final fix F-M3)', () => {
+    mkdirSync(path.join(root, 'db', 'state'), { recursive: true });
+    writeFileSync(path.join(root, 'db', 'state', 'T005.json'), JSON.stringify({ status: 'blocked', blockedBy: ['external'] }));
+    for (const op of [{ op: 'retire', task: 'T005', why: 'w' }, { op: 'move', task: 'T005', phase: 'F1' }, { op: 'edit', task: 'T005', title: 'renamed' }]) {
+      refused(op, 'T005 waits for the person');
+    }
+    expect((JSON.parse(phase().stdout) as { held: unknown[] }).held).toContainEqual({ task: 'T005', reason: 'T005 waits for the person' });
+    // Positive control: a task blocked by another task is the run's to re-plan.
+    writeFileSync(path.join(root, 'db', 'state', 'T005.json'), JSON.stringify({ status: 'blocked', blockedBy: ['T004'] }));
+    expect(check([{ op: 'retire', task: 'T005', why: 'w' }]).code).toBe(0);
+  });
+  it('refuses a move into a phase already reviewed, and infinite phase lists the reviewed phases (final fix F-M4)', () => {
+    state('T002', 'done');
+    expect(phase('--mark', 'F1').code).toBe(0);
+    const r = refused({ op: 'move', task: 'T004', phase: 'F1' }, 'ops[0] move T004 to F1: F1 was already reviewed');
+    expect(r).not.toContain('ops[1]');
+    expect((JSON.parse(phase().stdout) as { reviewed: string[] }).reviewed).toEqual(['F1']);
+    // Positive control: a move into a phase not reviewed, a new one included, passes; one into the phase it is in changes nothing.
+    expect(check([{ op: 'add-phase', id: 'F3', name: 'Polish', goal: 'what a serious product needs' }, { op: 'move', task: 'T004', phase: 'F3' }]).code).toBe(0);
+    expect(check([{ op: 'move', task: 'T004', phase: 'F2' }]).code).toBe(0);
+  });
+  it('runs only inside an active product run: the reviewed phases are that run\'s (final fix F-M4)', () => {
+    saveRun(root, { ...startRun(T0, { hours: 1 }, 10, 'c1'), autonomous: autonomous('spike') });
+    const spike = check([{ op: 'move', task: 'T004', phase: 'F1' }]);
+    expect(spike.code).toBe(2);
+    expect(spike.stderr).toContain('spike');
+    saveRun(root, startRun(T0, { hours: 1 }, 10, 'c1'));
+    expect(check([{ op: 'move', task: 'T004', phase: 'F1' }]).code).toBe(2);
   });
   it('infinite phase lists as held exactly what replan-check refuses to change, with the same reason (T6B3-REPLAN-HELD)', () => {
     const held = (JSON.parse(phase().stdout) as { held: { task: string; reason: string }[] }).held;

@@ -10,6 +10,7 @@ import { proposalDigest } from '../src/lib/proposals.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { stopContext, lastDecisions, unownedOf } from '../src/forge/cli/shared.js';
 import { profileNames } from '../src/forge/profile.js';
+import { explorePassed } from '../src/forge/saturation.js';
 import { useTempDirs } from './helpers/tmp.js';
 
 const tmp = useTempDirs();
@@ -535,6 +536,85 @@ describe('a keep places its task, and to-task takes that placement (6b-3, B-1)',
     expect(toTask(id, flags('F2', '30m')).code).toBe(0);
     expect(parsePlan(planText()).tasks.map(t => [t.id, t.phase, t.estimate_min])).toEqual([['T001', 'F1', undefined], ['T002', 'F2', 120], ['T003', 'F2', 30]]);
   });
+  // Final fix F-I1 (probe P-LASTPHASE): after the last phase closes, nothing can be placed until a re-plan adds a phase.
+  it('once every phase with tasks is done and none is empty, to-task says that no phase of the plan is open, with or without flags', () => {
+    const closed = PLAN + '  - { id: T002, title: b, track: backend, phase: F2, done_when: y }\n';
+    writeFileSync(path.join(root, 'plan.yaml'), closed);
+    for (const t of ['T001', 'T002']) writeFileSync(path.join(root, 'db', 'state', `${t}.json`), JSON.stringify({ status: 'done' }));
+    const id = add({ title: 'Combo meter' });
+    verdicts({ id, verdict: 'keep', why: 'it rewards skill', placement });
+    expect(outcome(id)).toBe('approved');
+    for (const extra of [[], flags('F1'), flags('F2'), flags('PX')]) {
+      const r = toTask(id, extra);
+      expect(r.code, extra.join(' ')).toBe(2);
+      expect(r.stderr, extra.join(' ')).toContain('no phase of the plan is open');
+    }
+    expect(planText()).toBe(closed);
+    expect(loadProposal(root, id)?.taskId).toBeUndefined();
+    // Positive control: once a re-plan adds a phase, the keep's done phase is refused as before, and the new phase takes it.
+    const opened = closed.replace('  - { id: F2, name: Polish, plan_status: committed }\n', '  - { id: F2, name: Polish, plan_status: committed }\n  - { id: F3, name: Next, plan_status: committed }\n');
+    writeFileSync(path.join(root, 'plan.yaml'), opened);
+    const keep = toTask(id);
+    expect(keep.code).toBe(2);
+    expect(keep.stderr).toContain('phase F2 is done');
+    expect(keep.stderr).not.toContain('no phase of the plan is open');
+    expect(toTask(id, flags('F3')).code).toBe(0);
+    expect(lastTask()).toMatchObject({ phase: 'F3' });
+  });
+  // Final fix T2-b: the keep's placement counts only for the text the critic judged (its event's digest).
+  it('to-task takes a judge event\'s placement only while the event\'s digest is the proposal\'s present one', () => {
+    const id = add({ title: 'Combo meter' });
+    verdicts({ id, verdict: 'keep', why: 'it rewards skill' });
+    expect(outcome(id)).toBe('approved');
+    const event = (digest: string) => appendEvent(root, { ts: T0.toISOString(), kind: 'proposal', action: 'judge', id, status: 'auto_approved', verdict: 'keep', digest, placement });
+    event('a'.repeat(64));
+    const other = toTask(id);
+    expect(other.code).toBe(2);
+    expect(other.stderr).toContain('--phase');
+    expect(planText()).toBe(PLAN);
+    event(proposalDigest(id, loadProposal(root, id)!));
+    const r = toTask(id);
+    expect(r.code, r.stderr).toBe(0);
+    expect(lastTask()).toMatchObject({ phase: 'F2', done_when: placement.doneWhen, depends_on: ['T001'], estimate_min: 45 });
+  });
+  // Final fix T2-c: the Task 2 review's probe paths (P1, P2, P4), as tests.
+  it('an idea the person insisted on needs the session\'s placement in a product run, and takes it (P1)', () => {
+    const id = 'p20261022100000aaaa';
+    saveProposal(root, id, { ts: T0.toISOString(), category: 'feature', risk: 'high', title: 'Online mode', rationale: 'r', evidence: 'e', pillar: '',
+      status: 'discussing', source: 'user', author: 'user:u1', parked: { why: 'solo game', loses: 'solo focus', at: T0.toISOString() } });
+    const u = run(['proposals', 'unpark', id, '--insist', '--from-chat'], io());
+    expect(u.code, u.stderr).toBe(0);
+    const none = toTask(id);
+    expect(none.code).toBe(2);
+    expect(none.stderr).toContain('--phase');
+    const placed = toTask(id, flags('F2', '45m'));
+    expect(placed.code, placed.stderr).toBe(0);
+    expect(lastTask()).toMatchObject({ phase: 'F2', done_when: 'a ghost run replays the best lap in the race test', estimate_min: 45, depends_on: [] });
+  });
+  it('a v2\'s own keep places it with no flags, and the v1 it replaced takes no task (P2)', () => {
+    const v1 = add({ title: 'Big shop' });
+    verdicts({ id: v1, verdict: 'adapt', why: 'too big', changes: 'only cosmetic items' });
+    expect(outcome(v1)).toBe('adapt');
+    const v2 = add({ title: 'Cosmetic shop', rationale: 'only cosmetic items' }, ['--revises', v1]);
+    const own = { phase: 'F2', doneWhen: 'the shop sells a hat in the store test', dependsOn: ['T001'], estimate: '2h' };
+    verdicts({ id: v2, verdict: 'keep', why: 'fits', placement: own });
+    expect(JSON.parse(judge(v2).stdout)).toMatchObject({ outcome: 'approved', placement: own, original: { id: v1 } });
+    const r = toTask(v2);
+    expect(r.code, r.stderr).toBe(0);
+    expect(lastTask()).toMatchObject({ phase: 'F2', done_when: own.doneWhen, depends_on: ['T001'], estimate_min: 120 });
+    expect(toTask(v1).code).toBe(2);
+  });
+  it('a placement edited in the ledger places nothing: the session must place it (P4)', () => {
+    const id = add({ title: 'Combo meter' });
+    verdicts({ id, verdict: 'keep', why: 'it rewards skill' });
+    expect(outcome(id)).toBe('approved');
+    appendEvent(root, { ts: T0.toISOString(), kind: 'proposal', action: 'judge', id, status: 'auto_approved', verdict: 'keep',
+      digest: proposalDigest(id, loadProposal(root, id)!), placement: { ...placement, phase: '../F2' } });
+    const r = toTask(id);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('--phase');
+    expect(planText()).toBe(PLAN);
+  });
 });
 
 describe('the adapt chain ends (6b-3, H-3)', () => {
@@ -570,6 +650,68 @@ describe('the adapt chain ends (6b-3, H-3)', () => {
     expect(decisions()).toMatchObject([{ point: 'approve', what: 'Hat stand', chosen: 'reject it' }]);
     expect(judged().map(e => [e.id, e.status, e.verdict])).toEqual([[v3, 'rejected', 'drop'], [v2, 'rejected', undefined], [o, 'rejected', undefined]]);
     expect(JSON.parse(run(['proposals', 'batch', '--pending', '--out', 'b.json'], io()).stdout).ids).toEqual([]);
+  });
+  // Final fix T2-c (probe P3): the exemption of --revises is its own chain's, never another open proposal's.
+  it('--revises exempts its own chain only: a v2 close to an unrelated open proposal is still refused, naming it', () => {
+    const other = add({ title: 'Big cosmetic shop', rationale: 'sell hats and skins in a shop' });
+    const root1 = add({ title: 'Online leaderboard', rationale: 'players compare scores' });
+    writeFileSync(path.join(root, 'p.json'), JSON.stringify({ category: 'feature', risk: 'high', title: 'Big cosmetic shop', rationale: 'sell hats and skins in a shop', evidence: 'e', pillar: 'Juice', source: 'scout' }));
+    const r = run(['proposals', 'add', '--file', 'p.json', '--revises', root1], io());
+    expect(r.code).toBe(3);
+    expect(r.stderr).toContain(other);
+  });
+  // Final fix F-I2 (probe P-ADAPT-WEDGE): an adapt whose v2 could not be added no longer comes back every cycle.
+  const pending = () => JSON.parse(run(['proposals', 'batch', '--pending', '--out', 'b.json'], io()).stdout).ids as string[];
+  const adapts = () => readEvents(root).filter(e => e.kind === 'proposal' && e.action === 'adapt');
+  /** The cycle ends (`FORGE cycle`): the next judge is of a later cycle, by a fresh critic. */
+  const nextCycle = () => expect(run(['cycle', '--progress', 'no'], io()).code).toBe(0);
+  it('an adapt is logged and changes nothing; adapted again in a later cycle with no v2 added since, the same text is dropped, the decision first, and nothing passed', () => {
+    const orig = add({ title: 'Big shop with many items' });
+    // A proposal rejected earlier says what the v2 will say, with the same evidence: the v2's add is refused (exit 3).
+    const rej = add({ title: 'Cosmetic shop with few items' });
+    saveProposal(root, rej, { ...loadProposal(root, rej)!, status: 'rejected', decidedBy: 'forge:auto', decidedAt: T0.toISOString(), reason: 'no' });
+    verdicts({ id: orig, verdict: 'adapt', why: 'too big', changes: 'cosmetic only' });
+    expect(outcome(orig)).toBe('adapt');
+    expect(adapts()).toEqual([{ ts: T0.toISOString(), kind: 'proposal', action: 'adapt', id: orig, digest: proposalDigest(orig, loadProposal(root, orig)!), runCycle: `${T0.toISOString()}#0` }]);
+    expect([loadProposal(root, orig)?.status, loadApproval(root, orig), decisions(), judged()]).toEqual(['proposed', null, [], []]);
+    writeFileSync(path.join(root, 'p.json'), JSON.stringify({ category: 'feature', risk: 'high', title: 'Cosmetic shop with few items', rationale: 'r', evidence: 'e', pillar: 'Juice', source: 'scout' }));
+    expect(run(['proposals', 'add', '--file', 'p.json', '--revises', orig], io()).code).toBe(3);
+    // A session that resumes its batch in the same cycle judges the same adapt again: that adapt, logged once, never a drop.
+    expect(outcome(orig)).toBe('adapt');
+    expect([adapts().length, decisions()]).toEqual([1, []]);
+    // The next cycle batches it again, and the critic adapts the same text again: judged as a drop.
+    nextCycle();
+    expect(pending()).toContain(orig);
+    verdicts({ id: orig, verdict: 'adapt', why: 'still too big', changes: 'cosmetic only' });
+    const r = JSON.parse(judge(orig).stdout);
+    expect(r).toMatchObject({ outcome: 'rejected', write: { status: 'rejected', reason: 'adapted twice; its v2 could not be added' }, approval: { data: { status: 'rejected', by: 'forge:auto' } } });
+    expect(r).not.toHaveProperty('changes');
+    expect(decisions()).toMatchObject([{ point: 'approve', what: 'Big shop with many items', chosen: 'reject it', why: 'adapted twice; its v2 could not be added' }]);
+    expect(judged().map(e => [e.id, e.status, e.verdict])).toEqual([[orig, 'rejected', 'drop']]);
+    expect(pending()).not.toContain(orig);
+    // The adapt event is no pass of the round.
+    expect(explorePassed(root, root, T0.toISOString())).toBe(0);
+  });
+  it('a second adapt is still an adapt when a v2 was added since the first, or the text changed since; in Spanish the drop says why', () => {
+    const o = add({ title: 'Big shop' });
+    verdicts({ id: o, verdict: 'adapt', why: 'too big', changes: 'only cosmetic items' });
+    expect(outcome(o)).toBe('adapt');
+    add({ title: 'Cosmetic shop', rationale: `r (v2 of ${o})` }, ['--revises', o]);
+    const e = add({ title: 'Daily quest' });
+    verdicts({ id: e, verdict: 'adapt', why: 'too vague', changes: 'one quest a day' });
+    expect(outcome(e)).toBe('adapt');
+    saveProposal(root, e, { ...loadProposal(root, e)!, rationale: 'rewritten by hand' });
+    appendEvent(root, { ts: T0.toISOString(), kind: 'proposal', action: 'add', id: e, digest: proposalDigest(e, loadProposal(root, e)!) });
+    nextCycle();
+    verdicts({ id: o, verdict: 'adapt', why: 'still too big', changes: 'only hats' }, { id: e, verdict: 'adapt', why: 'still too vague', changes: 'one quest a day' });
+    expect([outcome(o), outcome(e)]).toEqual(['adapt', 'adapt']);
+    expect(decisions()).toEqual([]);
+    autonomousRun(root, 'es');
+    const s = add({ title: 'Ranking global' });
+    verdicts({ id: s, verdict: 'adapt', why: 'demasiado grande', changes: 'solo amigos' });
+    expect(outcome(s)).toBe('adapt');
+    nextCycle();
+    expect(JSON.parse(judge(s).stdout).write).toMatchObject({ status: 'rejected', reason: 'adaptada dos veces; su v2 no se pudo añadir' });
   });
 });
 

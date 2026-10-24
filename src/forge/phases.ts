@@ -18,9 +18,22 @@ export const PHASES_REVIEWED_MAX = 200;
 
 export const phasesFile = (main: string, runId: string): string => path.join(autonomousDir(main, runId), 'phases.json');
 
+/** What the roadmap's state listing (`<DB>/state`) says of the tasks a re-plan may touch: those `done`, and (final fix F-M3)
+ *  those that wait for the person, `blocked` with `external` among `blockedBy` (`waypoint block --by external`: a question the
+ *  run asked). */
+export interface TaskFacts { done: ReadonlySet<string>; forPerson: ReadonlySet<string> }
+
+/** The TaskFacts of a state listing. */
+export function taskFacts(stateDir: string): TaskFacts {
+  const states = Object.entries(readDocs(stateDir, stateDoc).docs);
+  return {
+    done: new Set(states.filter(([, s]) => s.status === 'done').map(([task]) => task)),
+    forPerson: new Set(states.filter(([, s]) => s.status === 'blocked' && (s.blockedBy ?? []).includes('external')).map(([task]) => task)),
+  };
+}
+
 /** The tasks the roadmap's state listing (`<DB>/state`) says are done. */
-export const doneTasks = (stateDir: string): Set<string> =>
-  new Set(Object.entries(readDocs(stateDir, stateDoc).docs).filter(([, s]) => s.status === 'done').map(([task]) => task));
+export const doneTasks = (stateDir: string): Set<string> => new Set(taskFacts(stateDir).done);
 
 /** M-11: the state listing `<db>/state` (`db` as given, from `cwd`), resolved. One that is not there is a UsageError of `cmd`:
  *  read as empty, a closed phase would look open and a done task would look pending. */
@@ -32,6 +45,9 @@ export function stateDirOf(cwd: string, db: string, cmd: string): string {
 
 /** The done tasks of `<db>/state`, which must be there (stateDirOf). */
 export const doneOf = (cwd: string, db: string, cmd: string): Set<string> => doneTasks(stateDirOf(cwd, db, cmd));
+
+/** The TaskFacts of `<db>/state`, which must be there (stateDirOf). */
+export const factsOf = (cwd: string, db: string, cmd: string): TaskFacts => taskFacts(stateDirOf(cwd, db, cmd));
 
 /**
  * The phases of `runId` already reviewed, oldest first; none when its phases.json is not there. One that does not hold

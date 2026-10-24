@@ -39,7 +39,7 @@ export interface SaturationFacts {
 }
 
 interface Parts {
-  at: string; rounds: number; blocking: SaturationBlocking[]; openFindings: number; questions: number; blocked: number; deferred: number;
+  at: string; rounds: number; explored: boolean; blocking: SaturationBlocking[]; openFindings: number; questions: number; blocked: number; deferred: number;
   lists: Record<SaturationList, string[]>; missing: SaturationInput[];
 }
 
@@ -48,7 +48,7 @@ function reportOf(o: Parts): SaturationReport {
   const ids = (k: SaturationList) => o.lists[k].slice(0, SATURATION_LIST_MAX);
   const counts = Object.fromEntries(SATURATION_LISTS.map(k => [k, o.lists[k].length])) as Record<SaturationList, number>;
   return {
-    saturated: o.blocking.length === 0, at: o.at, rounds: o.rounds, blocking: o.blocking,
+    saturated: o.blocking.length === 0, at: o.at, rounds: o.rounds, explored: o.explored, blocking: o.blocking,
     evidence: { pendingTasks: ids('pendingTasks'), validatorsFailed: ids('validatorsFailed'), openFindings: o.openFindings, openDefects: ids('openDefects'),
       openProposals: ids('openProposals') },
     waiting: {
@@ -104,7 +104,8 @@ const namedByDebt = (notes: readonly NoteDoc[], id: string): boolean =>
  * (L-18), the tasks blocked for the person and the
  * approvals the run could not place (a debt note of the run names them); a proposal of those lists is no open defect or
  * proposal. A missing input blocks as `inputs`, and what needs it is not computed: the plan's tasks without --plan or --db,
- * notes without --db, validators without --validate. `rounds` blocks below the count and (fix 2) in a cycle without the scout.
+ * notes without --db, validators without --validate. `rounds` blocks below the count and (fix 2) in a cycle without the scout,
+ * which (final fix F-M6) the report's `explored` says, so the page tells «no exploration round yet» from «too few dry rounds».
  */
 export function saturationOf(i: SaturationFacts): SaturationReport {
   const missing = i.missing ?? [];
@@ -155,7 +156,7 @@ export function saturationOf(i: SaturationFacts): SaturationReport {
   if (openProposals.length) blocking.push('proposals');
   if (missing.length) blocking.push('inputs');
   return reportOf({
-    at: i.at, rounds: i.dry, blocking, openFindings, questions, blocked: i.blocked, deferred, missing: [...missing],
+    at: i.at, rounds: i.dry, explored: i.explored !== false, blocking, openFindings, questions, blocked: i.blocked, deferred, missing: [...missing],
     lists: { pendingTasks, validatorsFailed, openDefects, openProposals, parked, waitsOwner, unowned, blockedTasks, unplaced, orphanFindings },
   });
 }
@@ -180,10 +181,12 @@ export function writtenAfter(file: string, since: string): boolean {
   try { return statSync(file).mtimeMs > Date.parse(since); } catch { return true; }
 }
 
-/** H-2: an event of something that passed: a judge's approval, or a v2 added (an `add` with `revises`, the trace an adapt
- *  leaves, since judge logs nothing for one: a proposal that passes with changes). */
+/** H-2: an event of something that passed: a judge's approval, or a v2 added (an `add` with `revises`: a proposal that passes
+ *  with changes; the `adapt` event judge logs, final fix F-I2, changes nothing and is no pass). Final fix F-M1: never a person's
+ *  v2 that waits for the owner (`source: user` without `owner: true`, as a comment's v2): what waits for the person. */
 const passes = (e: LedgerEvent): boolean => e.kind === 'proposal'
-  && ((e.action === 'judge' && e.status === 'auto_approved') || (e.action === 'add' && typeof e.revises === 'string'));
+  && ((e.action === 'judge' && e.status === 'auto_approved')
+    || (e.action === 'add' && typeof e.revises === 'string' && !(e.source === 'user' && e.owner !== true)));
 
 /** T6B3-SAT-WINDOW: the run's last exploration round, the last of `events` (the ledger of run.json's directory) that is a recorded
  *  cycle (its number) with `explore`, since the run started; null before its first. */

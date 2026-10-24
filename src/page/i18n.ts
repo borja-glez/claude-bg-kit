@@ -189,6 +189,8 @@ const en = {
       'queue-full': 'Stopped: too many proposals waiting' } as Record<string, string>,
     saturated: 'Saturated',
     notYet: 'Not saturated:',
+    // Final fix F-M6: the rounds at or past the count, in a cycle that did not explore.
+    noRound: 'Waiting for an exploration round',
     blocking: { rounds: (of: string) => `of ${of} dry rounds`, 'pending-tasks': 'Pending tasks', validators: 'Validators failing', findings: 'Open review findings', defects: 'Open defects',
       proposals: 'Approvals or proposals still open (to judge, or approved without a task)', inputs: 'Inputs missing' },
     missing: { '--validate': 'validators not run this cycle', '--plan': 'plan not read', '--db': 'state not read' } as Record<string, string>,
@@ -408,6 +410,7 @@ const es: Dict = {
       'queue-full': 'Parada: demasiadas propuestas esperando' },
     saturated: 'Saturada',
     notYet: 'Sin saturar:',
+    noRound: 'Falta una ronda de exploración',
     blocking: { rounds: (of: string) => `de ${of} rondas sin novedades`, 'pending-tasks': 'Tareas pendientes', validators: 'Validadores en rojo', findings: 'Hallazgos de revisión abiertos', defects: 'Defectos abiertos',
       proposals: 'Aprobaciones o propuestas aún abiertas (por juzgar, o aprobadas sin tarea)', inputs: 'Faltan datos' },
     missing: { '--validate': 'validadores sin ejecutar en este ciclo', '--plan': 'plan sin leer', '--db': 'estado sin leer' },

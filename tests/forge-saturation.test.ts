@@ -3,7 +3,7 @@ import { mkdirSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parsePlan } from '../src/lib/plan.js';
 import { stateDoc } from '../src/page/normalize.js';
-import { saturationOf, SATURATION_ROUNDS } from '../src/forge/saturation.js';
+import { explorePassed, saturationOf, SATURATION_ROUNDS } from '../src/forge/saturation.js';
 import { proposalDigest, type ProposalDoc } from '../src/lib/proposals.js';
 import { run } from '../src/forge/cli/run.js';
 import { startRun, saveRun, parseRun, readRunText } from '../src/forge/run.js';
@@ -135,11 +135,38 @@ describe('saturationOf: what waits for the person never blocks, and a missing in
     expect(saturationOf({ ...base, explored: false })).toMatchObject({ saturated: false, blocking: ['rounds'] });
     expect(saturationOf({ ...base, explored: true })).toMatchObject({ saturated: true, blocking: [] });
   });
+  it('the report says whether its cycle was an exploration round (final fix F-M6)', () => {
+    expect(saturationOf({ ...base, explored: false })).toMatchObject({ explored: false, rounds: 3 });
+    expect(saturationOf({ ...base, explored: true }).explored).toBe(true);
+    expect(saturationOf(base).explored).toBe(true);
+  });
   it('a missing input is named and blocks; what does not need it is still computed (L-10, fix 1)', () => {
     expect(saturationOf({ ...base, validators: null, missing: ['--validate'] })).toMatchObject({ saturated: false, blocking: ['inputs'], missing: ['--validate'], evidence: { validatorsFailed: [] } });
     expect(saturationOf({ ...base, states: {}, notes: [{ ts: 't', type: 'question', author: 'session:S', text: '?' }], missing: ['--db'] }))
       .toMatchObject({ blocking: ['inputs'], evidence: { pendingTasks: [] }, waiting: { questions: 0 } });
     expect(saturationOf({ ...base, missing: ['--plan'], toJudge: ['p3'] })).toMatchObject({ blocking: ['proposals', 'inputs'], evidence: { openProposals: ['p3'] } });
+  });
+});
+
+describe('what passes in a round (6b-3 H-2, final fix F-M1, F-I2)', () => {
+  const tmp = useTempDirs();
+  const T = '2026-10-22T10:00:00.000Z';
+  const ev = (o: Record<string, unknown>) => ({ ts: '2026-10-22T10:01:00.000Z', kind: 'proposal' as const, id: 'p20261022100100zzzz', ...o });
+  it('a v2 counts unless it is a person\'s that waits for the owner; an adapt event never counts', () => {
+    const passed = (o: Record<string, unknown>) => {
+      const root = tmp('passes-');
+      appendEvent(root, ev(o));
+      return explorePassed(root, root, T);
+    };
+    // A v2 from someone's comment (source user, not the owner's): what waits for the person, no pass (probe P-USER-V2-PASS).
+    expect(passed({ action: 'add', revises: 'p20261022100000aaaa', source: 'user', owner: false, author: 'user:x' })).toBe(0);
+    expect(passed({ action: 'add', revises: 'p20261022100000aaaa', source: 'user', author: 'user:x' })).toBe(0);
+    // F-I2: the adapt judge logs changes nothing, and passes nothing.
+    expect(passed({ action: 'adapt', digest: 'a'.repeat(64) })).toBe(0);
+    // Positive controls: the run's own v2, a v2 of the owner's idea, and a judge's approval pass.
+    expect(passed({ action: 'add', revises: 'p20261022100000aaaa' })).toBe(1);
+    expect(passed({ action: 'add', revises: 'p20261022100000aaaa', source: 'user', owner: true, author: 'user:o' })).toBe(1);
+    expect(passed({ action: 'judge', status: 'auto_approved', verdict: 'keep' })).toBe(1);
   });
 });
 
@@ -273,8 +300,9 @@ describe('FORGE cycle --explore (6b-3)', () => {
     const r = cycle(inputs, false);
     expect(r.code, r.stderr).toBe(0);
     expect(JSON.parse(r.stdout)).toMatchObject({ explore: { rounds: 3, dry: 3 }, saturation: { saturated: false, at: at(), evidence: { pendingTasks: [] } } });
-    // Its validate file is the round's, from an earlier cycle: a missing input. And a cycle without the scout never concludes.
-    expect(JSON.parse(r.stdout).saturation).toMatchObject({ blocking: ['rounds', 'inputs'], missing: ['--validate'] });
+    // Its validate file is the round's, from an earlier cycle: a missing input. And a cycle without the scout never concludes,
+    // and (final fix F-M6) its report says it was no exploration round.
+    expect(JSON.parse(r.stdout).saturation).toMatchObject({ blocking: ['rounds', 'inputs'], missing: ['--validate'], explored: false });
     expect(status().stopReason).toBeNull();
     // T6B3-SAT-EXPLORE-ONLY: even with its own green validate file and nothing open, it is no round: not saturated.
     const own = cycle(inputs);
@@ -282,7 +310,7 @@ describe('FORGE cycle --explore (6b-3)', () => {
     expect(JSON.parse(own.stdout).saturation).not.toHaveProperty('missing');
     expect(status().stopReason).toBeNull();
     // Positive control: the next exploration round, with nothing left, concludes.
-    expect(explore()).toMatchObject({ explore: { rounds: 4, dry: 4 }, saturation: { saturated: true, blocking: [] } });
+    expect(explore()).toMatchObject({ explore: { rounds: 4, dry: 4 }, saturation: { saturated: true, blocking: [], explored: true } });
     expect(status().stopReason).toBe('saturated');
   });
 

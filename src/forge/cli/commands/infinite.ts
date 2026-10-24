@@ -2,7 +2,7 @@ import type { Command } from '../context.js';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { forgeDir } from '../../ledger.js';
-import { doneOf, markReviewed, phaseStatus, readReviewed } from '../../phases.js';
+import { factsOf, markReviewed, phaseStatus, readReviewed } from '../../phases.js';
 import { heldTasks } from '../../replan-check.js';
 import { parseRun, startRun, stopReason, readRunText, saveRun, stopFile, type RunState } from '../../run.js';
 import { UNBOUND_WARNING } from '../../hook.js';
@@ -107,14 +107,15 @@ export const command: Command = (args, ctx) => {
     const planArg = flag('plan');
     const db = flag('db');
     if (!planArg || !db) throw new UsageError('usage: forge infinite phase --plan <plan.yaml> --db <DB> [--mark <phase>]');
-    const done = doneOf(io.cwd, db, 'infinite phase');
+    const facts = factsOf(io.cwd, db, 'infinite phase');
     let text: string;
     try { text = readFileSync(path.resolve(io.cwd, planArg), 'utf8'); } catch { throw new UsageError(`infinite phase: cannot read ${planArg}`); }
     const plan = planOf(text, planArg, 'infinite phase: ');
     const mark = flag('mark');
     if (has('mark') && !(mark && plan.phases.some(ph => ph.id === mark))) throw new UsageError(`infinite phase: --mark ${mark ?? ''} is not a phase of ${planArg}`);
-    const status = phaseStatus(plan, done, mark ? markReviewed(main, runId, mark) : readReviewed(main, runId));
-    return json({ ...status, held: heldTasks(io.cwd, plan, done) });
+    // Final fix F-M4: `reviewed`, the phases already reviewed, which a re-plan never moves a task into.
+    const reviewed = mark ? markReviewed(main, runId, mark) : readReviewed(main, runId);
+    return json({ ...phaseStatus(plan, facts.done, reviewed), held: heldTasks(io.cwd, plan, facts), reviewed });
   }
   if (sub === 'status') {
     const runRoot = runRootOf(io.cwd);

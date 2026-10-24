@@ -5,6 +5,7 @@ export interface RunState {
   budget: { cycles?: number; hours?: number }; cycle: number;
   noProgress: number;                 // consecutive cycles without progress
   lastError: string | null; repeatedError: boolean;
+  lastErrorDigest?: string;           // final fix T4-R2-1: the sha256 of the whole cleaned error (lastError keeps 1000 code points); absent with no error
   lastBlockEvents: number | null;     // ledger event count at the last block
   stoppedReason?: string; queueMax: number;   // default 10
   sessionId: string | null;           // Claude's id of the session the run is bound to, set by infinite start (null in a run started by forge 0.15)
@@ -37,10 +38,11 @@ export type SaturationInput = (typeof SATURATION_INPUTS)[number];
  * open questions, blocked actions, deferred findings, the proposals that wait for the owner's mark and the approvals without
  * it (L-18), the plan's tasks blocked for the person and those that wait only on them, the approvals the run could not place
  * (fix 1, T6B3-SAT-WAITING), and the tasks the plan no longer has that kept open findings (information only). `missing`
- * (L-10) names the inputs the report lacked; what needs them is not computed.
+ * (L-10) names the inputs the report lacked; what needs them is not computed. `explored` (final fix F-M6): whether the report's
+ * cycle was an exploration round; only one concludes saturated. Absent in a report written before it.
  */
 export interface SaturationReport {
-  saturated: boolean; at: string; rounds: number; blocking: SaturationBlocking[];
+  saturated: boolean; at: string; rounds: number; explored?: boolean; blocking: SaturationBlocking[];
   evidence: { pendingTasks: string[]; validatorsFailed: string[]; openFindings: number; openDefects: string[]; openProposals: string[] };
   waiting: {
     parked: string[]; questions: number; blocked: number; deferred: number; waitsOwner: string[]; unowned: string[];
@@ -107,12 +109,14 @@ const oneOf = <T extends string>(list: readonly T[], x: unknown): x is T => type
 
 /** 6b-3: a saturation report, or null unless every field reads: `saturated` agrees with `blocking`, each list holds at most
  *  SATURATION_LIST_MAX ids and its count is at least that many (M-10), and (Task 6 fix 1) `inputs` blocks exactly when
- *  `missing` names some input, as saturationOf writes them. Other fields are ignored. The one reader of a report: parseRun's
+ *  `missing` names some input, as saturationOf writes them. Final fix F-M6: `explored`, when there, is a boolean, and a report
+ *  that says its cycle did not explore is never saturated. Other fields are ignored. The one reader of a report: parseRun's
  *  and the roadmap page's (meta/infinite, T6B3-PAGE-ONE-READER). */
 export function saturationReportOf(x: unknown): SaturationReport | null {
   if (!isObj(x)) return null;
-  const { saturated, at, rounds, blocking, evidence: e, waiting: w, counts: c, missing } = x;
+  const { saturated, at, rounds, explored, blocking, evidence: e, waiting: w, counts: c, missing } = x;
   if (typeof saturated !== 'boolean' || typeof at !== 'string' || !at || at.length > 64 || !isCount(rounds)) return null;
+  if (explored !== undefined && (typeof explored !== 'boolean' || (saturated && !explored))) return null;
   if (!Array.isArray(blocking) || !blocking.every(b => oneOf(SATURATION_BLOCKING, b)) || new Set(blocking).size !== blocking.length) return null;
   if (saturated !== (blocking.length === 0) || !isObj(e) || !isObj(w) || !isObj(c)) return null;
   if (!isCount(e.openFindings) || !isCount(w.questions) || !isCount(w.blocked) || !isCount(w.deferred)) return null;
@@ -131,7 +135,7 @@ export function saturationReportOf(x: unknown): SaturationReport | null {
   if (blocking.includes('inputs') !== (missing !== undefined)) return null;
   const ids = (k: SaturationList) => [...(lists[k] as string[])];
   return {
-    saturated, at, rounds, blocking: [...blocking] as SaturationBlocking[],
+    saturated, at, rounds, ...(typeof explored === 'boolean' ? { explored } : {}), blocking: [...blocking] as SaturationBlocking[],
     evidence: { pendingTasks: ids('pendingTasks'), validatorsFailed: ids('validatorsFailed'), openFindings: e.openFindings, openDefects: ids('openDefects'), openProposals: ids('openProposals') },
     waiting: {
       parked: ids('parked'), questions: w.questions, blocked: w.blocked, deferred: w.deferred, waitsOwner: ids('waitsOwner'), unowned: ids('unowned'),
@@ -175,6 +179,8 @@ export function parseRun(text: string | null): RunState | null {
     blocksSinceCycle: (o.blocksSinceCycle as number | undefined) ?? 0,
   };
   if (o.stoppedReason !== undefined) run.stoppedReason = o.stoppedReason as string;
+  // Final fix T4-R2-1: kept only when it reads as a sha256; one that does not is dropped, never the run.
+  if (typeof o.lastErrorDigest === 'string' && /^[0-9a-f]{64}$/.test(o.lastErrorDigest)) run.lastErrorDigest = o.lastErrorDigest;
   // An invalid locale is dropped, never the run: older run.json files have none.
   if (isLocale(o.locale)) run.locale = o.locale;
   if (autonomous) run.autonomous = autonomous;

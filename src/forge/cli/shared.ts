@@ -158,10 +158,10 @@ export function tddFor(io: Io, dir: string) {
   return { tdd, installed: sp.installed, version: sp.version, skill, line: tdd === 'superpowers' && skill ? tddLine(skill) : null };
 }
 
-const DECIDING = new Set(['decide', 'confirm', 'judge', 'unpark']);
+const DECIDING = new Set(['decide', 'confirm', 'judge', 'unpark', 'retire']);
 /** The status each proposal's latest decision event in this checkout's ledger left it in, and when: decide, confirm, a reopen
- *  (its `to`), the policy's auto-approval, and (6b-2, M-2) an autonomous run's judge and unpark; a policy that declined
- *  decided nothing. A pid with no such event is absent. */
+ *  (its `to`), the policy's auto-approval, (6b-2, M-2) an autonomous run's judge and unpark, and (6b-3 final fix T7-c) a
+ *  product run's retire; a policy that declined decided nothing. A pid with no such event is absent. */
 export function lastDecisions(root: string): Record<string, { status: string; ts: string }> {
   const out: Record<string, { status: string; ts: string }> = {};
   for (const e of readEvents(root)) {

@@ -7,6 +7,7 @@ import { loadApproval, loadProposal, saveApproval, saveProposal } from '../src/f
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { IDEA_MERGED } from '../src/forge/ideas.js';
 import { proposalDigest, type ProposalDoc } from '../src/lib/proposals.js';
+import { lastDecisions } from '../src/forge/cli/shared.js';
 import { useTempDirs } from './helpers/tmp.js';
 
 const tmp = useTempDirs();
@@ -66,8 +67,10 @@ describe('proposals retire (6b-3)', () => {
     });
     expect(loadProposal(root, P.run)).toMatchObject({ status: 'rejected', decidedBy: 'forge:auto', decidedAt: AT, reason, taskId: 'T004' });
     expect(loadApproval(root, P.run)).toEqual({ status: 'rejected', decidedAt: AT, by: 'forge:auto', digest });
-    // Fix 3: the event keeps what the writes said, so a resumed retire prints them again.
-    expect(retireEvents()).toEqual([{ ts: AT, kind: 'proposal', action: 'retire', id: P.run, taskId: 'T004', reason, digest }]);
+    // Fix 3: the event keeps what the writes said, so a resumed retire prints them again; final fix T7-c: its status too.
+    expect(retireEvents()).toEqual([{ ts: AT, kind: 'proposal', action: 'retire', id: P.run, taskId: 'T004', status: 'rejected', reason, digest }]);
+    // Final fix T7-c: the retire is the proposal's latest decision.
+    expect(lastDecisions(root)[P.run]).toEqual({ status: 'rejected', ts: AT });
   });
   // Fix 3, T6B3-RETIRE-IDEMPOTENT: a stop after the local rejection and before the store took it.
   it('a retire run again after a stop prints the same writes, and writes nothing more', () => {
@@ -83,19 +86,47 @@ describe('proposals retire (6b-3)', () => {
     expect(loadApproval(root, P.run)).toEqual(mark);
     expect(retireEvents()).toHaveLength(1);
   });
-  it('still refuses any other rejected proposal: one rejected without a retire, or rejected again with another reason', () => {
+  // Final fix T7-O2: «rejected already» has its own exit code, 4, which no other case uses: phase-close.md keys on it.
+  it('any other rejected proposal exits 4, writing nothing: one rejected without a retire, or rejected again with another reason', () => {
     const r = retire(P.rejected);
-    expect(r.code).toBe(2);
+    expect(r.code).toBe(4);
     expect(r.stderr).toContain('rejected');
     expect(retire(P.run).code).toBe(0);
     // The owner rejected it again on the page, with their own reason: that rejection is theirs.
     saveProposal(root, P.run, doc({ status: 'rejected', decidedBy: 'page', reason: 'not this year', taskId: 'T004' }));
     const file = proposalFile(P.run);
     const owner = retireAt(T1, P.run);
-    expect(owner.code).toBe(2);
+    expect(owner.code).toBe(4);
     expect(owner.stderr).toContain('rejected');
     expect(proposalFile(P.run)).toBe(file);
     expect(retireEvents()).toHaveLength(1);
+  });
+  // Final fix T7-R1 (probes I2, I3, I5): a resume repeats only the exact state the retire left; any change since is no resume.
+  it('a resume needs the state the retire left: the same text, its time, its mark and the task still retired; otherwise it exits 4, writing nothing', () => {
+    const cases: [string, () => void][] = [
+      ['I2 the text edited since', () => saveProposal(root, P.run, { ...loadProposal(root, P.run)!, title: 'Edited by the person' })],
+      ['I3 the owner\'s mark since', () => saveApproval(root, P.run, { ...loadApproval(root, P.run)!, by: 'page', decidedAt: T1.toISOString() })],
+      ['I5 the re-plan reverted', () => writeFileSync(path.join(root, 'plan.yaml'), PLAN.replace('retired: [T004, T005, T006, T007]\n', '')
+        .replace('  - { id: T001, title: a, track: core, phase: F1, done_when: x }\n', '  - { id: T001, title: a, track: core, phase: F1, done_when: x }\n  - { id: T004, title: b, track: core, phase: F1, done_when: y }\n'))],
+      ['the decision time changed', () => saveProposal(root, P.run, { ...loadProposal(root, P.run)!, decidedAt: T1.toISOString() })],
+    ];
+    for (const [label, change] of cases) {
+      root = tmp('retire-resume-');
+      writeFileSync(path.join(root, 'plan.yaml'), PLAN);
+      writeFileSync(path.join(root, 'why.txt'), 'no longer needed');
+      productRun();
+      put(P.run, doc({ taskId: 'T004' }));
+      expect(retire(P.run).code, label).toBe(0);
+      change();
+      const file = proposalFile(P.run);
+      const mark = loadApproval(root, P.run);
+      const r = retireAt(T1, P.run);
+      expect(r.code, label).toBe(4);
+      expect(r.stdout, label).toBe('');
+      expect(proposalFile(P.run), label).toBe(file);
+      expect(loadApproval(root, P.run), label).toEqual(mark);
+      expect(retireEvents(), label).toHaveLength(1);
+    }
   });
   it('runs only inside an active product run, as infinite phase does: none, a stopped one and a spike run are refused', () => {
     const before = proposalFile(P.run);
@@ -125,7 +156,8 @@ describe('proposals retire (6b-3)', () => {
     expect((JSON.parse(retire(P.live).stdout) as { write: { reason: string } }).write.reason).toBe('retirada por el replan: ya no hace falta');
   });
   it('refuses, writing nothing, a person\'s idea, one that is not approved, and one whose task the plan did not retire', () => {
-    for (const [id, word] of [[P.user, "person's idea"], [P.chat, "person's idea"], [P.rejected, 'rejected'], [P.live, 'T001'], [P.none, 'retired']] as const) {
+    put(P.rejected, doc({ status: 'proposed', decidedBy: undefined, decidedAt: undefined, taskId: 'T006' }));
+    for (const [id, word] of [[P.user, "person's idea"], [P.chat, "person's idea"], [P.rejected, 'proposed'], [P.live, 'T001'], [P.none, 'retired']] as const) {
       const before = proposalFile(id);
       const mark = loadApproval(root, id);
       const r = retire(id);

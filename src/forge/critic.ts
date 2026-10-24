@@ -1,4 +1,6 @@
 import { loadProposals, PROPOSAL_ID } from './proposals.js';
+import { readEvents } from './ledger.js';
+import { ancestorsOf } from './judge.js';
 import { proposalDigest, type ProposalDoc } from '../lib/proposals.js';
 import { clean as cleanLine } from '../lib/decisions.js';
 import { isPlanId } from '../lib/ids.js';
@@ -72,14 +74,19 @@ export function readVerdicts(text: string): CriticVerdict[] {
   return out;
 }
 
-/** The proposals the critic judges, each with the digest of its text; `missing` are the ids with no proposal in `root`. */
-export function proposalBatch(root: string, ids: string[]): { proposals: { id: string; digest: string; doc: ProposalDoc }[]; missing: string[] } {
+/** One proposal of a critic's batch: the digest of its text and (final fix T2-a) its version in its revises chain, 1 for a
+ *  proposal that revises none, so the critic sees that a v3 gets no adapt (judge enforces it: MAX_ADAPTS). */
+export interface BatchEntry { id: string; digest: string; version: number; doc: ProposalDoc }
+
+/** The proposals the critic judges (BatchEntry); `missing` are the ids with no proposal in `root`. */
+export function proposalBatch(root: string, ids: string[]): { proposals: BatchEntry[]; missing: string[] } {
   const byId = new Map(loadProposals(root).map(({ id, ...doc }) => [id, doc as ProposalDoc]));
-  const proposals: { id: string; digest: string; doc: ProposalDoc }[] = [];
+  const events = readEvents(root).filter(e => e.kind === 'proposal');
+  const proposals: BatchEntry[] = [];
   const missing: string[] = [];
   for (const id of new Set(ids)) {
     const doc = byId.get(id);
-    if (doc) proposals.push({ id, digest: proposalDigest(id, doc), doc }); else missing.push(id);
+    if (doc) proposals.push({ id, digest: proposalDigest(id, doc), version: ancestorsOf(events, id).length + 1, doc }); else missing.push(id);
   }
   return { proposals, missing };
 }

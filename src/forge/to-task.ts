@@ -67,6 +67,19 @@ export function checkPlacement(plan: Plan, title: string, p: Placement, done: Re
 }
 
 /**
+ * Final fix F-I1: the phases of `plan` a new task of a product run (`product`) can still go to, in its order: those that are
+ * empty or have a task `done` does not hold, never the improvements phase in a product run (L-6). None once every phase
+ * with tasks is done and no empty one exists: then nothing is placed until a re-plan adds a phase.
+ */
+export function openPhases(plan: Pick<Plan, 'phases' | 'tasks'>, done: ReadonlySet<string>, opts: { product?: boolean } = {}): string[] {
+  return plan.phases.filter(ph => {
+    if (opts.product && ph.id === IMPROVEMENTS_PHASE) return false;
+    const tasks = plan.tasks.filter(t => t.phase === ph.id);
+    return !tasks.length || tasks.some(t => !done.has(t.id));
+  }).map(ph => ph.id);
+}
+
+/**
  * The task (and the improvements phase, when the plan has none yet) proposal `p` becomes. 6b-3: with a `placement` the task
  * goes to its phase with its done_when, its dependencies and its estimate, and no improvements phase is made; the caller
  * checks it first (checkPlacement).

@@ -2545,6 +2545,30 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     // The rounds against their threshold, also at or past it in a cycle that did not explore.
     expect(c).toContain('<li><b>3</b> de 3 rondas sin novedades</li>');
   });
+  it('a saturated run says «Saturada» once, and a report past the count of a cycle that did not explore says it waits for one (final fix T6-a, F-M6)', () => {
+    const sat: SaturationReport = {
+      saturated: true, at: '2026-10-22T10:00:00.000Z', rounds: 3, explored: true, blocking: [],
+      evidence: { pendingTasks: [], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
+      waiting: { parked: [], questions: 0, blocked: 0, deferred: 0, waitsOwner: [], unowned: [], blockedTasks: [], unplaced: [], orphanFindings: [] },
+      counts: { pendingTasks: 0, validatorsFailed: 0, openDefects: 0, openProposals: 0, parked: 0, waitsOwner: 0, unowned: 0, blockedTasks: 0, unplaced: 0, orphanFindings: 0 },
+    };
+    const inf = { active: false, cycle: 9, budget: {}, startedAt: '2026-10-22T02:00:00.000Z', lastCycleAt: null, profile: 'product' as const };
+    const card = (over: object, locale = 'es') => autoCard(renderApp({ ...base(), meta: { ...base().meta!, locale }, infinite: { ...inf, ...over } }, ui()));
+    for (const [locale, word] of [['es', 'Saturada'], ['en', 'Saturated']] as const) {
+      const stopped = card({ stopReason: 'saturated', saturation: sat }, locale);
+      expect(stopped.split(word).length - 1, locale).toBe(1);
+      expect(stopped, locale).toContain(`<div class="ast">${word}</div>`);
+      // Running still (the Stop hook has not ended it yet), the verdict line says it.
+      expect(card({ active: true, stopReason: null, saturation: sat }, locale).split(word).length - 1, locale).toBe(1);
+    }
+    const notExplored: SaturationReport = { ...sat, saturated: false, explored: false, blocking: ['rounds'] };
+    const es = card({ stopReason: 'budget-cycles', saturation: notExplored });
+    expect(es).toContain('<li>Falta una ronda de exploración</li>');
+    expect(es).not.toContain('rondas sin novedades');
+    expect(card({ stopReason: 'budget-cycles', saturation: notExplored }, 'en')).toContain('<li>Waiting for an exploration round</li>');
+    // Positive control: below the count the rounds are counted, whatever the cycle.
+    expect(card({ stopReason: 'budget-cycles', saturation: { ...notExplored, rounds: 2 } })).toContain('<li><b>2</b> de 3 rondas sin novedades</li>');
+  });
 });
 
 describe('who decided a proposal: the owner’s mark, never what anyone can write in it (C26, carries 4b-2 and 4b-3)', () => {

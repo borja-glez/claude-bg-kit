@@ -68,6 +68,7 @@ const WORDS = {
     withdraw: 'withdraw it', withdrawn: 'withdrawn by the person', insists: 'the person insists on it', withdrew: 'the person withdrew their idea',
     insisted: (why: string) => `the person insists on their idea (it was parked: ${why})`,
     adapts: (why: string) => `a chain of versions gets at most ${MAX_ADAPTS} adapts, and the critic asked for one more: ${why}`,
+    adaptedTwice: 'adapted twice; its v2 could not be added',
     undo: {
       approved: (id: string) => `the person can reject it with /forge:decide ${id} reject before it becomes a task`,
       rejected: (id: string) => `the person can approve it with /forge:decide ${id} approve`,
@@ -80,6 +81,7 @@ const WORDS = {
     withdraw: 'retirarla', withdrawn: 'retirada por la persona', insists: 'la persona insiste en ella', withdrew: 'la persona retiró su idea',
     insisted: (why: string) => `la persona insiste en su idea (estaba aparcada: ${why})`,
     adapts: (why: string) => `una cadena de versiones admite como mucho ${MAX_ADAPTS} adaptaciones, y el crítico pidió una más: ${why}`,
+    adaptedTwice: 'adaptada dos veces; su v2 no se pudo añadir',
     undo: {
       approved: (id: string) => `la persona puede rechazarla con /forge:decide ${id} reject antes de que sea una tarea`,
       rejected: (id: string) => `la persona puede aprobarla con /forge:decide ${id} approve`,
@@ -142,6 +144,14 @@ function waitsOwner(root: string, id: string, doc: ProposalDoc, add: LedgerEvent
   if (idea && add.owner !== true) return true;
   if (idea && typeof add.author === 'string' && OWNER_USER.test(add.author) && add.author !== roadmapOwner(root)) return true;
   return typeof add.digest === 'string' && add.digest !== proposalDigest(id, doc);
+}
+
+/** Final fix F-I2: the last `adapt` of `id` among the `proposal` `events` of the text whose digest is `digest`, when no v2 of it
+ *  was added after it (an `add` whose `revises` is `id`): that adapt's v2 could not be added. null otherwise. */
+function adaptWithoutV2(events: readonly LedgerEvent[], id: string, digest: string): LedgerEvent | null {
+  let at = -1;
+  events.forEach((e, i) => { if (e.action === 'adapt' && e.id === id && e.digest === digest) at = i; });
+  return at >= 0 && !events.slice(at + 1).some(e => e.action === 'add' && e.revises === id) ? events[at] : null;
 }
 
 /** The proposal `id`'s last add event says it revises, or null. */
@@ -254,11 +264,13 @@ function holds(id: string, decision: Record<string, unknown>): void {
  * Judges proposal `id` of `root` (the profile's worktree) by `verdicts` (readVerdicts of the critic's file), at `at`, in
  * Spanish when `es`. T6B2-DECISION-FIRST: the outcome's decision is checked (addDecision's checks) and handed to `record`
  * before anything is written; then the proposal, its mark (and those of the original an approved or rejected v2 decides) and a `proposal` `judge` event with the
- * verdict go to .forge/, as the policy writes them. adapt and every wait write nothing; 6b-3 H-3: the adapt of a proposal whose
- * chain already had MAX_ADAPTS is a drop. 6b-3 B-1: a keep's placement goes into its event and its output. Throws JudgeError,
- * with nothing written, when it is not judged now, has no verdict of its own text, or its decision does not hold.
+ * verdict go to .forge/, as the policy writes them. Every wait writes nothing, and an adapt only its `adapt` event (final fix
+ * F-I2); 6b-3 H-3: the adapt of a proposal whose chain already had MAX_ADAPTS is a drop, and so (F-I2) is a second adapt of
+ * the same text, in a later cycle than `runCycle` (the run's start and its cycle count, which the CLI passes), with no v2
+ * added since. 6b-3 B-1: a keep's placement goes into its event and its output. Throws JudgeError, with nothing written, when
+ * it is not judged now, has no verdict of its own text, or its decision does not hold.
  */
-export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[], at: string, es: boolean, record: RecordDecision): Judged {
+export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[], at: string, es: boolean, record: RecordDecision, runCycle = ''): Judged {
   const doc = loadProposal(root, id);
   if (!doc) throw new JudgeError(`${id} not found`);
   const events = readEvents(root).filter(e => e.kind === 'proposal');
@@ -270,12 +282,21 @@ export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[
   // 6b-3 H-3: a chain gets at most MAX_ADAPTS adapts, so the critic's adapt of a proposal with that many earlier versions is
   // judged as a drop, and takes the chain with it below.
   const overAdapted = verdict.verdict === 'adapt' && ancestorsOf(events, id).length >= MAX_ADAPTS;
-  // An adapt changes nothing and logs nothing: the run may write a v2, or the proposal is judged again.
-  if (verdict.verdict === 'adapt' && !overAdapted) return { outcome: 'adapt', write: null, approval: null, decision: null, changes: verdict.changes ?? '' };
+  // Final fix F-I2: an adapt, in a later cycle, of the text an earlier adapt was of, with no v2 added since (its add was refused),
+  // is a drop too: otherwise the proposal is batched and adapted again every cycle. One of the same cycle (`runCycle`: a session
+  // that resumes its batch judges it again) is that adapt, never a second one.
+  const adapted = verdict.verdict === 'adapt' && !overAdapted ? adaptWithoutV2(events, id, verdict.digest) : null;
+  const adaptedTwice = adapted !== null && adapted.runCycle !== runCycle;
+  // An adapt changes nothing: it is logged once, as an `adapt` event of the text's digest and the cycle that no state reads, and
+  // the run may write a v2, or the proposal is judged again.
+  if (verdict.verdict === 'adapt' && !overAdapted && !adaptedTwice) {
+    if (!adapted) appendEvent(root, { ts: at, kind: 'proposal', action: 'adapt', id, digest: verdict.digest, runCycle });
+    return { outcome: 'adapt', write: null, approval: null, decision: null, changes: verdict.changes ?? '' };
+  }
   const outcome: Exclude<JudgeOutcome, 'adapt' | 'waits-owner'> = verdict.verdict === 'keep' ? 'approved'
     : verdict.verdict === 'clash' && doc.source === 'user' ? 'parked' : 'rejected';
   const w = es ? WORDS.es : WORDS.en;
-  const why = overAdapted ? w.adapts(verdict.why) : verdict.why;
+  const why = overAdapted ? w.adapts(verdict.why) : adaptedTwice ? w.adaptedTwice : verdict.why;
   // 6b-3 B-1, L-4: only a keep places its task (readVerdicts keeps a placement on nothing else).
   const placement = outcome === 'approved' ? verdict.placement : undefined;
   const parked = outcome === 'parked' ? normalizeParked({ why: verdict.why, loses: verdict.loses, at }) : null;
@@ -315,7 +336,7 @@ export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[
   }
   // M-2: the event lastDecisions reads, with the verdict that decided it (H-3: an adapt past the limit decided it as a drop),
   // and 6b-3 B-1: a keep's placement, which `proposals to-task` takes in a product run, so nothing is carried in memory.
-  appendEvent(root, { ts: at, kind: 'proposal', action: 'judge', id, status: next.status, verdict: overAdapted ? 'drop' : verdict.verdict, digest: verdict.digest,
+  appendEvent(root, { ts: at, kind: 'proposal', action: 'judge', id, status: next.status, verdict: overAdapted || adaptedTwice ? 'drop' : verdict.verdict, digest: verdict.digest,
     ...(placement ? { placement } : {}) });
   for (const r of replaced) {
     appendEvent(root, { ts: at, kind: 'proposal', action: 'judge', id: r.id, status: 'rejected', ...(outcome === 'approved' ? { replacedBy: id } : { droppedWith: id }) });

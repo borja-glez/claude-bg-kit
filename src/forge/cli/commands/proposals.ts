@@ -25,9 +25,9 @@ import { mainCheckout } from '../../local.js';
 import { addDecision, decisionNoteId, decisionWrites, markPublished } from '../../decisions.js';
 import { clean } from '../../../lib/decisions.js';
 import { normalizeOps } from '../../../lib/replan.js';
-import { doneOf } from '../../phases.js';
+import { doneOf, factsOf, readReviewed } from '../../phases.js';
 import { notRunsOwn, replanRefusals } from '../../replan-check.js';
-import { checkPlacement, estimateMinutes, proposalToTask, proposalOfIncludes, proposalsOfIncludes, type Placement } from '../../to-task.js';
+import { checkPlacement, estimateMinutes, IMPROVEMENTS_PHASE, openPhases, proposalToTask, proposalOfIncludes, proposalsOfIncludes, type Placement } from '../../to-task.js';
 import type { PlanTask } from '../../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { UsageError } from '../errors.js';
@@ -88,10 +88,11 @@ function heldTask(tasks: PlanTask[], id: string, taskId: string | undefined): st
 }
 
 /** 6b-3 B-1: the placement of the keep that approved `id`, from its last `judge` event in `cwd`'s ledger; null when that event
- *  has none that reads (readPlacement, as the critic's file is read: the ledger is a file someone could edit). */
-function judgedPlacement(cwd: string, id: string): Placement | null {
+ *  has none that reads (readPlacement, as the critic's file is read: the ledger is a file someone could edit), and (final fix
+ *  T2-b) when the event is of another text than `digest`, the proposal's present one: that keep placed what it judged. */
+function judgedPlacement(cwd: string, id: string, digest: string): Placement | null {
   const last = readEvents(cwd).filter(e => e.kind === 'proposal' && e.action === 'judge' && e.id === id).at(-1);
-  const p = readPlacement(last?.placement);
+  const p = last?.digest === digest ? readPlacement(last.placement) : null;
   const estimateMin = p ? estimateMinutes(p.estimate) : null;
   return p && estimateMin !== null ? { phase: p.phase, doneWhen: p.doneWhen, dependsOn: p.dependsOn, estimateMin } : null;
 }
@@ -440,9 +441,16 @@ export const command: Command = (args, ctx) => {
       const plan = planOf(text, planArg);
       const became = plan.tasks.find(t => proposalsOfIncludes(t.includes).includes(id))?.id ?? (spent ? String(spent.taskId ?? '?') : undefined);
       if (became !== undefined) throw new UsageError(`proposals to-task: proposal ${id} already became ${became}: a new approval of a new proposal is needed`);
+      // Final fix F-I1: once every phase with tasks is done and none is empty, nothing can be placed, by the keep or the flags,
+      // until a re-plan adds a phase: said apart, so the session opens one instead of leaving each approval to the person.
+      if (product && !openPhases(plan, done, { product }).length) {
+        const phases = plan.phases.map(ph => ph.id).filter(p => p !== IMPROVEMENTS_PHASE).join(', ');
+        throw new UsageError(`proposals to-task: no phase of the plan is open: every phase with tasks is done (${phases}) and none is empty; `
+          + `a re-plan must add a phase (add-phase) before ${id} is placed`);
+      }
       // B-1: in a product run, without the flags, the task goes where the critic's keep placed it (the flags override it); an
       // approval no keep placed (an insisted idea, the owner's own) is placed by the session, through the flags.
-      const judged = product && !given ? judgedPlacement(io.cwd, id) : null;
+      const judged = product && !given ? judgedPlacement(io.cwd, id, proposalDigest(id, found)) : null;
       const placement = given ?? judged;
       if (product && !placement) {
         throw new UsageError(`proposals to-task: in a product run ${id} needs its placement, which no keep of the critic gave: `
@@ -473,11 +481,15 @@ export const command: Command = (args, ctx) => {
     }
     case 'replan-check': {
       // 6b-3 B-2, M-8: before every `waypoint replan --check` and `waypoint replan`, whether the re-plan would retire, move or
-      // retitle a task of the person's or a done one (src/forge/replan-check.ts), from this checkout's proposals, marks and
-      // ledger. Exit 2 with every reason; it never writes. M-11: the state listing is required, read as empty it hides done tasks.
+      // retitle a task of the person's, a done one or (final fix F-M3) one blocked for the person, or (F-M4) move a task into a
+      // phase the run already reviewed (src/forge/replan-check.ts), from this checkout's proposals, marks and ledger. Exit 2 with
+      // every reason; it never writes. M-11: the state listing is required, read as empty it hides done tasks. F-M4: only inside
+      // an active product run, whose phases.json (the main checkout's) holds the reviewed phases.
       const [opsFile, planArg, db] = [subFlag('ops'), subFlag('plan'), subFlag('db')];
       if (!opsFile || !planArg || !db) throw new UsageError('usage: forge proposals replan-check --ops <ops.json> --plan <plan.yaml> --db <DB>');
-      const done = doneOf(io.cwd, db, 'proposals replan-check');
+      const main = mainCheckout(io.cwd);
+      const reviewed = readReviewed(main, activeProductRun(io.cwd, 'proposals replan-check', 're-plans its phases', main).autonomous.runId);
+      const facts = factsOf(io.cwd, db, 'proposals replan-check');
       // Read as waypoint replan reads it: a UTF-8 BOM is no part of the JSON, and the other keys of the file are ignored.
       const text = readText(opsFile, '--ops');
       let raw: unknown;
@@ -485,10 +497,10 @@ export const command: Command = (args, ctx) => {
       const { ops, errors } = normalizeOps(raw);
       if (errors.length) throw new UsageError(`proposals replan-check: ${errors.join('; ')}`);
       const plan = planOf(readText(planArg, '--plan'), planArg, 'proposals replan-check: ');
-      const refused = replanRefusals(io.cwd, plan, ops, done);
+      const refused = replanRefusals(io.cwd, plan, ops, facts, reviewed);
       if (refused.length) {
         throw new UsageError('proposals replan-check: refused: a re-plan never retires, moves, or changes the title or done_when of a task of the '
-          + `person's or of a done one; these need the person:\n- ${refused.join('\n- ')}`);
+          + `person's, a done one or one blocked for the person, and never moves a task into a phase already reviewed; these need the person:\n- ${refused.join('\n- ')}`);
       }
       return json({ ok: true, ops: ops.length });
     }
@@ -496,7 +508,8 @@ export const command: Command = (args, ctx) => {
       // 6b-3 M-8, T6B3-RETIRE-CLI: a proposal whose task a re-plan retired (its taskId in the plan's `retired:`) is rejected by the run,
       // under that re-plan's decision: judge's writes for a rejection, the forge:auto mark of its text, and a `retire` event. Never one
       // that is not approved, and (fix 2, T6B3-RETIRE-HELD) never one that is not the run's own by replan-check's rule (notRunsOwn: a
-      // person's idea or merged note, the owner's mark, a run mark of another text, no mark); every refusal is exit 2, nothing written.
+      // person's idea or merged note, the owner's mark, a run mark of another text, no mark); every refusal is exit 2, nothing written,
+      // but (final fix T7-O2) a proposal rejected already, exit 4: nothing to do.
       const id = rest[0];
       if (!id || !PROPOSAL_ID.test(id)) throw new UsageError('proposals retire: a proposal id (p + 14 digits + 4 letters/digits) is required');
       const [planArg, whyFile] = [subFlag('plan'), subFlag('why-file')];
@@ -507,18 +520,26 @@ export const command: Command = (args, ctx) => {
       const run = activeProductRun(io.cwd, 'proposals retire', 're-plans its phases');
       const doc = loadProposal(io.cwd, id);
       if (!doc) throw new UsageError(`proposals retire: ${id} not found`);
-      // Fix 3, T6B3-RETIRE-IDEMPOTENT: a retire that resumes (its event in the ledger, the local proposal rejected by the run with
-      // that reason) prints the same writes again, from its event, and writes nothing: the store may not have them yet.
+      const plan = planOf(readText(planArg, '--plan'), planArg, 'proposals retire: ');
+      const retired = (task: string | undefined): task is string => task !== undefined && (plan.retired ?? []).includes(task);
+      // Fix 3, T6B3-RETIRE-IDEMPOTENT: a retire that resumes prints the same writes again, from its event, and writes nothing: the
+      // store may not have them yet. Final fix T7-R1: only of the exact state that retire left: the proposal rejected by the run
+      // with its reason and at its time, of the same text, the run's mark of that text and time, and its task still retired.
       const earlier = readEvents(io.cwd).filter(e => e.kind === 'proposal' && e.action === 'retire' && e.id === id).at(-1);
-      if (earlier && doc.status === 'rejected' && doc.decidedBy === 'forge:auto' && typeof earlier.reason === 'string' && doc.reason === earlier.reason
-        && typeof earlier.digest === 'string') {
+      const mark = loadApproval(io.cwd, id);
+      if (earlier && typeof earlier.reason === 'string' && typeof earlier.digest === 'string' && doc.status === 'rejected' && doc.decidedBy === 'forge:auto'
+        && doc.reason === earlier.reason && doc.decidedAt === earlier.ts && proposalDigest(id, doc) === earlier.digest
+        && mark?.status === 'rejected' && mark.by === 'forge:auto' && mark.digest === earlier.digest && mark.decidedAt === earlier.ts
+        && doc.taskId === earlier.taskId && retired(doc.taskId)) {
         return json(retireWrites(id, earlier.ts, earlier.reason, earlier.digest, earlier.parked === true));
       }
+      // Final fix T7-O2: rejected already (by someone else, or changed since this run's retire): nothing to do, exit 4, a code no
+      // other refusal uses, so phase-close.md tells it apart from the proposals the person must decide.
+      if (doc.status === 'rejected') return { code: 4, stdout: '', stderr: `proposals retire: ${id} is rejected already: nothing to retire\n` };
       if (!isActionable(doc)) throw new UsageError(`proposals retire: ${id} is ${doc.status}: only an approved proposal is rejected when its task is retired`);
       const notOwn = notRunsOwn(io.cwd)(id);
       if (notOwn) throw new UsageError(`proposals retire: ${id} ${notOwn}: it is not the run's to reject, the person decides it`);
-      const plan = planOf(readText(planArg, '--plan'), planArg, 'proposals retire: ');
-      if (!doc.taskId || !(plan.retired ?? []).includes(doc.taskId)) {
+      if (!retired(doc.taskId)) {
         throw new UsageError(`proposals retire: the task of ${id} (${doc.taskId ?? 'none'}) is not in the retired list of ${planArg}`);
       }
       const at = ts();
@@ -528,8 +549,9 @@ export const command: Command = (args, ctx) => {
       const out = retireWrites(id, at, reason, digest, parked !== undefined);
       saveProposal(io.cwd, id, { ...kept, status: 'rejected', decidedBy: 'forge:auto', decidedAt: at, reason });
       saveApproval(io.cwd, id, out.approval.data);
-      // The event keeps what the writes say (fix 3), so a resumed retire prints them again.
-      appendEvent(io.cwd, { ts: at, kind: 'proposal', action: 'retire', id, taskId: doc.taskId, reason, digest, ...(parked ? { parked: true } : {}) });
+      // The event keeps what the writes say (fix 3), so a resumed retire prints them again, and (final fix T7-c) the status it
+      // decided, which lastDecisions reads.
+      appendEvent(io.cwd, { ts: at, kind: 'proposal', action: 'retire', id, taskId: doc.taskId, status: 'rejected', reason, digest, ...(parked ? { parked: true } : {}) });
       return json(out);
     }
     case 'batch': {
@@ -573,9 +595,10 @@ export const command: Command = (args, ctx) => {
       const recorded: { n?: number; event?: LedgerEvent } = {};
       let r: Judged;
       try {
+        // Final fix F-I2: the cycle it judges in, so an adapt judged again in the same cycle (a resumed batch) is that adapt.
         r = judgeProposal(io.cwd, id, verdicts, at, spanish(run.locale), d => {
           Object.assign(recorded, addDecision(main, d, { ts: at, runId: run.autonomous.runId }));
-        });
+        }, `${run.startedAt}#${run.cycle}`);
       } catch (e) {
         if (e instanceof JudgeError) throw new UsageError(`proposals judge: ${e.message}`);
         throw e;

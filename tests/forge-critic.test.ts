@@ -88,6 +88,21 @@ describe('proposals batch', () => {
     expect(proposalBatch(root, [id]).proposals).toHaveLength(1);
     expect(run(['proposals', 'batch', '../x', '--out', 'b.json'], { cwd: root, now: () => new Date(), env: {} }).code).toBe(2);
   });
+  it('gives each entry the version of its revises chain, so the critic knows a v3 gets no adapt (final fix T2-a)', () => {
+    const root = tmp('batch-version-');
+    let k = 0;
+    const io = { cwd: root, now: () => new Date('2026-10-22T10:00:00Z'), env: {}, rand: () => (++k % 36) / 36 };
+    const add = (title: string, extra: string[] = []) => {
+      writeFileSync(path.join(root, 'p.json'), JSON.stringify({ category: 'feature', risk: 'medium', title, rationale: title, evidence: 'e', pillar: 'Juice', source: 'scout' }));
+      return JSON.parse(run(['proposals', 'add', '--file', 'p.json', '--author', 'session:main', ...extra], io).stdout).id as string;
+    };
+    const o = add('Big shop');
+    const v2 = add('Cosmetic shop', ['--revises', o]);
+    const v3 = add('Hat stand', ['--revises', v2]);
+    expect(run(['proposals', 'batch', o, v2, v3, '--out', 'b.json'], io).code).toBe(0);
+    const b = JSON.parse(readFileSync(path.join(root, 'b.json'), 'utf8')) as { proposals: { id: string; version: number }[] };
+    expect(b.proposals.map(p => [p.id, p.version])).toEqual([[o, 1], [v2, 2], [v3, 3]]);
+  });
   it('lists a repeated id once, reads an id after --out, and refuses another flag', () => {
     const root = tmp('batch-ids-');
     const r = run(['proposals', 'batch', '--out', 'b.json', 'p20261022100000none', 'p20261022100000none'], { cwd: root, now: () => new Date(), env: {} });
