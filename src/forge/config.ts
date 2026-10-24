@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
-import { z } from 'zod';
+import * as z from 'zod';
 import { EFFORTS, MODELS, type Effort, type Model } from '../lib/launcher.js';
 
 export type Profile = 'balanced' | 'economy' | 'quality';
@@ -91,10 +91,10 @@ const Schema = z.object({
       checks: z.number().int().min(1).max(20).default(8),
       shots: z.number().int().min(1).max(30).default(10),
       minutes: z.number().int().min(1).max(60).default(10),
-    }).strict().default({}),
+    }).strict().prefault({}),
     ports: z.string().regex(/^\d{4,5}-\d{4,5}$/, 'must be <from>-<to>').refine(validPorts, 'must be two ports from 1024 to 65535, the first not above the second').optional(),
     flow: z.enum(FLOW_MODES).optional(),
-  }).strict().default({}),
+  }).strict().prefault({}),
   evidence: z.enum(['upload', 'local']).default('upload'),
   validatorTimeoutSec: z.number().int().positive().max(7200).default(600),
   validate: z.object({

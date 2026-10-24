@@ -1,5 +1,5 @@
 import { parse } from 'yaml';
-import { z } from 'zod';
+import * as z from 'zod';
 
 const ID = /^[A-Za-z0-9_.-]{1,64}$/;
 /** The statuses of a design (2a added parked); designMetaLite reads the same list. */

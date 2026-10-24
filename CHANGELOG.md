@@ -13,6 +13,11 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.35.1 — 2026-10-24
+
+#### Fixed
+- Built with zod 4.6.7 in place of zod 3, which can exhaust memory while validating oversized constrained collections (GHSA-mrhx-c7xc-m3w5, no fix in 3.x). The plan, the design, its critiques and its changelog read as before, and a changelog entry whose round is not a whole number is still ignored rather than refused.
+
 ### 0.35.0 — 2026-10-24
 
 #### Added
@@ -408,6 +413,11 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.30.1 — 2026-10-24
+
+#### Fixed
+- Built with zod 4.6.7 in place of zod 3, which can exhaust memory while validating oversized constrained collections (GHSA-mrhx-c7xc-m3w5, no fix in 3.x). `.forge/config.yaml` and the decisions read as before, with the same defaults: `verify` and `verify.limits` still fill in each missing value.
 
 ### 0.30.0 — 2026-10-24
 

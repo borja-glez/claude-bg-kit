@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 import { ROUND_MAX } from './critique.js';
 
 /** K3-07: what made a changelog entry (`design-snapshot --kind`). */
@@ -8,12 +8,15 @@ export type EntryKind = (typeof ENTRY_KINDS)[number];
 // I-13: the schema is built on first use, inside a function, so a module that imports only what needs no zod (the
 // band's mod: ENTRY_KINDS, normalizeApplied, normalizeResolved, entryKind) leaves zod out of its bundle.
 function historySchemas() {
+  // Any number but NaN, as zod 3's z.number() read it: zod 4 refuses ±Infinity (a JSON 1e999), and one such field would
+  // make the whole changelog invalid where entryRound only ignores it (carry 6).
+  const num = z.custom<number>(v => typeof v === 'number' && !Number.isNaN(v), 'expected a number');
   const EntrySchema = z.object({
-    version: z.number(),
+    version: num,
     date: z.string(),
     note: z.string(),
-    words: z.number(),
-    round: z.number(),
+    words: num,
+    round: num,
   });
   return { EntrySchema };
 }

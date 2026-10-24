@@ -1,5 +1,5 @@
 import { parse } from 'yaml';
-import { z } from 'zod';
+import * as z from 'zod';
 import { PHASE_GOAL_MAX, TRACK_COLORS, type Plan } from './types.js';
 import { PLAN_ID_RE as SEG, isPlanId, realDate } from './ids.js';
 import { historyOf } from './plan-history.js';

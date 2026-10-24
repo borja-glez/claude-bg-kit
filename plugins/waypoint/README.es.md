@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.35.0](https://img.shields.io/badge/versi%C3%B3n-0.35.0-cba6f7?style=flat-square)
+![versión 0.35.1](https://img.shields.io/badge/versi%C3%B3n-0.35.1-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 

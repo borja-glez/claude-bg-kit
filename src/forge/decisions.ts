@@ -2,7 +2,7 @@
 // docs/forge/decisions/<scope>.md file of a project without a roadmap. Never runs git and never deletes anything.
 import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { z } from 'zod';
+import * as z from 'zod';
 import { appendEvent, forgeDir, readEvents, type LedgerEvent } from './ledger.js';
 import { MAX_NOTE, NOTE_ID } from '../lib/notes.js';
 import { compactTs } from '../lib/ids.js';

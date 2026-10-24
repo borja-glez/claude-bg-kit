@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod';
 
 /** The highest round a critique can have: six digits, the bound of the critique file names below. */
 export const ROUND_MAX = 999_999;
