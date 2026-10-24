@@ -6,10 +6,9 @@
 // view, the retry of an update that failed) hold under every filter, and who decided is what the owner's mark says (C26).
 import { canDecide, MAX_PROPOSAL_TEXT, PROPOSAL_CATEGORIES, PROPOSAL_RISKS, PROPOSAL_STATUSES, type ApprovalDoc, type ProposalDoc, type ProposalStatus } from '../../lib/proposals.js';
 import { counts, MAX_NOTE, NOTE_TYPES } from '../../lib/notes.js';
-import { inlineMd } from '../../lib/inline-md.js';
 import type { NoteDoc } from '../../lib/types.js';
 import type { Dict } from '../i18n.js';
-import { authorLabel, decisionBlock, esc, fmt, labelOf, oneOf, safeNote, safeStatus, unmarkedReason } from '../html.js';
+import { authorLabel, decisionBlock, esc, fmt, labelOf, noteText, oneOf, safeNote, safeStatus, unmarkedReason } from '../html.js';
 import { PROPOSAL_FILTERS, TALK_FILTERS, type Model, type ProposalFilter, type ProposalFilterKind, type TalkFilter, type UiState } from '../model.js';
 
 type Note = NoteDoc & { id: string };
@@ -112,7 +111,7 @@ function noteCard(m: Model, d: Dict, ui: UiState, loc: string, n: Note): string 
     : `<button type="button" class="btn" data-action="answer-open" data-id="${esc(n.id)}">${esc(d.reply)}</button>`;
   return `<div class="note nb-${t}" data-k="n:${esc(n.id)}" tabindex="-1">
     <div class="nh"><span><span class="nt-${t}">${esc(open ? d.openQuestion : d.noteType[t])}</span>${dec ? ` <span class="nauto">${esc(dec.auto ? d.autoTag : d.yoursTag)}</span>` : ''}</span><span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
-    <p>${inlineMd(esc(n.text))}</p>
+    <p>${noteText(t, n.text)}</p>
     ${dec ? decisionBlock(d, dec, true) : ''}
     ${n.taskId ? `<button type="button" class="chip" data-action="open-task" data-id="${esc(n.taskId)}" data-k="tk:${esc(n.id)}">${esc(n.taskId)}</button>` : ''}
     ${answer}

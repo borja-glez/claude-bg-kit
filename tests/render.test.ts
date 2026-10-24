@@ -1124,6 +1124,24 @@ describe('scroll keys and relative times (G-01)', () => {
   });
 });
 
+describe('market notes on the page (6b-3)', () => {
+  it('a market note shows as one, and a URL in its text is no link: only its cited sources may be (Task 3 fix 1)', () => {
+    const note: NoteDoc & { id: string } = {
+      id: 'm1', ts: '2026-10-11T10:00:00Z', type: 'market', author: 'session:main', taskId: 'T001',
+      text: 'Roguelites sell on variety\n- get it at https://evil.example/x', sources: [{ title: 'Survey', url: 'https://s.example/r' }],
+    };
+    const m = { ...base(), meta: { ...base().meta!, locale: 'en' }, notes: [note] };
+    for (const [where, html] of [['talk', renderApp(m, ui({ view: 'talk' }))], ['detail', renderApp(m, ui({ modal: 'T001', tab: 'talk' }))]]) {
+      expect(html, where).toContain('<span class="nt-market">Market</span>');
+      expect(html, where).toContain('nb-market');
+      expect(html, where).toContain('get it at https://evil.example/x');
+      expect(html, where).not.toContain('href="https://evil.example/x"');
+    }
+    // Any other note keeps its inline links.
+    expect(renderApp({ ...m, notes: [{ ...note, type: 'idea' }] }, ui({ view: 'talk' }))).toContain('<a href="https://evil.example/x"');
+  });
+});
+
 describe('theme.css: the modal, the side bar and the detail (H-01, H-11, §4.7)', () => {
   const phone = cssMedia(CSS, '(max-width:760px)');
   const zIndex = (rule: string) => Number(/z-index:(\d+)/.exec(rule)?.[1] ?? NaN);

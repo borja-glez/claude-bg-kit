@@ -19,16 +19,19 @@ const FINDINGS_MAX = 12;
 const REPORT_FILE = /^\d{8}T\d{9}Z\.json$/;
 /** A byte order mark at the start of the file is no part of its JSON (built from its code point: no invisible character here). */
 const BOM = String.fromCharCode(0xfeff);
+/** T6B3-MARKET-FENCE: a reply wrapped in one ```json (or bare ```) fence, each fence on its own line: the JSON is inside it. */
+const FENCE = /^```(?:json)?[ \t]*\r?\n([\s\S]*)\r?\n[ \t]*```$/i;
 
 /**
  * A market report from the text of a market.json (untrusted: the agent read the web), or null when it is not a JSON object
  * with a summary. Texts are cleaned to one line and cut (the summary to SUMMARY_MAX, each finding to FINDING_MAX); a finding
  * without one source normalizeSources keeps is left out (only what is cited goes in), and FINDINGS_MAX are kept. With
- * `noWeb: true` the findings are ignored.
+ * `noWeb: true` the findings are ignored. The JSON may come in one FENCE; text around it, or a second fence, is no report.
  */
 export function readMarket(text: string): MarketReport | null {
+  const body = (text.startsWith(BOM) ? text.slice(1) : text).trim();
   let raw: unknown;
-  try { raw = JSON.parse(text.startsWith(BOM) ? text.slice(1) : text); } catch { return null; }
+  try { raw = JSON.parse(FENCE.exec(body)?.[1] ?? body); } catch { return null; }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
   const summary = typeof o.summary === 'string' ? clean(o.summary, SUMMARY_MAX) : '';

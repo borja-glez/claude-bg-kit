@@ -2304,8 +2304,10 @@ describe('plugin layout', () => {
   });
   it('forge-market searches the web and cites, and the scout, the critic and the planner read its last report (6b-3)', () => {
     const md = read('plugins/forge/agents/forge-market.md');
-    // H-4: the web only, no file tools: the session writes market.json from its reply.
-    expect(md.split(/\r?\n---\r?\n/)[0]).toMatch(/\ntools: WebSearch, WebFetch\r?\n/);
+    // H-4: the web only, no file tools: the session writes market.json from its reply. T6B3-MARKET-TOOLSEARCH: ToolSearch loads
+    // the web tools where they are deferred; it grants no tool the list does not name.
+    expect(md.split(/\r?\n---\r?\n/)[0]).toMatch(/\ntools: WebSearch, WebFetch, ToolSearch\r?\n/);
+    expect(md).toContain('load it with ToolSearch first');
     for (const w of ['market.json', '"noWeb"', '"sources"', '"summary"', '"findings"']) expect(md, w).toContain(w);
     for (const a of ['forge-scout', 'forge-critic', 'forge-planner']) expect(read(`plugins/forge/agents/${a}.md`), a).toContain('FORGE market last');
   });

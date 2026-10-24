@@ -37,6 +37,23 @@ describe('readMarket', () => {
     expect(readMarket(JSON.stringify({ summary: '   ', findings: [] }))).toBeNull();
     expect(readMarket(JSON.stringify([REPORT]))).toBeNull();
   });
+  it('reads a reply in exactly one ```json fence, or a bare ``` one; text around it, two fences or another language is no report (T6B3-MARKET-FENCE)', () => {
+    const f = '`'.repeat(3);
+    const body = JSON.stringify(REPORT, null, 2);
+    const kept = readMarket(body);
+    expect(kept).not.toBeNull();
+    for (const ok of [`${f}json\n${body}\n${f}`, `${f}\n${body}\n${f}\n`, `${f}JSON\r\n${body}\r\n${f}`]) expect(readMarket(ok), ok.slice(0, 8)).toEqual(kept);
+    for (const bad of [`Here it is:\n${f}json\n${body}\n${f}`, `${f}json\n${body}\n${f}\nDone.`, `${f}json\n${body}\n${f}\n${f}json\n${body}\n${f}`, `${f}js\n${body}\n${f}`, `${f}json ${body} ${f}`]) {
+      expect(readMarket(bad), bad.slice(0, 12)).toBeNull();
+    }
+  });
+  it('a source with a user or a password in its URL is dropped, and so is a finding left without a source', () => {
+    const r = readMarket(JSON.stringify({ summary: 's', noWeb: false, findings: [
+      { text: 'only spoofed', sources: [{ title: 'a', url: 'https://a@b/' }, { title: 'b', url: 'https://a:b@c/' }] },
+      { text: 'one good', sources: [{ title: 'p', url: 'https://:p@d.example/' }, { title: 'ok', url: 'https://ok.example/' }] },
+    ] }));
+    expect(r?.findings).toEqual([{ text: 'one good', sources: [{ title: 'ok', url: 'https://ok.example/' }] }]);
+  });
 });
 
 describe('marketNote', () => {

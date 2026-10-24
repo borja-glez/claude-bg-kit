@@ -25,12 +25,13 @@ export const NOTE_ID = /^[A-Za-z0-9_.:~@+-]{1,160}$/;
 const clipPoints = (s: string, max: number): string => (s.length <= max ? s : Array.from(s).slice(0, max).join(''));
 
 /** The href of `url` when a source can keep it: an http: or https: URL that `new URL` reads, of at most MAX_URL characters,
- *  with no space, control or bidi character (clean leaves it as it is), so the text kept is the link it opens; else null. */
+ *  with no space, control or bidi character (clean leaves it as it is), so the text kept is the link it opens, and no user or
+ *  password part (`https://trusted@evil/` shows one host and opens another); else null. */
 function webHref(url: string): string | null {
   if (!url || url.length > MAX_URL || /\s/.test(url) || clean(url, MAX_URL) !== url) return null;
   try {
     const u = new URL(url);
-    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
+    return (u.protocol === 'http:' || u.protocol === 'https:') && !u.username && !u.password ? u.href : null;
   } catch { return null; }
 }
 

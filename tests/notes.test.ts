@@ -152,4 +152,8 @@ describe('market notes (6b-3)', () => {
     expect(normalizeNote({ ...M, sources: [] })).not.toHaveProperty('sources');
     expect(normalizeNote({ ...M, type: 'idea', sources: [{ title: 'A', url: 'https://a.example/x' }] })).not.toHaveProperty('sources');
   });
+  it('a source URL with a user or a password part is dropped: it shows one host and opens another (Task 3 fix 1)', () => {
+    const n = normalizeNote({ ...M, sources: [{ url: 'https://a@b/' }, { url: 'https://a:b@c/' }, { url: 'https://trusted.example@evil.example/' }, { url: 'https://:p@d.example/' }, { url: 'https://ok.example/' }] });
+    expect(n?.sources).toEqual([{ title: 'https://ok.example/', url: 'https://ok.example/' }]);
+  });
 });

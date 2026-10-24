@@ -3,6 +3,7 @@
 import { escalationCandidates, liveness } from '../lib/coordination.js';
 import type { ForecastEnd } from '../lib/insights.js';
 import type { Metrics } from '../lib/metrics.js';
+import { inlineMd } from '../lib/inline-md.js';
 import { NOTE_KINDS } from '../lib/notes.js';
 import { ownerCheck, type ApprovalDoc, type ProposalDoc } from '../lib/proposals.js';
 import { TRACK_COLORS, type EventType, type MessageType, type NoteDecision, type NoteType, type TaskState, type TaskStatus } from '../lib/types.js';
@@ -26,6 +27,9 @@ const MSG_TYPES: readonly MessageType[] = ['overlap_warning', 'handoff_request',
 export const safeMsgType = (t: unknown): MessageType => (MSG_TYPES as readonly string[]).includes(t as string) ? (t as MessageType) : 'reply';
 // 6b-3: any type a note can have (NOTE_KINDS), so a market note shows as one and not as an idea.
 export const safeNote = (t: unknown): NoteType => ((NOTE_KINDS as readonly string[]).includes(t as string) ? (t as NoteType) : 'idea');
+/** A note's text on the page, of the type safeNote gave it: escaped, with inlineMd's marks and links. 6b-3 Task 3 fix 1: a
+ *  market note's text, read from the web, is only escaped, so a URL in a finding is never a link; its cited sources are. */
+export const noteText = (type: NoteType, text: string): string => (type === 'market' ? esc(text) : inlineMd(esc(text)));
 export const oneOf = <T extends string>(list: readonly T[], v: unknown, dflt: T): T => ((list as readonly string[]).includes(v as string) ? (v as T) : dflt);
 export const clip = (t: string, n: number): string => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 export const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
