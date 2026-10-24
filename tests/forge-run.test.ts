@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { parseRun, startRun, recordCycle, stopReason, saveRun, endRun, type RunState } from '../src/forge/run.js';
+import { parseRun, startRun, recordCycle, recordExplore, stopReason, saveRun, endRun, type RunState } from '../src/forge/run.js';
 import { LEASE_CAP_MINUTES, LEASE_MINUTES } from '../src/lib/coordination.js';
 import { infiniteDocOf, seatOf } from '../src/forge/infinite-doc.js';
 import { runDocOf } from '../src/forge/run-doc.js';
@@ -12,6 +12,9 @@ const tmp = useTempDirs();
 const T0 = new Date('2026-10-11T10:00:00.000Z');
 const ctx = (over: Partial<{ now: Date; stopFile: boolean; approvedPending: number; pendingProposals: number }> = {}) =>
   ({ now: T0, stopFile: false, approvedPending: 0, pendingProposals: 0, ...over });
+// 6b-3: the parts of a saturation report the rulings added to the plan's (H-2's openProposals, L-18's waitsOwner and unowned,
+// M-10's counts), empty.
+const noCounts = { pendingTasks: 0, validatorsFailed: 0, openDefects: 0, openProposals: 0, parked: 0, waitsOwner: 0, unowned: 0 };
 
 describe('parseRun', () => {
   it('reads a valid run', () => {
@@ -71,6 +74,43 @@ describe('parseRun', () => {
     }
     expect(startRun(T0, { cycles: 2 })).not.toHaveProperty('locale');
   });
+  it('keeps explore and saturation when they read, and drops them otherwise (6b-3)', () => {
+    const sat = { saturated: false, at: 't', rounds: 2, blocking: ['rounds'], evidence: { pendingTasks: ['T1'], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
+      waiting: { parked: [], questions: 0, blocked: 0, deferred: 0, waitsOwner: [], unowned: [] }, counts: { ...noCounts, pendingTasks: 1 } };
+    const ok = parseRun(JSON.stringify({ ...startRun(T0, { cycles: 3 }), explore: { rounds: 2, dry: 2 }, saturation: sat }))!;
+    expect(ok).toMatchObject({ explore: { rounds: 2, dry: 2 }, saturation: sat });
+    const bad = parseRun(JSON.stringify({ ...startRun(T0, { cycles: 3 }), explore: { rounds: -1 }, saturation: { saturated: 'yes' } }))!;
+    expect(bad).not.toHaveProperty('explore');
+    expect(bad).not.toHaveProperty('saturation');
+  });
+  it('drops a report that does not hold together, never the run (6b-3, M-10)', () => {
+    const sat = { saturated: true, at: 't', rounds: 3, blocking: [], evidence: { pendingTasks: [], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
+      waiting: { parked: [], questions: 0, blocked: 0, deferred: 0, waitsOwner: [], unowned: [] }, counts: noCounts };
+    const read = (o: Record<string, unknown>) => parseRun(JSON.stringify({ ...startRun(T0, { cycles: 3 }), ...o }));
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `T${100 + i}`);
+    for (const saturation of [
+      { ...sat, blocking: ['rounds'] }, { ...sat, saturated: false }, { ...sat, blocking: ['later'] },
+      { ...sat, saturated: false, blocking: ['pending-tasks'], evidence: { ...sat.evidence, pendingTasks: ids(21) }, counts: { ...noCounts, pendingTasks: 21 } },
+      { ...sat, saturated: false, blocking: ['pending-tasks'], evidence: { ...sat.evidence, pendingTasks: ids(3) } },
+      { ...sat, counts: { ...noCounts, unowned: undefined } }, { ...sat, missing: ['--other'] },
+      { ...sat, saturated: false, blocking: ['validators'], evidence: { ...sat.evidence, validatorsFailed: [`unit${String.fromCharCode(0x202e)}`] }, counts: { ...noCounts, validatorsFailed: 1 } },
+    ]) {
+      const r = read({ saturation });
+      expect(r, JSON.stringify(saturation)).not.toBeNull();
+      expect(r, JSON.stringify(saturation)).not.toHaveProperty('saturation');
+    }
+    expect(read({ explore: { rounds: 1, dry: 2 } })).not.toHaveProperty('explore');
+    // Positive controls: a full list of 20 with its count, a null report and one that names its missing inputs read.
+    const full = { ...sat, saturated: false, blocking: ['pending-tasks'], evidence: { ...sat.evidence, pendingTasks: ids(20) }, counts: { ...noCounts, pendingTasks: 31 } };
+    expect(read({ saturation: full })?.saturation).toEqual(full);
+    // An id is up to 80 code points, an astral one counting once.
+    const wide = { ...sat, saturated: false, blocking: ['validators'], evidence: { ...sat.evidence, validatorsFailed: ['v'.repeat(79) + String.fromCodePoint(0x1f600)] },
+      counts: { ...noCounts, validatorsFailed: 1 } };
+    expect(read({ saturation: wide })?.saturation).toEqual(wide);
+    expect(read({ saturation: null })?.saturation).toBeNull();
+    const missing = { ...sat, saturated: false, blocking: ['inputs'], missing: ['--plan', '--validate'] };
+    expect(read({ saturation: missing })?.saturation).toEqual(missing);
+  });
 });
 
 describe('recordCycle', () => {
@@ -128,6 +168,19 @@ describe('stopReason', () => {
     expect(stopReason(r, ctx({ pendingProposals: 10 }))).toBe('queue-full');
     expect(stopReason(r, ctx({ pendingProposals: 10, approvedPending: 1 }))).toBeNull();
   });
+  it('stops on saturated only in an autonomous run, after the budgets and before no-progress (6b-3)', () => {
+    const auto = { profile: 'spike' as const, name: 'x', runId: 'spike-x', worktree: path.resolve('/w'), branch: 'forge/spike-x', startBranch: 'main', protectedBranches: ['main'] };
+    const sat = { saturated: true, at: 't', rounds: 3, blocking: [], evidence: { pendingTasks: [], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
+      waiting: { parked: [], questions: 0, blocked: 0, deferred: 0, waitsOwner: [], unowned: [] }, counts: noCounts };
+    expect(stopReason({ ...r, autonomous: auto, saturation: sat, noProgress: 3 }, ctx())).toBe('saturated');
+    expect(stopReason({ ...r, saturation: sat }, ctx())).toBeNull();
+    expect(stopReason({ ...r, autonomous: auto, saturation: sat, cycle: 3 }, ctx())).toBe('budget-cycles');
+  });
+  it('recordExplore counts dry rounds and starts over when one passes (6b-3)', () => {
+    const once = recordExplore(r, 0);
+    expect(once.explore).toEqual({ rounds: 1, dry: 1 });
+    expect(recordExplore(recordExplore(once, 0), 2).explore).toEqual({ rounds: 3, dry: 0 });
+  });
 });
 
 describe('saveRun', () => {
@@ -169,6 +222,17 @@ describe('infiniteDocOf: meta/infinite with its coordinator (G-08)', () => {
   it('an inactive run says why it stopped; a run of forge 0.15 (no session) has no coordinator', () => {
     expect(infiniteDocOf(endRun(base, 'budget-cycles'), { now, sid: null, sleepUntil: null, lastCycleAt: null })).toMatchObject({ active: false, stopReason: 'budget-cycles' });
     expect(infiniteDocOf({ ...base, sessionId: null }, { now, sid: null, sleepUntil: null, lastCycleAt: null }).coordinator).toBeNull();
+  });
+  it('an autonomous run adds its profile and its saturation report, null until there is one (6b-3, L-20)', () => {
+    const auto = { profile: 'product' as const, name: 'x', runId: 'product-x', worktree: path.resolve('/w'), branch: 'forge/product-x', startBranch: 'main', protectedBranches: ['main'] };
+    const o = { now, sid: null, sleepUntil: null, lastCycleAt: null };
+    expect(infiniteDocOf({ ...base, autonomous: auto }, o)).toMatchObject({ profile: 'product', saturation: null });
+    const sat = { saturated: false, at: 't', rounds: 3, blocking: ['pending-tasks' as const], evidence: { pendingTasks: ['T1'], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
+      waiting: { parked: [], questions: 0, blocked: 0, deferred: 0, waitsOwner: [], unowned: [] }, counts: { ...noCounts, pendingTasks: 1 } };
+    expect(infiniteDocOf({ ...base, autonomous: auto, saturation: sat }, o).saturation).toEqual(sat);
+    // Positive control: a run without a profile carries neither key (the exact object above).
+    expect(infiniteDocOf({ ...base, saturation: sat }, o)).not.toHaveProperty('saturation');
+    expect(infiniteDocOf(base, o)).not.toHaveProperty('profile');
   });
 });
 

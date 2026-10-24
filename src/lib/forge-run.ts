@@ -11,6 +11,33 @@ export interface RunState {
   blocksSinceCycle: number;           // Stop-hook blocks since the last cycle was recorded (0 when absent in older files)
   locale?: string;                    // the language the person writes in (infinite start --locale); absent when unknown
   autonomous?: AutonomousRun;         // 6b: present only in an autonomous run; written by infinite start --profile, read and validated here
+  explore?: { rounds: number; dry: number };  // 6b-3: the exploration rounds (cycle --explore) and how many in a row passed nothing
+  saturation?: SaturationReport | null;       // 6b-3: the last report, once `dry` reached SATURATION_ROUNDS; null below it
+}
+
+/** 6b-3: what keeps an autonomous run from being saturated. `inputs`: the round lacked what the report is computed from. */
+export const SATURATION_BLOCKING = ['rounds', 'pending-tasks', 'validators', 'findings', 'defects', 'proposals', 'inputs'] as const;
+export type SaturationBlocking = (typeof SATURATION_BLOCKING)[number];
+/** 6b-3 M-10: the id lists of a report, each kept to SATURATION_LIST_MAX ids, with its full length in `counts`. */
+export const SATURATION_LISTS = ['pendingTasks', 'validatorsFailed', 'openDefects', 'openProposals', 'parked', 'waitsOwner', 'unowned'] as const;
+export type SaturationList = (typeof SATURATION_LISTS)[number];
+export const SATURATION_LIST_MAX = 20;
+/** 6b-3 L-10: the inputs of `cycle --explore` a report can name as missing. */
+export const SATURATION_INPUTS = ['--plan', '--db', '--validate'] as const;
+export type SaturationInput = (typeof SATURATION_INPUTS)[number];
+
+/**
+ * 6b-3, spec «Parada por saturación»: why the run is or is not saturated, with its evidence. `saturated` is `blocking` empty.
+ * `waiting` is what waits for the person, listed apart and never blocking: parked ideas, open questions, blocked actions,
+ * deferred findings, the proposals that wait for the owner's mark and the approvals without it. `missing` (L-10) only on a
+ * report the round could not compute.
+ */
+export interface SaturationReport {
+  saturated: boolean; at: string; rounds: number; blocking: SaturationBlocking[];
+  evidence: { pendingTasks: string[]; validatorsFailed: string[]; openFindings: number; openDefects: string[]; openProposals: string[] };
+  waiting: { parked: string[]; questions: number; blocked: number; deferred: number; waitsOwner: string[]; unowned: string[] };
+  counts: Record<SaturationList, number>;
+  missing?: SaturationInput[];
 }
 
 export const PROFILES = ['spike', 'product'] as const;
@@ -52,6 +79,52 @@ export const isLocale = (x: unknown): x is string => typeof x === 'string' && LO
 const isCount = (x: unknown): x is number => typeof x === 'number' && Number.isInteger(x) && x >= 0;
 const isPositiveInt = (x: unknown): x is number => isCount(x) && x > 0;
 const isPositive = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x > 0;
+const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+
+/** The explore counts, or null unless both are counts and the dry rounds are some of the rounds. */
+function exploreOf(x: unknown): RunState['explore'] | null {
+  if (!isObj(x) || !isCount(x.rounds) || !isCount(x.dry) || x.dry > x.rounds) return null;
+  return { rounds: x.rounds, dry: x.dry };
+}
+
+// An id of a report's list: a task, a proposal, a validator's name; one line of at most 80 code points, with no C0, DEL, C1
+// or bidi control. Built from code points, so this file holds none of them.
+const cp = (n: number) => String.fromCharCode(n);
+const REPORT_ID = new RegExp(`^[^${cp(0)}-${cp(0x1f)}${cp(0x7f)}-${cp(0x9f)}${cp(0x202a)}-${cp(0x202e)}${cp(0x2066)}-${cp(0x2069)}]{1,80}$`, 'u');
+const idList = (x: unknown): x is string[] =>
+  Array.isArray(x) && x.length <= SATURATION_LIST_MAX && x.every(v => typeof v === 'string' && REPORT_ID.test(v));
+const oneOf = <T extends string>(list: readonly T[], x: unknown): x is T => typeof x === 'string' && (list as readonly string[]).includes(x);
+
+/** 6b-3: a saturation report, or null unless every field reads: `saturated` agrees with `blocking`, each list holds at most
+ *  SATURATION_LIST_MAX ids and its count is at least that many (M-10). Other fields are ignored. */
+function saturationReportOf(x: unknown): SaturationReport | null {
+  if (!isObj(x)) return null;
+  const { saturated, at, rounds, blocking, evidence: e, waiting: w, counts: c, missing } = x;
+  if (typeof saturated !== 'boolean' || typeof at !== 'string' || !at || at.length > 64 || !isCount(rounds)) return null;
+  if (!Array.isArray(blocking) || !blocking.every(b => oneOf(SATURATION_BLOCKING, b)) || new Set(blocking).size !== blocking.length) return null;
+  if (saturated !== (blocking.length === 0) || !isObj(e) || !isObj(w) || !isObj(c)) return null;
+  if (!isCount(e.openFindings) || !isCount(w.questions) || !isCount(w.blocked) || !isCount(w.deferred)) return null;
+  const lists: Record<SaturationList, unknown> = {
+    pendingTasks: e.pendingTasks, validatorsFailed: e.validatorsFailed, openDefects: e.openDefects, openProposals: e.openProposals,
+    parked: w.parked, waitsOwner: w.waitsOwner, unowned: w.unowned,
+  };
+  const counts = {} as Record<SaturationList, number>;
+  for (const k of SATURATION_LISTS) {
+    const list = lists[k];
+    const n = c[k];
+    if (!idList(list) || !isCount(n) || n < list.length) return null;
+    counts[k] = n;
+  }
+  if (missing !== undefined && !(Array.isArray(missing) && missing.length && missing.every(m => oneOf(SATURATION_INPUTS, m)))) return null;
+  const ids = (k: SaturationList) => [...(lists[k] as string[])];
+  return {
+    saturated, at, rounds, blocking: [...blocking] as SaturationBlocking[],
+    evidence: { pendingTasks: ids('pendingTasks'), validatorsFailed: ids('validatorsFailed'), openFindings: e.openFindings, openDefects: ids('openDefects'), openProposals: ids('openProposals') },
+    waiting: { parked: ids('parked'), questions: w.questions, blocked: w.blocked, deferred: w.deferred, waitsOwner: ids('waitsOwner'), unowned: ids('unowned') },
+    counts,
+    ...(missing !== undefined ? { missing: [...missing] as SaturationInput[] } : {}),
+  };
+}
 
 /** null when absent or invalid (bad JSON, missing fields, wrong types, non-positive budget); never throws. */
 export function parseRun(text: string | null): RunState | null {
@@ -89,5 +162,13 @@ export function parseRun(text: string | null): RunState | null {
   // An invalid locale is dropped, never the run: older run.json files have none.
   if (isLocale(o.locale)) run.locale = o.locale;
   if (autonomous) run.autonomous = autonomous;
+  // 6b-3: kept only when they read; one that does not is dropped, never the run (a dropped report is no saturation).
+  const explore = exploreOf(o.explore);
+  if (explore) run.explore = explore;
+  if (o.saturation === null) run.saturation = null;
+  else {
+    const saturation = saturationReportOf(o.saturation);
+    if (saturation) run.saturation = saturation;
+  }
   return run;
 }

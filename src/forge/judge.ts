@@ -194,13 +194,24 @@ function heldBack(root: string, events: readonly LedgerEvent[], id: string, doc:
  * run must judge is kept on disk, so a compaction between two cycles loses none of it.
  */
 export function pendingForJudge(root: string): string[] {
+  return undecided(root).filter(p => p.held === null).map(p => p.id).sort();
+}
+
+/** 6b-3 L-18: the proposals of `root` still to decide, as pendingForJudge takes them, that judge would answer `waits-owner`
+ *  (heldBack): only the owner's mark moves them, so a saturation report lists them apart, as waiting for the person. */
+export function waitingForOwner(root: string): string[] {
+  return undecided(root).filter(p => p.held === 'waits-owner').map(p => p.id).sort();
+}
+
+/** The proposals of `root` still to decide (notJudgeable) and with no open descendant in their revises chain, each with what
+ *  heldBack answers of it: pendingForJudge and waitingForOwner share it. */
+function undecided(root: string): { id: string; held: 'waits-owner' | 'parked' | null }[] {
   const events = readEvents(root).filter(e => e.kind === 'proposal');
   const all = loadProposals(root);
   const heldByOpen = new Set(all.filter(p => p.status === 'proposed' || p.status === 'discussing').flatMap(p => ancestorsOf(events, p.id)));
   return all
-    .filter(({ id, ...doc }) => !heldByOpen.has(id) && notJudgeable(root, events, id, doc) === null && heldBack(root, events, id, doc).held === null)
-    .map(p => p.id)
-    .sort();
+    .filter(({ id, ...doc }) => !heldByOpen.has(id) && notJudgeable(root, events, id, doc) === null)
+    .map(({ id, ...doc }) => ({ id, held: heldBack(root, events, id, doc).held }));
 }
 
 /** The doc decided by this run (or, `by` forge:decide, by the person's answer), and its roadmap update: a stale reason or

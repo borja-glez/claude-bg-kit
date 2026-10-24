@@ -33,10 +33,18 @@ export function recordCycle(run: RunState, result: { progress: boolean; error?: 
   };
 }
 
+/** 6b-3: one more exploration round (cycle --explore): `dry` counts the rounds in a row that passed nothing. */
+export function recordExplore(run: RunState, passed: number): RunState {
+  const prev = run.explore ?? { rounds: 0, dry: 0 };
+  return { ...run, explore: { rounds: prev.rounds + 1, dry: passed > 0 ? 0 : prev.dry + 1 } };
+}
+
 export function stopReason(run: RunState, ctx: StopContext): string | null {
   if (ctx.stopFile) return 'stop-file';
   if (run.budget.cycles !== undefined && run.cycle >= run.budget.cycles) return 'budget-cycles';
   if (run.budget.hours !== undefined && ctx.now.getTime() - Date.parse(run.startedAt) >= run.budget.hours * 3600_000) return 'budget-hours';
+  // 6b-3: an autonomous run whose last exploration rounds found nothing left (cycle --explore's report).
+  if (run.autonomous && run.saturation?.saturated === true) return 'saturated';
   if (run.noProgress >= NO_PROGRESS_LIMIT) return 'no-progress';
   if (run.repeatedError) return 'repeated-error';
   if (run.blocksSinceCycle >= NO_CYCLE_BLOCKS) return 'no-cycle';

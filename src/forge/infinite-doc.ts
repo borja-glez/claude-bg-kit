@@ -36,6 +36,8 @@ export function infiniteDocOf(run: RunState, o: { now: Date; sid: string | null;
   return {
     active: run.active, cycle: run.cycle, budget: run.budget, startedAt: run.startedAt, lastCycleAt: o.lastCycleAt,
     coordinator, stopReason,
+    // 6b-3 L-20: only an autonomous run has a profile and a saturation report; any other keeps the exact object it had.
+    ...(run.autonomous ? { profile: run.autonomous.profile, saturation: run.saturation ?? null } : {}),
   };
 }
 

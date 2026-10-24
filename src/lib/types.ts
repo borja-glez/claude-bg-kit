@@ -1,5 +1,6 @@
 import type { Alternative, DecisionPoint } from './decisions.js';
 import type { ForgeDocV2 } from './roadmap-doc.js';
+import type { Profile, SaturationReport } from './forge-run.js';
 
 export type TaskStatus = 'free' | 'claimed' | 'in_progress' | 'blocked' | 'done' | 'orphaned';
 export const TASK_STATUSES: readonly TaskStatus[] = ['free', 'claimed', 'in_progress', 'blocked', 'done', 'orphaned'];
@@ -172,6 +173,9 @@ export interface InfiniteDoc {
   coordinator?: { sid: string | null; claude: string; seenAt: string; leaseUntil: string } | null;
   /** G-08: why the run stopped, once it is inactive. */
   stopReason?: string | null;
+  /** 6b-3 L-20: an autonomous run's profile and its last saturation report (null until a round computed one); absent otherwise. */
+  profile?: Profile;
+  saturation?: SaturationReport | null;
 }
 export interface PhaseDoc { id: string; name: string; plan_status: PlanStatus; goal?: string; order: number; tasks: PlanTask[] }
 
