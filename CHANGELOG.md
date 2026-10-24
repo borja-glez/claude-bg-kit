@@ -13,6 +13,15 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.35.0 — 2026-10-24
+
+#### Added
+- `waypoint replan <plan> --ops f --why-file f [--check]`: moves tasks between phases (`move`), adds, edits and reorders phases (`add-phase`, `edit-phase`, `order-phases`), reorders tasks (`order-tasks`), edits a task's title, `done_when`, dependencies or estimate (`edit`) and retires tasks (`retire`), never renumbering; each replan adds an entry to the plan's `history` (the last 30 are kept, each with its why), and a retired id joins the plan's `retired` list and is never given to a new task. Anything that would break the plan is refused and nothing is written; `--check` validates and prints the changes without writing, and a replan that changes nothing writes nothing.
+- The roadmap shows market notes with their sources, parked ideas with why they clash and what would be lost, the Market and Blocked filters, and a card with how an autonomous run stopped, its saturation evidence and what waits for you. Republish the roadmap after updating, as `waypoint:plan` says.
+
+#### Changed
+- `/waypoint:plan` keeps a plan's `retired` and `history` as they are, and numbers a new task past the highest id of its tasks and of `retired`.
+
 ### 0.34.0 — 2026-10-23
 
 #### Added
@@ -399,6 +408,20 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.30.0 — 2026-10-24
+
+#### Added
+- The product pilot (`/forge:infinite --profile product`): the `forge-market` agent researches similar products, what works, what users expect and prices, with a source for each finding, at the start and at each phase change (`market note`, `market last`; without web it says so and goes on); the scout, the critic and the planner read it. When a phase closes (`infinite phase --plan p --db d [--mark F]`, which prints `{closed, phases, held}`), the `forge-phase-review` agent reviews the whole roadmap and proposes the re-plan (`waypoint replan`) and any change to the vision, which goes through `design-critic`; each is a `replan` or `vision` decision, recorded before the plan or the vision changes. The last phase close runs the market too, so the final rounds follow a fresh read. A spike does not re-plan in this version (`infinite phase` exits 2 there).
+- `proposals replan-check --ops f --plan p --db d`, run before every `waypoint replan`: it refuses a re-plan that would retire, move, or change the title or `done_when` of a person's idea, a proposal the owner marked or a done task, and the run asks the person instead. `proposals retire <id> --plan p --why-file f` rejects the proposal of a task a replan retired, under that re-plan's decision, and prints its writes again when it resumes; never a person's idea.
+- In a product run, `proposals to-task` places each new task in its phase with a real `done_when`, its dependencies and its estimate (`--phase`, `--done-when-file`, `--depends-on`, `--estimate`), never in the improvements phase. Without the flags it takes the placement of the critic's `keep`; a placement that does not hold is refused, and an approval the run cannot place waits for the person as a debt note.
+- The `saturated` stop, for both profiles: `cycle --explore` records each exploration round (the scout and the critic), and after three in a row that pass nothing (no approval and no v2), with no pending task, green validators and no open finding, verify defect or open proposal, the run stops as saturated and reports why; only an exploration round can end it so. `cycle` takes `--plan p --db d` every cycle and `--validate f` with that round's validators, and an input missing keeps the run going. Parked ideas, questions, blocked actions, deferred findings, proposals waiting for the owner's mark, approvals without it, tasks blocked for the person and approvals the run could not place are listed apart and never keep it going.
+
+#### Changed
+- Notes gain the `market` type and `sources`; `meta/infinite` carries the profile and the saturation report.
+- In a product run `forge-critic`'s `keep` places the task (its phase, `done_when`, dependencies and estimate), and a revises chain gets at most two adapts: an adapt of a third version is judged as a drop.
+- `proposals to-task` takes `--db d`, required in a product run, so a phase that is done never reads as open; a new task's id comes after the plan's `retired` ids too.
+- Depends on waypoint ^0.35.0.
 
 ### 0.29.0 — 2026-10-23
 
@@ -989,6 +1012,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.13.11 — 2026-10-24
+
+#### Changed
+- Rebuilt with the code it shares with forge 0.30.0 (the run's exploration rounds and saturation report); nothing lens shows changes.
 
 ### 0.13.10 — 2026-10-23
 

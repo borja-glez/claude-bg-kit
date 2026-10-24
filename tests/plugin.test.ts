@@ -2371,4 +2371,15 @@ describe('plugin layout', () => {
       for (const w of ['retired:', 'history:']) expect(read(f), `${f}: ${w}`).toContain(w);
     }
   });
+  it('the READMEs describe the product pilot, saturation and waypoint replan (6b-3)', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const w of ['forge-market', 'forge-phase-review', '`market note', '`infinite phase', '--explore', 'saturated', '--done-when-file',
+        '`proposals replan-check', '`proposals retire']) expect(md, `${f}: ${w}`).toContain(w);
+    }
+    for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
+      const md = read(f);
+      for (const w of ['`replan', 'add-phase', 'order-phases', 'history', '--check', 'retired']) expect(md, `${f}: ${w}`).toContain(w);
+    }
+  });
 });
