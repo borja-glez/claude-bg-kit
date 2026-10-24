@@ -131,7 +131,8 @@ const markOf = (m: Model, pid: string): ApprovalDoc | undefined =>
  *  I1: without a mark nothing vouches for who decided, whatever the status: since 4a every decision the page or forge takes
  *  writes its mark first, so a decided proposal without one is older than the marks or forged. Its decidedBy, which anyone
  *  who writes proposals/ can set, is never shown: the line reads «Decidida · sin verificar», never «tú» nor a name. The
- *  proposal's reason is not part of this line (see proposalCard). '' when nothing says it was decided. */
+ *  proposal's reason is not part of this line (see proposalCard). '' when nothing says it was decided, and (6b-2 final fix
+ *  m-3) for a parked idea without a mark: it waits for the person, whatever decidedBy it still carries. */
 function decidedLine(m: Model, d: Dict, p: Prop, status: ProposalStatus, a: ApprovalDoc | undefined, loc: string): string {
   let line: string;
   let at: string | undefined;
@@ -144,7 +145,7 @@ function decidedLine(m: Model, d: Dict, p: Prop, status: ProposalStatus, a: Appr
     at = a.decidedAt;
     line = `${d.pfield.decided} · ${who}${a.status !== status ? ` · ${labelOf(d.pstatus, a.status)}` : ''}`;
   } else {
-    if (!p.decidedBy && !p.decidedAt) return '';
+    if ((status === 'discussing' && p.parked) || (!p.decidedBy && !p.decidedAt)) return '';
     line = d.pfield.unverified;
     at = p.decidedAt;
   }

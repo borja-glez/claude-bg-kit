@@ -2,8 +2,9 @@
 // verdict of the proposal's present text. keep approves it with the owner's mark by forge:auto, drop rejects it, and a clash
 // parks a person's idea until the person answers (anyone else's is rejected). adapt only lets the run write a v2, which is
 // approved on its own keep in a later batch and then replaces its original (fix 1, T6B2-V2-OWN-VERDICT); rejected, it takes
-// its original with it (Task 7 fix 3, T6B2-PENDING-V2). An idea of someone who is not the owner waits for the owner's
-// mark, and a v2 keeps its original's standing (I-2). Everything is read and
+// its original with it (Task 7 fix 3, T6B2-PENDING-V2), and either way every proposal before that one in its revises chain
+// (final fix M2). An idea of someone who is not the owner waits for the owner's mark, and a v2 keeps the standing of its
+// original and of the whole chain (I-2). Everything is read and
 // written in `root`, the profile's worktree; the decision each outcome is goes first, through the caller's `record`, to the
 // main checkout's ledger (T6B2-DECISION-FIRST). Task 5: `proposals unpark` applies the person's answer to a parked idea, in
 // the same order, and never judges it: insisting integrates it, withdrawing rejects it.
@@ -17,6 +18,9 @@ import type { Write } from '../lib/sync.js';
 
 export type JudgeOutcome = 'approved' | 'rejected' | 'parked' | 'adapt' | 'waits-owner';
 
+/** A proposal an approved or rejected v2 decided with it: its roadmap update and its mark. */
+export interface Replaced { id: string; write: Record<string, unknown>; approval: Write }
+
 /** Why a proposal is not judged now: `proposals judge` (and Task 5's unpark) turn it into exit 2, with nothing written. */
 export class JudgeError extends Error {}
 
@@ -28,7 +32,10 @@ export interface Judged {
   approval: Write | null;
   /** The original of a v2 that was approved (it replaced it) or rejected (it took it with it, T6B2-PENDING-V2): rejected, with
    *  its mark. */
-  original?: { id: string; write: Record<string, unknown>; approval: Write };
+  original?: Replaced;
+  /** Final fix M2: the earlier proposals of the v2's revises chain (its original's original, and so on, nearest first),
+   *  rejected with it the same way; absent when it has none. */
+  ancestors?: Replaced[];
   /** The `addDecision` input of the outcome, already recorded through `record`; null when nothing was decided (adapt,
    *  waits-owner, and a v2 that waits with its parked original). */
   decision: Record<string, unknown> | null;
@@ -124,15 +131,33 @@ function waitsOwner(root: string, id: string, doc: ProposalDoc, add: LedgerEvent
   return typeof add.digest === 'string' && add.digest !== proposalDigest(id, doc);
 }
 
+/** The proposal `id`'s last add event says it revises, or null. */
+const revisesOf = (events: readonly LedgerEvent[], id: string): string | null => {
+  const r = lastAdd(events, id)?.revises;
+  return typeof r === 'string' ? r : null;
+};
+
+/** Final fix M2: the earlier proposals of `id`'s revises chain, nearest first (its original, that one's original, …), each
+ *  once: a chain that comes back to itself stops there. */
+function ancestorsOf(events: readonly LedgerEvent[], id: string): string[] {
+  const out: string[] = [];
+  for (let at = revisesOf(events, id); at !== null && at !== id && !out.includes(at); at = revisesOf(events, at)) out.push(at);
+  return out;
+}
+
 /**
  * I-2: where the original of a v2 stands, which the v2 keeps. `open`: it could be judged now (open, never judged, no owner's
- * mark) and its origin is the owner's or forge's, so the v2 is judged and, approved, replaces it. `parked`: it waits, parked,
- * for the person, and so does the v2. `waits-owner` otherwise, a missing original too: the v2 waits for the owner's mark.
+ * mark), its origin is the owner's or forge's and (final fix M2) so is its own original's, up the whole revises chain, so the
+ * v2 is judged and, approved, replaces it. `parked`: it, or one before it in the chain, waits, parked, for the person, and so
+ * does the v2. `waits-owner` otherwise, a missing original and a chain that comes back to itself too: the v2 waits for the
+ * owner's mark. `seen` are the proposals of the chain already on the way.
  */
-function originalStanding(root: string, events: readonly LedgerEvent[], id: string, doc: ProposalDoc | null): 'open' | 'parked' | 'waits-owner' {
-  if (!doc) return 'waits-owner';
+function originalStanding(root: string, events: readonly LedgerEvent[], id: string, doc: ProposalDoc | null, seen: ReadonlySet<string>):
+  'open' | 'parked' | 'waits-owner' {
+  if (!doc || seen.has(id)) return 'waits-owner';
   if (doc.status === 'discussing' && doc.parked) return 'parked';
-  return notJudgeable(root, events, id, doc) === null && !waitsOwner(root, id, doc, lastAdd(events, id)) ? 'open' : 'waits-owner';
+  if (notJudgeable(root, events, id, doc) !== null) return 'waits-owner';
+  return heldBack(root, events, id, doc, seen).held ?? 'open';
 }
 
 /**
@@ -140,42 +165,43 @@ function originalStanding(root: string, events: readonly LedgerEvent[], id: stri
  * or a v2 whose original waits for the owner) or `parked` (a v2 of a parked original), and null when the verdict decides.
  * judgeProposal and pendingForJudge share it (Task 7 fix 3, N3).
  */
-function heldBack(root: string, events: readonly LedgerEvent[], id: string, doc: ProposalDoc):
+function heldBack(root: string, events: readonly LedgerEvent[], id: string, doc: ProposalDoc, seen: ReadonlySet<string> = new Set()):
   { held: 'waits-owner' | 'parked' | null; revises: string | null; origDoc: ProposalDoc | null } {
   const add = lastAdd(events, id);
   if (waitsOwner(root, id, doc, add)) return { held: 'waits-owner', revises: null, origDoc: null };
-  // I-2: a v2 is never judged past its original's standing.
+  // I-2: a v2 is never judged past its original's standing, nor (final fix M2) past that of any proposal before it.
   const revises = typeof add?.revises === 'string' ? add.revises : null;
   const origDoc = revises ? loadProposal(root, revises) : null;
-  const standing = revises ? originalStanding(root, events, revises, origDoc) : 'open';
+  const standing = revises ? originalStanding(root, events, revises, origDoc, new Set([...seen, id])) : 'open';
   return { held: standing === 'open' ? null : standing, revises, origDoc };
 }
 
 /**
  * 6b-2 Task 7 fix 1: the proposals of `root` that `proposals batch --pending` hands the critic, by id (oldest first): every one
  * still to decide (notJudgeable: proposed, or under discussion and not parked; no `judge` event; no owner's mark) whose
- * outcome the verdict decides (heldBack: not one judge would answer `waits-owner` or `parked` anyway, fix 3 N3), and no
- * original an open v2 revises (T6B2-PENDING-V2: that v2's outcome decides it too). What the run must judge is kept on disk,
- * so a compaction between two cycles loses none of it.
+ * outcome the verdict decides (heldBack: not one judge would answer `waits-owner` or `parked` anyway, fix 3 N3), and none
+ * with an open descendant in its revises chain (T6B2-PENDING-V2, final fix M2: that v-n's outcome decides it too). What the
+ * run must judge is kept on disk, so a compaction between two cycles loses none of it.
  */
 export function pendingForJudge(root: string): string[] {
   const events = readEvents(root).filter(e => e.kind === 'proposal');
   const all = loadProposals(root);
-  const revisedByOpen = new Set(all.filter(p => p.status === 'proposed' || p.status === 'discussing')
-    .map(p => lastAdd(events, p.id)?.revises).filter((r): r is string => typeof r === 'string'));
+  const heldByOpen = new Set(all.filter(p => p.status === 'proposed' || p.status === 'discussing').flatMap(p => ancestorsOf(events, p.id)));
   return all
-    .filter(({ id, ...doc }) => !revisedByOpen.has(id) && notJudgeable(root, events, id, doc) === null && heldBack(root, events, id, doc).held === null)
+    .filter(({ id, ...doc }) => !heldByOpen.has(id) && notJudgeable(root, events, id, doc) === null && heldBack(root, events, id, doc).held === null)
     .map(p => p.id)
     .sort();
 }
 
 /** The doc decided by this run (or, `by` forge:decide, by the person's answer), and its roadmap update: a stale reason or
- *  parked mark it no longer has is deleted (L-7). */
-function decidedDoc(doc: ProposalDoc, status: ProposalDoc['status'], at: string, extra: { reason?: string; parked?: ProposalParked }, by: string = BY):
+ *  parked mark it no longer has is deleted (L-7). `by` null is a park, which decides nothing (final fix m-3): neither
+ *  decidedBy nor decidedAt is written, and parked.at says when. */
+function decidedDoc(doc: ProposalDoc, status: ProposalDoc['status'], at: string, extra: { reason?: string; parked?: ProposalParked }, by: string | null = BY):
   { next: ProposalDoc; write: Record<string, unknown> } {
   const { reason: _reason, parked: _parked, ...rest } = doc;
-  const next: ProposalDoc = { ...rest, status, decidedBy: by, decidedAt: at, ...extra };
-  const write: Record<string, unknown> = { status, decidedBy: by, decidedAt: at, ...extra };
+  const decided = by === null ? {} : { decidedBy: by, decidedAt: at };
+  const next: ProposalDoc = { ...rest, status, ...decided, ...extra };
+  const write: Record<string, unknown> = { status, ...decided, ...extra };
   if (doc.reason && !extra.reason) write.reason = DEL;
   if (doc.parked && !extra.parked) write.parked = DEL;
   return { next, write };
@@ -219,13 +245,18 @@ export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[
   if (outcome === 'parked' && !parked) throw new JudgeError(`the critic's clash of ${id} does not say what integrating it would lose`);
   const { next, write } = outcome === 'approved' ? decidedDoc(doc, 'auto_approved', at, {})
     : outcome === 'rejected' ? decidedDoc(doc, 'rejected', at, { reason: verdict.why })
-    : decidedDoc(doc, 'discussing', at, { parked: parked! });
+    : decidedDoc(doc, 'discussing', at, { parked: parked! }, null);
   const mark = outcome === 'parked' ? null : markOf(id, next.status === 'auto_approved' ? 'auto_approved' : 'rejected', at, doc);
   // An approved v2 replaces its original, which its standing keeps open, and a rejected one takes it with it (T6B2-PENDING-V2):
-  // rejected either way, with its own mark.
+  // rejected either way, with its own mark. Final fix M2: so is every proposal before it in its revises chain, which the same
+  // standing keeps open (one that is not, never, so no decision or mark is overwritten).
   const origReason = outcome === 'approved' ? w.replaced(id) : w.dropped;
-  const orig = outcome !== 'parked' && revises && origDoc
-    ? { id: revises, ...decidedDoc(origDoc, 'rejected', at, { reason: origReason }), mark: markOf(revises, 'rejected', at, origDoc) } : null;
+  const replaced = outcome === 'parked' || !revises || !origDoc ? [] : ancestorsOf(events, id).flatMap(rid => {
+    const rdoc = rid === revises ? origDoc : loadProposal(root, rid);
+    return rdoc && notJudgeable(root, events, rid, rdoc) === null
+      ? [{ id: rid, ...decidedDoc(rdoc, 'rejected', at, { reason: origReason }), mark: markOf(rid, 'rejected', at, rdoc) }] : [];
+  });
+  const [orig, ...earlier] = replaced;
   const alternative = outcome === 'approved' ? w.rejected : outcome === 'rejected' ? w.approved : w.integrate;
   const decision = {
     point: doc.source === 'user' ? 'idea' : 'approve',
@@ -241,16 +272,20 @@ export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[
   record(decision);
   saveProposal(root, id, next);
   if (mark) saveApproval(root, id, mark);
-  if (orig) {
-    saveProposal(root, orig.id, orig.next);
-    saveApproval(root, orig.id, orig.mark);
+  for (const r of replaced) {
+    saveProposal(root, r.id, r.next);
+    saveApproval(root, r.id, r.mark);
   }
   // M-2: the event lastDecisions reads, with the verdict that decided it.
   appendEvent(root, { ts: at, kind: 'proposal', action: 'judge', id, status: next.status, verdict: verdict.verdict, digest: verdict.digest });
-  if (orig) appendEvent(root, { ts: at, kind: 'proposal', action: 'judge', id: orig.id, status: 'rejected', ...(outcome === 'approved' ? { replacedBy: id } : { droppedWith: id }) });
+  for (const r of replaced) {
+    appendEvent(root, { ts: at, kind: 'proposal', action: 'judge', id: r.id, status: 'rejected', ...(outcome === 'approved' ? { replacedBy: id } : { droppedWith: id }) });
+  }
+  const out = (r: (typeof replaced)[number]): Replaced => ({ id: r.id, write: r.write, approval: markWrite(r.id, r.mark) });
   return {
     outcome, write, approval: mark ? markWrite(id, mark) : null,
-    ...(orig ? { original: { id: orig.id, write: orig.write, approval: markWrite(orig.id, orig.mark) } } : {}),
+    ...(orig ? { original: out(orig) } : {}),
+    ...(earlier.length ? { ancestors: earlier.map(out) } : {}),
     decision,
   };
 }
@@ -271,13 +306,16 @@ export interface Unparked {
  * the person's decisions. Withdrawing rejects it, with its mark. No run needs to be active: the person may answer after it
  * stopped. T6B2-DECISION-FIRST, as judgeProposal: the decision is checked and handed to `record` before the proposal, its
  * mark and a `proposal` `unpark` event (M-2) are written. Throws JudgeError, with nothing written, when `id` is not a parked
- * idea or its decision does not hold. It never judges: the answer is the person's.
+ * idea, holds the owner's mark, or its decision does not hold. It never judges: the answer is the person's.
  */
 export function unparkProposal(root: string, id: string, insist: boolean, at: string, es: boolean, record: RecordDecision): Unparked {
   const doc = loadProposal(root, id);
   if (!doc) throw new JudgeError(`${id} not found`);
   const parked = doc.status === 'discussing' ? doc.parked : undefined;
   if (!parked) throw new JudgeError(`${id} is ${doc.status}${doc.status === 'discussing' ? ' and not parked' : ''}: only a parked idea waits for the person's answer`);
+  // Final fix (probe S3): the owner's mark is the owner's own decision (the page's, say, whose update of the proposal has not
+  // landed yet), which no answer here overwrites, as judge refuses it (notJudgeable).
+  if (loadApproval(root, id)) throw new JudgeError(`${id} has the owner's mark (approvals/${id}): the owner decided it`);
   const w = es ? WORDS.es : WORDS.en;
   const status = insist ? 'approved' : 'rejected';
   const { next, write } = decidedDoc(doc, status, at, insist ? {} : { reason: w.withdrawn }, DECIDE);

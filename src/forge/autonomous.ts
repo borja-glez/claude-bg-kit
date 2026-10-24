@@ -284,7 +284,9 @@ export function redactSecrets(s: string): string {
   return SECRETS.reduce((text, [re, to]) => text.replace(re, to), s);
 }
 
-export interface BlockedRecord { ts: string; rule: string; tool: string; target: string; reason: string; session: string | null }
+/** `hash` (6b-2 final fix I-1): on a record of rule `trust` for a set of config commands forge could not judge or record,
+ *  that set's hash, so it is recorded once. */
+export interface BlockedRecord { ts: string; rule: string; tool: string; target: string; reason: string; session: string | null; hash?: string }
 
 export const blockedFile = (main: string, runId: string): string => path.join(autonomousDir(main, runId), 'blocked.jsonl');
 

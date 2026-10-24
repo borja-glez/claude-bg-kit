@@ -82,6 +82,20 @@ describe('proposals judge (6b-2)', () => {
     expect(r.publish[0].data.decision).toMatchObject({ point: 'idea', chosen: 'park it', alternatives: [{ option: 'integrate it', tradeoffs: 'the focus on solo play' }] });
     expect(stopContext(root, T0).pendingProposals).toBe(1);
   });
+  it('a park decides nothing: neither its write nor the proposal carry decidedBy or decidedAt, the park time is parked.at (final fix, m-3)', () => {
+    const id = add({ title: 'Online mode', source: 'user' });
+    fromChat(id);
+    verdicts({ id, verdict: 'clash', why: 'the vision is a solo game', loses: 'the focus on solo play' });
+    const r = JSON.parse(judge(id).stdout);
+    expect(r.write).toEqual({ status: 'discussing', parked: { why: 'the vision is a solo game', loses: 'the focus on solo play', at: T0.toISOString() } });
+    expect(loadProposal(root, id)).toMatchObject({ status: 'discussing', parked: { at: T0.toISOString() } });
+    expect(loadProposal(root, id)).not.toHaveProperty('decidedBy');
+    expect(loadProposal(root, id)).not.toHaveProperty('decidedAt');
+    // Positive control: a rejection is decided, by forge on its own, at its time.
+    const drop = add({ title: 'Rename variables' });
+    verdicts({ id: drop, verdict: 'drop', why: 'moves nothing for the player' });
+    expect(JSON.parse(judge(drop).stdout).write).toMatchObject({ status: 'rejected', decidedBy: 'forge:auto', decidedAt: T0.toISOString() });
+  });
   it('an idea of someone who is not the owner waits for the owner\'s mark', () => {
     const id = add({ title: 'Dark theme', source: 'user' });
     appendEvent(root, { ts: T0.toISOString(), kind: 'proposal', action: 'add', id, from: 'note:n1', owner: false });
@@ -328,6 +342,69 @@ describe('a v2 keeps its original\'s standing (I-2)', () => {
     verdicts({ id: v2, verdict: 'keep', why: 'small and fun' });
     expect(outcome(v2)).toBe('approved');
     expect(pending()).toEqual([free]);
+  });
+  it('the whole revises chain is held: --pending leaves out every proposal with an open descendant, and a v3 decided rejects every open ancestor with it, the decision first (final fix, M2)', () => {
+    const pending = () => JSON.parse(run(['proposals', 'batch', '--pending', '--out', 'b.json'], io()).stdout).ids as string[];
+    // An adapt of an adapt: O ← v2 ← v3, all three open.
+    const o = add({ title: 'Big shop' });
+    const v2 = add({ title: 'Cosmetic shop', rationale: `r (v2 of ${o})` }, ['--revises', o]);
+    const v3 = add({ title: 'Hat stand', rationale: `r (v2 of ${v2})` }, ['--revises', v2]);
+    expect(pending()).toEqual([v3]);
+    verdicts({ id: v3, verdict: 'keep', why: 'small and fun' });
+    expect(JSON.parse(judge(v3).stdout)).toMatchObject({
+      outcome: 'approved',
+      original: { id: v2, write: { status: 'rejected', reason: `replaced by ${v3}` }, approval: { doc_id: v2, data: { status: 'rejected', by: 'forge:auto' } } },
+      ancestors: [{ id: o, write: { status: 'rejected', reason: `replaced by ${v3}` }, approval: { doc_id: o, data: { status: 'rejected', by: 'forge:auto' } } }],
+    });
+    expect([o, v2, v3].map(id => [loadProposal(root, id)?.status, loadApproval(root, id)?.status]))
+      .toEqual([['rejected', 'rejected'], ['rejected', 'rejected'], ['auto_approved', 'auto_approved']]);
+    // The review's M2: O is not batched again beside the approved v3.
+    expect(pending()).toEqual([]);
+    expect(decisions()).toHaveLength(1);
+    expect(judged().map(e => [e.id, e.status])).toEqual([[v3, 'auto_approved'], [v2, 'rejected'], [o, 'rejected']]);
+    // A v3 the critic drops takes its v2 and their original with it.
+    const p = add({ title: 'Global ranking' });
+    const p2 = add({ title: 'Weekly ranking', rationale: `r (v2 of ${p})` }, ['--revises', p]);
+    const p3 = add({ title: 'Friends table', rationale: `r (v2 of ${p2})` }, ['--revises', p2]);
+    expect(pending()).toEqual([p3]);
+    verdicts({ id: p3, verdict: 'drop', why: 'still moves nothing for the player' });
+    expect(JSON.parse(judge(p3).stdout)).toMatchObject({
+      outcome: 'rejected', original: { id: p2, write: { reason: 'its v2 was dropped' } }, ancestors: [{ id: p, write: { status: 'rejected', reason: 'its v2 was dropped' } }],
+    });
+    expect([p, p2, p3].map(id => loadApproval(root, id)?.status)).toEqual(['rejected', 'rejected', 'rejected']);
+    expect(pending()).toEqual([]);
+    expect(decisions()).toHaveLength(2);
+    // Positive control: a v2 with no earlier version prints no ancestors.
+    const q = add({ title: 'Daily quest' });
+    const q2 = add({ title: 'Weekly quest', rationale: `r (v2 of ${q})` }, ['--revises', q]);
+    verdicts({ id: q2, verdict: 'keep', why: 'fine' });
+    expect(JSON.parse(judge(q2).stdout)).not.toHaveProperty('ancestors');
+  });
+  it('a v3 keeps the standing of its whole chain: one of a v2 whose original waits for the owner waits too, and --pending leaves it out (final fix, M2)', () => {
+    const pending = () => JSON.parse(run(['proposals', 'batch', '--pending', '--out', 'b.json'], io()).stdout).ids as string[];
+    const pulled = 'p20261022090000pull';
+    saveProposal(root, pulled, { ts: 't', category: 'feature', risk: 'low', title: 'Pulled idea', rationale: 'r', evidence: '', pillar: '', status: 'proposed', source: 'scout', author: 'user:x' });
+    const w2 = add({ title: 'Smaller pulled idea', rationale: `r (v2 of ${pulled})` }, ['--revises', pulled]);
+    const w3 = add({ title: 'Tiny one', rationale: `r (v2 of ${w2})` }, ['--revises', w2]);
+    expect(pending()).toEqual([]);
+    verdicts({ id: w3, verdict: 'keep', why: 'fine' });
+    expect(JSON.parse(judge(w3).stdout)).toMatchObject({ outcome: 'waits-owner', write: null, approval: null });
+    expect([pulled, w2, w3].map(id => [loadProposal(root, id)?.status, loadApproval(root, id)])).toEqual([['proposed', null], ['proposed', null], ['proposed', null]]);
+    expect([decisions(), judged()]).toEqual([[], []]);
+    // And a v3 of a v2 of a parked idea waits with it, parked.
+    const idea = add({ title: 'Online mode', source: 'user' });
+    fromChat(idea);
+    verdicts({ id: idea, verdict: 'clash', why: 'the vision is a solo game', loses: 'the focus on solo play' });
+    expect(outcome(idea)).toBe('parked');
+    const i2 = add({ title: 'Local versus mode', source: 'user' }, ['--revises', idea]);
+    const i3 = add({ title: 'Split screen duel', source: 'user' }, ['--revises', i2]);
+    verdicts({ id: i3, verdict: 'keep', why: 'fits the vision' });
+    expect(JSON.parse(judge(i3).stdout)).toMatchObject({ outcome: 'parked', write: null, approval: null });
+    // Positive control: with the pulled original added by this checkout (its add event), the same chain is judged.
+    appendEvent(root, { ts: T0.toISOString(), kind: 'proposal', action: 'add', id: pulled, digest: proposalDigest(pulled, loadProposal(root, pulled)!) });
+    expect(pending()).toEqual([w3]);
+    verdicts({ id: w3, verdict: 'keep', why: 'fine' });
+    expect(JSON.parse(judge(w3).stdout)).toMatchObject({ outcome: 'approved', original: { id: w2 }, ancestors: [{ id: pulled }] });
   });
   it("a v2 from someone's comment on forge's proposal, added as source: user with the comment's author, waits for the owner (T6B2-COMMENT-V2)", () => {
     const orig = add({ title: 'Big shop' });

@@ -26,6 +26,7 @@ Write it to a file and ArtifactData `set` `notes/<EID>` (`EID` = `node "<WP>" ev
   - `approved` → it fits; say which phase it goes into once §3.2's `to-task` made its task (that task's `phase` in `<plan>`);
   - `approved` of its v2 → what changed and why (the `changes` of the original's `adapt`), naming the v2;
   - `rejected` → why (the `reason` of its `write`);
+  - `rejected` of its v2 → that the v2 was dropped and their idea with it (the `original`'s `reason`), why (the v2's `reason`), and that they can propose it again, with what is new, in a note or here;
   - `parked` → why it clashes and what would be lost (the `why` and `loses` of its `write`'s `parked`; with a null `write`, a v2 of a parked original, the original's `parked`), and that it waits for their answer;
   - `waits-owner` → that it waits for the approval of the roadmap's owner;
   - `adapt` → nothing yet: the answer comes with its v2's outcome.
@@ -40,7 +41,7 @@ Anyone else's comment, or a note from before the park, is no answer, and neither
 - **Insists** → `FORGE proposals unpark <id> --insist --from-chat --session <SID>` (or `--from-note <note> --db DB` in place of `--from-chat`), and send its batch: `update` `proposals/<id>` with its `write`, pinned to the version `DB` lists, the `set` of its `approval`, and its `publish`. The vision is then amended to take it in: `/waypoint:design reopen --auto`, whose change is a new section for it (`## <id>: <its title>`), then the design loop in auto of forge:run `references/autonomy.md`. `design-critic` may propose how to fit it better, but it cannot veto it: never apply a critic proposal that removes or empties that section (dismiss it, with the reason below), and before `/waypoint:design approve --auto`, what is still open on that section is dismissed: write «the owner insisted (proposal <id>)» to `.forge/work/infinite/dismiss-<id>.txt` and run `node "<WP>" critique-dismiss <design> --round <R> <their numbers> --reason-file .forge/work/infinite/dismiss-<id>.txt`. §3.2 then turns it into a task, as any approved proposal.
 - **Withdraws** → `FORGE proposals unpark <id> --withdraw --from-chat --session <SID>` (or `--from-note <note> --db DB`), and send its batch the same way.
 - **Not clear** → ask in its thread what they want, and leave it parked.
-- **The owner approves or rejects it on the page** → that decides: the `pull` brings it, and nothing is unparked.
+- **The owner approves or rejects it on the page** → that decides: the `pull` brings it, and nothing is unparked (`unpark` refuses once `approvals/<id>` holds the owner's mark).
 
 Meanwhile the run goes on with everything else. Record each note handled here in `seen.json` (`notes`), as §3.1 does.
 

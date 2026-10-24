@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
 import { loadConfig } from '../src/forge/config.js';
@@ -290,5 +290,52 @@ describe('delegated trust, fix round 1 (6b-2)', () => {
     const r = JSON.parse(cli(wt, ['triage', '--task', 't1', 'fix the button']).stdout);
     expect(r.trust).toMatchObject({ state: 'ask', note: false, blocked: true });
     expect(readTrust(main).commandsAsked).toBeUndefined();
+  });
+});
+
+describe('delegated trust, final fix (6b-2)', () => {
+  const failed = (cmd: string) => ({
+    ts: AT, rule: 'trust', tool: 'config', target: `validators.unit.cmd: ${cmd}`, reason: expect.stringMatching(/^the trust check failed: \S/), session: null,
+    hash: commandsHash([{ name: 'validators.unit.cmd', cmd }]),
+  });
+  it('I-1: once the run is found, a check that fails is blocked, never asked: one record per set, and the next check judges it again (probe S4)', () => {
+    start();
+    const ledger = path.join(main, '.forge', 'ledger.jsonl');
+    rmSync(ledger, { force: true });
+    mkdirSync(ledger); // main's ledger is a folder: the run's trust decision cannot be written
+    config(wt, 'npm run test:unit');
+    expect(trustFor(wt, loadConfig(wt), AT)).toMatchObject({ state: 'ask', blocked: true });
+    expect(trustFor(wt, loadConfig(wt), AT)).toMatchObject({ state: 'ask', blocked: true });
+    const r = JSON.parse(cli(wt, ['triage', '--task', 't1', 'fix the button']).stdout);
+    expect(r.trust).toMatchObject({ state: 'ask', note: false, blocked: true });
+    expect(readTrust(main).commandsAsked).toBeUndefined();
+    expect(readBlocked(main, 'spike-x')).toEqual([failed('npm run test:unit')]);
+    // Neither trusted nor refused: once the ledger can be written again, the same set is trusted, and nothing more is recorded.
+    expect(readTrust(main).delegated?.[0]).toMatchObject({ hashes: [expect.any(String)], refused: [] });
+    rmSync(ledger, { recursive: true });
+    expect(trustFor(wt, loadConfig(wt), AT).state).toBe('allowed');
+    expect(readBlocked(main, 'spike-x')).toHaveLength(1);
+    expect(trustDecisions().map((d: { why: string }) => d.why)).toEqual(['validators.unit.cmd: npm test → npm run test:unit']);
+  });
+  it('I-1: a trust.json that cannot be written after the decision is blocked too, with one record for each set', () => {
+    start();
+    const file = trustFile(main)!;
+    rmSync(file);
+    mkdirSync(file); // trust.json is a folder: the delegation cannot be kept
+    config(wt, 'npm run test:unit');
+    expect(trustFor(wt, loadConfig(wt), AT)).toMatchObject({ state: 'ask', blocked: true });
+    expect(trustFor(wt, loadConfig(wt), AT)).toMatchObject({ state: 'ask', blocked: true });
+    config(wt, 'npm run bench');
+    expect(trustFor(wt, loadConfig(wt), AT)).toMatchObject({ state: 'ask', blocked: true });
+    expect(readBlocked(main, 'spike-x')).toEqual([failed('npm run test:unit'), failed('npm run bench')]);
+  });
+  it('I-1, control: outside the run\'s worktree nothing is blocked, with the ledger unwritable too: the main checkout keeps its question', () => {
+    start();
+    const ledger = path.join(main, '.forge', 'ledger.jsonl');
+    rmSync(ledger, { force: true });
+    mkdirSync(ledger);
+    config(main, 'npm run lint');
+    expect(trustFor(main, loadConfig(main), AT)).toEqual(expect.not.objectContaining({ blocked: true }));
+    expect(readBlocked(main, 'spike-x')).toEqual([]);
   });
 });

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
 import { startRun, saveRun } from '../src/forge/run.js';
 import { readEvents } from '../src/forge/ledger.js';
-import { loadProposal, loadProposals, saveProposal, loadApproval } from '../src/forge/proposals.js';
+import { loadProposal, loadProposals, saveProposal, loadApproval, saveApproval, removeApproval } from '../src/forge/proposals.js';
 import { proposalDigest } from '../src/lib/proposals.js';
 import { lastDecisions } from '../src/forge/cli/shared.js';
 import { profileNames } from '../src/forge/profile.js';
@@ -388,6 +388,23 @@ describe('proposals unpark (6b-2)', () => {
     note('answer', { proposalId: id, ts: LATER });
     expect(cli(['unpark', id, '--insist', '--from-note', 'answer', '--db', db]).code).toBe(0);
     expect(loadProposal(root, id)?.status).toBe('approved');
+  });
+  it('never overwrites the owner\'s mark: with approvals/<id> set meanwhile (the page decided), unpark refuses and writes nothing, as judge does (final fix, probe S3)', () => {
+    const id = 'p20261022100000llll';
+    parked(id);
+    // The page saved the owner's approval, and its update of the proposal did not land: the proposal still reads parked.
+    const mark = { status: 'approved' as const, by: 'page' as const, decidedAt: LATER, digest: proposalDigest(id, loadProposal(root, id)!) };
+    saveApproval(root, id, mark);
+    for (const answer of ['--withdraw', '--insist']) {
+      const r = cli(['unpark', id, answer, '--from-chat', '--session', 'main']);
+      expect(r.code, answer).toBe(2);
+      expect(r.stderr, answer).toContain(`approvals/${id}`);
+    }
+    expect([loadApproval(root, id), loadProposal(root, id)?.status, !!loadProposal(root, id)?.parked, readEvents(root)]).toEqual([mark, 'discussing', true, []]);
+    // Positive control: without the mark, the same answer applies.
+    removeApproval(root, id);
+    expect(cli(['unpark', id, '--withdraw', '--from-chat']).code).toBe(0);
+    expect(loadApproval(root, id)).toMatchObject({ status: 'rejected', by: 'forge:decide' });
   });
 });
 

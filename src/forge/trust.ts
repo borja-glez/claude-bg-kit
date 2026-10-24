@@ -17,7 +17,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { RUN_ID } from '../lib/decisions.js';
 import { samePath } from '../lib/worktree.js';
-import { appendBlocked, autonomousRun, guardRulesFor, judgeGuard, redactSecrets } from './autonomous.js';
+import { appendBlocked, autonomousRun, guardRulesFor, judgeGuard, readBlocked, redactSecrets } from './autonomous.js';
 import { loadConfig, type ForgeConfig } from './config.js';
 import { addDecision } from './decisions.js';
 import { confinedIn, type GuardCtx, type GuardVerdict } from './guard.js';
@@ -29,7 +29,8 @@ import { assumedTrusted } from './trust-flag.js';
 export interface ConfigCommand { name: string; cmd: string }
 export interface CommandChange { name: string; before: string | null; after: string | null }
 export type TrustState = 'free' | 'allowed' | 'denied' | 'ask' | 'changed';
-/** `blocked`: the active autonomous run's guard refused these commands (blocked.jsonl says why): nobody is asked (H-4). */
+/** `blocked`: the active autonomous run's guard or the person refused these commands, or forge could not judge or record
+ *  them (blocked.jsonl says why): nobody is asked (H-4). */
 export interface Trust { state: TrustState; hash: string | null; commands: ConfigCommand[]; changed: CommandChange[]; blocked?: true }
 export interface TrustAsk { question: string; header: string; options: { label: string; description: string }[]; multiSelect: false }
 export interface TrustOutput {
@@ -397,31 +398,52 @@ function withDelegation(r: TrustRecord, runId: string, at: string, fn: (d: Deleg
 
 /** T6B2-REFUSED-IN-RUN: the reason a run's blocked action gives for a set the person refused. */
 export const PERSON_REFUSED = 'the person refused these commands; rewrite them or leave them out';
+/** Final fix I-1: how the reason of a run's blocked action starts when forge could not judge or record a set. */
+export const TRUST_CHECK_FAILED = 'the trust check failed: ';
+
+// redacted before it is cut, as the hook's targets: a cut never leaves half a secret no pattern matches
+const targetOf = (text: string): string => cut(redactSecrets(text), 300);
+/** The target of a blocked action of rule `trust`: the whole set, as the person would read it. */
+const setTarget = (t: Trust): string => targetOf(t.commands.map(c => `${c.name}: ${c.cmd}`).join('; '));
+
+/**
+ * Final fix I-1 (H-4, T6B2-NO-TRUST-QUESTION): a delegated trust that failed once its run was found is `blocked`, never a
+ * question. It records why as one blocked action of rule `trust` for the set, at most once per hash (the record keeps it),
+ * and refuses nothing: the next check judges the set again. Never throws.
+ */
+function failedClosed(main: string, runId: string, t: Trust, hash: string, at: string, e: unknown): Trust {
+  try {
+    const message = cut(e instanceof Error ? e.message : String(e), 300);
+    const recorded = readBlocked(main, runId, Infinity).some(r => r.rule === 'trust' && r.hash === hash && r.reason.startsWith(TRUST_CHECK_FAILED));
+    if (!recorded) appendBlocked(main, runId, { ts: at, rule: 'trust', tool: 'config', target: setTarget(t), reason: `${TRUST_CHECK_FAILED}${message}`, session: null, hash });
+  } catch { /* nothing more can be recorded: still blocked */ }
+  return { ...t, blocked: true };
+}
 
 /**
  * 6b-2: `t` once the active autonomous run whose profile worktree holds `dir` has trusted it. A set the person must answer
  * (ask or changed) is trusted by forge for that run, unless the person denied it (their No always wins: T6B2-REFUSED-IN-RUN,
  * one blocked action of rule `trust` for the set) or the guard would deny one of its commands (one blocked action each).
  * The hash is then refused, noted once, and the set comes back `blocked`: nobody is asked (H-4 reads blocked.jsonl).
- * Anywhere else, in any other state, or on any failure: `t` as it is.
+ * Anywhere else, in any other state, or when the run cannot be looked for: `t` as it is. Final fix I-1: once the run is
+ * found, any failure is `blocked` too (failedClosed), never a question.
  */
 export function delegatedTrust(dir: string, t: Trust, at: string): Trust {
   if ((t.state !== 'ask' && t.state !== 'changed') || t.hash === null) return t;
   const hash = t.hash;
+  let found: ReturnType<typeof profileRunAt>;
+  try { found = profileRunAt(dir); } catch { return t; }
+  if (!found) return t;
+  const { main, run } = found;
+  const runId = run.ctx.runId;
   try {
-    const found = profileRunAt(dir);
-    if (!found) return t;
-    const { main, run } = found;
-    const runId = run.ctx.runId;
     const record = readTrust(dir);
     const mine = delegationOf(record, runId);
     if (mine?.refused.includes(hash)) return { ...t, blocked: true };
     // The run's session judges them, and its locale is the decision's.
     const runState = parseRun(readRunText(main));
-    // redacted before it is cut, as the hook's targets: a cut never leaves half a secret no pattern matches
-    const targetOf = (text: string) => cut(redactSecrets(text), 300);
     const denials: { rule: string; target: string; reason: string }[] = deniedByPerson(record.commands, hash)
-      ? [{ rule: 'trust', target: targetOf(t.commands.map(c => `${c.name}: ${c.cmd}`).join('; ')), reason: PERSON_REFUSED }]
+      ? [{ rule: 'trust', target: setTarget(t), reason: PERSON_REFUSED }]
       : configGuardDenials(dir, t.commands, run, runState?.sessionId ?? null)
         .map(({ command, verdict }) => ({ rule: verdict.rule, target: targetOf(`${command.name}: ${command.cmd}`), reason: verdict.reason }));
     if (denials.length) {
@@ -433,16 +455,17 @@ export function delegatedTrust(dir: string, t: Trust, at: string): Trust {
       if (!failed) updateTrust(dir, r => withDelegation(r, runId, at, d => ({ ...d, refused: [...d.refused.filter(h => h !== hash), hash] })));
       return { ...t, blocked: true };
     }
-    // Noted before it is recorded, so no trust is ever kept without its note: a failure in between asks again (and a re-run
-    // within addDecision's window is the same decision).
+    // Noted before it is recorded, so no trust is ever kept without its note: a failure in between is blocked, and the next
+    // check judges the set again (a re-run within addDecision's window is the same decision).
     const es = (runState?.locale ?? '').toLowerCase().startsWith('es');
     addDecision(main, trustDecision(mine?.hashes.length ? mine.list : null, t.commands, runId, es), { ts: at, runId });
     const saved = updateTrust(dir, r => withDelegation(r, runId, at, d => ({
       hashes: [...d.hashes.filter(h => h !== hash), hash], refused: d.refused, list: t.commands,
     })));
-    // Outside a git repository nothing is kept, so nothing is trusted (an autonomous run's worktree always is in one).
-    return saved.ok ? { ...t, state: 'allowed', changed: [] } : t;
-  } catch { return t; }
+    // Where git cannot say where trust.json is, nothing is kept, so nothing is trusted (a run's worktree is always in a repository).
+    if (!saved.ok) throw new Error(`trust.json could not be written (${saved.why})`);
+    return { ...t, state: 'allowed', changed: [] };
+  } catch (e) { return failedClosed(main, runId, t, hash, at, e); }
 }
 
 /** trustIn, then delegatedTrust: what a command that runs the config's commands uses (trustIn alone never writes). */

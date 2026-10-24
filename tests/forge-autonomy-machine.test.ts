@@ -160,7 +160,19 @@ describe('6b-2 Task 0 fix 1 · ssh, scp and rsync options; GIT_TRACE values', ()
     ['EV8 -i ~/.ssh', bash(`ssh -i ~/.ssh/id_ed25519 localhost ls ${W('')}`)], ['EV10 -vo allowed key', bash(`ssh -vo BatchMode=yes localhost ls ${W('')}`)],
     ['EV12 -vp bundle', bash(`ssh -vp 2222 localhost ls ${W('')}`)], ['-O check', bash('ssh -O check localhost')], ['sftp -i ~', bash('sftp -i ~/.ssh/id_ed25519 localhost')],
     ['options after the host that allow', bash(`ssh localhost -p 22 -o BatchMode=yes ls ${W('')}`)],
+    // final fix, m-6: -o IdentityFile is a read, like -i: any literal path allows, however it is spelled.
+    ['-o IdentityFile=~', bash('ssh -o IdentityFile=~/.ssh/id_rsa localhost true')], ['-o "IdentityFile /abs"', bash('ssh -o "IdentityFile /home/u/.ssh/key" localhost true')],
+    ['glued -oIdentityFile', bash('ssh -oIdentityFile=/home/u/.ssh/key localhost true')], ['scp -o IdentityFile', bash(`scp -o IdentityFile=~/.ssh/id_rsa a.txt localhost:${W('b.txt')}`)],
+    ['sftp -o IdentityFile', bash('sftp -o IdentityFile=~/.ssh/id_rsa localhost')], ['-i ~/.ssh/id_rsa', bash('ssh -i ~/.ssh/id_rsa localhost true')],
   ])('every rule allows %s', (_, input) => expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toEqual({ decision: 'allow' }));
+  // final fix, m-6: UserKnownHostsFile is written, so it keeps its inside-the-roots check; a value the shell hides is unknown.
+  it.each<Row>([
+    ['UKHF ~', bash('ssh -o UserKnownHostsFile=~/.ssh/known_hosts localhost true')], ['UKHF "Key value" outside', bash('ssh -o "UserKnownHostsFile /outside/kh" localhost true')],
+    ['IdentityFile the shell hides', bash('ssh -o IdentityFile=$KEY localhost true')],
+  ])('network: %s is an unknown target', (_, input) => {
+    unknownBy('network', networkRule.check(input, CTX));
+    expect(evaluateGuard(input, CTX, AUTONOMY_RULES)).toMatchObject({ decision: 'deny' });
+  });
   it.each<Row>([
     B(`ssh -o StrictHostKeyChecking=no -o BatchMode=yes localhost ls ${W('')}`), B(`ssh -o ConnectTimeout=5 -o UserKnownHostsFile=/dev/null localhost ls ${W('')}`),
     B(`scp -o BatchMode=yes a.txt localhost:${W('b.txt')}`), B(`rsync -e ssh src/ localhost:${W('dst')}/`),

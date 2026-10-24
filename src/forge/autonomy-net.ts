@@ -359,7 +359,7 @@ export function sshReadValues(seg: Segment): Set<Word> | null {
   return out;
 }
 
-/** A value word that resolves to `/dev/null` or a literal path inside the run's roots (for `-E`, `-o UserKnownHostsFile/IdentityFile`). */
+/** A value word that resolves to `/dev/null` or a literal path inside the run's roots (for `-E` and `-o UserKnownHostsFile`, which ssh writes). */
 function insidePath(w: Word, seg: Segment, ctx: GuardCtx): boolean {
   if (w.dynamic) return false;
   if (isNullSink(w.text, seg.dialect)) return true;
@@ -367,12 +367,12 @@ function insidePath(w: Word, seg: Segment, ctx: GuardCtx): boolean {
   return p !== null && insideRoots(p, ctx);
 }
 
-/** An `-o Key[=| ]value`: Key must be on the allow-list; UserKnownHostsFile and IdentityFile also need a value inside the roots. */
+/** An `-o Key[=| ]value`: Key must be on the allow-list; UserKnownHostsFile also needs a value inside the roots (final fix m-6: IdentityFile is a read, as `-i`). */
 function sshOValueDeny(tool: string, w: Word, seg: Segment, ctx: GuardCtx): GuardVerdict | null {
   if (w.dynamic) return netUnknown(`${tool} -o value the shell hides`);
   const spec = w.text, sep = spec.search(/[=\s]/), key = (sep >= 0 ? spec.slice(0, sep) : spec).toLowerCase();
   if (!SSH_O_ALLOW.has(key)) return netUnknown(`${tool} -o ${spec} sets or runs something the hook cannot read`);
-  if (key === 'userknownhostsfile' || key === 'identityfile') {
+  if (key === 'userknownhostsfile') {
     const val = sep >= 0 ? spec.slice(sep + 1).trim() : '';
     if (!insidePath({ text: val, dynamic: false, glob: false }, seg, ctx)) return netUnknown(`${tool} -o ${key} points outside the run's roots`);
   }

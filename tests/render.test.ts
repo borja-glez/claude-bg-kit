@@ -734,6 +734,28 @@ describe('proposals view', () => {
     const plain = renderApp({ ...base(), isOwner: true, proposals: [P({ status: 'discussing' })] }, { ...ui(), view: 'talk', talk: 'proposals' });
     expect(plain).not.toContain('Aparcada');
   });
+  it('a parked idea reads parked, never decided: no «Decidida · sin verificar», whatever decidedBy it carries; the owner\'s mark meanwhile still says who decided (final fix, m-3)', () => {
+    const parked = { at: '2026-10-22T10:00:00.000Z', why: 'clashes', loses: 'the cart' };
+    const v = { ...ui(), view: 'talk' as const, talk: 'proposals' as const };
+    const show = (p: ReturnType<typeof P>, approvals = {}) => renderApp({ ...base(), isOwner: true, proposals: [p], approvals }, v);
+    // As a judge parks it now: no decidedBy, no decidedAt.
+    const fresh = show(P({ status: 'discussing', parked }));
+    expect(fresh).toContain('Aparcada: clashes');
+    expect(fresh).not.toContain('<div class="pdec">');
+    // One parked by an earlier judge (forge:auto), or put under discussion before it was parked.
+    for (const by of ['forge:auto', 'user:u1']) {
+      const html = show(P({ status: 'discussing', parked, decidedBy: by, decidedAt: '2026-10-22T10:00:00.000Z' }));
+      expect(html, by).toContain('Aparcada: clashes');
+      expect(html, by).not.toContain('<div class="pdec">');
+    }
+    const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, isOwner: true, proposals: [P({ status: 'discussing', parked, decidedBy: 'forge:auto', decidedAt: '2026-10-22T10:00:00.000Z' })], approvals: {} }, v);
+    expect(en).toContain('Parked: clashes');
+    expect(en).not.toContain('Decided · unverified');
+    // Positive controls: under discussion and not parked, it reads decided, unverified; with the owner's mark, the mark says who.
+    expect(show(P({ status: 'discussing', decidedBy: 'user:u1', decidedAt: '2026-10-22T10:00:00.000Z' }))).toContain('<div class="pdec"><span class="k">Decidida · sin verificar · ');
+    const p = P({ status: 'discussing', parked });
+    expect(show(p, { p1: { status: 'approved', by: 'page', decidedAt: '2026-10-22T11:00:00.000Z', digest: proposalDigest('p1', p) } })).toContain('<div class="pdec"><span class="k">Decidida por · tú');
+  });
   it('only a mark of this very text and status counts: without one the owner confirms; a mark of other text or another status means the decision changed, to decide again (§4.1, review I2, re-review N1)', () => {
     const now = P({ id: 'p1', status: 'approved', title: 'Cache prices v2' });
     const older = proposalDigest('p1', P({ id: 'p1', status: 'approved', title: 'Cache prices' }));
