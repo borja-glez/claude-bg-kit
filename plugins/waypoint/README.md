@@ -73,7 +73,7 @@ A typical run:
 /waypoint:work                    # or launch a session per track
 ```
 
-`/waypoint:design new --from docs/superpowers/specs/<file>.md` starts from a spec written with superpowers: its sections are copied as they are, and the design page says «Imported from».
+`/waypoint:design new --from docs/superpowers/specs/<file>.md` starts from a spec written with superpowers: its sections are copied as they are, and the design page says «Imported from». A spec without `##` sections (the short one superpowers 7.0.1 writes for a small change) becomes one section named after its title.
 
 A proposal you do not apply stays pending across rounds: the band counts the pending ones of every round, the next round's critic does not repeat them, and `approve` lists the critical and major ones still open and asks you to apply or dismiss them.
 

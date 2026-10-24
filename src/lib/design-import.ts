@@ -1,6 +1,6 @@
 // A superpowers spec (superpowers:brainstorming) as a waypoint design.md, mechanically and without rewriting it: the
 // H1 becomes the title, what sits between the H1 and the first `##` stays as the body's introduction, and every
-// section is copied as written. Pure (no node:*, no zod).
+// section is copied as written; a spec without `##` sections is one section named after its title. Pure (no node:*, no zod).
 import { stringify } from 'yaml';
 
 export class SpecImportError extends Error {}
@@ -60,7 +60,8 @@ export function importSpec(text: string, opts: { project: string; locale: string
   const h1 = lines.findIndex(l => !l.fenced && /^#\s+\S/.test(l.text));
   if (h1 < 0) throw new SpecImportError('the spec has no "# " title');
   const after = lines.slice(h1 + 1);
-  if (!after.some(l => !l.fenced && /^##\s+\S/.test(l.text))) throw new SpecImportError('the spec has no "## " section');
+  if (!after.some(l => l.text.trim())) throw new SpecImportError('the spec has nothing after its "# " title');
+  const sectioned = after.some(l => !l.fenced && /^##\s+\S/.test(l.text));
   const title = specTitle(lines[h1].text.replace(/^#\s+/, '').replace(/\s+#*\s*$/, ''));
   // The summary: the first paragraph of the first purpose-like section, else of the body, else the title.
   let summary: string | null = null;
@@ -73,6 +74,10 @@ export function importSpec(text: string, opts: { project: string; locale: string
   summary ??= firstParagraph(after) ?? title;
   const meta = { title, project: opts.project, locale: opts.locale, summary, pillars: [], start_prompt: '/waypoint:work <track>', status: 'draft', source: opts.source };
   // The body is the spec after its H1, byte for byte (its line endings included), without the leading blank lines.
-  const body = src.split(/(?<=\n)/).slice(h1 + 1).join('').replace(/^(?:[ \t]*\r?\n)+/, '');
+  const pieces = src.split(/(?<=\n)/);
+  const rest = pieces.slice(h1 + 1).join('').replace(/^(?:[ \t]*\r?\n)+/, '');
+  // Without a "## " section the spec is one, named after its title, in the end of line of its own H1.
+  const eol = /\r?\n$/.exec(pieces[h1])?.[0] ?? '\n';
+  const body = sectioned ? rest : `## ${title}${eol}${eol}${rest}`;
   return `---\n${stringify(meta, { lineWidth: 0 })}---\n\n${body}`;
 }

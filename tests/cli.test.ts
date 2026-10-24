@@ -2562,9 +2562,16 @@ describe('design-import', () => {
     // A design the import would make invalid (an empty locale) is refused like any bad argument, and nothing is written.
     expect(run(['design-import', 'docs/superpowers/specs/s.md', '--project', 'cart2', '--locale', '', '--out', 'o5.md'], io).code).toBe(2);
     expect(existsSync(path.join(dir, 'o5.md'))).toBe(false);
+    // A1: a spec without "## " sections is one section; one with nothing after its title is refused and writes nothing.
     writeFileSync(path.join(dir, 'flat.md'), '# Only a title\n\ntext\n');
-    expect(run(['design-import', 'flat.md', '--project', 'cart', '--out', 'o3.md'], io).code).toBe(2);
-    expect(existsSync(path.join(dir, 'o3.md'))).toBe(false);
+    const flat = run(['design-import', 'flat.md', '--project', 'flat', '--out', 'o3.md'], io);
+    expect(flat.code).toBe(0);
+    expect(JSON.parse(flat.stdout)).toMatchObject({ title: 'Only a title', sections: 1 });
+    writeFileSync(path.join(dir, 'bare.md'), '# Only a title\n');
+    const bare = run(['design-import', 'bare.md', '--project', 'bare', '--out', 'o6.md'], io);
+    expect(bare.code).toBe(2);
+    expect(bare.stderr).toContain('nothing after its "# " title');
+    expect(existsSync(path.join(dir, 'o6.md'))).toBe(false);
   });
 });
 
