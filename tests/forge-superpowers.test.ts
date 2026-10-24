@@ -109,7 +109,7 @@ describe('sp-specs and sp-plans', () => {
     expect(specs.pending.map(s => s.path)).toEqual(['b', 'c', 'd', 'e'].map(n => `docs/superpowers/specs/${n}.md`));
     expect(specs.others).toEqual([{ path: 'docs/superpowers/specs/a.md', title: 'Spec a' }, { path: 'docs/superpowers/specs/old.md' }]);
     expect(spSpecs(project, NOW, { declined: ['docs/superpowers/specs/a.md'] })).toEqual(specs.pending.slice(0, 3));
-    const plan = (box: string) => `# P Implementation Plan\n\n### Task 1: one\n\n- [${box}] a\n`;
+    const plan = (box: string) => `# P Implementation Plan\n\n### Task 1: one\n\n- [x] a\n\n### Task 2: two\n\n- [${box}] b\n`;
     for (const d of [1, 2, 3, 4]) file(`docs/superpowers/plans/open-${d}.md`, plan(' '), d);
     file('docs/superpowers/plans/done.md', plan('x'), 1);
     file('docs/superpowers/plans/broken.md', '# no tasks\n', 1);
@@ -119,6 +119,7 @@ describe('sp-specs and sp-plans', () => {
     expect([...plans.others].sort((x, y) => x.path.localeCompare(y.path))).toEqual([
       { path: 'docs/superpowers/plans/broken.md' }, { path: 'docs/superpowers/plans/done.md', title: 'P' }, { path: 'docs/superpowers/plans/old.md' },
     ]);
+    expect(plans.untraced).toEqual([]);
     expect(spPlans(project, NOW)).toEqual(plans.pending.slice(0, 3));
   });
   it('times a tracked file by its last commit, and leaves out declined specs', () => {
@@ -152,7 +153,7 @@ describe('sp-specs and sp-plans', () => {
     expect(JSON.parse(run(['sp-path', 'test-driven-development'], { ...io, env: { CLAUDE_CONFIG_DIR: path.join(cfg, 'none') } }).stdout)).toBeNull();
   });
   it("a plan done elsewhere is not pending: the main checkout's SDD ledger, forge's record there, or its commits (K1-07)", () => {
-    const plan = (title: string) => `# ${title} Implementation Plan\n\n### Task 1: one\n\n- [ ] a\n\n### Task 2: two\n\n- [ ] b\n`;
+    const plan = (title: string) => `# ${title} Implementation Plan\n\n### Task 1: one\n\n- [x] a\n\n### Task 2: two\n\n- [ ] b\n`;
     file('docs/superpowers/plans/main-ledger.md', plan('Main Ledger'), 1);
     file('docs/superpowers/plans/sp-done.md', plan('Sp Done'), 2);
     file('docs/superpowers/plans/commits.md', plan('Cart Totals'), 3);
@@ -168,6 +169,23 @@ describe('sp-specs and sp-plans', () => {
     expect(paths({ main, subjects })).toEqual(['docs/superpowers/plans/open.md']);
     expect(doneByCommits(subjects, 'Cart Totals')).toEqual([1, 2]);
     expect(doneByCommits(['Cart Totals: task 3 done later', 'Cart: task 1 done'], 'Cart Totals')).toEqual([]);
+  });
+  it('a plan with no trace of progress is not pending: no ticked box, ledger, record or done commit, as lens hides it (A1)', () => {
+    const plan = (title: string, a = ' ') => `# ${title} Implementation Plan\n\n### Task 1: one\n\n- [${a}] a\n- [ ] a2\n\n### Task 2: two\n\n- [ ] b\n`;
+    file('docs/superpowers/plans/fresh.md', plan('Fresh'), 1);
+    file('docs/superpowers/plans/half.md', plan('Half', 'x'), 2);
+    file('docs/superpowers/plans/ledger.md', plan('Ledger'), 3);
+    file('.superpowers/sdd/ledger/progress.md', '# SDD ledger — plan: docs/superpowers/plans/ledger.md\n\nTask 1: complete\n', 0);
+    file('docs/superpowers/plans/commit.md', plan('Commit'), 4);
+    const subjects = ['Commit: task 1 done'];
+    // A task half ticked, a live SDD ledger or a done commit is a trace: those stay pending.
+    expect(spPlans(project, NOW, { subjects }).map(p => [p.path, p.done])).toEqual([
+      ['docs/superpowers/plans/half.md', 0], ['docs/superpowers/plans/ledger.md', 1], ['docs/superpowers/plans/commit.md', 1],
+    ]);
+    const pool = spPlanPool(project, NOW, { subjects });
+    expect(pool.untraced).toEqual([{ path: 'docs/superpowers/plans/fresh.md', title: 'Fresh', tasks: 2, done: 0 }]);
+    expect(pool.pending.map(p => p.path)).not.toContain('docs/superpowers/plans/fresh.md');
+    expect(pool.others.map(o => o.path)).not.toContain('docs/superpowers/plans/fresh.md');
   });
   it('a spec a plan cites, or a route handed off or finished, is no longer offered (K1-07)', () => {
     for (const [n, d] of [['cited', 1], ['routed', 2], ['free', 3]] as const) file(`docs/superpowers/specs/${n}.md`, `# Spec ${n}\n\n## A\n`, d);

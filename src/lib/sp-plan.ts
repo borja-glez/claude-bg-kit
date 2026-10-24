@@ -162,6 +162,19 @@ export function markDone(plan: SpPlan, done: number[]): SpPlan {
   return { ...plan, tasks: plan.tasks.map(t => (done.includes(t.n) ? { ...t, done: true } : t)) };
 }
 
+/** Whether some task of the plan has a ticked box (`- [x]`) outside code; a box before the first task does not count.
+ *  Throws SpPlanError as parseSpPlan does. */
+export function hasTickedBox(text: string): boolean {
+  const { lines, ranges } = scan(text);
+  return ranges.some(r => {
+    for (let i = r.head + 1; i < r.end; i++) {
+      const b = lines[i].fenced ? null : BOX.exec(lines[i].text);
+      if (b && b[2] !== ' ') return true;
+    }
+    return false;
+  });
+}
+
 /** Ticks `- [ ]` → `- [x]` inside task `n` only (never inside code), keeping every line ending as it was. */
 export function checkSpTask(text: string, n: number): { text: string; checked: number } {
   const { lines, ranges } = scan(text);
