@@ -52,8 +52,8 @@ describe('npm run ci (I-05)', () => {
     expect(job.strategy.matrix.os).toEqual(['ubuntu-latest', 'windows-latest']);
     expect(job['runs-on']).toBe('${{ matrix.os }}');
     const steps = job.steps as { run?: string; uses?: string; with?: Record<string, unknown> }[];
-    expect(steps.map(s => s.uses).filter(Boolean)).toEqual(['actions/checkout@v4', 'actions/setup-node@v4']);
-    expect(steps.find(s => s.uses === 'actions/setup-node@v4')?.with?.['node-version']).toBe(22);
+    expect(steps.map(s => s.uses).filter(Boolean)).toEqual(['actions/checkout@v7', 'actions/setup-node@v7']);
+    expect(steps.find(s => s.uses === 'actions/setup-node@v7')?.with?.['node-version']).toBe(22);
     const cmds = steps.map(s => s.run).filter((x): x is string => !!x);
     expect(cmds.indexOf('npm ci')).toBeGreaterThan(-1);
     expect(cmds.indexOf('npm ci')).toBeLessThan(cmds.indexOf('npm run ci'));
@@ -68,7 +68,7 @@ describe('npm run ci (I-05)', () => {
   it('.github/workflows/ci.yml loads the forge and waypoint bundles on Node 20, the minimum the plugins promise', () => {
     const job = parse(read('.github/workflows/ci.yml')).jobs.node20;
     const steps = job.steps as { run?: string; uses?: string; with?: Record<string, unknown> }[];
-    expect(steps.find(s => s.uses === 'actions/setup-node@v4')?.with?.['node-version']).toBe(20);
+    expect(steps.find(s => s.uses === 'actions/setup-node@v7')?.with?.['node-version']).toBe(20);
     const cmds = steps.map(s => s.run ?? '').join('\n');
     expect(cmds).toContain('node plugins/forge/dist/forge.cjs');
     expect(cmds).toContain('node plugins/waypoint/dist/waypoint.cjs');
