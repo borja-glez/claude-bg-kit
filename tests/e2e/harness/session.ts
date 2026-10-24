@@ -1,6 +1,8 @@
 // A8: drives a real `claude -p` session against the scripted Messages API. Isolation, in three lines:
 // the config dir and HOME are temp directories; the environment is clean of the parent session's, vitest's and the proxy's variables;
 // the only address the child can reach is 127.0.0.1 (ANTHROPIC_BASE_URL), with a fictional key.
+// Claude Code reads the CLAUDE.md files of the working directory's ancestors, and on Windows the OS temp dir lies under the user
+// profile, so e2eEnv switches CLAUDE.md loading off (CLAUDE_CODE_DISABLE_CLAUDE_MDS): no CLAUDE.md is loaded.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { treeKill } from '../../../scripts/tui/checks.mjs';
@@ -16,7 +18,9 @@ const DROPPED_NAMES = ['NODE_ENV', 'TEST', 'NODE_OPTIONS', 'HTTP_PROXY', 'HTTPS_
 const KEPT = 'CLAUDE_CODE_GIT_BASH_PATH';
 
 /** The child's environment: `base` without the parent session's, vitest's, forge's and the proxy's variables (in any case:
- *  NODE_ENV=test changes Claude Code, CLAUDECODE makes it refuse to start inside another session), pointed at the server. */
+ *  NODE_ENV=test changes Claude Code, CLAUDECODE makes it refuse to start inside another session), pointed at the server.
+ *  CLAUDE_CODE_DISABLE_CLAUDE_MDS=1: Claude Code reads the CLAUDE.md files of the working directory's ancestors, and on Windows
+ *  the OS temp dir lies under the user profile, so no CLAUDE.md is loaded. */
 export function e2eEnv(base: Record<string, string | undefined>, ws: Pick<Workspace, 'home' | 'configDir' | 'hookLog'>, serverUrl: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(base)) {
@@ -39,6 +43,7 @@ export function e2eEnv(base: Record<string, string | undefined>, ws: Pick<Worksp
     DISABLE_TELEMETRY: '1',
     DISABLE_ERROR_REPORTING: '1',
     NO_PROXY: '127.0.0.1,localhost',
+    CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
   };
 }
 

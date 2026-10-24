@@ -144,7 +144,7 @@ describe('the e2e session (A8)', () => {
     expect(env).toEqual({
       PATH: '/bin', CLAUDE_CODE_GIT_BASH_PATH: 'C:\\g\\bash.exe', ANTHROPIC_BASE_URL: 'http://127.0.0.1:9', ANTHROPIC_API_KEY: E2E_KEY,
       CLAUDE_CONFIG_DIR: '/h/.claude', HOME: '/h', USERPROFILE: '/h', BGKIT_E2E_HOOK_LOG: '/h/hooks.jsonl', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-      DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1', NO_PROXY: '127.0.0.1,localhost',
+      DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1', NO_PROXY: '127.0.0.1,localhost', CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
     });
   });
   it('claudeArgs: print mode with stream-json both ways, hook events, the session, the model, strict MCP, the debug file, each plugin dir, the settings and each permission mode', () => {
