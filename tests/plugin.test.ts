@@ -2103,12 +2103,22 @@ describe('plugin layout', () => {
     for (const l of run) expect(l.startsWith('- ')).toBe(true);
     expect(rules(read('plugins/forge/skills/route/SKILL.md'))).toEqual(run);
   });
-  it('forge:route hands a brainstorming without a spec over to forge:run with the decisions as the task text (K1-06)', () => {
-    const lines = read('plugins/forge/skills/route/SKILL.md').split(/\r?\n/);
+  it('forge:route hands over whatever brainstorming leaves: a plan, a spec, or no file with the decisions as the task text (K1-06, A1)', () => {
+    const md = read('plugins/forge/skills/route/SKILL.md');
+    const lines = md.split(/\r?\n/);
     for (const opt of ['- `superpowers-design`', '- `superpowers-plan`']) {
-      const line = lines.find(l => l.trimStart().startsWith(opt))!;
-      for (const w of ['.forge/work/<id>/task.txt', 'FORGE route stage --stage handed-off --session ${CLAUDE_SESSION_ID}', '`forge:run`']) expect(line, `${opt}: ${w}`).toContain(w);
+      expect(lines.find(l => l.trimStart().startsWith(opt)), opt).toContain('**When brainstorming ends**');
     }
+    const at = lines.findIndex(l => l.trimStart().startsWith('**When brainstorming ends**'));
+    expect(at).toBeGreaterThan(-1);
+    const block = lines.slice(at, at + 4);
+    expect(block.slice(1).every(l => l.trimStart().startsWith('- '))).toBe(true);
+    const ends = block.join('\n');
+    for (const w of ['forge:run --superpowers-plan <its path>', 'forge:run --from-spec <its path>', '«Do it, and say what you did»', '.forge/work/<id>/task.txt',
+      'FORGE route stage --stage handed-off --session ${CLAUDE_SESSION_ID}', '`forge:run`']) expect(ends, w).toContain(w);
+    // Endings, not versions: the skill works with whatever superpowers is installed.
+    expect(md).not.toContain('Bounded');
+    expect(md).not.toMatch(/\b\d+\.\d+\.\d+\b/);
   });
   it('a git-revert undo names its exact commits in shas, in every skill that records or reverts one (K2-19)', () => {
     expect(runRef('decisions')).toContain('"shas"');

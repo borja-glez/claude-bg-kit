@@ -42,6 +42,15 @@ describe('routingRule and routeReminder', () => {
     expect(routeReminder({ ...r, stage: 'handed-off' }, NOW.getTime())).toBeNull();
     expect(routeReminder(null, NOW.getTime())).toBeNull();
   });
+  it('reminds the hand-over of a brainstorming that ends without a file, on both mixed routes (A1)', () => {
+    const r = { task: 't1', chosen: 'superpowers-design' as const, by: 'user' as const, stage: 'designing' as const, ts: NOW.toISOString() };
+    for (const doc of [r, { ...r, chosen: 'superpowers-plan' as const, stage: 'planning' as const }]) {
+      const text = routeReminder(doc, NOW.getTime())!;
+      expect(text, doc.chosen).toContain('.forge/work/t1/task.txt');
+      expect(text, doc.chosen).toMatch(/invoke forge:run$/);
+      expect(text, doc.chosen).not.toMatch(/Bounded|continue/);
+    }
+  });
 });
 
 describe('forge hook route-session and route-prompt', () => {
@@ -292,6 +301,12 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
     expect(routes).toHaveLength(50);
     expect(routes[0]).toMatchObject({ session: 'zzz' });
     expect(ctx(run(['hook', 'route-session'], io({ session_id: 'NEW', source: 'clear' })))).toContain('routed task fresh');
+  });
+  it('the carried line keeps the hand-over without a file, then the command that closes the route (A1)', () => {
+    writeRoute(root, { task: 't1', chosen: 'superpowers-plan', by: 'user', stage: 'planning', ts: NOW.toISOString(), session: 'OLD' });
+    const fork = ctx(run(['hook', 'route-session'], io({ session_id: 'FORK', source: 'fork' })));
+    expect(fork).toContain('.forge/work/t1/task.txt and invoke forge:run. Once handed off, close that route with FORGE route stage --stage handed-off --session OLD');
+    expect(fork).not.toContain('continue');
   });
 });
 
