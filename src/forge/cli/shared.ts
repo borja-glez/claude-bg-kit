@@ -259,6 +259,17 @@ export function runRootOf(cwd: string, main = mainCheckout(cwd)): string {
   return readRunText(main) === null && readRunText(cwd) !== null ? cwd : main;
 }
 
+/** 6b-3: the active autonomous run (run.json found as every command finds it, runRootOf) when it is a product run; otherwise a
+ *  UsageError of `cmd`: no autonomous run is active, or (L-16) it is another profile's, and only a product run does `what`.
+ *  `infinite phase` and (fix 3) `proposals retire` share it. */
+export function activeProductRun(cwd: string, cmd: string, what: string, main = mainCheckout(cwd)): RunState & { autonomous: NonNullable<RunState['autonomous']> } {
+  const run = parseRun(readRunText(runRootOf(cwd, main)));
+  if (!run?.active || !run.autonomous) throw new UsageError(`${cmd}: no autonomous run is active (infinite start --profile product)`);
+  const { profile, runId } = run.autonomous;
+  if (profile !== 'product') throw new UsageError(`${cmd}: ${runId} is a ${profile} run, and only a product run ${what}`);
+  return { ...run, autonomous: run.autonomous };
+}
+
 // The `reply` of the cycle and infinite status JSON: the sentence that tells the session which language to answer in
 // (the run's, else the active execution's, else the plan's); null when none is known.
 export function runReply(cwd: string, run: RunState | null): string | null {

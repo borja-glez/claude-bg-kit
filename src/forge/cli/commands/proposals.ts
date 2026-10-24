@@ -31,7 +31,7 @@ import { checkPlacement, estimateMinutes, proposalToTask, proposalOfIncludes, pr
 import type { PlanTask } from '../../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { UsageError } from '../errors.js';
-import { approvalsPageFile, ownerCtx, ownerStanding, planOf, runRootOf, unownedReasons } from '../shared.js';
+import { activeProductRun, approvalsPageFile, ownerCtx, ownerStanding, planOf, runRootOf, unownedReasons } from '../shared.js';
 
 /** The active autonomous run of run.json (found as every command finds it, runRootOf), or null. `main`: mainCheckout(cwd). */
 function activeAutonomous(cwd: string, main = mainCheckout(cwd)): (RunState & { autonomous: NonNullable<RunState['autonomous']> }) | null {
@@ -94,6 +94,14 @@ function judgedPlacement(cwd: string, id: string): Placement | null {
   const p = readPlacement(last?.placement);
   const estimateMin = p ? estimateMinutes(p.estimate) : null;
   return p && estimateMin !== null ? { phase: p.phase, doneWhen: p.doneWhen, dependsOn: p.dependsOn, estimateMin } : null;
+}
+
+/** 6b-3 M-8: what `proposals retire` prints for the rejection of `id` at `at`, in judge's shapes: the update of proposals/<id> (a
+ *  parked mark it had deleted) and the set of approvals/<id>, the run's mark of the text whose digest is `digest`. */
+type Retired = { id: string; write: Record<string, unknown>; approval: { op: 'set'; collection: string; doc_id: string; data: ApprovalDoc } };
+function retireWrites(id: string, at: string, reason: string, digest: string, parked: boolean): Retired {
+  const write: Record<string, unknown> = { status: 'rejected', decidedBy: 'forge:auto', decidedAt: at, reason, ...(parked ? { parked: { __delete__: true } } : {}) };
+  return { id, write, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'rejected', decidedAt: at, by: 'forge:auto', digest } } };
 }
 
 export const command: Command = (args, ctx) => {
@@ -495,8 +503,17 @@ export const command: Command = (args, ctx) => {
       if (!planArg || !whyFile) throw new UsageError('usage: forge proposals retire <id> --plan <plan.yaml> --why-file <why.txt>');
       const why = clean(readText(whyFile, '--why-file'), CRITIC_TEXT_MAX);
       if (!why) throw new UsageError('proposals retire: --why-file says nothing: write why the re-plan retired the task');
+      // Fix 3: only inside an active product run, by the check `infinite phase` makes.
+      const run = activeProductRun(io.cwd, 'proposals retire', 're-plans its phases');
       const doc = loadProposal(io.cwd, id);
       if (!doc) throw new UsageError(`proposals retire: ${id} not found`);
+      // Fix 3, T6B3-RETIRE-IDEMPOTENT: a retire that resumes (its event in the ledger, the local proposal rejected by the run with
+      // that reason) prints the same writes again, from its event, and writes nothing: the store may not have them yet.
+      const earlier = readEvents(io.cwd).filter(e => e.kind === 'proposal' && e.action === 'retire' && e.id === id).at(-1);
+      if (earlier && doc.status === 'rejected' && doc.decidedBy === 'forge:auto' && typeof earlier.reason === 'string' && doc.reason === earlier.reason
+        && typeof earlier.digest === 'string') {
+        return json(retireWrites(id, earlier.ts, earlier.reason, earlier.digest, earlier.parked === true));
+      }
       if (!isActionable(doc)) throw new UsageError(`proposals retire: ${id} is ${doc.status}: only an approved proposal is rejected when its task is retired`);
       const notOwn = notRunsOwn(io.cwd)(id);
       if (notOwn) throw new UsageError(`proposals retire: ${id} ${notOwn}: it is not the run's to reject, the person decides it`);
@@ -505,15 +522,15 @@ export const command: Command = (args, ctx) => {
         throw new UsageError(`proposals retire: the task of ${id} (${doc.taskId ?? 'none'}) is not in the retired list of ${planArg}`);
       }
       const at = ts();
-      const reason = `${spanish(parseRun(readRunText(runRootOf(io.cwd)))?.locale) ? 'retirada por el replan' : 'retired by replan'}: ${why}`;
-      const write: Record<string, unknown> = { status: 'rejected', decidedBy: 'forge:auto', decidedAt: at, reason };
+      const reason = `${spanish(run.locale) ? 'retirada por el replan' : 'retired by replan'}: ${why}`;
+      const digest = proposalDigest(id, doc);
       const { parked, ...kept } = doc;
-      if (parked) write.parked = { __delete__: true };
-      const mark: ApprovalDoc = { status: 'rejected', decidedAt: at, by: 'forge:auto', digest: proposalDigest(id, doc) };
+      const out = retireWrites(id, at, reason, digest, parked !== undefined);
       saveProposal(io.cwd, id, { ...kept, status: 'rejected', decidedBy: 'forge:auto', decidedAt: at, reason });
-      saveApproval(io.cwd, id, mark);
-      appendEvent(io.cwd, { ts: at, kind: 'proposal', action: 'retire', id, taskId: doc.taskId });
-      return json({ id, write, approval: { op: 'set', collection: 'approvals', doc_id: id, data: mark } });
+      saveApproval(io.cwd, id, out.approval.data);
+      // The event keeps what the writes say (fix 3), so a resumed retire prints them again.
+      appendEvent(io.cwd, { ts: at, kind: 'proposal', action: 'retire', id, taskId: doc.taskId, reason, digest, ...(parked ? { parked: true } : {}) });
+      return json(out);
     }
     case 'batch': {
       // The ids are every argument but --out and its value (and --pending): an id after a flag still counts, and any other

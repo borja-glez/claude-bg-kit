@@ -15,7 +15,7 @@ import { activeProfileAt, prepareProfile, profileArgs, profileBlock, readableRun
 import { autonomousFor, recordSessions } from '../../autonomous.js';
 import { loadConfig, type ForgeConfig } from '../../config.js';
 import { resetDelegation, trustFor, type TrustState } from '../../trust.js';
-import { planOf, stopContext, unownedOf, runRootOf, runReply } from '../shared.js';
+import { activeProductRun, planOf, stopContext, unownedOf, runRootOf, runReply } from '../shared.js';
 
 export const command: Command = (args, ctx) => {
   const { io, flag, has, json, ts } = ctx;
@@ -103,10 +103,7 @@ export const command: Command = (args, ctx) => {
     // T6B3-REPLAN-HELD: `held` is what replan-check would refuse to change, by the same rule, from this checkout (the run's
     // worktree, where the session runs both), for the phase review.
     const main = mainCheckout(io.cwd);
-    const run = parseRun(readRunText(runRootOf(io.cwd, main)));
-    if (!run?.active || !run.autonomous) throw new UsageError('infinite phase: no autonomous run is active (infinite start --profile product)');
-    const { profile, runId } = run.autonomous;
-    if (profile !== 'product') throw new UsageError(`infinite phase: ${runId} is a ${profile} run, and only a product run reviews its phases`);
+    const { runId } = activeProductRun(io.cwd, 'infinite phase', 'reviews its phases', main).autonomous;
     const planArg = flag('plan');
     const db = flag('db');
     if (!planArg || !db) throw new UsageError('usage: forge infinite phase --plan <plan.yaml> --db <DB> [--mark <phase>]');

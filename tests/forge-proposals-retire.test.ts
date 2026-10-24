@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
 import { startRun, saveRun } from '../src/forge/run.js';
@@ -11,6 +11,7 @@ import { useTempDirs } from './helpers/tmp.js';
 
 const tmp = useTempDirs();
 const T0 = new Date('2026-10-22T10:00:00.000Z');
+const T1 = new Date('2026-10-22T11:30:00.000Z');
 const AT = T0.toISOString();
 // T004 to T007 were retired by a re-plan; T001 is still a task of the plan.
 const PLAN = `project: g\nlocale: en\nversion: "0.1"\ntracks:\n  - { id: core, name: Core, color: blue }\nphases:\n  - { id: F1, name: Base }\ntasks:\n`
@@ -24,8 +25,14 @@ const put = (id: string, d: ProposalDoc) => {
   saveProposal(root, id, d);
   saveApproval(root, id, { status: d.status === 'rejected' ? 'rejected' : 'auto_approved', decidedAt: AT, by: 'forge:auto', digest: proposalDigest(id, d) });
 };
-const retire = (id: string, ...args: string[]) =>
-  run(['proposals', 'retire', id, ...(args.length ? args : ['--plan', 'plan.yaml', '--why-file', 'why.txt'])], { cwd: root, now: () => T0, env: {} });
+const autonomous = (profile: 'product' | 'spike') =>
+  ({ profile, name: 'g', runId: `${profile}-g`, worktree: path.join(root, 'wt'), branch: `forge/${profile}-g`, startBranch: 'main', protectedBranches: ['main'] });
+/** Fix 3: retire runs only while a product run is active, as `infinite phase` does. */
+const productRun = (locale: string | null = null, over: { active?: boolean; profile?: 'product' | 'spike' } = {}) =>
+  saveRun(root, { ...startRun(T0, { hours: 1 }, 10, 'c1', locale), ...(over.active === false ? { active: false } : {}), autonomous: autonomous(over.profile ?? 'product') });
+const retireAt = (now: Date, id: string, ...args: string[]) =>
+  run(['proposals', 'retire', id, ...(args.length ? args : ['--plan', 'plan.yaml', '--why-file', 'why.txt'])], { cwd: root, now: () => now, env: {} });
+const retire = (id: string, ...args: string[]) => retireAt(T0, id, ...args);
 const proposalFile = (id: string) => readFileSync(path.join(root, '.forge', 'proposals', `${id}.json`), 'utf8');
 const retireEvents = () => readEvents(root).filter(e => e.kind === 'proposal' && e.action === 'retire');
 
@@ -33,6 +40,7 @@ beforeEach(() => {
   root = tmp('retire-');
   writeFileSync(path.join(root, 'plan.yaml'), PLAN);
   writeFileSync(path.join(root, 'why.txt'), '  the provider\nsends it now  \n');
+  productRun();
   put(P.run, doc({ taskId: 'T004' }));
   put(P.user, doc({ source: 'user', author: 'borja', taskId: 'T005' }));
   put(P.live, doc({ taskId: 'T001' }));
@@ -50,23 +58,68 @@ describe('proposals retire (6b-3)', () => {
     expect(r.stderr).toBe('');
     expect(r.code).toBe(0);
     const reason = 'retired by replan: the provider sends it now';
+    const digest = proposalDigest(P.run, doc());
     expect(JSON.parse(r.stdout)).toEqual({
       id: P.run,
       write: { status: 'rejected', decidedBy: 'forge:auto', decidedAt: AT, reason },
-      approval: { op: 'set', collection: 'approvals', doc_id: P.run, data: { status: 'rejected', decidedAt: AT, by: 'forge:auto', digest: proposalDigest(P.run, doc({ taskId: 'T004' })) } },
+      approval: { op: 'set', collection: 'approvals', doc_id: P.run, data: { status: 'rejected', decidedAt: AT, by: 'forge:auto', digest } },
     });
     expect(loadProposal(root, P.run)).toMatchObject({ status: 'rejected', decidedBy: 'forge:auto', decidedAt: AT, reason, taskId: 'T004' });
-    expect(loadApproval(root, P.run)).toEqual({ status: 'rejected', decidedAt: AT, by: 'forge:auto', digest: proposalDigest(P.run, doc()) });
-    expect(retireEvents()).toEqual([{ ts: AT, kind: 'proposal', action: 'retire', id: P.run, taskId: 'T004' }]);
-    // Rejected now, it is not rejected twice.
-    expect(retire(P.run).code).toBe(2);
+    expect(loadApproval(root, P.run)).toEqual({ status: 'rejected', decidedAt: AT, by: 'forge:auto', digest });
+    // Fix 3: the event keeps what the writes said, so a resumed retire prints them again.
+    expect(retireEvents()).toEqual([{ ts: AT, kind: 'proposal', action: 'retire', id: P.run, taskId: 'T004', reason, digest }]);
+  });
+  // Fix 3, T6B3-RETIRE-IDEMPOTENT: a stop after the local rejection and before the store took it.
+  it('a retire run again after a stop prints the same writes, and writes nothing more', () => {
+    const first = retire(P.run);
+    expect(first.code).toBe(0);
+    const file = proposalFile(P.run);
+    const mark = loadApproval(root, P.run);
+    const again = retireAt(T1, P.run);
+    expect(again.stderr).toBe('');
+    expect(again.code).toBe(0);
+    expect(JSON.parse(again.stdout)).toEqual(JSON.parse(first.stdout));
+    expect(proposalFile(P.run)).toBe(file);
+    expect(loadApproval(root, P.run)).toEqual(mark);
     expect(retireEvents()).toHaveLength(1);
+  });
+  it('still refuses any other rejected proposal: one rejected without a retire, or rejected again with another reason', () => {
+    const r = retire(P.rejected);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('rejected');
+    expect(retire(P.run).code).toBe(0);
+    // The owner rejected it again on the page, with their own reason: that rejection is theirs.
+    saveProposal(root, P.run, doc({ status: 'rejected', decidedBy: 'page', reason: 'not this year', taskId: 'T004' }));
+    const file = proposalFile(P.run);
+    const owner = retireAt(T1, P.run);
+    expect(owner.code).toBe(2);
+    expect(owner.stderr).toContain('rejected');
+    expect(proposalFile(P.run)).toBe(file);
+    expect(retireEvents()).toHaveLength(1);
+  });
+  it('runs only inside an active product run, as infinite phase does: none, a stopped one and a spike run are refused', () => {
+    const before = proposalFile(P.run);
+    const mark = loadApproval(root, P.run);
+    const setups: [string, () => void, string][] = [
+      ['no run', () => rmSync(path.join(root, '.forge', 'run.json')), 'no autonomous run is active'],
+      ['a stopped run', () => productRun(null, { active: false }), 'no autonomous run is active'],
+      ['a spike run', () => productRun(null, { profile: 'spike' }), 'spike'],
+    ];
+    for (const [label, setup, word] of setups) {
+      setup();
+      const r = retire(P.run);
+      expect(r.code, label).toBe(2);
+      expect(r.stderr, label).toContain(word);
+      expect(proposalFile(P.run), label).toBe(before);
+      expect(loadApproval(root, P.run), label).toEqual(mark);
+    }
+    expect(retireEvents()).toEqual([]);
   });
   it('cleans and clips the why as judge\'s reasons, and says it in the run\'s language', () => {
     writeFileSync(path.join(root, 'why.txt'), `${'x'.repeat(1200)}\n`);
     const long = JSON.parse(retire(P.run).stdout) as { write: { reason: string } };
     expect(long.write.reason).toBe(`retired by replan: ${'x'.repeat(1000)}`);
-    saveRun(root, { ...startRun(T0, { hours: 1 }, 10, 'c1', 'es') });
+    productRun('es');
     put(P.live, doc({ taskId: 'T005' }));
     writeFileSync(path.join(root, 'why.txt'), 'ya no hace falta');
     expect((JSON.parse(retire(P.live).stdout) as { write: { reason: string } }).write.reason).toBe('retirada por el replan: ya no hace falta');
@@ -107,6 +160,7 @@ describe('proposals retire (6b-3)', () => {
       root = tmp('retire-held-');
       writeFileSync(path.join(root, 'plan.yaml'), PLAN);
       writeFileSync(path.join(root, 'why.txt'), 'no longer needed');
+      productRun();
       setup();
       const before = proposalFile(ID);
       const mark = loadApproval(root, ID);
