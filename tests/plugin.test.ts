@@ -65,6 +65,7 @@ describe('plugin layout', () => {
       expect.objectContaining({ name: 'waypoint', source: './plugins/waypoint' }),
       expect.objectContaining({ name: 'lens', source: './plugins/lens' }),
       expect.objectContaining({ name: 'forge', source: './plugins/forge' }),
+      expect.objectContaining({ name: 'crew', source: './plugins/crew' }),
     ]);
   });
   it('lens manifest, module and contract exist', () => {

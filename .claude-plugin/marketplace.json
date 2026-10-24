@@ -17,6 +17,11 @@
       "name": "forge",
       "source": "./plugins/forge",
       "description": "An adaptive way of working for Claude Code: triage by size, models by role, tool-first validation and weighted independent review."
+    },
+    {
+      "name": "crew",
+      "source": "./plugins/crew",
+      "description": "On-demand agents: novice-reader tells where a newcomer gets lost in docs and courses, and playtest-qa plays browser prototypes with real input on the GPU."
     }
   ]
 }
