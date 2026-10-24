@@ -97,12 +97,17 @@ function servePanes(on: On) {
   return open;
 }
 
+// w7 A5: todos no longer bring lens's band. A forge.cjs call that names a task this session works on does, for 10 minutes
+// (forgeHeardAt), and draws nothing of its own while that task has no status.
+const FORGE_CALL = { tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T009-1 --path medium', tool_use_id: 'f1' } as never;
+
 function start(on: On, sessionId: () => string = () => SESSION) {
   const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('agent.list', () => ({ value: [] }));
   on('session.id', () => ({ value: sessionId() }));
   on('classic.SubagentStart', () => ({}));
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   return clock;
 }
 
@@ -220,11 +225,10 @@ test('with the pane closed, .forge/ is read only while there is activity, for th
   serveFiles(on, FORGE, touched);
   servePanes(on);
   const clock = start(on);
-  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await clock.advance(60000);
   expect(touched.filter(p => p.includes('/.forge'))).toEqual([]);
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await $.tool.call(FORGE_CALL);
   await clock.advance(30000);
   expect(touched).toContain(`${ROOT}/.forge/status.json`);
   expect(touched).not.toContain(`${ROOT}/.forge/ledger.jsonl`);
@@ -313,9 +317,8 @@ test('the band shows the forge task with its bar while there is activity, as cel
   serveFiles(on, { ...FORGE, [`${ROOT}/.forge/work/hash/brief-1.md`]: 'b', [`${ROOT}/.forge/work/hash/brief-2.md`]: 'b' });
   servePanes(on);
   const clock = start(on);
-  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await $.tool.call(FORGE_CALL);
   await clock.advance(30000);
   const props = { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 9 }, view: {} };
   const term = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props });
@@ -419,9 +422,8 @@ test('a plan task counts its briefs in .forge/work/<project>/<task> (D-08)', asy
   });
   servePanes(on);
   const clock = start(on);
-  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await $.tool.call(FORGE_CALL);
   await clock.advance(30000);
   const props = { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 9 }, view: {} };
   const term = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props });
@@ -438,9 +440,8 @@ test('a project id as long as forge allows (120 characters) still finds its brie
   });
   servePanes(on);
   const clock = start(on);
-  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await $.tool.call(FORGE_CALL);
   await clock.advance(30000);
   const props = { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 9 }, view: {} };
   const term = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props });

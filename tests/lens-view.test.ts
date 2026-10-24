@@ -220,6 +220,9 @@ describe('lens cards', () => {
   it('builds nothing from an empty model', () => {
     expect(buildCards(EMPTY, T, 0)).toEqual([]);
   });
+  it('no TodoWrite and no TaskCreated: no Todos card and no Claude Code tasks card (w7 A5)', () => {
+    expect(buildCards(EMPTY, T, 0).some(c => c.id === 'todos' || c.id === 'ccTasks')).toBe(false);
+  });
 });
 
 describe('lens svg', () => {

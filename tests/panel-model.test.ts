@@ -854,3 +854,14 @@ describe('statusRootOf (C5)', () => {
     expect(statusRootOf('/elsewhere/task-T1', '/repo')).toBe('/elsewhere/task-T1');
   });
 });
+
+describe('the Todos and Claude Code tasks cards come only from their own events (w7 A5)', () => {
+  const base = { band: NONE_BAND, now: 100_000 };
+  it('without a TodoWrite that lists something or a TaskCreated there is neither; with one, its card', () => {
+    expect(buildPanelModel({ ...base, activity: act() })).toMatchObject({ todos: null, ccTasks: null });
+    expect(buildPanelModel({ ...base, activity: act({ todos: [] }) }).todos).toBeNull();
+    expect(buildPanelModel({ ...base, activity: act({ todos: [{ content: 'a', status: 'completed' }] }) }).todos).toMatchObject({ total: 1, done: 1 });
+    expect(buildPanelModel({ ...base, activity: act({ ccTasks: [{ id: '1', subject: 'Write the spec', done: false }] }) }).ccTasks)
+      .toEqual({ open: 1, done: 0, recent: ['Write the spec'] });
+  });
+});

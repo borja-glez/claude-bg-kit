@@ -437,6 +437,9 @@ describe('plugin layout', () => {
     }
     for (const f of ['plugins/lens/README.md', 'plugins/lens/README.es.md', 'plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) expect(read(f)).toContain('⚑');
   });
+  it('the lens READMEs say how the todo tools come back (w7 A5)', () => {
+    for (const f of ['plugins/lens/README.md', 'plugins/lens/README.es.md']) expect(read(f)).toContain('CLAUDE_CODE_ENABLE_TODO_TOOLS=1');
+  });
   it('READMEs describe the timings', () => {
     for (const f of ['plugins/lens/README.md', 'plugins/lens/README.es.md']) {
       const md = read(f);

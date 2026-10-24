@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
 import { noneBand, type BandModel } from '../mod/model.js';
-import { buildPanelModel, bandKey, parseSddLedger, summarizeTodos, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
+import { buildPanelModel, bandKey, parseSddLedger, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
 import { normalizeStatus, statusKey } from '../lib/forge-status.js';
 import { JOB_FILE_MAX, runRoleOf } from './activities.js';
@@ -79,7 +79,7 @@ const agentTools = new Map<string, Map<string, { name: string; since: number }>>
 const pendingEnds = new Map<string, number>();
 const PENDING_END_MS = 2 * 60_000;
 const PENDING_ENDS_MAX = 50;
-// Whether there is activity worth a band of its own (open todos or recent subagents) when no waypoint band shows.
+// Whether there is activity worth a band of its own (recent subagents, links agents or forge work; todos alone do not count) when no waypoint band shows.
 let busy = false;
 // The roadmap section, read from the waypoint project's files at the panel's pace while the pane is open.
 let roadmap: BandModel = noneBand();
@@ -246,14 +246,13 @@ function applyPendingEnd(id: string, now: number): void {
   if (now - at <= PENDING_END_MS) links = endAgent(links, id, at);
 }
 
-// Open todos, a subagent heard of within the hour (older entries are dropped here), an agent of links still alive, or
+// A subagent heard of within the hour (older entries are dropped here), an agent of links still alive, or
 // this session's own forge work: in progress in the last model and moving (final review m-3: a task left in progress for
 // LEFT_OPEN_MS keeps nothing reading), or a forge.cjs call heard within 10 minutes (§4.6: the surfaces need the tick
-// reading while it lasts).
+// reading while it lasts). Todos alone count for nothing: Claude Code 2.1.233 took TodoWrite away from the newest models.
 function isBusy(now: number): boolean {
   activity.subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
-  const todos = summarizeTodos(activity.todos);
-  return todos.total - todos.done > 0 || activity.subagents.length > 0 || links.some(l => l.status !== 'done')
+  return activity.subagents.length > 0 || links.some(l => l.status !== 'done')
     || ownBusy(bandModel, runRoleOf(roadmap)) || (forgeHeardAt !== null && now - forgeHeardAt < FORGE_HEARD_MS);
 }
 
