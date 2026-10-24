@@ -117,6 +117,10 @@ const NO_PATH_ARGS: readonly string[] = ['echo', 'printf', 'write-output', 'writ
 /** Commands whose pattern word is text, not a path. */
 const PATTERN_COMMANDS: readonly string[] = ['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'findstr', 'select-string', 'sls'];
 const URL = /^[a-z][a-z0-9+.-]+:\/\//i;
+/** PowerShell options whose next word is their value, never the pattern. */
+const PS_VALUE_OPTION = /^-(?:path|literalpath|include|exclude|encoding|context|culture)$/i;
+/** PowerShell's glued form -Name:value; group 1 is the value. */
+const PS_GLUED = /^-[a-z][a-z0-9-]*:(.+)$/i;
 
 /** text with its leading spelling of the home folder (~, $HOME, $env:USERPROFILE, %USERPROFILE%…) replaced by home; else text as it is. */
 export function homeSpelled(text: string, home: string): string {
@@ -141,8 +145,14 @@ function patternWords(seg: Segment, name: string): Set<Word> {
     }
   });
   if (!explicit) {
-    const first = args.find(a => !a.text.startsWith('-') && !(name === 'findstr' && a.text.startsWith('/')));
-    if (first) out.add(first);
+    // The first operand, not counting the value of a PowerShell option that takes a path or other non-pattern value (-Path x).
+    for (let i = 0; i < args.length; i++) {
+      const t = args[i].text;
+      if (PS_VALUE_OPTION.test(t)) { i++; continue; }
+      if (t.startsWith('-') || (name === 'findstr' && t.startsWith('/'))) continue;
+      out.add(args[i]);
+      break;
+    }
   }
   return out;
 }
@@ -166,7 +176,10 @@ function segmentVerdict(seg: Segment, input: GuardInput, ctx: GuardCtx, home: st
   for (const w of words) {
     if (URL.test(w.text)) continue;
     const eq = w.text.indexOf('=');
-    for (const text of eq >= 0 ? [w.text, w.text.slice(eq + 1)] : [w.text]) {
+    const glued = PS_GLUED.exec(w.text)?.[1];
+    const texts = eq >= 0 ? [w.text, w.text.slice(eq + 1)] : [w.text];
+    if (glued !== undefined) texts.push(glued);
+    for (const text of texts) {
       if (text === '' || URL.test(text)) continue;
       const t = homeSpelled(text, home);
       const dynamic = w.dynamic && (t === text || /[$`%]/.test(t));

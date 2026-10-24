@@ -126,6 +126,10 @@ describe('secretsRule in Bash and PowerShell (w7 A4, guard B)', () => {
     expect(pwsh('Select-String -Pattern .env -Path src\\a.ts', IMPL)).toBeNull();
     expect(pwsh('Select-String -Pattern:.env -Path src\\a.ts', IMPL)).toBeNull();
   });
+  it.each([
+    'Select-String -Path ~\\.ssh\\id_rsa foo', 'sls -LiteralPath $HOME\\.aws\\credentials foo', 'Get-Content -Path:~\\.ssh\\id_rsa', 'Get-Content -LiteralPath:$env:USERPROFILE\\.netrc',
+    'Select-String -Path:.env foo',
+  ])('denies the PowerShell call %s whose path is the value of an option', command => expect(ruleOf(pwsh(command, IMPL))).toBe('secrets'));
   it('verify reads the repository .env through Bash, and writes none and reads no other', () => {
     for (const command of ['cat .env', 'dotenv -e .env -- node app.js', 'npm run dev']) expect(bash(command, VERIFY), command).toBeNull();
     for (const command of [`cat ${sh(OTHER)}/.env`, 'echo X=1 >> .env', "sed -i 's/a/b/' .env", 'cat "$CFG/.env"', 'cat ~/.ssh/id_rsa']) expect(ruleOf(bash(command, HEAVY)), command).toBe('secrets');
