@@ -234,6 +234,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   const announce = startAnnounce({
     es: spanish(state.locale ?? null, io.cwd, project), kind, resume, runId: state.runId, mode: state.mode, parallel: state.parallel,
     branch: state.branch, base: state.base, mergeOnFinish: state.mergeOnFinish, loose: loose.length, setup, mergeRefused, mergeNote,
+    nested: config.swarm.nested === true ? (kind === 'plan' && state.mode === 'subagents' ? 'on' : 'ignored') : null,
   });
   return json({ ...state, setup, baseSync, ...looseOut, announce, ...attributes, ...(replaced ? { replaced } : {}), ...(mergeRefused ? { mergeRefused } : {}) });
 };
