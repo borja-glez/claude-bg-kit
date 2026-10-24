@@ -19,7 +19,7 @@ Input from the caller: the design path (`docs/waypoint/<project>/design.md`, fro
    - `zones`: globs of the files the task will touch, from the architecture; tasks of different tracks should not share zones unless the design forces it.
    - `depends_on` only where order really matters, so tracks can run in parallel.
    - `design_ref`: the slug of the design section each task comes from: its `##` or `###` heading in lower case, accents dropped, every other run of characters a single `-` (`## Diseño técnico` → `diseno-tecnico`; cut at 80 characters, leading and trailing `-` trimmed; a repeated heading gets `-2`), or `_intro` for the text before the first heading.
-   - If plan.yaml already exists, keep every existing id: never renumber; add new ids after the highest.
+   - If plan.yaml already exists, keep every existing id: never renumber; add new ids after the highest of its tasks and of its `retired:` list. Keep its `retired:` and `history:` lists as they are (`waypoint replan` writes them).
    - **Fixed cost.** Read the stats file the caller gives you (FORGE stats --json). Every task pays a fixed overhead of about `overheadMin.p50` minutes (baseline, validators, review, verdict) on top of its own work. When the stats file is missing, empty or unreadable, or its `overheadMin` is null (a new project), assume 7 minutes of fixed cost per task; when `estimate` is null, use the raw estimates (ratio 1). This holds in extend mode too: with no stats file given, assume 7.
      - Do not create tasks of less than about 15 minutes of work: merge small tasks of the same zone into one.
      - Keep depends_on chains short: the longest chain sets the run's wall time. Prefer tasks that can run side by side, at least two at once for most of the plan.
@@ -30,6 +30,6 @@ Input from the caller: the design path (`docs/waypoint/<project>/design.md`, fro
 4. Do not commit and do not publish anything.
 5. Reply with only: status (DONE | BLOCKED), the plan path, and one line per phase: `<phase id> <name>: <n> tasks`.
 
-**Extend mode.** The caller may instead give you `{design, plan, task}`: an approved design with a section `## <T>: <title>` for the plan task `T`, the existing plan.yaml and `T`. Read that section and add to plan.yaml the tasks it needs, in `T`'s track and phase, each with the `design_ref` of that section: new ids after the highest, never renumber. Keep `T` as the closing task: its `done_when` stays, and its `depends_on` becomes the new tasks. Run the validation of step 3, do not commit, and reply as in step 5 plus one line `new: <ids>`.
+**Extend mode.** The caller may instead give you `{design, plan, task}`: an approved design with a section `## <T>: <title>` for the plan task `T`, the existing plan.yaml and `T`. Read that section and add to plan.yaml the tasks it needs, in `T`'s track and phase, each with the `design_ref` of that section: new ids after the highest of the tasks and of `retired:`, never renumber, and `retired:` and `history:` kept as they are. Keep `T` as the closing task: its `done_when` stays, and its `depends_on` becomes the new tasks. Run the validation of step 3, do not commit, and reply as in step 5 plus one line `new: <ids>`.
 
 Never spawn subagents.

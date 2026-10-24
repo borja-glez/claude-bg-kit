@@ -2328,4 +2328,32 @@ describe('plugin layout', () => {
     expect(rows.find(l => l.startsWith('| `replan` |')), 'replan').toMatch(/\| `git-revert`[^|]*\|$/);
     expect(rows.find(l => l.startsWith('| `vision` |')), 'vision').toMatch(/\| `design-reopen`[^|]*\|$/);
   });
+  it('the product pilot lives in its own reference, read from the autonomous one, never in the infinite core (6b-3)', () => {
+    const product = read('plugins/forge/skills/infinite/references/product.md');
+    for (const w of ['## At the start', '## Each cycle', '## When a phase closes', 'forge-market', 'FORGE market note', 'FORGE market last', 'forge-phase-review',
+      'FORGE infinite phase --plan', 'replan <plan> --ops', '--why-file', '--mark', '--phase', '--done-when-file', 'design-critic', 'vision']) expect(product, w).toContain(w);
+    // H-1, B-2: the CLI's checks come before the decision, and the decision before the write; H-5: the start note is kept, then
+    // published; H-7: the review's findings become proposals; M-6: each step's output lives in the phase's folder.
+    for (const w of ['FORGE proposals replan-check --ops', '--check', 'FORGE decision add', '--locale', 'note.json', 'FORGE proposals add --file', '.forge/work/infinite/phase-<F>/']) {
+      expect(product, w).toContain(w);
+    }
+    const auto = read('plugins/forge/skills/infinite/references/autonomous.md');
+    // M-4: the pointer keys on the run's profile, which a compaction does not lose.
+    for (const w of ['references/product.md', '--explore', 'replan', 'run.autonomous.profile']) expect(auto, w).toContain(w);
+    const stop = read('plugins/forge/skills/infinite/references/stop.md');
+    for (const w of ['saturated', 'run.saturation']) expect(stop, w).toContain(w);
+    const core = read('plugins/forge/skills/infinite/SKILL.md');
+    for (const w of ['forge-market', 'forge-phase-review', '--explore']) expect(core, w).not.toContain(w);
+  });
+  it('the texts carry what 6b-3 built: to-task with --db, the revises chain, the replan undo and a planner that keeps retired and history', () => {
+    const core = read('plugins/forge/skills/infinite/SKILL.md');
+    // M-11: to-task reads the state listing; H-3: --revises exempts the whole chain.
+    expect(core).toContain('FORGE proposals to-task <id> --plan <plan> --db DB');
+    expect(core).not.toContain('for that one original only');
+    expect(runRef('autonomy').split('\n').find(l => l.startsWith('| `replan` |'))).toContain('names this decision');
+    // T6B3-PLANNER-KEEPS
+    for (const f of ['plugins/forge/agents/forge-planner.md', 'plugins/waypoint/skills/plan/SKILL.md']) {
+      for (const w of ['retired:', 'history:']) expect(read(f), `${f}: ${w}`).toContain(w);
+    }
+  });
 });

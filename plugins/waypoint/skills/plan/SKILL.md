@@ -35,6 +35,8 @@ tasks:
     zones: ["src/area/**"]      # globs this task will touch
     estimate_min: 30
     design_ref: arquitectura     # from a design: the slug of the section the task comes from
+retired: [T009]                  # only after `waypoint replan`: the ids it retired; keep it as it is
+history: [{ at: <iso>, why: <why>, changes: [<change>] }]   # only after `waypoint replan`; keep it as it is
 ```
 
 If plan.yaml does not exist yet and `docs/waypoint/<project>/design.md` exists with `status: approved`, derive the plan from it:
@@ -50,7 +52,7 @@ Likewise, if plan.yaml does not exist yet and the design's `start_prompt` contai
 
 **The link to the design.** Whether you wrote plan.yaml or it was already there (forge's `forge-planner` writes it on the Large path), when `docs/waypoint/<project>/design.md` has `status: approved`: set `artifacts.design` to the design's `artifact` (when it has one) and `design_version` to its version (the `v<N>` that `waypoint design-validate` prints for it), and give every task that comes from a section its `design_ref`. Do it again on every later sync from an approved design: an amendment adds versions, and `waypoint design-impact` lists the tasks it touched. While the design is a draft again (reopened), leave `design_version` as it is until it is approved.
 
-Rules: tasks small enough for one sitting (≤ ~60 min); every `done_when` must be checkable; ids stable once published (never renumber).
+Rules: tasks small enough for one sitting (≤ ~60 min); every `done_when` must be checkable; ids stable once published (never renumber). When you rewrite a plan that has `retired:` or `history:`, keep both as they are, and number a new task past the highest id of its tasks and of `retired:`.
 
 Run `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" validate <plan> --design docs/waypoint/<project>/design.md` (without `--design` when there is no design) and fix every reported issue, and every warning about `design_ref`, `design_version` or `artifacts.design`, before continuing.
 
