@@ -16,7 +16,7 @@ import { PAGE_RULES } from '../../../lib/publish.js';
 import { NOTE_ID } from '../../../lib/notes.js';
 import { autoApprovable } from '../../policy.js';
 import { CRITIC_TEXT_MAX, proposalBatch, readPlacement, readVerdicts } from '../../critic.js';
-import { ancestorsOf, judgeProposal, pendingForJudge, unparkProposal, JudgeError, type Judged, type Unparked } from '../../judge.js';
+import { ancestorsOf, judgeProposal, pendingForJudge, personsIdea, unparkProposal, JudgeError, type Judged, type Unparked } from '../../judge.js';
 import {
   convertedFrom, ideaLink, ideaNote, ideaOrigin, IDEA_MERGED, normalizeOwner, noteOf, pendingIdeas, roadmapOwner, saveOwner, type RoadmapOwner,
 } from '../../ideas.js';
@@ -484,6 +484,37 @@ export const command: Command = (args, ctx) => {
       }
       return json({ ok: true, ops: ops.length });
     }
+    case 'retire': {
+      // 6b-3 M-8, T6B3-RETIRE-CLI: a proposal whose task a re-plan retired (its taskId in the plan's `retired:`) is rejected by the run,
+      // under that re-plan's decision: judge's writes for a rejection, the forge:auto mark of its text, and a `retire` event. Never a
+      // person's idea (replan-check refuses its retire anyway) nor one that is not approved; every refusal is exit 2 with nothing written.
+      const id = rest[0];
+      if (!id || !PROPOSAL_ID.test(id)) throw new UsageError('proposals retire: a proposal id (p + 14 digits + 4 letters/digits) is required');
+      const [planArg, whyFile] = [subFlag('plan'), subFlag('why-file')];
+      if (!planArg || !whyFile) throw new UsageError('usage: forge proposals retire <id> --plan <plan.yaml> --why-file <why.txt>');
+      const why = clean(readText(whyFile, '--why-file'), CRITIC_TEXT_MAX);
+      if (!why) throw new UsageError('proposals retire: --why-file says nothing: write why the re-plan retired the task');
+      const doc = loadProposal(io.cwd, id);
+      if (!doc) throw new UsageError(`proposals retire: ${id} not found`);
+      if (!isActionable(doc)) throw new UsageError(`proposals retire: ${id} is ${doc.status}: only an approved proposal is rejected when its task is retired`);
+      if (personsIdea(readEvents(io.cwd).filter(e => e.kind === 'proposal'), id, doc)) {
+        throw new UsageError(`proposals retire: ${id} is a person's idea: a re-plan never decides it, the person does`);
+      }
+      const plan = planOf(readText(planArg, '--plan'), planArg, 'proposals retire: ');
+      if (!doc.taskId || !(plan.retired ?? []).includes(doc.taskId)) {
+        throw new UsageError(`proposals retire: the task of ${id} (${doc.taskId ?? 'none'}) is not in the retired list of ${planArg}`);
+      }
+      const at = ts();
+      const reason = `${spanish(parseRun(readRunText(runRootOf(io.cwd)))?.locale) ? 'retirada por el replan' : 'retired by replan'}: ${why}`;
+      const write: Record<string, unknown> = { status: 'rejected', decidedBy: 'forge:auto', decidedAt: at, reason };
+      const { parked, ...kept } = doc;
+      if (parked) write.parked = { __delete__: true };
+      const mark: ApprovalDoc = { status: 'rejected', decidedAt: at, by: 'forge:auto', digest: proposalDigest(id, doc) };
+      saveProposal(io.cwd, id, { ...kept, status: 'rejected', decidedBy: 'forge:auto', decidedAt: at, reason });
+      saveApproval(io.cwd, id, mark);
+      appendEvent(io.cwd, { ts: at, kind: 'proposal', action: 'retire', id, taskId: doc.taskId });
+      return json({ id, write, approval: { op: 'set', collection: 'approvals', doc_id: id, data: mark } });
+    }
     case 'batch': {
       // The ids are every argument but --out and its value (and --pending): an id after a flag still counts, and any other
       // flag is refused. Task 7 fix 1: --pending takes, instead, every proposal still to judge (pendingForJudge), from disk.
@@ -593,6 +624,6 @@ export const command: Command = (args, ctx) => {
       return json({ id, ...out, decision: recorded.n, ...(publish ? { publish } : {}) });
     }
     default:
-      throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task|replan-check|batch|judge|ideas|unpark> ...');
+      throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task|replan-check|retire|batch|judge|ideas|unpark> ...');
   }
 };

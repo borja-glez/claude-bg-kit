@@ -21,7 +21,7 @@ forge asks at its gates unless autonomy is `auto`. It is `auto` when `FORGE begi
 | `plan-confirm` | confirm the planner's phase outline | `plan-edit` with the new task ids |
 | `mode` | the mode and N that `FORGE swarm propose` recommends | `none` |
 | `ruling` | with blocking findings (`breaker` or `stalled`): a ruling, the task blocked with a question note, and the other tasks go on | `none` |
-| `replan` | in a `product` run of `/forge:infinite`, when a phase closes: the re-plan `forge-phase-review` proposes, once `FORGE proposals replan-check` passes it (keeping the plan as it is is always one alternative) | `git-revert` of the plan commit that names this decision |
+| `replan` | in a `product` run of `/forge:infinite`, when a phase closes: the re-plan `forge-phase-review` proposes, once `FORGE proposals replan-check` passes it (keeping the plan as it is is always one alternative) | `none`, its reason naming the plan commit that comes after it (its title names the decision): reverting that commit undoes it |
 | `vision` | in that phase close, the change to the vision the review proposes, through `/waypoint:design reopen --auto` and the design loop below (keeping the vision as it is is always one alternative) | `design-reopen` |
 
 - **The design loop in auto** (`references/large.md` step 1, and `/forge:infinite` after it reopens the design). `<design>` is `docs/waypoint/<project>/design.md`.

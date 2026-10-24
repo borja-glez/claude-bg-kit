@@ -2325,32 +2325,47 @@ describe('plugin layout', () => {
   it('the session finds the replan and vision points and their undo (6b-3 M-5)', () => {
     expect(runRef('decisions')).toMatch(/"point": "<[a-z|-]*\|replan\|vision\|[a-z|-]*>"/);
     const rows = runRef('autonomy').split('\n');
-    expect(rows.find(l => l.startsWith('| `replan` |')), 'replan').toMatch(/\| `git-revert`[^|]*\|$/);
+    // Task 7 fix 1, Minor 6: decision first, so the plan commit comes after the replan decision and its undo can only name it.
+    expect(rows.find(l => l.startsWith('| `replan` |')), 'replan').toMatch(/\| `none`[^|]*\|$/);
     expect(rows.find(l => l.startsWith('| `vision` |')), 'vision').toMatch(/\| `design-reopen`[^|]*\|$/);
   });
-  it('the product pilot lives in its own reference, read from the autonomous one, never in the infinite core (6b-3)', () => {
-    const product = read('plugins/forge/skills/infinite/references/product.md');
-    for (const w of ['## At the start', '## Each cycle', '## When a phase closes', 'forge-market', 'FORGE market note', 'FORGE market last', 'forge-phase-review',
-      'FORGE infinite phase --plan', 'replan <plan> --ops', '--why-file', '--mark', '--phase', '--done-when-file', 'design-critic', 'vision']) expect(product, w).toContain(w);
-    // H-1, B-2: the CLI's checks come before the decision, and the decision before the write; H-5: the start note is kept, then
-    // published; H-7: the review's findings become proposals; M-6: each step's output lives in the phase's folder.
-    for (const w of ['FORGE proposals replan-check --ops', '--check', 'FORGE decision add', '--locale', 'note.json', 'FORGE proposals add --file', '.forge/work/infinite/phase-<F>/']) {
-      expect(product, w).toContain(w);
-    }
-    const auto = read('plugins/forge/skills/infinite/references/autonomous.md');
+  it('the product pilot lives in its own references, read from the autonomous one, never in the infinite core (6b-3)', () => {
+    const ref = (f: string) => read(`plugins/forge/skills/infinite/references/${f}.md`);
+    // T6B3-PRODUCT-SPLIT: product.md, read every cycle, keeps the three headings and points to the start and the phase close.
+    const product = ref('product');
+    for (const w of ['## At the start', '## Each cycle', '## When a phase closes', 'references/product-start.md', 'references/phase-close.md', 'FORGE market last',
+      'FORGE infinite phase --plan', '--phase', '--done-when-file', 'vision']) expect(product, w).toContain(w);
+    // H-5: the start note is kept, then published.
+    const start = ref('product-start');
+    for (const w of ['forge-market', 'FORGE market note', 'FORGE market last', '--locale', 'note.json']) expect(start, w).toContain(w);
+    // H-7: the review's findings become proposals; M-6: each step's output lives in the phase's folder; M-8 through the CLI.
+    const close = ref('phase-close');
+    for (const w of ['forge-phase-review', 'replan <plan> --ops', '--why-file', '--mark', 'design-critic', 'vision', 'FORGE proposals add --file', 'FORGE proposals retire',
+      '.forge/work/infinite/phase-<F>/', '"revertOf"']) expect(close, w).toContain(w);
+    // Minor 9, H-1: replan-check, then the dry run, then the decision, then replan-check again and the write; the vision's decision
+    // before its reopen.
+    const at = (w: string) => { const i = close.indexOf(w); expect(i, w).toBeGreaterThanOrEqual(0); return i; };
+    const order = ['FORGE proposals replan-check --ops', '--why-file PH/why.txt --check', 'FORGE decision add --data-file PH/decision.json',
+      '`FORGE proposals replan-check` again', '--why-file PH/why.txt`'].map(at);
+    expect(order, 'the re-plan').toEqual([...order].sort((a, b) => a - b));
+    expect(at('FORGE decision add --data-file PH/vision.json'), 'the vision').toBeLessThan(at('/waypoint:design reopen --auto'));
+    // Important 1, T6B3-STATE-FRESH: the state is listed again after the task, before the phase check.
+    expect(product.indexOf('**A fresh state.**')).toBeLessThan(product.indexOf('FORGE infinite phase --plan'));
+    const auto = ref('autonomous');
     // M-4: the pointer keys on the run's profile, which a compaction does not lose.
-    for (const w of ['references/product.md', '--explore', 'replan', 'run.autonomous.profile']) expect(auto, w).toContain(w);
-    const stop = read('plugins/forge/skills/infinite/references/stop.md');
+    for (const w of ['references/product.md', 'references/product-start.md', '--explore', 'replan', 'run.autonomous.profile', 'list state first']) expect(auto, w).toContain(w);
+    const stop = ref('stop');
     for (const w of ['saturated', 'run.saturation']) expect(stop, w).toContain(w);
     const core = read('plugins/forge/skills/infinite/SKILL.md');
-    for (const w of ['forge-market', 'forge-phase-review', '--explore']) expect(core, w).not.toContain(w);
+    for (const w of ['forge-market', 'forge-phase-review', '--explore', 'product-start.md', 'phase-close.md']) expect(core, w).not.toContain(w);
   });
   it('the texts carry what 6b-3 built: to-task with --db, the revises chain, the replan undo and a planner that keeps retired and history', () => {
     const core = read('plugins/forge/skills/infinite/SKILL.md');
-    // M-11: to-task reads the state listing; H-3: --revises exempts the whole chain.
+    // M-11, T6B3-STATE-FRESH: §3.1 lists the state that to-task and FORGE cycle read; H-3: --revises exempts the whole chain.
+    expect(core).toContain('`meta` and `state`');
     expect(core).toContain('FORGE proposals to-task <id> --plan <plan> --db DB');
     expect(core).not.toContain('for that one original only');
-    expect(runRef('autonomy').split('\n').find(l => l.startsWith('| `replan` |'))).toContain('names this decision');
+    expect(runRef('autonomy').split('\n').find(l => l.startsWith('| `replan` |'))).toContain('plan commit that comes after it');
     // T6B3-PLANNER-KEEPS
     for (const f of ['plugins/forge/agents/forge-planner.md', 'plugins/waypoint/skills/plan/SKILL.md']) {
       for (const w of ['retired:', 'history:']) expect(read(f), `${f}: ${w}`).toContain(w);

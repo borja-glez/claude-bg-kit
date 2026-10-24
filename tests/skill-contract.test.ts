@@ -239,7 +239,7 @@ describe('the skills cite only what the CLIs accept (I-10)', () => {
       expect(subs.size, cmd).toBeGreaterThan(0);
     }
     for (const [cmd, sub] of [['swarm', 'merge'], ['swarm', 'step'], ['swarm', 'task'], ['proposals', 'to-task'], ['decision', 'md'], ['infinite', 'status'], ['shadow', 'collect'],
-      ['authorize', 'merge-on-finish'], ['local', 'get'], ['local', 'set']]) {
+      ['authorize', 'merge-on-finish'], ['local', 'get'], ['local', 'set'], ['proposals', 'replan-check'], ['proposals', 'retire'], ['infinite', 'phase'], ['market', 'note']]) {
       expect(vocab.forge.subs.get(cmd)?.has(sub), `forge ${cmd} ${sub}`).toBe(true);
     }
   });
