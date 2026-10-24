@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { parse } from 'yaml';
 import { applyReplan, normalizeOps, ReplanError, MAX_OPS } from '../src/lib/replan.js';
 import { parsePlan } from '../src/lib/plan.js';
+import { planLite } from '../src/lib/plan-lite.js';
+import { buildSyncWrites } from '../src/lib/sync.js';
+import { proposalToTask } from '../src/forge/to-task.js';
 import { PLAN_HISTORY_MAX } from '../src/lib/types.js';
+import type { ProposalDoc } from '../src/lib/proposals.js';
 import { run, type Io } from '../src/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
 
@@ -14,6 +19,13 @@ const ops = (...o: unknown[]) => normalizeOps({ ops: o }).ops;
 const bad = (o: unknown[]) => {
   try { applyReplan(FIXTURE, ops(...o), 'x', AT); return []; } catch (e) { expect(e).toBeInstanceOf(ReplanError); return (e as ReplanError).issues; }
 };
+// m-2: an anchor and an alias, which a reorder could put before its anchor.
+const ALIAS = FIXTURE.replace('zones: ["src/db/**"]', 'zones: &z ["src/db/**"]').replace('zones: ["src/api/orders/**"]', 'zones: *z');
+// m-5: two versions, F1 in the first and F2 in the second.
+const TWO_VERSIONS = FIXTURE.replace('    phases: [F1, F2]', '    phases: [F1]\n  - id: "0.2"\n    phases: [F2]');
+const proposal = (): ProposalDoc & { id: string } => ({
+  id: 'p20261022100000abcd', ts: '', category: 'feature', risk: 'low', title: 'Otra idea', rationale: 'r', evidence: '', pillar: 'p', status: 'approved', source: 'scout', author: 'a',
+});
 
 describe('applyReplan', () => {
   it('adds a phase after another, moves tasks into it and reorders, never renumbering, with one history entry', () => {
@@ -113,9 +125,47 @@ describe('applyReplan', () => {
     expect(r.text).toContain('# the base first\nphases:\n');
     expect(r.text).toContain('  # the payment\n  - id: T004\n');
     expect(r.text.startsWith('project: demo-shop\nlocale: es\nversion: "0.1"\n')).toBe(true);
-    // The quotes stay; the yaml library pads a one-line list (`[ T001 ]`), as proposals to-task writes it too.
-    expect(r.text).toContain('    zones: [ "src/db/**" ]\n');
-    expect(r.text).toContain('  - { id: F2, name: Checkout, plan_status: provisional }\n  - { id: F1, name: Base, plan_status: committed }\n');
+    // m-6: the meaning, not the yaml library's padding: the zone keeps its quotes, and the phases stay one-line maps.
+    expect(r.text).toMatch(/^ {4}zones: \[\s*"src\/db\/\*\*"\s*\]$/m);
+    expect(r.text).toMatch(/^ {2}- \{\s*id: F2, name: Checkout, plan_status: provisional\s*\}\n {2}- \{\s*id: F1, name: Base, plan_status: committed\s*\}$/m);
+  });
+  it('m-3: keeps the line endings of the file: a CRLF plan stays CRLF', () => {
+    const crlf = FIXTURE.replace(/\n/g, '\r\n');
+    const r = applyReplan(crlf, ops({ op: 'move', task: 'T003', phase: 'F2' }), 'x', AT);
+    expect(r.text).toContain('\r\n');
+    expect(r.text).not.toMatch(/[^\r]\n/);
+    expect(parsePlan(r.text).tasks.find(t => t.id === 'T003')?.phase).toBe('F2');
+  });
+  it('m-5: on a plan with two versions, a new phase joins the version of `after`, else the last one, and each version is reordered', () => {
+    const after = parsePlan(applyReplan(TWO_VERSIONS, ops({ op: 'add-phase', id: 'F3', name: 'Tres', after: 'F1' }), 'x', AT).text);
+    expect(after.versions.map(v => v.phases)).toEqual([['F1', 'F3'], ['F2']]);
+    const last = parsePlan(applyReplan(TWO_VERSIONS, ops({ op: 'add-phase', id: 'F3', name: 'Tres' }), 'x', AT).text);
+    expect(last.phases.map(f => f.id)).toEqual(['F1', 'F2', 'F3']);
+    expect(last.versions.map(v => v.phases)).toEqual([['F1'], ['F2', 'F3']]);
+    const ordered = parsePlan(applyReplan(TWO_VERSIONS, ops({ op: 'add-phase', id: 'F3', name: 'Tres', after: 'F1' }, { op: 'order-phases', phases: ['F2', 'F3', 'F1'] }), 'x', AT).text);
+    expect(ordered.phases.map(f => f.id)).toEqual(['F2', 'F3', 'F1']);
+    expect(ordered.versions.map(v => v.phases)).toEqual([['F3', 'F1'], ['F2']]);
+  });
+  it('m-1: an operation that changes nothing gives no line, and a batch with no real change gives the text as it was', () => {
+    const same = ops(
+      { op: 'order-phases', phases: ['F1', 'F2'] }, { op: 'order-tasks', phase: 'F1', tasks: ['T001', 'T002', 'T003'] },
+      { op: 'edit', task: 'T001', title: 'Esquema de pedidos', estimate_min: 20 }, { op: 'edit', task: 'T002', depends_on: ['T001'] },
+      { op: 'edit', task: 'T003', depends_on: [] }, { op: 'edit-phase', id: 'F1', name: 'Base', plan_status: 'committed' },
+    );
+    expect(applyReplan(FIXTURE, same, 'x', AT)).toEqual({ text: FIXTURE, changes: [] });
+    // A move away and back: the plan is the same, so nothing is written and no entry is added.
+    expect(applyReplan(FIXTURE, ops({ op: 'move', task: 'T003', phase: 'F2' }, { op: 'move', task: 'T003', phase: 'F1' }), 'x', AT)).toEqual({ text: FIXTURE, changes: [] });
+    // Beside a real change, the same operations give no line.
+    const mixed = applyReplan(FIXTURE, [...same, ...ops({ op: 'edit', task: 'T001', title: 'Esquema' })], 'x', AT);
+    expect(mixed.changes).toEqual(['T001: title']);
+    expect(parsePlan(mixed.text).history?.[0].changes).toEqual(['T001: title']);
+  });
+  it('m-2: refuses a plan with an alias, whatever the operation', () => {
+    expect(parsePlan(ALIAS).tasks[1].zones).toEqual(['src/db/**']);
+    for (const o of [[{ op: 'order-tasks', phase: 'F1', tasks: ['T002', 'T001', 'T003'] }], [{ op: 'move', task: 'T006', phase: 'F1' }]]) {
+      const issues = (() => { try { applyReplan(ALIAS, ops(...o), 'x', AT); return []; } catch (e) { expect(e).toBeInstanceOf(ReplanError); return (e as ReplanError).issues; } })();
+      expect(issues.join()).toContain('alias');
+    }
   });
   it('writes a new id that reads as a number back as text', () => {
     const p = parsePlan(applyReplan(FIXTURE, ops({ op: 'add-phase', id: '10', name: 'Diez' }, { op: 'move', task: 'T006', phase: '10' }), 'x', AT).text);
@@ -128,6 +178,53 @@ describe('applyReplan', () => {
     const move = ops({ op: 'move', task: 'T003', phase: 'F2' })[0];
     expect(() => applyReplan(FIXTURE, Array.from({ length: MAX_OPS + 1 }, () => move), 'x', AT)).toThrow(ReplanError);
     expect(() => applyReplan(FIXTURE, [move], ' \n ', AT)).toThrow(ReplanError);
+  });
+});
+
+describe('a retired id is never minted again (T6B3-RETIRED-IDS)', () => {
+  it('retire keeps the id in `retired`, to-task mints past it, and sync never gives the new task the old state', () => {
+    const r = applyReplan(FIXTURE, ops({ op: 'retire', task: 'T006', why: 'el proveedor lo envía' }), 'x', AT);
+    const plan = parsePlan(r.text);
+    expect(plan.retired).toEqual(['T006']);
+    expect(planLite(r.text)).toEqual(plan);
+    const { task } = proposalToTask(plan, proposal(), {});
+    expect(task.id).toBe('T007');
+    // A later retire adds its id, after the first.
+    expect(parsePlan(applyReplan(r.text, ops({ op: 'retire', task: 'T005', why: 'y' }), 'y', AT).text).retired).toEqual(['T006', 'T005']);
+    // The roadmap holds T006 done with its commits; the first sync orphans it, the next one adds T007 as a new, free task.
+    const known = { state: Object.fromEntries(['T001', 'T002', 'T003', 'T004', 'T005', 'T006'].map(id => [id, 1])) };
+    const done = { status: 'done' as const, commits: [{ sha: 'abc1234', ts: AT, title: 'email', add: 1, del: 0 }] };
+    const opts = (states: Record<string, unknown>) => ({ nowIso: AT, sessionId: 'main', eventId: 'e1', states: states as never });
+    const writes = (p: typeof plan, states: Record<string, unknown>) => buildSyncWrites(p, known, 'out', opts(states)).batches.flat().filter(w => w.collection === 'state');
+    expect(writes(plan, { T006: done })).toEqual([{ op: 'update', collection: 'state', doc_id: 'T006', data: { status: 'orphaned', prevStatus: 'done' }, if_version: 1 }]);
+    const next = writes({ ...plan, tasks: [...plan.tasks, task] }, { T006: { ...done, status: 'orphaned', prevStatus: 'done' } });
+    expect(next).toEqual([{ op: 'set', collection: 'state', doc_id: 'T007', data: { status: 'free' } }]);
+  });
+});
+
+describe('the history every reader takes (T6B3-HISTORY-LENIENT, m-4)', () => {
+  const entry = (i: number, why = `r${i}`) => `  - at: "2026-10-${String(i % 28 + 1).padStart(2, '0')}T10:00:00.000Z"\n    why: ${why}\n    changes: ["phases: F2, F1"]\n`;
+  // Hand-edited: 31 entries, a why of 400 characters, an entry with 25 lines and one that is not text, and two malformed entries.
+  const MESSY = `${FIXTURE}history:\n${entry(0, 'w'.repeat(400))}${Array.from({ length: 30 }, (_, i) => entry(i + 1)).join('')}`
+    + '  - just text\n  - { at: 1, why: x, changes: [] }\n'
+    + `  - at: "2026-10-30T10:00:00.000Z"\n    why: many\n    changes: [${Array.from({ length: 25 }, (_, i) => `"c${i}"`).join(', ')}, 7]\n`;
+  it('keeps the last 30 well-formed entries, clips their texts to the caps, and never fails the plan', () => {
+    const h = parsePlan(MESSY).history!;
+    expect(h).toHaveLength(PLAN_HISTORY_MAX.entries);
+    expect(h[0].why).toBe('r2');
+    expect(h.at(-1)).toEqual({ at: '2026-10-30T10:00:00.000Z', why: 'many', changes: Array.from({ length: PLAN_HISTORY_MAX.changes }, (_, i) => `c${i}`) });
+    const long = parsePlan(`${FIXTURE}history:\n${entry(0, 'w'.repeat(400))}`).history!;
+    expect(long[0].why).toHaveLength(PLAN_HISTORY_MAX.why);
+    // planLite reads it the same, and a history that is no list is no history.
+    expect(planLite(MESSY)).toEqual(parsePlan(MESSY));
+    expect(parsePlan(`${FIXTURE}history: oops\n`).history).toBeUndefined();
+    expect(planLite(`${FIXTURE}history: oops\n`)).toEqual(parsePlan(`${FIXTURE}history: oops\n`));
+  });
+  it('a replan of such a plan still writes within the caps', () => {
+    const text = applyReplan(MESSY, ops({ op: 'move', task: 'T003', phase: 'F2' }), 'w'.repeat(400), AT).text;
+    // The file's list keeps its last 30 items; the readers show the well-formed ones, the new entry last.
+    expect((parse(text) as { history: unknown[] }).history).toHaveLength(PLAN_HISTORY_MAX.entries);
+    expect(parsePlan(text).history!.at(-1)).toEqual({ at: AT, why: 'w'.repeat(PLAN_HISTORY_MAX.why), changes: ['T003: F1 → F2'] });
   });
 });
 
@@ -221,6 +318,23 @@ describe('waypoint replan', () => {
     expect(run(['replan', 'plan.yaml', '--ops', 'ops.json', '--why-file', 'missing.txt'], io).code).toBe(2);
     expect(run(['replan', '--ops', 'ops.json', '--why-file', 'why.txt'], io).code).toBe(2);
     untouched();
+    // m-7: a bare list is told what the file must be.
+    writeFileSync(path.join(dir, 'why.txt'), 'la revisión de fase');
+    writeFileSync(path.join(dir, 'ops.json'), JSON.stringify([{ op: 'move', task: 'T003', phase: 'F2' }]));
+    const list = replan();
+    expect(list.code).toBe(2);
+    expect(list.stderr).toContain('{ "ops": [...] }');
+    untouched();
+  });
+  it('m-2: a plan with an alias is exit 2 with waypoint\'s message, and stays as it was', () => {
+    writeFileSync(path.join(dir, 'plan.yaml'), ALIAS);
+    writeFileSync(path.join(dir, 'ops.json'), JSON.stringify({ ops: [{ op: 'order-tasks', phase: 'F1', tasks: ['T002', 'T001', 'T003'] }] }));
+    const r = replan();
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/^replan: refused/);
+    expect(r.stderr).toContain('alias');
+    expect(readFileSync(path.join(dir, 'plan.yaml'), 'utf8')).toBe(ALIAS);
+    expect(readdirSync(dir).sort()).toEqual(['assets', 'ops.json', 'plan.yaml', 'why.txt']);
   });
   it('H-1: --check validates and prints the changes, and writes nothing', () => {
     writeFileSync(path.join(dir, 'ops.json'), JSON.stringify({ ops: [{ op: 'move', task: 'T003', phase: 'F2' }, { op: 'edit-phase', id: 'F2', goal: 'cobrar' }] }));

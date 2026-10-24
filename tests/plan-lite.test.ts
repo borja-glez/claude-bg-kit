@@ -36,6 +36,9 @@ tasks:
     delicate: true
     design_ref: alcance
   - { id: T2, title: Dos, track: core, phase: p2, done_when: hecho, depends_on: [T1] }
+retired: [T0]
+history:
+  - { at: "2026-10-22T10:00:00.000Z", why: la revisión de p1, changes: ["T2: p1 → p2", −T0 (ya no hace falta)] }
 `;
 // The schema's defaults: FULL without locale, artifacts and versions (T2 already leaves out zones, p1 plan_status).
 const DEFAULTS = FULL.replace('locale: es\n', '').replace(/^artifacts:\n(?: {2}.*\n)+/m, '').replace(/^versions:\n(?: {2}.*\n)+/m, '');
@@ -43,6 +46,8 @@ const DEFAULTS = FULL.replace('locale: es\n', '').replace(/^artifacts:\n(?: {2}.
 describe('planLite (I-13)', () => {
   it('reads a valid plan as parsePlan does: every field the band reads, and the rest', () => {
     for (const text of [FIXTURE, FULL, DEFAULTS]) expect(planLite(text)).toEqual(parsePlan(text));
+    // m-4: the replan's history and retired ids too (FULL has both).
+    expect(planLite(FULL)).toMatchObject({ retired: ['T0'], history: [{ at: '2026-10-22T10:00:00.000Z', why: 'la revisión de p1', changes: ['T2: p1 → p2', '−T0 (ya no hace falta)'] }] });
   });
   it('fills in the defaults of the schema as parsePlan does', () => {
     expect(DEFAULTS).not.toMatch(/^(?:locale|artifacts|versions):/m);

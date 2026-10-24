@@ -2,10 +2,11 @@
 // and retires tasks, and never renumbers an id. The operations change the nodes of the YAML document, never its text, so
 // comments and the order of everything else stay. One history entry per replan stays in plan.yaml, and the result must
 // pass parsePlan before the caller writes anything.
-import { isMap, isScalar, isSeq, parseDocument, type Document, type YAMLMap, type YAMLSeq } from 'yaml';
+import { isMap, isScalar, isSeq, parseDocument, visit, type Document, type YAMLMap, type YAMLSeq } from 'yaml';
 import { clean } from './decisions.js';
 import { parsePlan, PlanError, isPlanId } from './plan.js';
-import { PHASE_GOAL_MAX, PLAN_HISTORY_MAX, type PlanHistoryEntry, type PlanStatus } from './types.js';
+import { fitText } from './plan-history.js';
+import { PHASE_GOAL_MAX, PLAN_HISTORY_MAX, type Plan, type PlanHistoryEntry, type PlanStatus } from './types.js';
 
 export type ReplanOp =
   | { op: 'add-phase'; id: string; name: string; goal?: string; after?: string; plan_status?: PlanStatus }
@@ -34,23 +35,10 @@ export class ReplanError extends Error {
   }
 }
 
-/** M-1: `clean` (one line, no control or bidi characters), then clipped by whole characters to `max` UTF-16 units, the
- *  length the plan's schema counts, so a clipped text always passes it. */
-function fit(s: string, max: number): string {
-  const t = clean(s, max);
-  if (t.length <= max) return t;
-  let out = '';
-  for (const ch of t) {
-    if (out.length + ch.length > max) break;
-    out += ch;
-  }
-  return out;
-}
-
 type Raw = Record<string, unknown>;
 const isObj = (x: unknown): x is Raw => !!x && typeof x === 'object' && !Array.isArray(x);
 const planId = (x: unknown): x is string => typeof x === 'string' && isPlanId(x);
-const text = (max: number) => (x: unknown): string | null => (typeof x === 'string' ? fit(x, max) || null : null);
+const text = (max: number) => (x: unknown): string | null => (typeof x === 'string' ? fitText(x, max) || null : null);
 const idList = (x: unknown): string[] | null => (Array.isArray(x) && x.every(planId) ? x : null);
 const status = (x: unknown): PlanStatus | null => (x === 'committed' || x === 'provisional' ? x : null);
 const minutes = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : null);
@@ -133,6 +121,7 @@ function readOp(o: unknown): ReplanOp | { error: string; kind?: string } {
 /** The operations of `{ "ops": [...] }` (L-1: the other keys of the file, such as a phase review's summary, are ignored).
  *  Each operation that is unknown or malformed is an error with its position; an empty list and more than MAX_OPS are one. */
 export function normalizeOps(x: unknown): { ops: ReplanOp[]; errors: string[] } {
+  if (Array.isArray(x)) return { ops: [], errors: ['ops: the file must be { "ops": [...] }, not a bare list'] };
   const list = isObj(x) ? x.ops : undefined;
   if (!Array.isArray(list)) return { ops: [], errors: ['ops: not a list'] };
   if (!list.length) return { ops: [], errors: [EMPTY] };
@@ -147,17 +136,21 @@ export function normalizeOps(x: unknown): { ops: ReplanOp[]; errors: string[] } 
   return { ops, errors };
 }
 
-/** The plan's lists as nodes: its phases and tasks (plain maps) and the phase list of each version. */
+/** The plan's lists as nodes: its phases and tasks (maps) and the phase list of each version. */
 interface Nodes { phases: YAMLSeq; tasks: YAMLSeq; versions: YAMLSeq[] }
 
 function nodesOf(doc: Document): Nodes {
+  // m-2: an alias (`*name`) that an order or a retire moves before its anchor cannot be written back, so none is taken.
+  let alias = false;
+  visit(doc, { Alias: () => { alias = true; return visit.BREAK; } });
+  if (alias) throw new ReplanError(['plan: it uses an alias (*name), which a replan cannot keep in place: write the value out in plan.yaml']);
   const maps = (s: unknown): s is YAMLSeq => isSeq(s) && s.items.every(isMap);
   const phases = doc.get('phases', true), tasks = doc.get('tasks', true), versions = doc.get('versions', true);
   if (!maps(phases) || !maps(tasks) || (versions !== undefined && !maps(versions))) {
-    throw new ReplanError(['plan: phases, tasks and versions must be lists of plain maps (no aliases)']);
+    throw new ReplanError(['plan: phases, tasks and versions must be lists of maps']);
   }
   const lists: unknown[] = versions === undefined ? [] : versions.items.map(v => (v as YAMLMap).get('phases', true));
-  if (!lists.every((l): l is YAMLSeq => isSeq(l) && l.items.every(isScalar))) throw new ReplanError(['plan: the phases of each version must be a plain list']);
+  if (!lists.every((l): l is YAMLSeq => isSeq(l) && l.items.every(isScalar))) throw new ReplanError(['plan: the phases of each version must be a list of ids']);
   return { phases, tasks, versions: lists };
 }
 
@@ -165,9 +158,15 @@ const idOf = (n: unknown): string => (isMap(n) ? String(n.get('id')) : '');
 const scalarOf = (n: unknown): string => (isScalar(n) ? String(n.value) : '');
 const indexOf = (seq: YAMLSeq, id: string): number => seq.items.findIndex(n => idOf(n) === id);
 const mapOf = (seq: YAMLSeq, id: string): YAMLMap | null => (seq.items.find(n => idOf(n) === id) as YAMLMap | undefined) ?? null;
+/** A task's dependencies as written; none when it has no `depends_on` (the schema's default). */
+const depsOf = (task: unknown): string[] => {
+  const d = isMap(task) ? task.get('depends_on', true) : undefined;
+  return isSeq(d) ? d.items.map(scalarOf) : [];
+};
 
-/** What keeps `given` from being every one of `current` once, in some order: those missing, those that are none, those twice. */
-function notEachOnce(given: string[], current: string[], what: string): string | null {
+/** What keeps `given` from naming every one of `current` once, in some order: those missing, those that are none, those
+ *  twice. `one` and `many` name what the list holds (a phase, phases). */
+function notEachOnce(given: string[], current: string[], one: string, many: string): string | null {
   const seen = new Set<string>();
   const twice = new Set<string>();
   for (const id of given) {
@@ -178,15 +177,15 @@ function notEachOnce(given: string[], current: string[], what: string): string |
   const extra = [...seen].filter(id => !current.includes(id));
   const parts = [
     missing.length ? `missing ${missing.join(', ')}` : '',
-    extra.length ? `${extra.join(', ')} ${extra.length === 1 ? 'is' : 'are'} not ${what}` : '',
+    extra.length ? `${extra.join(', ')} ${extra.length === 1 ? `is not a ${one}` : `are not ${many}`}` : '',
     twice.size ? `${[...twice].join(', ')} twice` : '',
   ].filter(Boolean);
-  return parts.length ? `the list must name each ${what} once: ${parts.join('; ')}` : null;
+  return parts.length ? `the list must name every ${one} once: ${parts.join('; ')}` : null;
 }
 
 type Step = { change: string | null } | { issue: string };
 
-/** One operation on the document's nodes: its change line (null when it changes nothing), or why it cannot be done. */
+/** One operation on the document's nodes: its change line (m-1: null when it changes nothing), or why it cannot be done. */
 function applyOp(doc: Document, n: Nodes, op: ReplanOp, retired: string[]): Step {
   switch (op.op) {
     case 'add-phase': {
@@ -211,19 +210,24 @@ function applyOp(doc: Document, n: Nodes, op: ReplanOp, retired: string[]): Step
     case 'edit-phase': {
       const node = mapOf(n.phases, op.id);
       if (!node) return { issue: `phase ${op.id} not found` };
-      const fields = PHASE_FIELDS.filter(k => op[k] !== undefined);
+      // A phase without plan_status is committed, the schema's default.
+      const now = (k: (typeof PHASE_FIELDS)[number]) => node.get(k) ?? (k === 'plan_status' ? 'committed' : undefined);
+      const fields = PHASE_FIELDS.filter(k => op[k] !== undefined && op[k] !== now(k));
+      if (!fields.length) return { change: null };
       for (const k of fields) node.set(k, op[k]);
       return { change: `${op.id}: ${fields.join(', ')}` };
     }
     case 'order-phases': {
-      const wrong = notEachOnce(op.phases, n.phases.items.map(idOf), 'a phase');
+      const wrong = notEachOnce(op.phases, n.phases.items.map(idOf), 'phase', 'phases');
       if (wrong) return { issue: wrong };
+      const shape = () => JSON.stringify([n.phases.items.map(idOf), n.versions.map(l => l.items.map(scalarOf))]);
+      const before = shape();
       const byId = new Map(n.phases.items.map(x => [idOf(x), x]));
       n.phases.items = op.phases.map(id => byId.get(id));
       // Each version keeps its phases, in the new order.
       const rank = (x: unknown) => op.phases.indexOf(scalarOf(x));
       for (const l of n.versions) l.items.sort((a, b) => rank(a) - rank(b));
-      return { change: `phases: ${op.phases.join(', ')}` };
+      return { change: shape() === before ? null : `phases: ${op.phases.join(', ')}` };
     }
     case 'move': {
       const node = mapOf(n.tasks, op.task);
@@ -239,15 +243,18 @@ function applyOp(doc: Document, n: Nodes, op: ReplanOp, retired: string[]): Step
       // The places the phase's tasks hold in the list take them in the new order; every other task stays where it is.
       const slots = n.tasks.items.flatMap((x, i) => (isMap(x) && String(x.get('phase')) === op.phase ? [i] : []));
       const byId = new Map(slots.map(i => [idOf(n.tasks.items[i]), n.tasks.items[i]]));
-      const wrong = notEachOnce(op.tasks, [...byId.keys()], `a task of ${op.phase}`);
+      const wrong = notEachOnce(op.tasks, [...byId.keys()], `task of ${op.phase}`, `tasks of ${op.phase}`);
       if (wrong) return { issue: wrong };
+      if ([...byId.keys()].join() === op.tasks.join()) return { change: null };
       op.tasks.forEach((id, k) => { n.tasks.items[slots[k]] = byId.get(id); });
       return { change: `${op.phase}: ${op.tasks.join(', ')}` };
     }
     case 'edit': {
       const node = mapOf(n.tasks, op.task);
       if (!node) return { issue: `task ${op.task} not found` };
-      const fields = TASK_FIELDS.filter(k => op[k] !== undefined);
+      const same = (k: (typeof TASK_FIELDS)[number]) => (k === 'depends_on' ? depsOf(node).join() === op.depends_on?.join() : node.get(k) === op[k]);
+      const fields = TASK_FIELDS.filter(k => op[k] !== undefined && !same(k));
+      if (!fields.length) return { change: null };
       for (const k of fields) {
         if (k !== 'depends_on') { node.set(k, op[k]); continue; }
         const deps = doc.createNode(op.depends_on ?? []);
@@ -262,17 +269,40 @@ function applyOp(doc: Document, n: Nodes, op: ReplanOp, retired: string[]): Step
       n.tasks.items.splice(i, 1);
       retired.push(op.task);
       // The why is clipped to the room the line leaves it, so the line keeps its closing parenthesis.
-      return { change: `−${op.task} (${fit(op.why, PLAN_HISTORY_MAX.change - op.task.length - 4)})` };
+      return { change: `−${op.task} (${fitText(op.why, PLAN_HISTORY_MAX.change - op.task.length - 4)})` };
     }
   }
 }
 
 /** parsePlan, its problems as a ReplanError. */
-function checked(text: string): void {
-  try { parsePlan(text); } catch (e) {
+function checked(text: string): Plan {
+  try { return parsePlan(text); } catch (e) {
     if (e instanceof PlanError) throw new ReplanError(e.issues);
     throw e;
   }
+}
+
+/** The plan as the roadmap and every agent read it: its history aside. */
+const shapeOf = (p: Plan): string => JSON.stringify({ ...p, history: undefined });
+
+/** m-3: the document as text, in the line endings of the file it came from. A document yaml cannot write is a ReplanError. */
+function serialize(doc: Document, eol: string): string {
+  let out: string;
+  // lineWidth 0: no folding, so a long text the replan did not touch keeps its one line.
+  try { out = doc.toString({ lineWidth: 0 }); } catch (e) { throw new ReplanError([`plan: yaml cannot write the result: ${(e as Error).message}`]); }
+  return eol === '\n' ? out : out.replace(/\n/g, eol);
+}
+
+/** T6B3-RETIRED-IDS: each retired id joins the plan's `retired` list (uncapped, once each), which to-task mints past. */
+function addRetired(doc: Document, ids: string[]): void {
+  const list = doc.get('retired', true);
+  if (!isSeq(list)) {
+    const node = doc.createNode(ids);
+    node.flow = true;
+    doc.set('retired', node);
+    return;
+  }
+  for (const id of ids) if (!list.items.some(x => scalarOf(x) === id)) list.items.push(doc.createNode(id));
 }
 
 /** M-2: an entry keeps PLAN_HISTORY_MAX.changes lines; past that, its last line says how many more there were. */
@@ -281,10 +311,10 @@ function entryChanges(all: string[]): string[] {
   return all.length <= max ? all : [...all.slice(0, max - 1), `… ${all.length - max + 1} more`];
 }
 
-/** Adds the entry to the plan's history and keeps the last PLAN_HISTORY_MAX.entries. */
+/** Adds the entry to the plan's history and keeps the last PLAN_HISTORY_MAX.entries items of its list. */
 function addHistory(doc: Document, entry: PlanHistoryEntry): void {
   const history = doc.get('history', true);
-  // addIn on a missing key would set the entry itself, not a list holding it.
+  // addIn on a missing key would set the entry itself, not a list holding it; a history that is no list reads as none.
   if (!isSeq(history)) { doc.set('history', doc.createNode([entry])); return; }
   history.flow = false;
   doc.addIn(['history'], doc.createNode(entry));
@@ -294,17 +324,18 @@ function addHistory(doc: Document, entry: PlanHistoryEntry): void {
 /**
  * Applies the operations in order to the plan's text and adds one entry to its history: `{ text, changes }`, one line per
  * change (`T004: F2 → F3`, `phases: F1, F3, F2`, `F1: T003, T001, T002`, `+F3 Pulido`, `F3: name, goal`, `T006: done_when`,
- * `−T007 (<why>)`). The why and each line are cleaned and clipped (M-1), never refused for length. A batch that changes
- * nothing gives the text as it was, with no entry. Throws ReplanError with every problem: an id that does not exist, a new id
- * already taken, an order list incomplete or with extras, a retired task another still depends on once every operation is
- * applied, and those of parsePlan (cycles, references).
+ * `−T007 (<why>)`). A retired id joins `retired`. The why and each line are cleaned and clipped (M-1), never refused for
+ * length. An operation that changes nothing gives no line, and a batch whose plan comes out the same gives the text as it
+ * was, with no entry (m-1). Throws ReplanError with every problem: an id that does not exist, a new id already taken, an
+ * order list incomplete or with extras, a retired task another still depends on once every operation is applied, an alias,
+ * and those of parsePlan (cycles, references).
  */
 export function applyReplan(text: string, ops: ReplanOp[], why: string, at: string): { text: string; changes: string[] } {
   if (!ops.length) throw new ReplanError([EMPTY]);
   if (ops.length > MAX_OPS) throw new ReplanError([TOO_MANY(ops.length)]);
-  const reason = fit(why, PLAN_HISTORY_MAX.why);
+  const reason = fitText(why, PLAN_HISTORY_MAX.why);
   if (!reason) throw new ReplanError(['why: empty (the why is part of the history)']);
-  checked(text);
+  const before = checked(text);
   const doc = parseDocument(text);
   const nodes = nodesOf(doc);
   const issues: string[] = [];
@@ -313,19 +344,21 @@ export function applyReplan(text: string, ops: ReplanOp[], why: string, at: stri
   ops.forEach((op, i) => {
     const r = applyOp(doc, nodes, op, retired);
     if ('issue' in r) issues.push(`ops[${i}] ${op.op}: ${r.issue}`);
-    else if (r.change !== null) changes.push(fit(r.change, PLAN_HISTORY_MAX.change));
+    else if (r.change !== null) changes.push(fitText(r.change, PLAN_HISTORY_MAX.change));
   });
   // A retire is checked against the plan after every operation: an edit of the same batch may lift the dependency.
-  const tasks = (doc.toJS() as { tasks: { id: string; depends_on?: string[] }[] }).tasks;
   for (const id of retired) {
-    const users = tasks.filter(t => t.depends_on?.includes(id)).map(t => t.id);
+    const users = nodes.tasks.items.filter(t => depsOf(t).includes(id)).map(idOf);
     if (users.length) issues.push(`retire ${id}: ${users.join(', ')} still depend${users.length === 1 ? 's' : ''} on it`);
   }
   if (issues.length) throw new ReplanError(issues);
-  if (!changes.length) return { text, changes };
+  if (!changes.length) return { text, changes: [] };
+  if (retired.length) addRetired(doc, retired);
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  // m-1: a move away and back, say, leaves the plan as it was: nothing to write, no history entry.
+  if (shapeOf(checked(serialize(doc, eol))) === shapeOf(before)) return { text, changes: [] };
   addHistory(doc, { at, why: reason, changes: entryChanges(changes) });
-  // lineWidth 0: no folding, so a long text the replan did not touch keeps its one line.
-  const next = doc.toString({ lineWidth: 0 });
+  const next = serialize(doc, eol);
   checked(next);
   return { text: next, changes };
 }

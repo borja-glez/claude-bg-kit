@@ -1,5 +1,6 @@
 import { parse } from 'yaml';
 import { isPlanId } from './ids.js';
+import { historyOf } from './plan-history.js';
 import { TRACK_COLORS, type Plan, type PlanPhase, type PlanTask, type PlanTrack, type PlanVersion } from './types.js';
 
 type Obj = Record<string, unknown>;
@@ -16,7 +17,8 @@ const objs = (x: unknown): Obj[] => (Array.isArray(x) ? x.filter(isObj) : []);
  * still read, and the band shows it: the CLI is the one that validates. M1: the plan's id rule still holds for every
  * reader: a track, phase or task whose id breaks it is left out, and so is such an id in `depends_on` and in a version's
  * `phases`. Null when it is not a plan at all (no project, or no track, phase or task with a plan id). Pure and without
- * Node imports: the mods use it.
+ * Node imports: the mods use it. m-4: the replan's `retired` ids and its `history` read as parsePlan reads them (the
+ * history through the same lenient historyOf).
  */
 export function planLite(text: string): Plan | null {
   let raw: unknown;
@@ -54,6 +56,7 @@ export function planLite(text: string): Plan | null {
     id: v.id as string, phases: ids(v.phases), ...(isStr(v.target) ? { target: v.target } : {}),
   }));
   const dv = raw.design_version;
+  const history = historyOf(raw.history);
   return {
     project: raw.project,
     locale: isStr(raw.locale) && raw.locale ? raw.locale : 'en',
@@ -61,5 +64,7 @@ export function planLite(text: string): Plan | null {
     ...(typeof dv === 'number' && Number.isInteger(dv) && dv > 0 ? { design_version: dv } : {}),
     artifacts: { ...(isStr(a.roadmap) ? { roadmap: a.roadmap } : {}), ...(isStr(a.design) ? { design: a.design } : {}) },
     versions, tracks, phases, tasks,
+    ...(Array.isArray(raw.retired) ? { retired: ids(raw.retired) } : {}),
+    ...(history ? { history } : {}),
   };
 }

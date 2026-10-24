@@ -22,6 +22,10 @@ ${extraPhase}tasks:
 const prop = (over: Partial<ProposalDoc> = {}): ProposalDoc & { id: string } => ({ id: 'p20261011100000aaaa', ts: '', category: 'quality', risk: 'low', title: 'Cut dead code', rationale: 'r'.repeat(400), evidence: '', pillar: 'p', status: 'approved', source: 'scout', author: 'a', ...over });
 
 describe('proposalToTask', () => {
+  it('numbers past the ids a replan retired, so a retired task never comes back as a new one (T6B3-RETIRED-IDS)', () => {
+    const { task } = proposalToTask(parsePlan(`${planText('en')}retired: [T009, X3, T004]\n`), prop(), {});
+    expect(task.id).toBe('T010');
+  });
   it('numbers after the highest T id and uses the first track', () => {
     const { task } = proposalToTask(parsePlan(planText('en')), prop({ path: 'src/**' }), {});
     expect(task).toMatchObject({ id: 'T008', track: 'backend', phase: 'PX', title: 'Cut dead code', done_when: 'Cut dead code — validators pass', zones: ['src/**'], estimate_min: 30, depends_on: [] });

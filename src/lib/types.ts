@@ -32,7 +32,8 @@ export const PHASE_GOAL_MAX = 300;
 /** 6b-3: one `waypoint replan` of the plan: when, why, and one line per change. */
 export interface PlanHistoryEntry { at: string; why: string; changes: string[] }
 /** M-2: every agent and the band read plan.yaml whole, so its history stays small: the last 30 entries, each with a why of
- *  300 characters and 20 change lines of 200. `waypoint replan` clips to these, never refusing for length. */
+ *  300 characters and 20 change lines of 200. `waypoint replan` writes within these, and every reader clips to them
+ *  (T6B3-HISTORY-LENIENT), so neither ever refuses a plan for its history. */
 export const PLAN_HISTORY_MAX = { entries: 30, why: 300, changes: 20, change: 200 } as const;
 export interface Plan {
   project: string;
@@ -44,6 +45,9 @@ export interface Plan {
   tracks: PlanTrack[];
   phases: PlanPhase[];
   tasks: PlanTask[];
+  /** T6B3-RETIRED-IDS: the ids of the tasks `waypoint replan` retired, uncapped: `to-task` never mints one again, so a new
+   *  task never takes a retired one's state. */
+  retired?: string[];
   history?: PlanHistoryEntry[];
 }
 /** What the page and metrics need — satisfied by Plan and by planViewFromDocs(). */

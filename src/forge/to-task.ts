@@ -36,8 +36,9 @@ function includesOf(p: ProposalDoc & { id: string }, es: boolean): string {
 }
 
 export function proposalToTask(plan: Plan, p: ProposalDoc & { id: string }, opts: { track?: string }): { task: PlanTask; phase: PlanPhase | null } {
+  // T6B3-RETIRED-IDS: past the plan's tasks and the ids a replan retired, so a new task never takes a retired one's state.
   let max = 0;
-  for (const t of plan.tasks) { const m = /^T(\d+)$/.exec(t.id); if (m) max = Math.max(max, Number(m[1])); }
+  for (const id of [...plan.tasks.map(t => t.id), ...(plan.retired ?? [])]) { const m = /^T(\d+)$/.exec(id); if (m) max = Math.max(max, Number(m[1])); }
   const es = plan.locale.toLowerCase().startsWith('es');
   const existing = plan.phases.find(ph => ph.id === IMPROVEMENTS_PHASE);
   const phase: PlanPhase | null = existing ? null : { id: IMPROVEMENTS_PHASE, name: es ? 'Mejoras' : 'Improvements', plan_status: 'provisional' };
