@@ -4,6 +4,7 @@ import { isSyncBatch } from '../lib/sync-files.js';
 import { leftoversOf, removeLeftovers } from './doctor.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { parsePlan, PlanError, isPlanId } from '../lib/plan.js';
+import { applyReplan, normalizeOps, ReplanError } from '../lib/replan.js';
 import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known, type Write } from '../lib/sync.js';
 import { normalizeMessage, normalizeMeta, normalizePhase, sessionDoc, stateDoc } from '../page/normalize.js';
 import { readDocs } from '../lib/read-docs.js';
@@ -45,7 +46,7 @@ const nodeSpawn: Spawn = (command, options) => spawn(command, options);
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined>; spawn?: Spawn }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|replan|hash|clean-cache|page|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -165,6 +166,28 @@ export function run(argv: string[], io: Io): Result {
           }
         }
         return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}${refs}`);
+      }
+      case 'replan': {
+        // 6b-3 Task 1: moves, orders, adds, edits and retires phases and tasks, never renumbering, with the why in the plan's
+        // history. H-1: --check validates and prints the changes, writing nothing. Every check runs before the one atomic
+        // write, so a problem (exit 2, the issues on stderr) leaves the plan byte for byte as it was.
+        const opsFile = flag('ops'), whyFile = flag('why-file');
+        if (!args[0] || args[0].startsWith('--') || !opsFile || !whyFile) return fail('usage: waypoint replan <plan.yaml> --ops <ops.json> --why-file <why.txt> [--check]', 2);
+        const file = abs(args[0]);
+        let text: string, raw: unknown, why: string;
+        try { text = readFileSync(file, 'utf8'); } catch { return fail(`replan: cannot read ${args[0]}`, 2); }
+        try { raw = JSON.parse(readFileSync(abs(opsFile), 'utf8')); } catch { return fail(`replan: cannot read ${opsFile} as JSON`, 2); }
+        try { why = readFileSync(abs(whyFile), 'utf8'); } catch { return fail(`replan: cannot read ${whyFile}`, 2); }
+        const { ops, errors } = normalizeOps(raw);
+        if (errors.length) return fail(new ReplanError(errors).message, 2);
+        let r: ReturnType<typeof applyReplan>;
+        try { r = applyReplan(text, ops, why, io.now().toISOString()); } catch (e) {
+          if (e instanceof ReplanError) return fail(e.message, 2);
+          throw e;
+        }
+        if (args.includes('--check')) return ok(JSON.stringify({ changes: r.changes }));
+        if (r.text !== text) writeAtomic(file, r.text);
+        return ok(JSON.stringify({ changes: r.changes, history: parsePlan(r.text).history?.length ?? 0 }));
       }
       case 'clean-cache': {
         const p = loadPlan();

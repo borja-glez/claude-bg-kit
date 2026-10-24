@@ -1,6 +1,6 @@
 import { parse } from 'yaml';
 import { z } from 'zod';
-import { TRACK_COLORS, type Plan } from './types.js';
+import { PHASE_GOAL_MAX, PLAN_HISTORY_MAX, TRACK_COLORS, type Plan } from './types.js';
 import { PLAN_ID_RE as SEG, isPlanId, realDate } from './ids.js';
 
 /** The plan's rule for task, track and phase ids (src/lib/ids.ts, free of yaml and zod for the page). */
@@ -42,9 +42,15 @@ function planSchemas() {
       id,
       name: z.string().min(1),
       plan_status: z.enum(['committed', 'provisional']).default('committed'),
-      goal: z.string().max(300).optional(),
+      goal: z.string().max(PHASE_GOAL_MAX).optional(),
     })).min(1),
     tasks: z.array(TaskSchema).min(1),
+    // 6b-3, M-2: what `waypoint replan` changed and why (the roadmap's documents leave it out).
+    history: z.array(z.object({
+      at: z.string(),
+      why: z.string().max(PLAN_HISTORY_MAX.why),
+      changes: z.array(z.string().max(PLAN_HISTORY_MAX.change)).max(PLAN_HISTORY_MAX.changes),
+    })).max(PLAN_HISTORY_MAX.entries).optional(),
   });
   return { TaskSchema, PlanSchema };
 }

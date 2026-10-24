@@ -27,6 +27,13 @@ export interface PlanTask {
 export interface PlanPhase { id: string; name: string; plan_status: PlanStatus; goal?: string }
 export interface PlanTrack { id: string; name: string; color: TrackColor }
 export interface PlanVersion { id: string; phases: string[]; target?: string }
+/** The longest goal of a phase. */
+export const PHASE_GOAL_MAX = 300;
+/** 6b-3: one `waypoint replan` of the plan: when, why, and one line per change. */
+export interface PlanHistoryEntry { at: string; why: string; changes: string[] }
+/** M-2: every agent and the band read plan.yaml whole, so its history stays small: the last 30 entries, each with a why of
+ *  300 characters and 20 change lines of 200. `waypoint replan` clips to these, never refusing for length. */
+export const PLAN_HISTORY_MAX = { entries: 30, why: 300, changes: 20, change: 200 } as const;
 export interface Plan {
   project: string;
   locale: string;
@@ -37,6 +44,7 @@ export interface Plan {
   tracks: PlanTrack[];
   phases: PlanPhase[];
   tasks: PlanTask[];
+  history?: PlanHistoryEntry[];
 }
 /** What the page and metrics need — satisfied by Plan and by planViewFromDocs(). */
 export type PlanView = Pick<Plan, 'tracks' | 'phases' | 'tasks' | 'versions'>;
