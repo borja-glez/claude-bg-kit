@@ -11,12 +11,13 @@
 // Only the person's own submit counts: a choice the engine sent while they were away, a follow-up instead of the submit,
 // or a yes they added a note to is not a yes.
 import { execFileSync } from 'node:child_process';
-import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isRunBranch, isSafeId } from '../lib/execution-state.js';
 import { samePath, worktreeDirs } from '../lib/worktree.js';
 import { hookRoot, mainCheckout } from './local.js';
 import { sleepSync } from './pid.js';
+import { measureJsonl, readTail } from './transcript-file.js';
 import { answerTrust, TRUST_QUESTION_END, type AskedQuestion } from './trust.js';
 
 export type AuthKind = 'merge' | 'merge-on-finish';
@@ -465,26 +466,11 @@ function toolUseIds(message: unknown): string[] {
  * result is never taken for this one.
  */
 function resultFromTranscript(file: unknown, toolUseId: unknown): Record<string, unknown> | null {
-  if (typeof file !== 'string' || !path.isAbsolute(file) || !file.endsWith('.jsonl')) return null;
+  const m = measureJsonl(file);
+  if (!m) return null;
   if (typeof toolUseId !== 'string' || !toolUseId) return null;
-  let tail: string;
-  try {
-    // Never a pipe or a device: opening one could wait.
-    if (!statSync(file).isFile()) return null;
-    const fd = openSync(file, 'r');
-    try {
-      const size = fstatSync(fd).size;
-      const len = Math.min(size, TRANSCRIPT_TAIL);
-      const buf = Buffer.alloc(len);
-      let off = 0;
-      while (off < len) {
-        const n = readSync(fd, buf, off, len - off, size - len + off);
-        if (n <= 0) break;
-        off += n;
-      }
-      tail = buf.subarray(0, off).toString('utf8');
-    } finally { closeSync(fd); }
-  } catch { return null; }
+  const tail = readTail(m.file, TRANSCRIPT_TAIL);
+  if (tail === null) return null;
   const lines = tail.split('\n');
   for (let i = lines.length - 1; i >= 0 && i >= lines.length - TRANSCRIPT_LINES; i--) {
     if (!lines[i].includes('"answers"')) continue;
