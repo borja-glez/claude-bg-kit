@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MAX_NOTE, NOTE_TYPES, counts, filterNotes, normalizeNote, normalizeNoteDecision, notesSince } from '../src/lib/notes.js';
+import { MAX_NOTE, MAX_SOURCES, NOTE_TYPES, counts, filterNotes, normalizeNote, normalizeNoteDecision, notesSince } from '../src/lib/notes.js';
 import type { NoteDoc } from '../src/lib/types.js';
 
 type N = NoteDoc & { id: string };
@@ -119,7 +119,7 @@ describe('notesSince', () => {
 describe('counts', () => {
   it('counts per type and open questions', () => {
     const c = counts([n('a', { type: 'decision' }), n('b', { type: 'question' }), n('c', { type: 'question', answer: 'x' }), n('d', { type: 'debt' })]);
-    expect(c).toEqual({ decision: 1, idea: 0, debt: 1, question: 2, open: 1 });
+    expect(c).toEqual({ decision: 1, idea: 0, debt: 1, question: 2, market: 0, open: 1 });
   });
 });
 
@@ -131,5 +131,25 @@ describe('normalizeNote proposalId', () => {
   it('drops proposalId with a slash or a non-string', () => {
     expect(normalizeNote({ ...b, proposalId: 'a/b' })!.proposalId).toBeUndefined();
     expect(normalizeNote({ ...b, proposalId: 5 })!.proposalId).toBeUndefined();
+  });
+});
+
+describe('market notes (6b-3)', () => {
+  const M = { ts: 't', type: 'market', author: 'session:S', text: 'similar games' };
+  it('reads a market note with its http(s) sources only, once each, and the composer still offers the four types', () => {
+    const n = normalizeNote({ ...M, sources: [{ title: 'A', url: 'https://a.example/x' }, { title: 'B', url: 'javascript:alert(1)' }, { url: 'http://b.example' }, { title: 'A again', url: 'https://a.example/x' }, 'nope'] });
+    expect(n?.type).toBe('market');
+    expect(n?.sources).toEqual([{ title: 'A', url: 'https://a.example/x' }, { title: 'http://b.example', url: 'http://b.example' }]);
+    expect(NOTE_TYPES).toEqual(['decision', 'idea', 'debt', 'question']);
+    expect(counts([n!]).market).toBe(1);
+  });
+  it('a source is a URL new URL reads, of at most 2000 characters, with a clean title of at most 200; MAX_SOURCES of them, on a market note only (L-14)', () => {
+    const long = `https://a.example/${'x'.repeat(2000)}`;
+    const n = normalizeNote({ ...M, sources: [{ title: 'bad', url: 'https://' }, { title: 'long', url: long }, { title: 'sp ace', url: 'https://a.example/a b' }, { title: `t\u0007${'y'.repeat(300)}`, url: 'https://c.example' }] });
+    expect(n?.sources).toEqual([{ title: `t ${'y'.repeat(198)}`, url: 'https://c.example' }]);
+    const many = Array.from({ length: MAX_SOURCES + 5 }, (_, i) => ({ title: `s${i}`, url: `https://s.example/${i}` }));
+    expect(normalizeNote({ ...M, sources: many })?.sources).toHaveLength(MAX_SOURCES);
+    expect(normalizeNote({ ...M, sources: [] })).not.toHaveProperty('sources');
+    expect(normalizeNote({ ...M, type: 'idea', sources: [{ title: 'A', url: 'https://a.example/x' }] })).not.toHaveProperty('sources');
   });
 });

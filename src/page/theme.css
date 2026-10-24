@@ -155,8 +155,8 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .seg i{display:block;min-width:2px}
 .seg .st-done{background:var(--done)} .seg .st-in_progress{background:var(--cur)} .seg .st-blocked{background:var(--blk)} .seg .st-free{background:var(--s1)}
 /* notes view */
-.nt-decision{color:var(--t-peach)} .nt-idea{color:var(--t-sapphire)} .nt-debt{color:var(--t-red)} .nt-question{color:var(--t-mauve)}
-.nb-decision{border-left-color:var(--peach)!important} .nb-idea{border-left-color:var(--sapphire)!important} .nb-debt{border-left-color:var(--red)!important} .nb-question{border-left-color:var(--mauve)!important}
+.nt-decision{color:var(--t-peach)} .nt-idea{color:var(--t-sapphire)} .nt-debt{color:var(--t-red)} .nt-question{color:var(--t-mauve)} .nt-market{color:var(--t-teal)}
+.nb-decision{border-left-color:var(--peach)!important} .nb-idea{border-left-color:var(--sapphire)!important} .nb-debt{border-left-color:var(--red)!important} .nb-question{border-left-color:var(--mauve)!important} .nb-market{border-left-color:var(--teal)!important}
 .ncomp{display:flex;gap:6px;margin-top:12px;align-items:flex-start;flex-wrap:wrap}
 .ncomp textarea{flex:1;min-width:0;min-height:38px;padding:8px 10px;font-size:12.5px;resize:vertical}
 .ncomp .btn{margin:0;display:flex;align-items:center;gap:4px;min-height:32px}

@@ -175,7 +175,10 @@ export interface InfiniteDoc {
 }
 export interface PhaseDoc { id: string; name: string; plan_status: PlanStatus; goal?: string; order: number; tasks: PlanTask[] }
 
-export type NoteType = 'decision' | 'idea' | 'debt' | 'question';
+/** 6b-3: `market` is forge's market research (forge-market); the page's composer offers only the other four (NOTE_TYPES). */
+export type NoteType = 'decision' | 'idea' | 'debt' | 'question' | 'market';
+/** 6b-3: a page a market note cites: an http(s) URL and its title. */
+export interface NoteSource { title: string; url: string }
 /** The structured part of a decision note: `auto: true` when forge took it without asking, false when the person did. */
 export interface NoteDecision {
   point: DecisionPoint; what: string; chosen: string; alternatives?: Alternative[]; tradeoffs?: string; why: string; revert?: string; auto: boolean;
@@ -196,4 +199,6 @@ export interface NoteDoc {
   answeredByName?: string;
   proposalId?: string;
   decision?: NoteDecision;
+  /** 6b-3 L-14: the pages a market note cites; no other type keeps any. */
+  sources?: NoteSource[];
 }

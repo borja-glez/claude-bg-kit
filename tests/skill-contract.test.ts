@@ -52,6 +52,7 @@ const DISPATCH: Record<Cli, Record<string, [file: string, from: string, to: stri
     decision: ['src/forge/cli/commands/decision.ts', 'export const command', ''],
     resource: ['src/forge/cli/commands/resource.ts', 'export const command', ''],
     blocked: ['src/forge/cli/commands/blocked.ts', 'export const command', ''],
+    market: ['src/forge/cli/commands/market.ts', 'export const command', ''],
   },
   waypoint: {},
 };

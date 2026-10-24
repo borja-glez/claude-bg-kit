@@ -1,8 +1,15 @@
-import type { NoteDecision, NoteDoc, NoteType } from './types.js';
+import type { NoteDecision, NoteDoc, NoteSource, NoteType } from './types.js';
 import { DECISION_POINTS, LIMITS, clean, normalizeAlternative, type Alternative, type DecisionPoint } from './decisions.js';
 
+/** The types the page's composer offers. */
 export const NOTE_TYPES: NoteType[] = ['decision', 'idea', 'debt', 'question'];
+/** 6b-3: every type a note can have, the ones normalizeNote accepts: the composer's and forge's `market`. */
+export const NOTE_KINDS: NoteType[] = [...NOTE_TYPES, 'market'];
 export const MAX_NOTE = 2000;
+/** 6b-3: the most sources a market note keeps; a source's URL and title are cut at MAX_URL and MAX_SOURCE_TITLE. */
+export const MAX_SOURCES = 20;
+const MAX_URL = 2000;
+const MAX_SOURCE_TITLE = 200;
 const MAX_NAME = 80;
 /** The longest note or answer text a `say` line quotes. */
 export const SAY_MAX = 200;
@@ -17,11 +24,43 @@ export const NOTE_ID = /^[A-Za-z0-9_.:~@+-]{1,160}$/;
 /** At most `max` code points: a clip never splits a surrogate pair (carry 6). */
 const clipPoints = (s: string, max: number): string => (s.length <= max ? s : Array.from(s).slice(0, max).join(''));
 
+/** The href of `url` when a source can keep it: an http: or https: URL that `new URL` reads, of at most MAX_URL characters,
+ *  with no space, control or bidi character (clean leaves it as it is), so the text kept is the link it opens; else null. */
+function webHref(url: string): string | null {
+  if (!url || url.length > MAX_URL || /\s/.test(url) || clean(url, MAX_URL) !== url) return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
+  } catch { return null; }
+}
+
+/**
+ * 6b-3: the sources of a market note (or of a market report's finding) from untrusted JSON: each `{ title, url }` whose URL
+ * webHref keeps, once per URL (the first wins), its title cleaned and cut to MAX_SOURCE_TITLE (the URL when it has none); at
+ * most MAX_SOURCES. Anything else is left out.
+ */
+export function normalizeSources(x: unknown): NoteSource[] {
+  if (!Array.isArray(x)) return [];
+  const out: NoteSource[] = [];
+  const seen = new Set<string>();
+  for (const s of x) {
+    if (out.length >= MAX_SOURCES) break;
+    if (!s || typeof s !== 'object' || Array.isArray(s)) continue;
+    const o = s as Record<string, unknown>;
+    const url = str(o.url) ? o.url.trim() : '';
+    const href = webHref(url);
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    out.push({ title: (str(o.title) ? clean(o.title, MAX_SOURCE_TITLE) : '') || clean(url, MAX_SOURCE_TITLE), url });
+  }
+  return out;
+}
+
 /** Strict normalizer for shared (untrusted) note docs. A missing ts becomes '' (treated as old). */
 export function normalizeNote(x: unknown): NoteDoc | null {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
   const o = x as Record<string, unknown>;
-  if (!str(o.type) || !(NOTE_TYPES as string[]).includes(o.type)) return null;
+  if (!str(o.type) || !(NOTE_KINDS as string[]).includes(o.type)) return null;
   if (!str(o.author) || !str(o.text)) return null;
   const out: NoteDoc = { ts: str(o.ts) ? o.ts : '', type: o.type as NoteType, author: o.author, text: clipPoints(o.text, MAX_NOTE) };
   if (str(o.taskId)) out.taskId = o.taskId;
@@ -36,6 +75,9 @@ export function normalizeNote(x: unknown): NoteDoc | null {
   if (str(o.proposalId) && o.proposalId && !o.proposalId.includes('/')) out.proposalId = o.proposalId;
   const decision = normalizeNoteDecision(o.decision);
   if (decision) out.decision = decision;
+  // 6b-3 L-14: only a market note keeps sources, so no one can hang links on another note.
+  const sources = out.type === 'market' ? normalizeSources(o.sources) : [];
+  if (sources.length) out.sources = sources;
   return out;
 }
 
@@ -140,7 +182,7 @@ export function noteLines(notes: NoteDoc[], since: string | null, locale: 'es' |
 }
 
 export function counts(notes: NoteDoc[]): Record<NoteType | 'open', number> {
-  const c: Record<NoteType | 'open', number> = { decision: 0, idea: 0, debt: 0, question: 0, open: 0 };
+  const c: Record<NoteType | 'open', number> = { decision: 0, idea: 0, debt: 0, question: 0, market: 0, open: 0 };
   for (const n of notes) {
     c[n.type]++;
     if (isOpen(n)) c.open++;

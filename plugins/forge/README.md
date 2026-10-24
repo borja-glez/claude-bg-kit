@@ -108,6 +108,7 @@ Triage reads the task text, the files it is likely to touch and the sensitive zo
 | `forge-planner` | Opus | xhigh | Large path: turns an approved design into a waypoint plan |
 | `forge-scout` | Opus | medium | infinite mode: evidence-backed improvement proposals |
 | `forge-critic` | Opus | high | infinite mode: judges a batch of proposals (keep, adapt, drop or clash) |
+| `forge-market` | Sonnet | medium | product pilot: market research on the web, with a source for every finding |
 
 Every agent pins its `model` and `effort`, so none inherits your session's. Implementers write their report to `report-<n>.txt` and also include it in their reply. They climb a five-rung ladder: `mech` → `impl-light` → `impl` → `impl-high` → `impl-heavy`. The `economy` profile steps implementers down one rung (`impl-heavy` → `forge-impl-high`, `impl-high` → `forge-impl`, `impl` → `forge-impl-light`) and `quality` steps them up (`impl` and `impl-high` → `forge-impl-heavy`, `impl-light` → `forge-impl`, `mech` → `forge-impl-light`).
 

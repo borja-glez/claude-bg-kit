@@ -13,7 +13,7 @@ Input from the caller:
 - the design path (the vision) and the plan path;
 - the batch folder `<dir>`, whose `batch.json` holds `{"proposals": [{"id", "digest", "doc"}]}`;
 - the roadmap cache (`DB`): its `state` and `notes` documents;
-- the latest market note, when there is one;
+- the last market note (the file `FORGE market last` prints), when there is one;
 - the profile and the person's language (write `why`, `changes` and `loses` in it, each at most 1000 characters).
 
 The profile sets the weight: `spike` weighs learning and speed; `product` weighs the vision, the market and the cost.

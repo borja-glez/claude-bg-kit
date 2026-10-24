@@ -544,7 +544,7 @@ describe('plugin layout', () => {
       'forge-review-correctness': ['opus', 'high'], 'forge-review-security': ['opus', 'high'], 'forge-review-perf': ['opus', 'high'], 'forge-fable': ['fable', 'high'],
       'forge-review-final': ['opus', 'xhigh'],
       'forge-planner': ['opus', 'xhigh'], 'forge-scout': ['opus', 'medium'], 'forge-verify': ['sonnet', 'high'], 'forge-verify-heavy': ['opus', 'high'],
-      'forge-critic': ['opus', 'high'],
+      'forge-critic': ['opus', 'high'], 'forge-market': ['sonnet', 'medium'],
     };
     const agents = readdirSync(new URL('../plugins/forge/agents/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3));
     expect(agents.length).toBeGreaterThan(0);
@@ -2301,5 +2301,12 @@ describe('plugin layout', () => {
       expect(md, f).not.toContain('siguen corriendo solo con tu confianza, como hasta ahora');
       expect(md, f).toMatch(/one task per cycle|una tarea por ciclo/);
     }
+  });
+  it('forge-market searches the web and cites, and the scout, the critic and the planner read its last report (6b-3)', () => {
+    const md = read('plugins/forge/agents/forge-market.md');
+    // H-4: the web only, no file tools: the session writes market.json from its reply.
+    expect(md.split(/\r?\n---\r?\n/)[0]).toMatch(/\ntools: WebSearch, WebFetch\r?\n/);
+    for (const w of ['market.json', '"noWeb"', '"sources"', '"summary"', '"findings"']) expect(md, w).toContain(w);
+    for (const a of ['forge-scout', 'forge-critic', 'forge-planner']) expect(read(`plugins/forge/agents/${a}.md`), a).toContain('FORGE market last');
   });
 });
