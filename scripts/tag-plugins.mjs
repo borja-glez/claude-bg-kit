@@ -1,13 +1,13 @@
 // C8, I-05: after a plan is merged into main with a clean tree, one local tag per plugin whose version changed, as
 // `claude plugin tag` makes it (<name>--v<version>, after checking plugin.json against the marketplace). Without --apply
 // it only shows them (--dry-run). It never pushes: --push is refused, and publishing tags is the person's call.
-// Usage: node scripts/tag-plugins.mjs <waypoint|forge|lens>… [--apply]
+// Usage: node scripts/tag-plugins.mjs <waypoint|forge|lens|web>… [--apply]
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const PLUGINS = ['waypoint', 'forge', 'lens'];
-const USAGE = 'usage: node scripts/tag-plugins.mjs <waypoint|forge|lens>… [--apply]';
+export const PLUGINS = ['waypoint', 'forge', 'lens', 'web'];
+const USAGE = 'usage: node scripts/tag-plugins.mjs <waypoint|forge|lens|web>… [--apply]';
 
 /** The `claude` arguments that tag each named plugin, or the error that stops the script. */
 export function tagCommands(argv) {
