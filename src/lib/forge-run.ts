@@ -103,8 +103,9 @@ const idList = (x: unknown): x is string[] =>
 const oneOf = <T extends string>(list: readonly T[], x: unknown): x is T => typeof x === 'string' && (list as readonly string[]).includes(x);
 
 /** 6b-3: a saturation report, or null unless every field reads: `saturated` agrees with `blocking`, each list holds at most
- *  SATURATION_LIST_MAX ids and its count is at least that many (M-10). Other fields are ignored. */
-function saturationReportOf(x: unknown): SaturationReport | null {
+ *  SATURATION_LIST_MAX ids and its count is at least that many (M-10). Other fields are ignored. The one reader of a report:
+ *  parseRun's and the roadmap page's (meta/infinite, T6B3-PAGE-ONE-READER). */
+export function saturationReportOf(x: unknown): SaturationReport | null {
   if (!isObj(x)) return null;
   const { saturated, at, rounds, blocking, evidence: e, waiting: w, counts: c, missing } = x;
   if (typeof saturated !== 'boolean' || typeof at !== 'string' || !at || at.length > 64 || !isCount(rounds)) return null;

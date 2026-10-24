@@ -52,9 +52,10 @@ export interface Model {
 /** The six views of §4.6, in the order of the nav. */
 export type View = 'summary' | 'plan' | 'schedule' | 'runs' | 'sessions' | 'talk';
 export const VIEWS: readonly View[] = ['summary', 'plan', 'schedule', 'runs', 'sessions', 'talk'];
-/** The conversation's filters (§4.6.7): everything, open questions, decisions, proposals, ideas and debt, and mine. */
-export type TalkFilter = 'all' | 'open' | 'decision' | 'proposals' | 'ideas' | 'mine';
-export const TALK_FILTERS: readonly TalkFilter[] = ['all', 'open', 'decision', 'proposals', 'ideas', 'mine'];
+/** The conversation's filters (§4.6.7): everything, open questions, decisions, proposals, ideas and debt, 6b-3's market
+ *  notes and blocked actions (the decisions of point `blocked`), and mine. */
+export type TalkFilter = 'all' | 'open' | 'decision' | 'proposals' | 'ideas' | 'market' | 'blocked' | 'mine';
+export const TALK_FILTERS: readonly TalkFilter[] = ['all', 'open', 'decision', 'proposals', 'ideas', 'market', 'blocked', 'mine'];
 /** The four tabs of the task detail (§4.7); forge shows only with forge data or evidence. */
 export type DetailTab = 'summary' | 'definition' | 'forge' | 'talk';
 export const DETAIL_TABS: readonly DetailTab[] = ['summary', 'definition', 'forge', 'talk'];

@@ -3,6 +3,7 @@
 // something, except «En curso», which with nothing running says which free task is next.
 import { availableTasks, statusOf } from '../../lib/deps.js';
 import { liveness, sessionLiveness } from '../../lib/coordination.js';
+import { SATURATION_BLOCKING, type SaturationBlocking } from '../../lib/forge-run.js';
 import type { ForgeDocV2 } from '../../lib/roadmap-doc.js';
 import type { PlanTask, RunDoc, TaskState } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
@@ -14,7 +15,57 @@ import type { Model, UiState } from '../model.js';
 
 export function renderSummary(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
   return `<header class="hd"><h1>${esc(d.views.summary)}</h1>${metaLine(m, d, dv)}</header>
-  ${renderNeeds(m, d, ui, dv)}${renderNow(m, d, dv)}${renderNext(m, d)}${renderProgress(m, d, dv, loc)}${renderRecent(m, d, loc)}${renderLive(m, d, dv)}`;
+  ${renderNeeds(m, d, ui, dv)}${renderAutonomous(m, d, loc)}${renderNow(m, d, dv)}${renderNext(m, d)}${renderProgress(m, d, dv, loc)}${renderRecent(m, d, loc)}${renderLive(m, d, dv)}`;
+}
+
+/**
+ * 6b-3: the card of an autonomous run (meta/infinite with a profile): its profile, whether it runs or why it stopped, and
+ * its last saturation report (none below the count): saturated, its evidence (the rounds and each count it would block on,
+ * at zero); else what keeps it going, each of the seven blocks with its full count (M-10) and the inputs it lacked by name
+ * (T6B3-PAGE-LABELS); and what waits for the person, each group with its full count and the ids the report kept. The
+ * findings of retired tasks are told as information only, out of the total. Every id is the report's, escaped. '' for any
+ * other run.
+ */
+export function renderAutonomous(m: Model, d: Dict, loc: string): string {
+  const inf = m.infinite;
+  if (!inf?.profile) return '';
+  const a = d.auto;
+  const state = inf.active ? a.active : a.stopped(inf.stopReason ? labelOf(a.reason, inf.stopReason) : '');
+  const head = `<h2 class="lbl" id="auto-h">${esc(a.title(inf.profile))}</h2><div class="ast">${esc(state)}</div>`;
+  const s = inf.saturation;
+  if (!s) return `<section class="card auto" aria-labelledby="auto-h">${head}</section>`;
+  const c = s.counts;
+  const ids = (list: readonly string[], total: number): string =>
+    list.length ? ` <span class="aids">${list.map(x => esc(x)).join(' ')}${total > list.length ? ` ${esc(a.more(total - list.length))}` : ''}</span>` : '';
+  const fact = (label: string, value: number, list: readonly string[] = [], cls = ''): string =>
+    `<li${cls ? ` class="${cls}"` : ''}>${esc(label)}: <b>${esc(d.num(value))}</b>${ids(list, value)}</li>`;
+  const block = (k: SaturationBlocking): string => {
+    const e = s.evidence;
+    switch (k) {
+      case 'rounds': return fact(a.blocking[k], s.rounds);
+      case 'pending-tasks': return fact(a.blocking[k], c.pendingTasks, e.pendingTasks);
+      case 'validators': return fact(a.blocking[k], c.validatorsFailed, e.validatorsFailed);
+      case 'findings': return fact(a.blocking[k], e.openFindings);
+      case 'defects': return fact(a.blocking[k], c.openDefects, e.openDefects);
+      case 'proposals': return fact(a.blocking[k], c.openProposals, e.openProposals);
+      case 'inputs': return `<li>${esc(a.blocking[k])}: ${esc((s.missing ?? []).map(x => labelOf(a.missing, x)).join(', '))}</li>`;
+    }
+  };
+  const when = fmt(s.at, loc);
+  const verdict = `<div class="asat${s.saturated ? ' ok' : ''}">${esc(s.saturated ? a.saturated : a.notYet)}${when ? ` <span class="k">· ${esc(when)}</span>` : ''}</div>`;
+  // Saturated, its blocking is empty: the evidence is every count it would block on; a missing input would have blocked.
+  const facts = (s.saturated ? SATURATION_BLOCKING.filter(k => k !== 'inputs') : s.blocking).map(block).join('');
+  const w = s.waiting;
+  const groups: [string, number, readonly string[]][] = [
+    [a.wait.parked, c.parked, w.parked], [a.wait.questions, w.questions, []], [a.wait.blocked, w.blocked, []], [a.wait.deferred, w.deferred, []],
+    [a.wait.waitsOwner, c.waitsOwner, w.waitsOwner], [a.wait.unowned, c.unowned, w.unowned], [a.wait.blockedTasks, c.blockedTasks, w.blockedTasks],
+    [a.wait.unplaced, c.unplaced, w.unplaced],
+  ];
+  const total = groups.reduce((n, g) => n + g[1], 0);
+  const waits = groups.filter(g => g[1] > 0).map(([label, n, list]) => fact(label, n, list)).join('')
+    + (c.orphanFindings ? fact(a.wait.orphanFindings, c.orphanFindings, w.orphanFindings, 'ainfo') : '');
+  return `<section class="card auto" aria-labelledby="auto-h">${head}${verdict}<ul class="afacts">${facts}</ul>`
+    + `<div class="awt"><div class="lbl">${esc(a.waiting(total))}</div>${waits ? `<ul class="afacts">${waits}</ul>` : ''}</div></section>`;
 }
 
 /** «Te necesita» (G-24): what to do and a link to the object. No button changes shared state: the only ones are the

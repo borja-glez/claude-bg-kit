@@ -174,6 +174,10 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .ndec{margin-top:6px;font-size:12px;color:var(--sub1);display:flex;flex-direction:column;gap:2px;overflow-wrap:anywhere}
 .ndec .k{margin-right:4px}
 .ndec .nalt{margin:2px 0 0 14px;padding:0;display:flex;flex-direction:column;gap:2px}
+/* 6b-3: the pages a market note cites, each with the host its link opens */
+.nsrc{margin:6px 0 0 14px;padding:0;font-size:12px;color:var(--sub1);display:flex;flex-direction:column;gap:2px;overflow-wrap:anywhere}
+.nsrc a{color:var(--t-blue)}
+.nsrc .nhost{font:11px 'JetBrains Mono',monospace;color:var(--sub0)}
 .ans{margin-top:8px;padding:6px 8px;border-radius:5px;background:var(--base);font-size:12px;color:var(--sub1);white-space:pre-wrap;overflow-wrap:anywhere}
 .ans .k{display:block;margin-bottom:2px}
 .areply{display:flex;flex-direction:column;gap:6px;margin-top:8px}
@@ -193,6 +197,7 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .prop.pr-low{border-left-color:var(--green)} .prop.pr-medium{border-left-color:var(--yellow)} .prop.pr-high{border-left-color:var(--red)}
 .pill.risk-low{color:var(--t-green)} .pill.risk-medium{color:var(--t-yellow)} .pill.risk-high{color:var(--t-red)}
 .pill.ps-proposed{color:var(--t-lav)} .pill.ps-discussing{color:var(--t-mauve)} .pill.ps-approved,.pill.ps-auto_approved{color:var(--t-peach)} .pill.ps-done{color:var(--t-sapphire)} .pill.ps-rejected{color:var(--mute)}
+.pill.ps-parked{color:var(--t-mauve)}
 .pill.inf{color:var(--t-mauve);text-transform:none;margin-top:0;vertical-align:middle;white-space:nowrap}
 .evid{margin:0;padding:6px 8px;border-radius:5px;background:var(--base);font:11.5px/1.5 'JetBrains Mono',monospace;color:var(--sub1);white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}
 .pdec{margin-top:8px;padding:6px 8px;border-radius:5px;background:var(--base);font-size:12px;color:var(--sub1);white-space:pre-wrap;overflow-wrap:anywhere}
@@ -414,6 +419,17 @@ button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-
 .need .btn{margin:4px 0 0 6px}
 .lnk{color:var(--t-blue);border-bottom:1px dotted currentColor;margin-left:6px;font-size:12.5px}
 .lnk:focus-visible,.need .chip:focus-visible{outline:2px solid var(--lavender);outline-offset:2px}
+/* ---- 6b-3: an autonomous run, how it stopped and its saturation report ---- */
+.card.auto{margin-top:12px}
+.auto .ast{font-size:13px;color:var(--text);overflow-wrap:anywhere}
+.auto .asat{margin-top:8px;font:600 13px 'Barlow Condensed',sans-serif;letter-spacing:.06em;color:var(--t-lav)}
+.auto .asat.ok{color:var(--t-green)}
+.auto .asat .k{letter-spacing:0}
+.afacts{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:12.5px;color:var(--sub1);overflow-wrap:anywhere}
+.afacts b{color:var(--text);font-weight:600}
+.afacts .aids{margin-left:4px;font:11.5px 'JetBrains Mono',monospace;color:var(--sub0)}
+.afacts .ainfo{color:var(--mute)}
+.auto .awt{margin-top:10px}
 
 /* ---- The task detail in four tabs (§4.7) ---- */
 .dtabs{display:flex;gap:2px;margin:10px 0 4px;border-bottom:1px solid var(--s0);overflow-x:auto;scrollbar-width:none}

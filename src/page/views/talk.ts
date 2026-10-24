@@ -1,12 +1,12 @@
 // Conversación (G-17, H-17): one composer on top, one row of filters (everything, open questions, decisions,
-// proposals, ideas and debt, mine) and one list where notes and proposals mix by date. A proposal carries its comments
+// proposals, ideas and debt, market notes, blocked actions, mine) and one list where notes and proposals mix by date. A proposal carries its comments
 // (they never show loose), the task it became, its history and the owner's mark; a decision shows its structure; a question
 // a decision resolved shows closed, with a link to that decision. Only the roadmap's owner decides proposals (§4.1): the
 // rules 4b set for it (the mark first, [Confirmar] only without one, a decision that changed decided again with its text in
 // view, the retry of an update that failed) hold under every filter, and who decided is what the owner's mark says (C26).
 import { canDecide, MAX_PROPOSAL_TEXT, PROPOSAL_CATEGORIES, PROPOSAL_RISKS, PROPOSAL_STATUSES, type ApprovalDoc, type ProposalDoc, type ProposalStatus } from '../../lib/proposals.js';
 import { counts, MAX_NOTE, NOTE_TYPES } from '../../lib/notes.js';
-import type { NoteDoc } from '../../lib/types.js';
+import type { NoteDoc, NoteSource } from '../../lib/types.js';
 import type { Dict } from '../i18n.js';
 import { authorLabel, decisionBlock, esc, fmt, labelOf, noteText, oneOf, safeNote, safeStatus, unmarkedReason } from '../html.js';
 import { PROPOSAL_FILTERS, TALK_FILTERS, type Model, type ProposalFilter, type ProposalFilterKind, type TalkFilter, type UiState } from '../model.js';
@@ -49,6 +49,8 @@ function itemsOf(m: Model, ui: UiState, filter: TalkFilter, loose: Note[]): Item
     : filter === 'open' ? isOpenQuestion(n)
     : filter === 'decision' ? n.type === 'decision'
     : filter === 'ideas' ? n.type === 'idea' || n.type === 'debt'
+    : filter === 'market' ? n.type === 'market'
+    : filter === 'blocked' ? n.type === 'decision' && n.decision?.point === 'blocked'
     : mine(n.author));
   const f = ui.proposalFilter;
   const props = filter === 'all' ? m.proposals
@@ -112,11 +114,36 @@ function noteCard(m: Model, d: Dict, ui: UiState, loc: string, n: Note): string 
   return `<div class="note nb-${t}" data-k="n:${esc(n.id)}" tabindex="-1">
     <div class="nh"><span><span class="nt-${t}">${esc(open ? d.openQuestion : d.noteType[t])}</span>${dec ? ` <span class="nauto">${esc(dec.auto ? d.autoTag : d.yoursTag)}</span>` : ''}</span><span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
     <p>${noteText(t, n.text)}</p>
+    ${t === 'market' ? sourcesOf(n.sources) : ''}
     ${dec ? decisionBlock(d, dec, true) : ''}
     ${n.taskId ? `<button type="button" class="chip" data-action="open-task" data-id="${esc(n.taskId)}" data-k="tk:${esc(n.id)}">${esc(n.taskId)}</button>` : ''}
     ${answer}
     ${reply}
   </div>`;
+}
+
+/** The host a source's link opens, or null when it is no link: an http:// or https:// URL that `new URL` reads, with no user
+ *  or password part (one host shown, another opened). */
+function webHost(url: string): string | null {
+  if (!/^https?:\/\//i.test(url)) return null;
+  try {
+    const u = new URL(url);
+    return (u.protocol === 'http:' || u.protocol === 'https:') && !u.username && !u.password ? u.host : null;
+  } catch { return null; }
+}
+
+/** 6b-3: the pages a market note cites (NoteDoc.sources): each title a link to its URL, with the host beside it so the reader
+ *  sees where it leads (Task 3's review); a URL that is not http(s) leaves the title as text. Both are escaped. A URL in the
+ *  note's own text never becomes a link (noteText). '' without sources. */
+function sourcesOf(sources: readonly NoteSource[] | undefined): string {
+  if (!sources?.length) return '';
+  return `<ul class="nsrc">${sources.map(s => {
+    const host = webHost(s.url);
+    // normalizeSources gives an untitled source its URL; so does the page, so a link is never empty.
+    const title = esc(s.title || s.url);
+    return host === null ? `<li>${title}</li>`
+      : `<li><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${title}</a> <span class="nhost">${esc(host)}</span></li>`;
+  }).join('')}</ul>`;
 }
 
 /** The owner's mark of a proposal (approvals/<pid>), by an own key only: nothing inherited from Object.prototype passes for
@@ -200,8 +227,11 @@ function proposalCard(m: Model, d: Dict, ui: UiState, loc: string, p: Prop): str
   const mark = why === 'no-mark'
     ? `<div class="pmark"><span class="warn">${esc(d.owner.noMark)}</span>${m.isOwner === true && !ro ? ` <button type="button" class="btn" data-action="p-confirm" data-id="${id}">${esc(d.owner.confirm)}</button>` : ''}</div>`
     : why === 'changed' ? `<div class="pmark"><span class="warn">${esc(changed)}</span></div>` : '';
-  // 6b-2 M-3: an idea an autonomous run parked until the person answers: why, and what integrating it would lose.
-  const parked = status === 'discussing' && p.parked ? `<div class="prsn"><span class="k">${esc(d.pfield.parked(p.parked.why, p.parked.loses))}</span></div>` : '';
+  // 6b-2 M-3: an idea an autonomous run parked until the person answers: why, and what integrating it would lose. 6b-3 M-7:
+  // a pill beside its status says it at a glance; this line stays its one explanation.
+  const pk = status === 'discussing' ? p.parked : undefined;
+  const parked = pk ? `<div class="prsn"><span class="k">${esc(d.pfield.parked(pk.why, pk.loses))}</span></div>` : '';
+  const parkedPill = pk ? `<span class="pill ps-parked">${esc(d.parked.pill)}</span>` : '';
   // G-17: the task the proposal became; a button only when the plan has it.
   const toTask = !p.taskId ? ''
     : m.plan.tasks.some(t => t.id === p.taskId)
@@ -215,7 +245,7 @@ function proposalCard(m: Model, d: Dict, ui: UiState, loc: string, p: Prop): str
         `<li>${esc(d.talk.reopened(named(m, d, step.reopenedBy), fmt(step.reopenedAt, loc), d.pstatus[oneOf(PROPOSAL_STATUSES, step.status, 'done')]))}${step.reason ? ` · ${esc(step.reason)}` : ''}</li>`).join('')}</ul></div>`
     : '';
   return `<div class="note prop pr-${risk}" data-id="${id}" data-k="pr:${id}">
-    <div class="nh"><span class="tag pc">${esc(d.pcategory[category])}</span><span class="pill risk-${risk}">${esc(d.prisk[risk])}</span><span class="pill ps-${status}">${esc(d.pstatus[status])}</span>${toTask}<span class="k">${esc(authorLabel(m, d, p.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
+    <div class="nh"><span class="tag pc">${esc(d.pcategory[category])}</span><span class="pill risk-${risk}">${esc(d.prisk[risk])}</span><span class="pill ps-${status}">${esc(d.pstatus[status])}</span>${parkedPill}${toTask}<span class="k">${esc(authorLabel(m, d, p.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
     <h3>${esc(p.title)}</h3>
     ${p.pillar ? `<div class="mono">${esc(d.pfield.pillar)}: ${esc(p.pillar)}</div>` : ''}
     ${p.rationale ? `<p>${esc(p.rationale)}</p>` : ''}

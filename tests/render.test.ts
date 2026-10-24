@@ -8,6 +8,7 @@ import { fitWindow } from '../src/lib/timeline.js';
 import type { MessageDoc, EventType, NoteDoc, PlanStatus, PlanTrack, TaskStatus } from '../src/lib/types.js';
 import { proposalDigest, type ApprovalDoc, type ProposalDoc } from '../src/lib/proposals.js';
 import { unmarked, unmarkedReason } from '../src/page/html.js';
+import type { SaturationReport } from '../src/lib/forge-run.js';
 
 const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
 const NOW = Date.parse('2026-10-11T12:00:00Z');
@@ -2237,6 +2238,12 @@ describe('the sessions view (G-04, G-10, H-23)', () => {
   });
 });
 
+/** 6b-3: the autonomous run's card of the summary, or '' without one. */
+const autoCard = (html: string): string => {
+  const i = html.indexOf('<section class="card auto"');
+  return i < 0 ? '' : html.slice(i, html.indexOf('</section>', i));
+};
+
 describe('the conversation (G-17, H-17, §4.6.7)', () => {
   const notesOf = () => [
     note({ id: 'q1', ts: '2026-10-11T11:40:00Z', type: 'question', text: '¿apple pay?' }),
@@ -2370,6 +2377,131 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     expect(card(html, 'n:x2')).toContain('<span class="k">usuario');
     expect(html).not.toContain('function');
     expect(html).not.toContain('native code');
+  });
+  it('shows market notes with their sources, blocked actions and parked ideas, each under its filter, escaped (6b-3)', () => {
+    const market = note({ id: 'm1', type: 'market', text: 'los roguelites venden por variedad', sources: [{ title: '<b>Encuesta</b>', url: 'https://s.example/r?a=1&b=2' }] });
+    const blocked = note({ id: 'b1', type: 'decision', text: 'Bash: git push → no se hizo', decision: { point: 'blocked', what: 'Bash: git push', chosen: 'no se hizo', why: 'forge autonomy · git: …', auto: true } });
+    const parked = P({ id: 'p1', status: 'discussing', source: 'user', parked: { why: 'la visión es un juego en solitario', loses: 'el foco en solitario', at: '2026-10-22T10:00:00.000Z' } });
+    const all = renderApp({ ...base(), notes: [market, blocked], proposals: [parked] }, ui({ view: 'talk' }));
+    expect(all).toContain('<a href="https://s.example/r?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">&lt;b&gt;Encuesta&lt;/b&gt;</a>');
+    // Task 3's review: the host beside the title, so the reader sees where the link leads.
+    expect(all).toContain('&lt;b&gt;Encuesta&lt;/b&gt;</a> <span class="nhost">s.example</span></li>');
+    expect(all).toContain('<span class="pill ps-parked">Aparcada</span>');
+    // M-7: the parked idea's one text is 6b-2's, after the status pill's own.
+    expect(all).toContain('<span class="pill ps-discussing">En discusión</span><span class="pill ps-parked">Aparcada</span>');
+    expect(all).toContain('Aparcada: la visión es un juego en solitario · Se perdería: el foco en solitario');
+    expect(all).not.toContain('ppark');
+    for (const c of ['market', 'blocked']) expect(all).toContain(`data-action="talk-c" data-c="${c}"`);
+    const onlyBlocked = renderApp({ ...base(), notes: [market, blocked], proposals: [parked] }, ui({ view: 'talk', talk: 'blocked' }));
+    expect(onlyBlocked).toContain('Bash: git push');
+    expect(onlyBlocked).not.toContain('los roguelites');
+    expect(onlyBlocked).not.toContain('ps-parked');
+    const onlyMarket = renderApp({ ...base(), notes: [market, blocked], proposals: [parked] }, ui({ view: 'talk', talk: 'market' }));
+    expect(onlyMarket).not.toContain('Bash: git push');
+    expect(onlyMarket).toContain('los roguelites');
+    expect(onlyMarket).not.toContain('ps-parked');
+    // A decision of another point is no blocked action; an empty filter says what it would show.
+    const other = note({ ...blocked, decision: { ...blocked.decision!, point: 'other' } });
+    expect(renderApp({ ...base(), notes: [other] }, ui({ view: 'talk', talk: 'blocked' }))).toContain('No se bloqueó nada.');
+    expect(renderApp(base(), ui({ view: 'talk', talk: 'market' }))).toContain('Aún no hay notas de mercado.');
+    const approved = renderApp({ ...base(), proposals: [{ ...parked, status: 'approved' as const }] }, ui({ view: 'talk' }));
+    expect(approved).not.toContain('ps-parked');
+    expect(approved).not.toContain('Aparcada');
+  });
+  it('a market source is a link only to an http(s) URL, its title and URL escaped; a URL in the text stays text; English labels (6b-3, Task 3 review)', () => {
+    const sources = [
+      { title: 'js', url: 'javascript:alert(1)' }, { title: 'data', url: 'data:text/html,<b>x</b>' }, { title: 'plain', url: 'http://p.example:8080/a' },
+      { title: HOSTILE, url: `https://h.example/${HOSTILE}` }, { title: '', url: 'https://e.example/z' },
+    ];
+    const m = { ...base(), notes: [note({ id: 'm1', type: 'market', text: 'ver https://t.example/x', sources })] };
+    const html = renderApp(m, ui({ view: 'talk' }));
+    expect(html).not.toContain('href="javascript:');
+    expect(html).not.toContain('href="data:');
+    expect(html).toContain('<li>js</li>');
+    expect(html).toContain('<li>data</li>');
+    expect(html).toContain('<a href="http://p.example:8080/a" target="_blank" rel="noopener noreferrer">plain</a> <span class="nhost">p.example:8080</span>');
+    expect(html).toContain('<span class="nhost">h.example</span>');
+    // An untitled source reads its URL: a link is never empty.
+    expect(html).toContain('<a href="https://e.example/z" target="_blank" rel="noopener noreferrer">https://e.example/z</a>');
+    expect(html).not.toContain('href="https://t.example/x"');
+    clean(html);
+    // Only a market note lists sources.
+    expect(renderApp({ ...m, notes: [note({ id: 'i1', type: 'idea', sources })] }, ui({ view: 'talk' }))).not.toContain('class="nsrc"');
+    const en = renderApp({ ...m, meta: { ...base().meta!, locale: 'en' }, notes: [], proposals: [P({ status: 'discussing', parked: { why: 'w', loses: 'l', at: '2026-10-22T10:00:00.000Z' } })] }, ui({ view: 'talk' }));
+    expect(en).toContain('<span class="pill ps-parked">Parked</span>');
+    expect(en).toContain('data-c="market" aria-pressed="false" data-k="tc:market">Market</button>');
+    expect(en).toContain('data-c="blocked" aria-pressed="false" data-k="tc:blocked">Blocked</button>');
+    expect(renderApp({ ...m, meta: { ...base().meta!, locale: 'en' }, notes: [] }, ui({ view: 'talk', talk: 'blocked' }))).toContain('Nothing was blocked.');
+    expect(renderApp({ ...m, meta: { ...base().meta!, locale: 'en' }, notes: [] }, ui({ view: 'talk', talk: 'market' }))).toContain('No market notes yet.');
+  });
+  it('the summary tells how an autonomous run stopped, with the saturation evidence and what waits for the person (6b-3)', () => {
+    const saturation: SaturationReport = {
+      saturated: true, at: '2026-10-22T10:00:00.000Z', rounds: 3, blocking: [],
+      evidence: { pendingTasks: [], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
+      waiting: { parked: ['p1'], questions: 1, blocked: 2, deferred: 0, waitsOwner: [], unowned: [], blockedTasks: [], unplaced: [], orphanFindings: [] },
+      counts: { pendingTasks: 0, validatorsFailed: 0, openDefects: 0, openProposals: 0, parked: 1, waitsOwner: 0, unowned: 0, blockedTasks: 0, unplaced: 0, orphanFindings: 0 },
+    };
+    const html = renderApp({ ...base(), infinite: { active: false, cycle: 9, budget: { hours: 8 }, startedAt: '2026-10-22T02:00:00.000Z', lastCycleAt: null, stopReason: 'saturated', profile: 'product', saturation } }, ui());
+    expect(html).toContain('class="card auto"');
+    expect(html).toContain('Ejecución autónoma · product');
+    expect(html).toContain('Saturada');
+    expect(html).toContain('Esperan tu respuesta');
+    // After «Te necesita» and before «En curso».
+    expect(html.indexOf('class="card auto"')).toBeLessThan(html.indexOf('class="card now"'));
+    const c = autoCard(html);
+    expect(c).toContain('Parada: saturada: no queda nada por hacer');
+    // The evidence: the rounds and every count the report blocks on, at zero; no input is missing.
+    for (const s of ['Rondas de exploración seguidas sin pasar nada: <b>3</b>', 'Tareas pendientes: <b>0</b>', 'Validadores en rojo: <b>0</b>', 'Hallazgos de revisión abiertos: <b>0</b>',
+      'Defectos abiertos: <b>0</b>', 'Aprobaciones o propuestas aún abiertas (por juzgar, o aprobadas sin tarea): <b>0</b>']) expect(c, s).toContain(s);
+    expect(c).not.toContain('Sin saturar');
+    expect(c).not.toContain('Faltan datos');
+    // What waits: 4 in all, each group with its count; an empty one is left out.
+    expect(c).toContain('Esperan tu respuesta: 4');
+    for (const s of ['Ideas aparcadas: <b>1</b> <span class="aids">p1</span>', 'Preguntas abiertas: <b>1</b>', 'Acciones bloqueadas: <b>2</b>']) expect(c, s).toContain(s);
+    expect(c).not.toContain('Hallazgos aplazados');
+    expect(renderApp({ ...base(), infinite: { active: true, cycle: 1, budget: { cycles: 5 }, startedAt: '2026-10-22T02:00:00.000Z', lastCycleAt: null } }, ui())).not.toContain('class="card auto"');
+    // An autonomous run below the count: its profile and its state, no report yet.
+    const early = autoCard(renderApp({ ...base(), infinite: { active: true, cycle: 1, budget: { cycles: 5 }, startedAt: '2026-10-22T02:00:00.000Z', lastCycleAt: null, profile: 'spike', saturation: null } }, ui()));
+    expect(early).toContain('Ejecución autónoma · spike');
+    expect(early).toContain('En marcha');
+    expect(early).not.toContain('Esperan tu respuesta');
+  });
+  it('a run not saturated says what keeps it going: the seven blocks, each with its full count, the missing inputs by name, and every id escaped (6b-3, T6B3-PAGE-LABELS)', () => {
+    const many = Array.from({ length: 20 }, (_, i) => `po${i}`);
+    const saturation: SaturationReport = {
+      saturated: false, at: '2026-10-22T10:00:00.000Z', rounds: 1, blocking: ['rounds', 'pending-tasks', 'validators', 'findings', 'defects', 'proposals', 'inputs'],
+      evidence: { pendingTasks: ['T004', HOSTILE], validatorsFailed: ['(no validators)'], openFindings: 2, openDefects: ['pd1'], openProposals: many },
+      waiting: { parked: ['pk1'], questions: 3, blocked: 1, deferred: 4, waitsOwner: ['pw1'], unowned: ['pu1'], blockedTasks: ['T007'], unplaced: ['pn1'], orphanFindings: ['T099'] },
+      counts: { pendingTasks: 2, validatorsFailed: 1, openDefects: 1, openProposals: 25, parked: 1, waitsOwner: 1, unowned: 1, blockedTasks: 3, unplaced: 1, orphanFindings: 1 },
+      missing: ['--validate', '--plan', '--db'],
+    };
+    const inf = { active: false, cycle: 4, budget: { cycles: 4 }, startedAt: '2026-10-22T02:00:00.000Z', lastCycleAt: null, stopReason: 'budget-cycles', profile: 'product' as const, saturation };
+    const c = autoCard(renderApp({ ...base(), infinite: inf }, ui()));
+    expect(c).toContain('Parada: agotó los ciclos');
+    expect(c).toContain('Sin saturar:');
+    expect(c).not.toContain('Saturada');
+    for (const s of ['Rondas de exploración seguidas sin pasar nada: <b>1</b>', 'Tareas pendientes: <b>2</b> <span class="aids">T004 &lt;img', 'Validadores en rojo: <b>1</b> <span class="aids">(no validators)</span>',
+      'Hallazgos de revisión abiertos: <b>2</b>', 'Defectos abiertos: <b>1</b> <span class="aids">pd1</span>',
+      'Aprobaciones o propuestas aún abiertas (por juzgar, o aprobadas sin tarea): <b>25</b> <span class="aids">po0 po1',
+      'Faltan datos: validadores sin ejecutar en este ciclo, plan sin leer, estado sin leer']) expect(c, s).toContain(s);
+    // The report keeps 20 ids of 25: the count is the full one, and the rest is said.
+    expect(c).toContain('po19 +5 más</span>');
+    // Waiting: every group with its full count (orphanFindings told apart, as information only, and out of the total).
+    expect(c).toContain('Esperan tu respuesta: 15');
+    for (const s of ['Ideas aparcadas: <b>1</b> <span class="aids">pk1</span>', 'Preguntas abiertas: <b>3</b>', 'Acciones bloqueadas: <b>1</b>', 'Hallazgos aplazados: <b>4</b>',
+      'Esperan tu marca: <b>1</b> <span class="aids">pw1</span>', 'Aprobadas sin tu marca: <b>1</b> <span class="aids">pu1</span>',
+      'Tareas bloqueadas a la espera de ti, y las que esperan por ellas: <b>3</b> <span class="aids">T007 +2 más</span>',
+      'Aprobaciones que la ejecución no pudo colocar: <b>1</b> <span class="aids">pn1</span>',
+      '<li class="ainfo">Hallazgos de tareas retiradas (solo información): <b>1</b> <span class="aids">T099</span></li>']) expect(c, s).toContain(s);
+    clean(c);
+    // An unknown stop reason is shown as written (escaped); English labels.
+    expect(autoCard(renderApp({ ...base(), infinite: { ...inf, stopReason: '<b>x</b>' } }, ui()))).toContain('Parada: &lt;b&gt;x&lt;/b&gt;');
+    const en = autoCard(renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, infinite: inf }, ui()));
+    for (const s of ['Autonomous run · product', 'Stopped: ran out of cycles', 'Not saturated:', 'Exploration rounds in a row that passed nothing: <b>1</b>', 'Pending tasks: <b>2</b>',
+      'Validators failing: <b>1</b>', 'Open review findings: <b>2</b>', 'Open defects: <b>1</b>', 'Approvals or proposals still open (to judge, or approved without a task): <b>25</b>',
+      'Inputs missing: validators not run this cycle, plan not read, state not read', 'po19 +5 more</span>', 'Waiting for you: 15', 'Parked ideas: <b>1</b>', 'Open questions: <b>3</b>',
+      'Blocked actions: <b>1</b>', 'Deferred findings: <b>4</b>', 'Waiting for your mark: <b>1</b>', 'Approved without your mark: <b>1</b>',
+      'Tasks blocked for you, and those that wait on them: <b>3</b>', 'Approvals the run could not place: <b>1</b>', 'Findings of retired tasks (information only): <b>1</b>']) expect(en, s).toContain(s);
   });
 });
 

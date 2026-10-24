@@ -4,6 +4,7 @@ import { isPlanId, realDate } from '../lib/ids.js';
 import { parseForgeDocV2, UNCHECKED_MAX } from '../lib/roadmap-doc.js';
 import { cleanText, REASON_MAX } from '../lib/batches.js';
 import { LEASE_CAP_MINUTES } from '../lib/coordination.js';
+import { PROFILES, saturationReportOf, type Profile } from '../lib/forge-run.js';
 import { LOOSE_MAX_TASKS, LOOSE_STATUSES, STAGES, type ForgeV1, type LooseRunTask, type LooseStatus, type Commit, type EventDoc, type InfiniteDoc, type MessageDoc, type MetaDoc, type PhaseDoc, type PlanTask, type PlanTrack, type RunDoc, type SessionDoc, type Stage, type TaskExec, type TaskState } from '../lib/types.js';
 
 // Documents in the shared db are untrusted and may be malformed: coerce them into the shapes the renderer expects.
@@ -270,7 +271,8 @@ const SAFE_ID = /^[A-Za-z0-9_\-.]{1,120}$/;
 const safeId = (v: unknown): v is string => typeof v === 'string' && SAFE_ID.test(v) && v !== '.' && v !== '..';
 
 /** meta/infinite: active only when exactly true, cycle a non-negative integer (else 0), budget kept only when positive;
- *  G-08: its coordinator (seat, Claude's id, ISO seenAt and leaseUntil) and its stop reason when the doc carries them. */
+ *  G-08: its coordinator (seat, Claude's id, ISO seenAt and leaseUntil) and its stop reason when the doc carries them;
+ *  6b-3: an autonomous run's profile and its saturation report (null below the count), read by forge-run's own reader. */
 export function normalizeInfinite(x: unknown, report?: Report): InfiniteDoc | null {
   if (!isObj(x)) return null;
   const b: Obj = isObj(x.budget) ? x.budget : {};
@@ -296,6 +298,18 @@ export function normalizeInfinite(x: unknown, report?: Report): InfiniteDoc | nu
   }
   // Carry 4: one clean line, as the other free text.
   if ('stopReason' in x) out.stopReason = typeof x.stopReason === 'string' && cleanText(x.stopReason, 80) ? cleanText(x.stopReason, 80) : null;
+  // 6b-3 L-20, T6B3-PAGE-ONE-READER: the report as parseRun reads it from run.json, so the page and the CLI read one shape.
+  // What does not read is dropped and reported; any other run keeps the exact object it had.
+  if (x.profile !== undefined) {
+    if ((PROFILES as readonly unknown[]).includes(x.profile)) out.profile = x.profile as Profile;
+    else report?.('profile', 'dropped', typeof x.profile === 'string' ? 'not a profile' : kindOf(x.profile));
+  }
+  if (x.saturation === null) out.saturation = null;
+  else if (x.saturation !== undefined) {
+    const saturation = saturationReportOf(x.saturation);
+    if (saturation) out.saturation = saturation;
+    else report?.('saturation', 'dropped', isObj(x.saturation) ? 'not a saturation report' : kindOf(x.saturation));
+  }
   return out;
 }
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { normalizeMeta, normalizePhase, normalizeState, normalizeSession, normalizeEvent, normalizeMessage, normalizeInfinite, normalizeRun, normalizeForgeV1, normalizeMetrics, mergeMetrics } from '../src/page/normalize.js';
+import { saturationReportOf } from '../src/lib/forge-run.js';
 
 describe('normalizeRun / execution fields', () => {
   it('normalizeRun keeps valid fields and drops junk', () => {
@@ -288,6 +289,39 @@ describe('normalizeInfinite', () => {
     expect(normalizeInfinite({ ...base, coordinator })!.coordinator).toEqual({ ...coordinator, leaseUntil: '2026-10-11T11:30:00.000Z' });
     const fine = { ...coordinator, leaseUntil: '2026-10-11T10:10:00.000Z' };
     expect(normalizeInfinite({ ...base, coordinator: fine })!.coordinator).toEqual(fine);
+  });
+  it('keeps the profile and the saturation report of an autonomous run, read with forge-run’s own reader; what does not read is dropped and reported (6b-3, T6B3-PAGE-ONE-READER)', () => {
+    const sat = {
+      saturated: true, at: '2026-10-22T10:00:00.000Z', rounds: 3, blocking: [],
+      evidence: { pendingTasks: [], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
+      waiting: { parked: ['p20261022100000aaaa'], questions: 1, blocked: 2, deferred: 0, waitsOwner: [], unowned: [], blockedTasks: [], unplaced: [], orphanFindings: ['T009'] },
+      counts: { pendingTasks: 0, validatorsFailed: 0, openDefects: 0, openProposals: 0, parked: 1, waitsOwner: 0, unowned: 0, blockedTasks: 0, unplaced: 0, orphanFindings: 1 },
+    };
+    const run = { active: false, cycle: 9, budget: { hours: 8 }, startedAt: '2026-10-22T02:00:00.000Z', lastCycleAt: null, stopReason: 'saturated' };
+    expect(normalizeInfinite({ ...run, profile: 'product', saturation: sat })).toMatchObject({ profile: 'product', saturation: sat });
+    // One shape for the page and the CLI: the page keeps what parseRun's reader keeps.
+    expect(normalizeInfinite({ ...run, profile: 'product', saturation: sat })!.saturation).toEqual(saturationReportOf(sat));
+    // Not saturated: what blocks it, and the inputs the cycle lacked.
+    const open = { ...sat, saturated: false, blocking: ['rounds', 'inputs'], missing: ['--validate'] };
+    expect(normalizeInfinite({ ...run, profile: 'spike', saturation: open })).toMatchObject({ profile: 'spike', saturation: open });
+    // Below the count a run has no report yet.
+    expect(normalizeInfinite({ ...run, profile: 'product', saturation: null })).toMatchObject({ profile: 'product', saturation: null });
+    const got: string[] = [];
+    const bad = normalizeInfinite({ active: false, cycle: 1, budget: {}, startedAt: '2026-10-22T02:00:00.000Z', lastCycleAt: null, profile: 'prod', saturation: { saturated: 'yes' } }, (f, a) => { got.push(`${f} · ${a}`); })!;
+    expect(bad).not.toHaveProperty('profile');
+    expect(bad).not.toHaveProperty('saturation');
+    expect(got).toEqual(['profile · dropped', 'saturation · dropped']);
+    // A report forge-run would not read: saturated against its blocking, an unknown blocking value, a count under its list,
+    // a list over 20 ids, an id with a bidi control, an unknown input; and what is no report at all.
+    const rlo = String.fromCharCode(0x202e);
+    for (const s of [
+      { ...sat, saturated: false }, { ...sat, saturated: false, blocking: ['nope'] }, { ...sat, counts: { ...sat.counts, parked: 0 } },
+      { ...sat, waiting: { ...sat.waiting, parked: Array.from({ length: 21 }, (_, i) => `p${i}`) }, counts: { ...sat.counts, parked: 21 } },
+      { ...sat, waiting: { ...sat.waiting, parked: [`p1${rlo}`] } }, { ...open, missing: ['--state'] }, 'x', [], 7,
+    ]) expect(normalizeInfinite({ ...run, profile: 'product', saturation: s }), JSON.stringify(s).slice(0, 60)).not.toHaveProperty('saturation');
+    // Any other run keeps the exact object it had.
+    expect(normalizeInfinite(run)).not.toHaveProperty('profile');
+    expect(normalizeInfinite(run)).not.toHaveProperty('saturation');
   });
 });
 
