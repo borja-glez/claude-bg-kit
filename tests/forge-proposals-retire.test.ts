@@ -5,6 +5,7 @@ import { run } from '../src/forge/cli/run.js';
 import { startRun, saveRun } from '../src/forge/run.js';
 import { loadApproval, loadProposal, saveApproval, saveProposal } from '../src/forge/proposals.js';
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
+import { IDEA_MERGED } from '../src/forge/ideas.js';
 import { proposalDigest, type ProposalDoc } from '../src/lib/proposals.js';
 import { useTempDirs } from './helpers/tmp.js';
 
@@ -81,6 +82,41 @@ describe('proposals retire (6b-3)', () => {
       expect(loadApproval(root, id), id).toEqual(mark);
     }
     expect(retireEvents()).toEqual([]);
+  });
+  // Fix 2, T6B3-RETIRE-HELD: replan-check's rule. Only the run's own proposal is the run's to reject: the owner's mark, a person's
+  // merged note, a run mark of another text, or no mark holds it, and nothing is written.
+  it('refuses, writing nothing, a proposal the run does not own: the owner\'s mark, a merged note, a mark of another text, no mark', () => {
+    const ID = 'p20261022100000gggg';
+    const cases: [string, () => void, string][] = [
+      ['P1 the owner\'s page mark', () => {
+        const d = doc({ status: 'approved', decidedBy: 'page', taskId: 'T004' });
+        saveProposal(root, ID, d);
+        saveApproval(root, ID, { status: 'approved', decidedAt: AT, by: 'page', digest: proposalDigest(ID, d) });
+      }, "owner's mark"],
+      ['P2 a person\'s note merged into it', () => {
+        put(ID, doc({ taskId: 'T004' }));
+        appendEvent(root, { ts: AT, kind: 'proposal', action: IDEA_MERGED, id: ID, from: 'note:n1' });
+      }, 'merged'],
+      ['P3 a run mark of another text', () => {
+        saveProposal(root, ID, doc({ taskId: 'T004' }));
+        saveApproval(root, ID, { status: 'auto_approved', decidedAt: AT, by: 'forge:auto', digest: proposalDigest(ID, doc({ title: 'Another text' })) });
+      }, 'no longer matches'],
+      ['P4 no mark', () => { saveProposal(root, ID, doc({ taskId: 'T004' })); }, 'no mark'],
+    ];
+    for (const [label, setup, word] of cases) {
+      root = tmp('retire-held-');
+      writeFileSync(path.join(root, 'plan.yaml'), PLAN);
+      writeFileSync(path.join(root, 'why.txt'), 'no longer needed');
+      setup();
+      const before = proposalFile(ID);
+      const mark = loadApproval(root, ID);
+      const r = retire(ID);
+      expect(r.code, label).toBe(2);
+      expect(r.stderr, label).toContain(word);
+      expect(proposalFile(ID), label).toBe(before);
+      expect(loadApproval(root, ID), label).toEqual(mark);
+      expect(retireEvents(), label).toEqual([]);
+    }
   });
   it('needs a proposal id it has, --plan, a why that says something, and a plan that parses', () => {
     expect(retire('p20261022100000zzzz').code, 'unknown').toBe(2);

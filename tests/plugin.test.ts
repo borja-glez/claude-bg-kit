@@ -2341,7 +2341,7 @@ describe('plugin layout', () => {
     // H-7: the review's findings become proposals; M-6: each step's output lives in the phase's folder; M-8 through the CLI.
     const close = ref('phase-close');
     for (const w of ['forge-phase-review', 'replan <plan> --ops', '--why-file', '--mark', 'design-critic', 'vision', 'FORGE proposals add --file', 'FORGE proposals retire',
-      '.forge/work/infinite/phase-<F>/', '"revertOf"']) expect(close, w).toContain(w);
+      '.forge/work/infinite/phase-<F>/', '"revertOf"', 'write-refused.json', 'vision-reverting.txt', 'git diff --quiet']) expect(close, w).toContain(w);
     // Minor 9, H-1: replan-check, then the dry run, then the decision, then replan-check again and the write; the vision's decision
     // before its reopen.
     const at = (w: string) => { const i = close.indexOf(w); expect(i, w).toBeGreaterThanOrEqual(0); return i; };

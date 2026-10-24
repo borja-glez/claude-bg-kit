@@ -16,7 +16,7 @@ import { PAGE_RULES } from '../../../lib/publish.js';
 import { NOTE_ID } from '../../../lib/notes.js';
 import { autoApprovable } from '../../policy.js';
 import { CRITIC_TEXT_MAX, proposalBatch, readPlacement, readVerdicts } from '../../critic.js';
-import { ancestorsOf, judgeProposal, pendingForJudge, personsIdea, unparkProposal, JudgeError, type Judged, type Unparked } from '../../judge.js';
+import { ancestorsOf, judgeProposal, pendingForJudge, unparkProposal, JudgeError, type Judged, type Unparked } from '../../judge.js';
 import {
   convertedFrom, ideaLink, ideaNote, ideaOrigin, IDEA_MERGED, normalizeOwner, noteOf, pendingIdeas, roadmapOwner, saveOwner, type RoadmapOwner,
 } from '../../ideas.js';
@@ -26,7 +26,7 @@ import { addDecision, decisionNoteId, decisionWrites, markPublished } from '../.
 import { clean } from '../../../lib/decisions.js';
 import { normalizeOps } from '../../../lib/replan.js';
 import { doneOf } from '../../phases.js';
-import { replanRefusals } from '../../replan-check.js';
+import { notRunsOwn, replanRefusals } from '../../replan-check.js';
 import { checkPlacement, estimateMinutes, proposalToTask, proposalOfIncludes, proposalsOfIncludes, type Placement } from '../../to-task.js';
 import type { PlanTask } from '../../../lib/types.js';
 import { parseDocument } from 'yaml';
@@ -486,8 +486,9 @@ export const command: Command = (args, ctx) => {
     }
     case 'retire': {
       // 6b-3 M-8, T6B3-RETIRE-CLI: a proposal whose task a re-plan retired (its taskId in the plan's `retired:`) is rejected by the run,
-      // under that re-plan's decision: judge's writes for a rejection, the forge:auto mark of its text, and a `retire` event. Never a
-      // person's idea (replan-check refuses its retire anyway) nor one that is not approved; every refusal is exit 2 with nothing written.
+      // under that re-plan's decision: judge's writes for a rejection, the forge:auto mark of its text, and a `retire` event. Never one
+      // that is not approved, and (fix 2, T6B3-RETIRE-HELD) never one that is not the run's own by replan-check's rule (notRunsOwn: a
+      // person's idea or merged note, the owner's mark, a run mark of another text, no mark); every refusal is exit 2, nothing written.
       const id = rest[0];
       if (!id || !PROPOSAL_ID.test(id)) throw new UsageError('proposals retire: a proposal id (p + 14 digits + 4 letters/digits) is required');
       const [planArg, whyFile] = [subFlag('plan'), subFlag('why-file')];
@@ -497,9 +498,8 @@ export const command: Command = (args, ctx) => {
       const doc = loadProposal(io.cwd, id);
       if (!doc) throw new UsageError(`proposals retire: ${id} not found`);
       if (!isActionable(doc)) throw new UsageError(`proposals retire: ${id} is ${doc.status}: only an approved proposal is rejected when its task is retired`);
-      if (personsIdea(readEvents(io.cwd).filter(e => e.kind === 'proposal'), id, doc)) {
-        throw new UsageError(`proposals retire: ${id} is a person's idea: a re-plan never decides it, the person does`);
-      }
+      const notOwn = notRunsOwn(io.cwd)(id);
+      if (notOwn) throw new UsageError(`proposals retire: ${id} ${notOwn}: it is not the run's to reject, the person decides it`);
       const plan = planOf(readText(planArg, '--plan'), planArg, 'proposals retire: ');
       if (!doc.taskId || !(plan.retired ?? []).includes(doc.taskId)) {
         throw new UsageError(`proposals retire: the task of ${id} (${doc.taskId ?? 'none'}) is not in the retired list of ${planArg}`);

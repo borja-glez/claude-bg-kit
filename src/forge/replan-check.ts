@@ -8,6 +8,7 @@
 //   edited since). Failing closed, a proposal this checkout does not have, or one that holds no mark, is not the run's either;
 // - a done task (the roadmap's state): its phase would close at once, and its id and its state must stay together.
 // What changes nothing (a move to the phase it is in, the title it has) overrides no one. Reads only: it never writes.
+// T6B3-RETIRE-HELD: `proposals retire` asks the same per-proposal rule (notRunsOwn) before it rejects a retired task's proposal.
 import type { Plan, PlanTask } from '../lib/types.js';
 import type { ReplanOp } from '../lib/replan.js';
 import { ownerCheck } from '../lib/proposals.js';
@@ -36,6 +37,35 @@ function changeOf(op: ReplanOp, tasks: ReadonlyMap<string, PlanTask>): { task: s
 }
 
 /**
+ * T6B3-RETIRE-HELD: why proposal `id` of `root` is not the run's own to change or decide, or null when it is. Read once from the
+ * proposals (`proposals`, when the caller has them loaded), the marks and the proposal events of `root`; fails closed. It is not
+ * the run's when this checkout does not have it, it is a person's idea, a person's note was merged into it (T6B3-REPLAN-MERGED),
+ * it holds no mark or one that is not the run's own (RUN_MARKS), or the run's mark no longer matches it (T6B3-REPLAN-MARK-OK:
+ * reopened or edited since). The reason reads after the proposal («<id> holds the owner's mark …»). heldBy and
+ * `proposals retire` both ask it, so a re-plan and the rejection of a retired task's proposal never disagree.
+ */
+export function notRunsOwn(root: string, proposals = loadProposals(root)): (id: string) => string | null {
+  const byId = new Map(proposals.map(p => [p.id, p]));
+  const marks = loadApprovals(root);
+  const events = readEvents(root).filter(e => e.kind === 'proposal');
+  // T6B3-REPLAN-MERGED: a person's note that said what an open proposal says joined it (`proposals add --from-note`).
+  const merged = new Map(events.filter(e => e.action === IDEA_MERGED && typeof e.id === 'string').map(e => [e.id as string, String(e.from ?? 'a note')]));
+  return id => {
+    const found = byId.get(id);
+    if (!found) return 'is not in this checkout, so who decided it is not known';
+    const { id: _id, ...doc } = found;
+    if (personsIdea(events, id, doc)) return "is a person's idea (source: user)";
+    if (merged.has(id)) return `holds a person's idea merged into it (${merged.get(id)})`;
+    const mark = marks[id];
+    if (!mark) return 'holds no mark, so who decided it is not known';
+    if (!RUN_MARKS.includes(mark.by)) return `holds the owner's mark (by ${mark.by})`;
+    // T6B3-REPLAN-MARK-OK: the run's mark counts while it agrees with the proposal and is of its present text.
+    if (ownerCheck(id, doc, mark) !== 'ok') return "holds a run's mark that no longer matches it (reopened or edited since)";
+    return null;
+  };
+}
+
+/**
  * Why a re-plan may not retire, move, or change the title or done_when of a task: a function of the task's id that gives the
  * reasons (`<task> is done`, `its proposal <id> …`), or null when it may. `root` is the checkout whose proposals, marks and
  * ledger say where each task came from (the run's worktree), `plan` the plan, `done` the tasks the roadmap's state says are
@@ -43,26 +73,14 @@ function changeOf(op: ReplanOp, tasks: ReadonlyMap<string, PlanTask>): { task: s
  */
 export function heldBy(root: string, plan: Plan, done: ReadonlySet<string>): (task: string) => string | null {
   const proposals = loadProposals(root);
-  const byId = new Map(proposals.map(p => [p.id, p]));
-  const marks = loadApprovals(root);
-  const events = readEvents(root).filter(e => e.kind === 'proposal');
-  // T6B3-REPLAN-MERGED: a person's note that said what an open proposal says joined it (`proposals add --from-note`).
-  const merged = new Map(events.filter(e => e.action === IDEA_MERGED && typeof e.id === 'string').map(e => [e.id as string, String(e.from ?? 'a note')]));
+  const notOwn = notRunsOwn(root, proposals);
   const tasks = new Map(plan.tasks.map(t => [t.id, t]));
   /** Why `task` is the person's, by the first proposal it came from that is not the run's own; null when none is. */
   const personOf = (task: string): string | null => {
     const from = [...proposalsOfIncludes(tasks.get(task)?.includes), ...proposals.filter(p => p.taskId === task).map(p => p.id)];
     for (const id of new Set(from)) {
-      const found = byId.get(id);
-      if (!found) return `its proposal ${id} is not in this checkout, so who decided it is not known`;
-      const { id: _id, ...doc } = found;
-      if (personsIdea(events, id, doc)) return `its proposal ${id} is a person's idea (source: user)`;
-      if (merged.has(id)) return `its proposal ${id} holds a person's idea merged into it (${merged.get(id)})`;
-      const mark = marks[id];
-      if (!mark) return `its proposal ${id} holds no mark, so who decided it is not known`;
-      if (!RUN_MARKS.includes(mark.by)) return `its proposal ${id} holds the owner's mark (by ${mark.by})`;
-      // T6B3-REPLAN-MARK-OK: the run's mark counts while it agrees with the proposal and is of its present text.
-      if (ownerCheck(id, doc, mark) !== 'ok') return `its proposal ${id}: its mark no longer matches the proposal (reopened or edited since)`;
+      const why = notOwn(id);
+      if (why) return `its proposal ${id} ${why}`;
     }
     return null;
   };
