@@ -545,6 +545,7 @@ describe('plugin layout', () => {
       'forge-review-final': ['opus', 'xhigh'],
       'forge-planner': ['opus', 'xhigh'], 'forge-scout': ['opus', 'medium'], 'forge-verify': ['sonnet', 'high'], 'forge-verify-heavy': ['opus', 'high'],
       'forge-critic': ['opus', 'high'], 'forge-market': ['sonnet', 'medium'], 'forge-phase-review': ['opus', 'xhigh'],
+      'forge-runner': ['opus', 'medium'],
     };
     const agents = readdirSync(new URL('../plugins/forge/agents/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3));
     expect(agents.length).toBeGreaterThan(0);
@@ -2230,11 +2231,17 @@ describe('plugin layout', () => {
       expect(read(`plugins/forge/agents/${a}.md`), a).toContain('`forge autonomy ·`');
     }
   });
-  it('no forge agent can spawn subagents: tools without Agent, or Agent disallowed (6b-1)', () => {
+  it('no forge agent but forge-runner can spawn subagents: tools without Agent, or Agent disallowed (6b-1, A10)', () => {
     for (const f of readdirSync(new URL('../plugins/forge/agents/', import.meta.url)).filter(x => x.endsWith('.md'))) {
       const head = read(`plugins/forge/agents/${f}`).split(/\r?\n---\r?\n/)[0];
       const tools = /\ntools: (.+)/.exec(head)?.[1];
       const denied = /\ndisallowedTools: (.+)/.exec(head)?.[1];
+      if (f === 'forge-runner.md') {
+        // A10: the nested runner spawns its task's implementer and reviewers: no tools list, and Agent is not disallowed.
+        expect(tools, f).toBeUndefined();
+        expect(/\bAgent\b/.test(denied ?? ''), f).toBe(false);
+        continue;
+      }
       expect(tools ? !/\bAgent\b/.test(tools) : /\bAgent\b/.test(denied ?? ''), f).toBe(true);
     }
   });

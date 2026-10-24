@@ -218,3 +218,24 @@ describe('the say of the nested runner (A10)', () => {
     expect(stepSay([{ type: 'handback', task: 'T1', stage: 'review', reason: 'silent' }], null, 'en')).toBe('Step: T1: its runner handed it back; I take it from here.');
   });
 });
+
+describe('the runner agent and the coordinator text (A10)', () => {
+  const doc = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+  it('forge-runner: Opus at medium, may spawn agents, never edits nor asks, and carries the loop\'s commands and its reply', () => {
+    const md = doc('plugins/forge/agents/forge-runner.md');
+    const head = md.split(/\r?\n---\r?\n/)[0];
+    for (const re of [/^---\r?\nname: forge-runner\r?\n/, /\nmodel: opus\r?\n/, /\neffort: medium\r?\n/, /\nmaxTurns: 120\r?\n/, /\ndisallowedTools: Edit, NotebookEdit, AskUserQuestion\r?(\n|$)/]) expect(head).toMatch(re);
+    expect(head).not.toMatch(/\ntools:/);
+    for (const w of ['task-steps.md', '<WORK>/runner.json', 'FORGE swarm task <T> --stage', '--lease-minutes 90', 'timeout: 600000',
+      'FORGE triage --plan <plan> --task <T> --cwd <worktree> --base <base>', 'FORGE review-prep --task <T>-<n>', 'FORGE verify-plan --task <T>-<n>',
+      'FORGE review-close --task <T>-<n>', 'FORGE log --kind agent --task <T>-<n>', '<WORK>/deferred.json', '--stage verdict --status accepted --no-agent',
+      'SendMessage', '`<T> accepted`', '`<T> handback: <', '`<T> handback: taken back`', 'validators-head-<n>.json']) expect(md, w).toContain(w);
+  });
+  it('step.md hands the coordinator spawnRunner and handback, and a runner that comes back goes in --returned', () => {
+    const lines = doc('plugins/forge/skills/run/references/step.md').split('\n');
+    const runner = lines.find(l => l.trimStart().startsWith('- `spawnRunner` ('))!;
+    for (const w of ['`forge:forge-runner`', '`effort`', '`taskLine`', '`references/task-steps.md`', '`swarm.nested: true`']) expect(runner, w).toContain(w);
+    expect(lines.find(l => l.trimStart().startsWith('- `handback` ('))).toBeDefined();
+    expect(lines.find(l => l.startsWith('1. **Run it.**'))).toContain('`spawnRunner`');
+  });
+});

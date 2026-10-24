@@ -110,6 +110,7 @@ El triaje lee el texto de la tarea, los ficheros que probablemente toque y las z
 | `forge-critic` | Opus | alto | modo infinito: juzga un lote de propuestas (quedarla, adaptarla, descartarla o chocar) |
 | `forge-market` | Sonnet | medio | piloto de producto: investigación de mercado en la web, con una fuente por hallazgo |
 | `forge-phase-review` | Opus | muy alto | piloto de producto: al cerrar una fase, revisa el roadmap entero y propone el replan y, si hace falta, el cambio de visión |
+| `forge-runner` | Opus | medio | runner anidado (`swarm.nested`, apagado por defecto): lleva el bucle de una tarea por la coordinadora y lanza su implementador y sus revisores |
 
 Cada agente fija su `model` y su `effort`, así que ninguno hereda los de tu sesión. Los implementadores escriben su informe en `report-<n>.txt` y también lo incluyen en su respuesta. Suben por una escalera de cinco peldaños: `mech` → `impl-light` → `impl` → `impl-high` → `impl-heavy`. El perfil `economy` baja un peldaño a los implementadores (`impl-heavy` → `forge-impl-high`, `impl-high` → `forge-impl`, `impl` → `forge-impl-light`) y `quality` los sube (`impl` e `impl-high` → `forge-impl-heavy`, `impl-light` → `forge-impl`, `mech` → `forge-impl-light`).
 
