@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import { parseGuardInput, type GuardCtx, type GuardInput, type GuardVerdict } from '../src/forge/guard.js';
-import { isDotenvName, isForgeAgent, isVerifyAgent, secretOf, secretsRule } from '../src/forge/guard-secrets.js';
+import { homeSpelled, isDotenvName, isForgeAgent, isVerifyAgent, secretOf, secretsRule } from '../src/forge/guard-secrets.js';
 
 const WIN = process.platform === 'win32';
 const HOME = path.resolve(os.tmpdir(), 'guard-home');
@@ -98,5 +98,44 @@ describe('secretsRule: the credentials of the machine and the .env files (w7 A4,
     expect([isForgeAgent(IMPL), isForgeAgent('forge-mech'), isForgeAgent('general-purpose'), isForgeAgent(undefined)]).toEqual([true, true, false, false]);
     expect([isVerifyAgent(VERIFY), isVerifyAgent('forge-verify-heavy'), isVerifyAgent(IMPL), isVerifyAgent('x:forge-verify')]).toEqual([true, true, false, false]);
     expect(secretOf(path.join(HOME, '.config', 'gh', 'hosts.yml'), HOME)).toBe('~/.config/gh');
+  });
+});
+
+describe('secretsRule in Bash and PowerShell (w7 A4, guard B)', () => {
+  const H = sh(HOME);
+  const bash = (command: string, agent?: string) => secretsRule.check(call('Bash', { command }, agent), CTX);
+  const pwsh = (command: string, agent?: string) => secretsRule.check(call('PowerShell', { command }, agent), CTX);
+  const gitBash = `/${HOME[0].toLowerCase()}${sh(HOME.slice(2))}`;
+  it.each([
+    'cat ~/.ssh/id_ed25519', 'cat $HOME/.aws/credentials', 'cat "${HOME}/.config/gh/hosts.yml"', 'cp ~/.netrc /tmp/n', 'echo token >> ~/.git-credentials',
+    'KUBECONFIG=~/.kube/config kubectl get pods', 'kubectl --kubeconfig=~/.kube/config get pods', 'cd ~/.ssh && ls', 'cat ../../.ssh/id_rsa', `cat ${H}/.aws/config`,
+    'ls -la ~/.ssh/', 'tar -czf /tmp/k.tgz ~/.kube', 'x=$(cat ~/.ssh/id_rsa)', 'bash -c "cat ~/.ssh/id_rsa"', 'grep -r BEGIN ~', 'rg password $HOME', 'find ~ -name id_rsa',
+    'cat .env', 'source .env', 'node --env-file=.env app.js', 'cat apps/web/.env.local', `cat ${sh(OTHER)}/.env`, 'cat "$CFG/.env"',
+    'cat .env*', 'cat "apps/*/.env"', 'rg --regexp=x ~/.ssh', 'grep -e x -r ~',
+    ...(WIN ? ['cmd /c "type %USERPROFILE%\\.ssh\\id_rsa"', `cat ${gitBash}/.ssh/id_rsa`, `cat "${HOME.toUpperCase()}\\.SSH\\ID_RSA"`] : []),
+  ])('denies a forge agent the Bash call %s (Review Focus 3)', command => expect(ruleOf(bash(command, IMPL))).toBe('secrets'));
+  it.each([
+    'Get-Content $env:USERPROFILE\\.ssh\\id_rsa', 'Get-Content ~\\.aws\\credentials', 'type $HOME\\.kube\\config', 'Copy-Item ${env:USERPROFILE}\\.netrc x', 'Get-Content .env',
+  ])('denies a forge agent the PowerShell call %s', command => expect(ruleOf(pwsh(command, IMPL))).toBe('secrets'));
+  it.each([
+    'grep -rn ".env" src', 'rg -e .env src', 'rg --regexp=.env src', 'rg -e.env src', 'rg -n "process\\.env" src', 'echo .env >> .gitignore', "printf '%s\\n' .env >> .gitignore",
+    'git add .env.example', 'cat .env.example', 'curl -s https://example.com/.env', 'git commit -m "document ~/.ssh setup"', 'cat ~/.gitconfig', 'ls ~/work', 'npm test',
+    'grep -r x src', "find . -name '*.ts'",
+  ])('lets a forge agent run %s (Review Focus 1)', command => expect(bash(command, IMPL)).toBeNull());
+  it('lets a forge agent search for the text .env with Select-String', () => {
+    expect(pwsh('Select-String -Pattern .env -Path src\\a.ts', IMPL)).toBeNull();
+    expect(pwsh('Select-String -Pattern:.env -Path src\\a.ts', IMPL)).toBeNull();
+  });
+  it('verify reads the repository .env through Bash, and writes none and reads no other', () => {
+    for (const command of ['cat .env', 'dotenv -e .env -- node app.js', 'npm run dev']) expect(bash(command, VERIFY), command).toBeNull();
+    for (const command of [`cat ${sh(OTHER)}/.env`, 'echo X=1 >> .env', "sed -i 's/a/b/' .env", 'cat "$CFG/.env"', 'cat ~/.ssh/id_rsa']) expect(ruleOf(bash(command, HEAVY)), command).toBe('secrets');
+  });
+  it('the person\'s session and other agents run any of them', () => {
+    for (const a of [undefined, 'general-purpose']) for (const command of ['cat ~/.ssh/id_rsa', 'cat .env', 'grep -r BEGIN ~']) expect(bash(command, a), `${a} ${command}`).toBeNull();
+  });
+  it('homeSpelled replaces only a leading spelling of the home folder', () => {
+    for (const t of ['~', '~/.ssh', '$HOME/.aws', '${HOME}/x', '$env:USERPROFILE\\.ssh', '${env:USERPROFILE}\\x', '%USERPROFILE%\\.ssh', '%HOMEDRIVE%%HOMEPATH%\\x'])
+      expect(homeSpelled(t, HOME).startsWith(HOME), t).toBe(true);
+    for (const t of ['~user/x', '$HOMEDIR/x', 'a/~/x', 'x$HOME']) expect(homeSpelled(t, HOME), t).toBe(t);
   });
 });

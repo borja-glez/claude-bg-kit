@@ -3,13 +3,16 @@
 // forge-verify-heavy read the repository's own .env, to start the app, and none of them writes it.
 // The rule acts only when the call carries an agent_type that starts with forge: the person's session and every other
 // agent pass, and for them it reads nothing of the context. It judges Read, Edit, Write, NotebookEdit, Grep and Glob by
-// the paths they name; Bash and PowerShell come with Task 2.
+// the paths they name; Bash and PowerShell by the words of each command the guard's splitter finds.
 // Its limit: it recognises patterns, it is no sandbox. A search rooted in a repository folder that holds a .env, without
 // naming it, is not judged, and neither is a path spelled through what only the disk knows (a link, a junction, an 8.3 name).
 // Pure: it reads no file and starts no process.
 import os from 'node:os';
 import path from 'node:path';
-import { confinedIn, guardPath, isInside, targetPaths, type GuardCtx, type GuardInput, type GuardRule, type GuardVerdict } from './guard.js';
+import { bashSegments, segmentPath } from './autonomy-shared.js';
+import { writeInfo } from './autonomy-parse.js';
+import { commandName, type Segment, type Word } from './shell-words.js';
+import { confinedIn, guardPath, isInside, SHELL_TOOLS, targetPaths, type GuardCtx, type GuardInput, type GuardRule, type GuardVerdict } from './guard.js';
 
 export const SECRETS_RULE_ID = 'secrets';
 /** Relative to the home folder; compared with isInside. */
@@ -106,6 +109,89 @@ function searchItems(input: GuardInput, ctx: GuardCtx): Item[] {
   return [{ p: root, search: true, dotenv: targetsDotenv(path.basename(root)) ||targetsDotenv(last) }];
 }
 
+// ---- Bash and PowerShell ---------------------------------------------------------------------------------------------
+
+const HOME_SPELLING = /^(?:~|\$\{?HOME\}?|\$\{?env:(?:HOME|USERPROFILE)\}?|%(?:USERPROFILE|HOME)%|%HOMEDRIVE%%HOMEPATH%)(?=$|[\\/])/i;
+/** Commands whose arguments are text, not paths (their redirections still are). */
+const NO_PATH_ARGS: readonly string[] = ['echo', 'printf', 'write-output', 'write-host', 'write'];
+/** Commands whose pattern word is text, not a path. */
+const PATTERN_COMMANDS: readonly string[] = ['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'findstr', 'select-string', 'sls'];
+const URL = /^[a-z][a-z0-9+.-]+:\/\//i;
+
+/** text with its leading spelling of the home folder (~, $HOME, $env:USERPROFILE, %USERPROFILE%…) replaced by home; else text as it is. */
+export function homeSpelled(text: string, home: string): string {
+  const m = HOME_SPELLING.exec(text);
+  return m ? home + text.slice(m[0].length) : text;
+}
+
+/** The words of a grep-like segment that are the text it looks for: after -e/--regexp/-pattern, attached to them, or else the first operand. */
+function patternWords(seg: Segment, name: string): Set<Word> {
+  const out = new Set<Word>();
+  if (!PATTERN_COMMANDS.includes(name)) return out;
+  const args = seg.argv.slice(1);
+  let explicit = false;
+  args.forEach((a, i) => {
+    const t = a.text;
+    if (t === '-e' || t === '--regexp' || /^-pattern$/i.test(t)) {
+      explicit = true;
+      if (args[i + 1]) out.add(args[i + 1]);
+    } else if (/^--regexp=/.test(t) || /^-e[^-]/.test(t) || /^-pattern:/i.test(t)) {
+      explicit = true;
+      out.add(a);
+    }
+  });
+  if (!explicit) {
+    const first = args.find(a => !a.text.startsWith('-') && !(name === 'findstr' && a.text.startsWith('/')));
+    if (first) out.add(first);
+  }
+  return out;
+}
+
+const lastSegment = (t: string): string => t.slice(Math.max(t.lastIndexOf('/'), t.lastIndexOf('\\')) + 1);
+
+function segmentVerdict(seg: Segment, input: GuardInput, ctx: GuardCtx, home: string): GuardVerdict | null {
+  if (!seg.argv.length) return null;
+  const name = commandName(seg.argv[0]);
+  const skip = patternWords(seg, name);
+  const words: Word[] = [
+    ...(NO_PATH_ARGS.includes(name) ? seg.argv.slice(0, 1) : seg.argv).filter(w => !skip.has(w)),
+    ...seg.redirects.map(r => r.target),
+    ...Object.values(seg.env),
+  ];
+  const writes = new Set<string>();
+  const addWrite = (t: string): void => { writes.add(t); const eq = t.indexOf('='); if (eq >= 0) writes.add(t.slice(eq + 1)); };
+  for (const w of writeInfo(seg).targets) addWrite(w.text);
+  for (const r of seg.redirects) if (r.op !== '<') addWrite(r.target.text);
+  const searching = PATTERN_COMMANDS.includes(name) || name === 'find';
+  for (const w of words) {
+    if (URL.test(w.text)) continue;
+    const eq = w.text.indexOf('=');
+    for (const text of eq >= 0 ? [w.text, w.text.slice(eq + 1)] : [w.text]) {
+      if (text === '' || URL.test(text)) continue;
+      const t = homeSpelled(text, home);
+      const dynamic = w.dynamic && (t === text || /[$`%]/.test(t));
+      const p = segmentPath({ text: t, dynamic, glob: w.glob }, seg);
+      const wild = /[*?[]/.test(t);
+      if (p !== null) {
+        const secret = secretOf(p, home);
+        if (secret !== null) return deny(CREDS(secret));
+        if (searching && reachesSecrets(p, home)) return deny(SEARCH(p));
+        if (wild ? targetsDotenv(lastSegment(t)) : isDotenvName(path.basename(guardPath(p)))) {
+          const v = dotenvVerdict(p, input, ctx, writes.has(text));
+          if (v !== null) return v;
+        }
+      } else {
+        const last = lastSegment(t);
+        if (wild ? targetsDotenv(last) : isDotenvName(last)) {
+          const v = dotenvVerdict(null, input, ctx, writes.has(text));
+          if (v !== null) return v;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export const secretsRule: GuardRule = {
   id: SECRETS_RULE_ID,
   check(input, ctx) {
@@ -116,6 +202,13 @@ export const secretsRule: GuardRule = {
       items = targetPaths(input, ctx).map(p => ({ p, search: false, dotenv: isDotenvName(path.basename(guardPath(p))) }));
     } else if (input.tool_name === 'Grep' || input.tool_name === 'Glob') {
       items = searchItems(input, ctx);
+    } else if (SHELL_TOOLS.includes(input.tool_name)) {
+      const home = ctx.home ?? os.homedir();
+      for (const seg of bashSegments(input, ctx) ?? []) {
+        const v = segmentVerdict(seg, input, ctx, home);
+        if (v !== null) return v;
+      }
+      return null;
     } else return null;
     const home = ctx.home ?? os.homedir();
     for (const { p, search, dotenv } of items) {
