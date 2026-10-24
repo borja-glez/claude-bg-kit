@@ -95,6 +95,8 @@ export function checkReferences(plan: Plan): string[] {
     for (const d of t.depends_on) if (!tasks.has(d)) issues.push(`task ${t.id}: unknown dependency ${d}`);
   }
   for (const v of plan.versions) for (const p of v.phases) if (!phases.has(p)) issues.push(`version ${v.id}: unknown phase ${p}`);
+  // T6B3-RETIRED-IDS: a task may not take a retired id, or sync would give it the retired task's state.
+  for (const id of plan.retired ?? []) if (tasks.has(id)) issues.push(`task ${id}: the id is retired (a replan took that task out): give the task a new id`);
   const cycle = findCycle(plan);
   if (cycle) issues.push(`dependency cycle: ${cycle.join(' -> ')}`);
   return issues;

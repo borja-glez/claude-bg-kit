@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
 import { applyReplan, normalizeOps, ReplanError, MAX_OPS } from '../src/lib/replan.js';
-import { parsePlan } from '../src/lib/plan.js';
+import { parsePlan, PlanError } from '../src/lib/plan.js';
 import { planLite } from '../src/lib/plan-lite.js';
 import { buildSyncWrites } from '../src/lib/sync.js';
 import { proposalToTask } from '../src/forge/to-task.js';
@@ -200,6 +200,11 @@ describe('a retired id is never minted again (T6B3-RETIRED-IDS)', () => {
     const next = writes({ ...plan, tasks: [...plan.tasks, task] }, { T006: { ...done, status: 'orphaned', prevStatus: 'done' } });
     expect(next).toEqual([{ op: 'set', collection: 'state', doc_id: 'T007', data: { status: 'free' } }]);
   });
+  it('fix 2: a plan whose task takes a retired id is refused, naming the id', () => {
+    expect(() => parsePlan(`${FIXTURE}retired: [T009, T006]\n`)).toThrow(PlanError);
+    expect(() => parsePlan(`${FIXTURE}retired: [T009, T006]\n`)).toThrow(/T006/);
+    expect(parsePlan(`${FIXTURE}retired: [T009]\n`).retired).toEqual(['T009']);
+  });
 });
 
 describe('the history every reader takes (T6B3-HISTORY-LENIENT, m-4)', () => {
@@ -335,6 +340,25 @@ describe('waypoint replan', () => {
     expect(r.stderr).toContain('alias');
     expect(readFileSync(path.join(dir, 'plan.yaml'), 'utf8')).toBe(ALIAS);
     expect(readdirSync(dir).sort()).toEqual(['assets', 'ops.json', 'plan.yaml', 'why.txt']);
+  });
+  it('fix 2: refuses a flag it does not know, naming it, and writes nothing (a typo of --check never writes)', () => {
+    writeFileSync(path.join(dir, 'ops.json'), JSON.stringify({ ops: [{ op: 'move', task: 'T003', phase: 'F2' }] }));
+    for (const extra of [['--chek'], ['--check', '--force'], ['-c']]) {
+      const r = replan(...extra);
+      expect(r.code, extra.join(' ')).toBe(2);
+      expect(r.stderr).toContain(extra.at(-1)!);
+      expect(readFileSync(path.join(dir, 'plan.yaml'), 'utf8')).toBe(FIXTURE);
+    }
+    expect(readdirSync(dir).sort()).toEqual(['assets', 'ops.json', 'plan.yaml', 'why.txt']);
+  });
+  it('fix 2: accepts a UTF-8 BOM at the start of the ops and the why files', () => {
+    const bom = String.fromCharCode(0xfeff);
+    writeFileSync(path.join(dir, 'ops.json'), `${bom}${JSON.stringify({ ops: [{ op: 'move', task: 'T003', phase: 'F2' }] })}`);
+    writeFileSync(path.join(dir, 'why.txt'), `${bom}la revisión de fase`);
+    const r = replan();
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ changes: ['T003: F1 → F2'], history: 1 });
+    expect(parsePlan(readFileSync(path.join(dir, 'plan.yaml'), 'utf8')).history?.[0].why).toBe('la revisión de fase');
   });
   it('H-1: --check validates and prints the changes, and writes nothing', () => {
     writeFileSync(path.join(dir, 'ops.json'), JSON.stringify({ ops: [{ op: 'move', task: 'T003', phase: 'F2' }, { op: 'edit-phase', id: 'F2', goal: 'cobrar' }] }));

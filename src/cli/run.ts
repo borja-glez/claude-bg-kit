@@ -171,13 +171,19 @@ export function run(argv: string[], io: Io): Result {
         // 6b-3 Task 1: moves, orders, adds, edits and retires phases and tasks, never renumbering, with the why in the plan's
         // history. H-1: --check validates and prints the changes, writing nothing. Every check runs before the one atomic
         // write, so a problem (exit 2, the issues on stderr) leaves the plan byte for byte as it was.
+        // T6B3-UNKNOWN-FLAG: a flag it does not know is refused before anything is read, so a typo of --check never writes.
+        const unknown = args.slice(1).filter((a, i, rest) => a.startsWith('-') && !['--ops', '--why-file'].includes(rest[i - 1] ?? '')
+          && a !== '--ops' && a !== '--why-file' && a !== '--check');
+        if (unknown.length) return fail(`replan: unknown option ${unknown.join(', ')} (it takes --ops, --why-file and --check)`, 2);
         const opsFile = flag('ops'), whyFile = flag('why-file');
         if (!args[0] || args[0].startsWith('--') || !opsFile || !whyFile) return fail('usage: waypoint replan <plan.yaml> --ops <ops.json> --why-file <why.txt> [--check]', 2);
         const file = abs(args[0]);
+        // A UTF-8 BOM, which some editors write at the start of a file, is no part of the JSON or of the why.
+        const read = (f: string) => { const s = readFileSync(abs(f), 'utf8'); return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s; };
         let text: string, raw: unknown, why: string;
         try { text = readFileSync(file, 'utf8'); } catch { return fail(`replan: cannot read ${args[0]}`, 2); }
-        try { raw = JSON.parse(readFileSync(abs(opsFile), 'utf8')); } catch { return fail(`replan: cannot read ${opsFile} as JSON`, 2); }
-        try { why = readFileSync(abs(whyFile), 'utf8'); } catch { return fail(`replan: cannot read ${whyFile}`, 2); }
+        try { raw = JSON.parse(read(opsFile)); } catch { return fail(`replan: cannot read ${opsFile} as JSON`, 2); }
+        try { why = read(whyFile); } catch { return fail(`replan: cannot read ${whyFile}`, 2); }
         const { ops, errors } = normalizeOps(raw);
         if (errors.length) return fail(new ReplanError(errors).message, 2);
         let r: ReturnType<typeof applyReplan>;
