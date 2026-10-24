@@ -55,7 +55,7 @@ const REF_TOKENS: Record<string, string[]> = {
   verify: ['pnpm format && pnpm format:check', 'pnpm check', 'TypeScript 6', "CLAUDECODE: ''", "CURSOR_TRACE_ID: ''", '--ignore-lock',
     'process.env.PORT ?? 4321', 'reuseExistingServer: false', 'CLAUDECODE= pnpm preview', 'lhci autorun', 'numberOfRuns: 3', 'minScore', 'EPERM',
     '--headless=new', '--remote-debugging-port=9333', '--port=9333', 'npx lighthouse', 'mcr.microsoft.com/playwright',
-    'CHROME_PATH=/ms-playwright/chromium-*/chrome-linux64/chrome', 'MSYS_NO_PATHCONV=1', 'gh run watch', "channel: 'chrome'", 'requestAnimationFrame',
+    'export CHROME_PATH=$(ls /ms-playwright/chromium-*/chrome-linux64/chrome)', 'MSYS_NO_PATHCONV=1', 'gh run watch', "channel: 'chrome'", 'requestAnimationFrame',
     "scrollTo({ behavior: 'instant' })", 'PID'],
 };
 

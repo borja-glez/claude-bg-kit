@@ -57,7 +57,7 @@ To reproduce CI numbers, run in the Playwright container (use the version of `@p
 
 ```bash
 MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/work" -w /work mcr.microsoft.com/playwright:v<version>-noble \
-  bash -c 'CHROME_PATH=/ms-playwright/chromium-*/chrome-linux64/chrome npx lhci autorun'
+  bash -c 'export CHROME_PATH=$(ls /ms-playwright/chromium-*/chrome-linux64/chrome) && npx lhci autorun'
 ```
 
 `MSYS_NO_PATHCONV=1` stops Git Bash from rewriting the volume path. Remember the local Chrome follows the system's dark theme, which CI's does not, so scores differ for that alone.
