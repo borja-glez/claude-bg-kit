@@ -6,6 +6,7 @@ import { checkPlanProject, commitInfo, integratedPublish } from './swarm.js';
 import { pendingVerify } from './shared.js';
 import { readExecution, executionTaskFile, runWorktree, taskBase, writePublicTask } from '../execution.js';
 import { phaseToVerify } from '../flow.js';
+import { loadConfig } from '../config.js';
 import { takeStepLock } from '../jobs.js';
 import { appendEvent, readEvents, withEventContext, type LedgerEvent } from '../ledger.js';
 import { eventsOf, isTask, readWorkDir, taskLine, workRel } from '../task-ref.js';
@@ -35,6 +36,8 @@ interface Ctx {
   project: string;
   /** Carry 3: the execution's id, recorded in validators-head-<n>.json so another run's is never read as its own. */
   runId: string;
+  /** A10: swarm.nested is on in a subagents run: a start goes to a runner. */
+  nested: boolean;
 }
 /** respawned.json of a review round: each reviewer respawned once, when, and the mtime of the file it was respawned on. */
 type Respawned = Record<string, { at: string; mtimeMs: number }>;
@@ -51,6 +54,12 @@ interface Round { work: string; abs: string; roundDir: string; plan: Json | null
 const AGENT_LEASE_MINUTES = 90;
 /** A question nobody answered is put to the person once more this long after it was asked (a compaction may lose it). */
 const ASK_AGAIN_MS = 24 * 3600_000;
+/** A10: <WORK>/runner.json says a nested runner holds the task; the step leaves it alone until it is back or silent. */
+const RUNNER_FILE = 'runner.json';
+const RUNNER_AGENT = 'forge-runner';
+const RUNNER_EFFORT = 'medium';
+const RUNNER_SILENT_MINUTES = AGENT_LEASE_MINUTES + LEASE_MINUTES;
+interface RunnerDoc { runId: string; attempts: number; state: 'running' | 'back'; at: string; backAt?: string; reason?: 'returned' | 'silent' }
 
 const slash = (p: string) => p.split(path.sep).join('/');
 const readText = (f: string): string | null => { try { return readFileSync(f, 'utf8'); } catch { return null; } };
@@ -194,6 +203,25 @@ function finished(file: string): boolean {
   } catch { return true; }
 }
 
+/** A10: whether the main checkout's config turns the nested runner on; a config that does not read is off. */
+function nestedOn(root: string): boolean {
+  try { return loadConfig(root).swarm.nested === true; } catch { return false; }
+}
+
+/** A10: the runner.json of a task the runner holds (this run's, this attempt's, state running); null otherwise. It does
+ *  not depend on c.nested: the file decides, so a config changed mid-run leaves the tasks already out with their runner. */
+function heldRunner(c: Ctx, task: string, t: ExecTask): { file: string; doc: RunnerDoc } | null {
+  const file = path.join(c.io.cwd, workOf(c, task, readEvents(c.io.cwd)), RUNNER_FILE);
+  const doc = readJson(file);
+  if (!isObject(doc) || doc.state !== 'running' || doc.runId !== c.runId || doc.attempts !== t.attempts) return null;
+  return { file, doc: doc as unknown as RunnerDoc };
+}
+
+/** Writes the hand-back at once (not in Ctx.after): a step that dies must not leave the task with the runner again. */
+function releaseRunner(c: Ctx, held: { file: string; doc: RunnerDoc }, reason: 'returned' | 'silent'): void {
+  writeJson(held.file, { ...held.doc, state: 'back', backAt: c.iso(), reason } satisfies RunnerDoc);
+}
+
 /** The local lease of a subagents task the coordinator drives: renewed to NOW + LEASE_MINUTES, never shortened. */
 function renewLease(io: Io, e: ExecutionState, task: string, t: ExecTask, now: Date): void {
   let prev: PublicTask | null = null;
@@ -261,10 +289,23 @@ function startTask(c: Ctx, task: string, resume: boolean): boolean {
   // The skill spawns it from this action: the step logs it, as task-steps step 2 says (review-close reads the rung).
   logAgent(c, `${task}-1`, agent, typeof impl.role === 'string' ? impl.role : 'impl');
   if (!call(c, task, ['swarm', 'task', task, '--stage', 'implement', '--agent', agent, '--round', '0', '--lease', c.agentLease()])) return false;
-  c.actions.push({
-    type: 'spawnImplementer', task, agent, taskLine: taskLine(`${task}-1`, c.project), role: impl.role ?? null, brief: slash(brief), report: slash(path.join(work, 'report-1.txt')),
-    validate: pr.validate ?? null, worktree, base: pr.base ?? null, ...(w.setup ? { setup: w.setup } : {}), ...(tri.announce ? { announce: tri.announce } : {}),
-  });
+  // What spawnImplementer and spawnRunner both hand over.
+  const handout = {
+    brief: slash(brief), report: slash(path.join(work, 'report-1.txt')), validate: pr.validate ?? null, worktree, base: pr.base ?? null,
+    ...(w.setup ? { setup: w.setup } : {}), ...(tri.announce ? { announce: tri.announce } : {}),
+  };
+  // A10: a task resumed on its branch (D-02) stays with the coordinator.
+  if (c.nested && !resumedBase) {
+    const attempts = readExecution(c.io.cwd)?.tasks[task]?.attempts ?? 0;
+    // Last act of the step: a step that dies before its output leaves no runner nobody launched.
+    c.after.push(() => writeJson(path.join(c.io.cwd, work, RUNNER_FILE), { runId: c.runId, attempts, state: 'running', at: c.iso() } satisfies RunnerDoc));
+    c.actions.push({
+      type: 'spawnRunner', task, agent: RUNNER_AGENT, effort: RUNNER_EFFORT, taskLine: taskLine(task, c.project), plan: c.planArg, project: c.project, locale: c.locale,
+      work: slash(work), implementer: { agent, role: impl.role ?? null, taskLine: taskLine(`${task}-1`, c.project) }, ...handout,
+    });
+    return true;
+  }
+  c.actions.push({ type: 'spawnImplementer', task, agent, taskLine: taskLine(`${task}-1`, c.project), role: impl.role ?? null, ...handout });
   return true;
 }
 
@@ -627,6 +668,8 @@ export function publishOf(io: Io, e: ExecutionState, started: Set<string>, versi
 
 const SAY: Record<string, [string, string]> = {
   spawnImplementer: ['{t} empieza con {x}', '{t} starts with {x}'],
+  spawnRunner: ['{t} empieza con su runner ({x})', '{t} starts with its runner ({x})'],
+  handback: ['{t}: su runner la devuelve; sigo yo', '{t}: its runner handed it back; I take it from here'],
   spawnReviewers: ['{t} a revisión', '{t} to review'],
   express: ['{t} a revisión exprés', '{t} to an express review'],
   validatorsRound: ['{t} vuelve a su implementador (validadores en rojo)', '{t} back to its implementer (red validators)'],
@@ -666,7 +709,9 @@ export function stepSay(actions: StepAction[], wait: number | null, locale: 'es'
   const parts = actions.flatMap(a => {
     const s = SAY[a.type];
     if (!s) return [];
-    const x = a.type === 'spawnImplementer' ? a.agent : a.type === 'error' ? a.command : a.type === 'block' || a.type === 'stalled' ? a.reason : '';
+    const runnerImpl = isObject(a.implementer) && typeof a.implementer.agent === 'string' ? a.implementer.agent : '';
+    const x = a.type === 'spawnImplementer' ? a.agent : a.type === 'spawnRunner' ? runnerImpl
+      : a.type === 'error' ? a.command : a.type === 'block' || a.type === 'stalled' ? a.reason : '';
     const env = a.type === 'accepted' && Array.isArray(a.envUnverified) && a.envUnverified.length
       ? ` (${a.envUnverified.join(', ')} ${locale === 'es' ? 'sin volver a comprobar: entorno' : 'not checked again: environment'})` : '';
     return [s[i].replace('{t}', String(a.task ?? 'swarm step')).replace('{x}', String(x ?? '')) + env];
@@ -684,7 +729,8 @@ export function stepSay(actions: StepAction[], wait: number | null, locale: 'es'
  * validate); follows the person's answers (`--ruling <T>:fix|out-of-model|defer:F3[+F5]|review`); ticks (a start in
  * mode subagents gets its worktree, brief, triage and prep; at most one integrate; the rest passes through); and
  * prints `{actions, publish, running, parallel, wait, say}`. A command that fails for one task is an `error` action of
- * that task, again at each step while it fails, and the others go on. Plan executions only. One step at a time (I4):
+ * that task, again at each step while it fails, and the others go on. A10: with swarm.nested, a start is handed to a
+ * runner (spawnRunner) and the step leaves the task alone while runner.json holds it. Plan executions only. One step at a time (I4):
  * while another live step holds .forge/jobs/step.lock it prints `{busy: {pid, startedAt}}` and runs nothing.
  */
 export function swarmStep(rest: string[], io: Io, deps: StepDeps): Result {
@@ -717,6 +763,7 @@ export function swarmStep(rest: string[], io: Io, deps: StepDeps): Result {
   try {
     const c: Ctx = {
       io, deps, planArg, db, runBranch: e0.branch, project: e0.project, runId: e0.runId, locale, rulings, actions: [], after: [],
+      nested: e0.mode === 'subagents' && nestedOn(io.cwd),
       iso: () => io.now().toISOString(), agentLease: () => new Date(io.now().getTime() + AGENT_LEASE_MINUTES * 60000).toISOString(),
     };
     // C4: every event of the step, its own and its commands' (those that name no project), is of the run's project, even
@@ -732,8 +779,24 @@ function stepOnce(c: Ctx, e0: ExecutionState, returned: Set<string>, versions: V
   // 2. What came back, and what a previous step left half done.
   const started = new Set<string>();
   const ruled = new Set<string>();
+  // A10: a runner that left its task accepted (not running) is let go; the tick integrates it.
+  for (const task of returned) {
+    const t = e0.tasks[task];
+    const held = t && t.status !== 'running' ? heldRunner(c, task, t) : null;
+    if (t && held) releaseRunner(c, held, 'returned');
+  }
   for (const [task, t] of Object.entries(e0.tasks)) {
     if (t.status !== 'running' || t.executor !== 'subagents') continue;
+    const held = heldRunner(c, task, t);
+    if (held) {
+      const last = Math.max(Date.parse(String(held.doc.at)) || 0, Date.parse(t.updatedAt) || 0);
+      const silent = Date.parse(c.iso()) - last > RUNNER_SILENT_MINUTES * 60000;
+      // Held: the task is not touched (renewLease kept its lease), and a --ruling for it gets the error of any task not back.
+      if (!returned.has(task) && !silent) continue;
+      const reason = returned.has(task) ? 'returned' : 'silent';
+      releaseRunner(c, held, reason);
+      c.actions.push({ type: 'handback', task, stage: t.stage, reason });
+    }
     if (t.stage === 'brief') { if (startTask(c, task, true)) started.add(task); }
     else if (t.stage === 'implement' || t.stage === 'validate') { ruled.add(task); implementerBack(c, task, t, returned.has(task)); }
     else if (t.stage === 'review') { ruled.add(task); reviewersBack(c, task, t, returned.has(task)); }
