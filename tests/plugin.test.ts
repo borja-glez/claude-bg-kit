@@ -389,11 +389,17 @@ describe('plugin layout', () => {
     expect(h.UserPromptSubmit[0].hooks[0].command).toContain('hook route-prompt');
     expect(h.SessionStart).toEqual(expect.arrayContaining([expect.objectContaining({ matcher: 'startup|resume|clear|compact|fork', hooks: [expect.objectContaining({ command: expect.stringContaining('hook live') })] })]));
   });
-  it('plan 2 leftovers in the texts: --from-spec triage and declined specs', () => {
+  it('plan 2 leftovers in the texts: --from-spec follows the triage, and declined specs (A1)', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     expect(md).toContain('**From a spec.** With `--from-spec <f>`');
-    expect(runRef('large')).toContain('The path is Large whatever `FORGE triage` prints');
-    expect(runRef('large')).toContain('FORGE sp-specs --decline <path>');
+    const head = md.split(/\r?\n---\r?\n/)[0];
+    expect(head).toContain('--from-spec <spec>');
+    expect(head).not.toContain('starts Large from a superpowers spec');
+    const large = runRef('large');
+    const from = large.slice(large.indexOf('### From a spec'));
+    expect(from).not.toContain('whatever `FORGE triage` prints');
+    for (const w of ['--text-file <f>', '{"path":"large"', '/waypoint:design new --from <f>', 'Spec: <f>', 'FORGE sp-specs --decline <f>']) expect(from, w).toContain(w);
+    expect(large).toContain('FORGE sp-specs --decline <path>');
     expect(read('plugins/forge/README.md')).toContain('`/forge:run --from-spec <spec> [<task>]`');
     expect(read('plugins/forge/README.es.md')).toContain('`/forge:run --from-spec <spec> [<tarea>]`');
   });

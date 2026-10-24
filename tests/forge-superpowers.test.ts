@@ -262,3 +262,33 @@ describe('tdd: superpowers', () => {
     expect(run(['brief', '--superpowers-plan', 'sp.md', '--task', '2'], io).stdout).not.toContain('TDD: required');
   });
 });
+
+describe('--from-spec follows the triage (A1)', () => {
+  const AT = new Date('2026-10-24T10:00:00.000Z');
+  let io: Io;
+  const put = (rel: string, text: string) => { mk(path.dirname(path.join(project, rel))); writeFileSync(path.join(project, rel), text); };
+  beforeEach(() => {
+    for (const f of ['src/cart/total.ts', 'src/cart/coupon.ts', 'src/auth/login.ts', 'src/app.ts']) put(f, '// x\n');
+    put('README.md', '# x\n');
+    put('package.json', '{"name":"x"}\n');
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: project, stdio: 'ignore' });
+    git('init', '-q', '-b', 'main'); git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
+    git('add', '-A'); git('commit', '-q', '-m', 'init');
+    io = { cwd: project, now: () => AT, env: { CLAUDE_CONFIG_DIR: cfg } };
+  });
+  // What forge:run runs on a spec (references/large.md, From a spec): the triage with the spec itself as --text-file.
+  const triaged = (id: string, text: string): string => {
+    const rel = `docs/superpowers/specs/2026-10-24-${id}-design.md`;
+    put(rel, text);
+    const r = run(['triage', '--task', id, '--text-file', rel, '--locale', 'en'], io);
+    expect(r.code, r.stderr).toBe(0);
+    return JSON.parse(r.stdout).path;
+  };
+  it('a short spec of a small change is Small or Medium by the triage, never Large for being a spec', () => {
+    expect(triaged('coupon', '# Coupon field — design\n\nLet a shopper type a coupon code at checkout: `applyCoupon` in src/cart/coupon.ts takes 10% off the subtotal, and src/cart/total.ts shows the new total. One unit test for each file.\n')).toBe('small');
+    expect(triaged('lockout', '# Login lockout — design\n\nAfter five wrong passwords, src/auth/login.ts locks the account for ten minutes.\n')).toBe('medium');
+  });
+  it('a spec whose title is architecture-scale is Large, so it is imported as the design', () => {
+    expect(triaged('cart', '# Rewrite of the cart subsystem — design\n\n## Goals\n\nOne cart for web and app.\n')).toBe('large');
+  });
+});
