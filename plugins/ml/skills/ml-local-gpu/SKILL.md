@@ -42,6 +42,8 @@ Read `pyproject.toml`, the lock, the CI config and the README before anything el
 
 | Situation | Do |
 |---|---|
+| Starting on a project | read `pyproject.toml`, the lock, the CI config and the README first; the project's versions and tools win |
+| ONNX or transformers.js in a browser | read `references/browser-inference.md` before any worker code |
 | Any Python run | `uv run ...`, never global `python` or `pip` |
 | CUDA False, "no kernel image", `sm_120` | cu128 index for Blackwell, cpu index for CI, project's wheel for older GPUs |
 | Before a GPU job | `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader`; peaks under total minus 10 % |
