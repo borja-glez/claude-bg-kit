@@ -78,9 +78,9 @@ describe('work folders in the skills of forge (D-08)', () => {
       const text = readFileSync(f, 'utf8').replace(WORK_DEFINITION, '');
       const out: string[] = [];
       if (/\.forge\/work\/(?:T|<T>)(?=[/\s`])/.test(text)) out.push(rel(f));
-      // A reference names a task's folder <WORK>. A loose task's .forge/work/<id> stays in forge:run's own body and in a
-      // superpowers plan, and task.txt is written before any triage.
-      if (rel(f).includes('/references/') && !rel(f).endsWith('superpowers-plan.md') && /\.forge\/work\/<id>(?!\/task\.txt)(?=[/\s`])/.test(text)) out.push(`${rel(f)} (<id>)`);
+      // A reference names a task's folder <WORK>. A loose task's .forge/work/<id> stays in forge:run's own body, in its
+      // Medium path (references/medium.md, moved there whole in w7 A2) and in a superpowers plan, and task.txt is written before any triage.
+      if (rel(f).includes('/references/') && !rel(f).endsWith('superpowers-plan.md') && !rel(f).endsWith('/medium.md') && /\.forge\/work\/<id>(?!\/task\.txt)(?=[/\s`])/.test(text)) out.push(`${rel(f)} (<id>)`);
       return out;
     });
     expect(hits).toEqual([]);

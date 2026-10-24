@@ -26,6 +26,14 @@ const WORK_CAP = 21043;
 const RUN_CAP = 17983;
 // 6b-1: the core of forge:infinite stays under what compaction re-attaches (5,000 tokens per skill; ≈ 3.5 characters per token here); its tails live in references/.
 const INFINITE_CAP = 13500;
+// w7 A2: compaction re-attaches the first 5,000 tokens of each skill invoked (Claude Code docs, «What survives compaction»);
+// 16,000 bytes is ≈ 4,000–4,600 tokens at 3.5–4 characters per token, so a SKILL.md under it comes back whole. In bytes:
+// no API key, no manual step.
+const SKILL_CAP = 16000;
+/** A skill as a session reads it: its SKILL.md, then each of its references/*.md in name order. */
+const skillText = (dir: string): string => [read(`${dir}/SKILL.md`), ...(existsSync(new URL(`../${dir}/references/`, import.meta.url))
+  ? readdirSync(new URL(`../${dir}/references/`, import.meta.url)).filter(f => f.endsWith('.md')).sort().map(f => read(`${dir}/references/${f}`)) : [])].join('\n');
+const runText = () => skillText('plugins/forge/skills/run');
 /** I-17: the floor of a dependency range (`^5.0.5`, `~5.0.5`, `5.0.5`) is `min` or later. */
 const floorAtLeast = (range: string | undefined, min: string): boolean => {
   const m = /^[\^~]?(\d+)\.(\d+)\.(\d+)$/.exec(range ?? '');
@@ -125,7 +133,7 @@ describe('plugin layout', () => {
   });
   it('forge run skill drives the Large path through waypoint', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
-    for (const w of ['report-<n>.txt', '"base"', 'references/large.md']) expect(md).toContain(w);
+    for (const w of ['report-<n>.txt', '"base"', 'references/large.md']) expect(runText(), w).toContain(w);
     expect(runRef('task-steps')).toContain('--path large');
     expect(runRef('ephemeral')).toContain('review-perf');
     const large = runRef('large');
@@ -214,7 +222,7 @@ describe('plugin layout', () => {
   it('run skill: model by size, ephemeral execution, parallel Medium briefs and the member conflict fix round', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     for (const w of ['implementer.agent', '--batch', '### Ephemeral execution', '**Briefs in parallel.**', 'references/ephemeral.md']) {
-      expect(md).toContain(w);
+      expect(runText(), w).toContain(w);
     }
     const eph = runRef('ephemeral');
     for (const w of ['--kind ephemeral', '.forge/work/loose-tasks.json', 'no `--plan` nor `--db`', 'step 5 is its **Ephemeral run.** paragraph']) expect(eph).toContain(w);
@@ -228,7 +236,7 @@ describe('plugin layout', () => {
   });
   it('the run skill logs done at the end', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
-    expect(md).toContain('7. Log the phase `done`');
+    expect(runText()).toContain('7. Log the phase `done`');
     expect(runRef('large')).toContain('5. Log the phase `done`, then report');
   });
   it("versions: forge depends on waypoint with a caret range that admits waypoint's version (I-10)", () => {
@@ -269,7 +277,7 @@ describe('plugin layout', () => {
   it('skills print the lines the CLI hands over (campaign fixes)', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
     for (const s of ['Print `announce` exactly as printed', 'When the triage\'s `gate` is `plan`', '`untracked`', 'git commit -m "forge: track .forge/.gitignore" -- .forge/.gitignore']) {
-      expect(run).toContain(s);
+      expect(runText()).toContain(s);
     }
     for (const s of ['its `diff` verbatim', '`ask.question` with exactly the three `ask.options`', '`missing` and `unknown` tools',
       'allowed --expect <the surface\'s hash from verify-plan>', 'When `diffTruncated` is true', 'FORGE verify-close --task <id> --dir <WORK>/reviews-1-1 --evidence <WORK>/evidence/1-1/']) expect(runRef('verify')).toContain(s);
@@ -338,8 +346,7 @@ describe('plugin layout', () => {
     // The line step 4 writes into task.txt when the user asks about performance: triage's perf rule must read it as such.
     expect([...step4.matchAll(/«([^»]+)»/g)].map(m => m[1]).some(isPerfTask), 'a «…» line of step 4 is a perf task for FORGE triage').toBe(true);
     for (const w of ["review-prep's `spawn`", "the Agent tool's `effort`", 'each as subagent type `forge:<agent>`', 'forge-task: <id>-1']) expect(step6).toContain(w);
-    const run = read('plugins/forge/skills/run/SKILL.md');
-    const medium2 = run.slice(run.indexOf('\n2. For each task, write'), run.indexOf('\n3. Do not validate'));
+    const medium2 = runRef('medium').split(/\r?\n/).find(l => l.startsWith('2. For each task, write'))!;
     expect(medium2).toContain('run Triage step 1 again with `--delicate`');
   });
   it('auto mode in the skills: launch questions, decisions by auto, the design loop and the gate', () => {
@@ -613,7 +620,7 @@ describe('plugin layout', () => {
     }
   });
   it('the run skill wires verification in', () => {
-    const md = read('plugins/forge/skills/run/SKILL.md');
+    const md = runText();
     for (const s of ['FORGE verify-plan', 'forge-verify', '--path', '`new`']) expect(md).toContain(s);
     expect(md).toMatch(/explains how to check something[\s\S]*\.forge\/verify\/<name>\.md/);
     expect(md).toMatch(/[Rr]ead `references\/verify\.md` now and follow `## Before the review`/);
@@ -631,10 +638,10 @@ describe('plugin layout', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     expect(md).toMatch(/^---\r?\nname: run\r?\ndescription: .+\r?\n/);
     expect(md).toContain('`FORGE` below means `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs"`');
-    for (const w of ['FORGE triage', 'FORGE validate', 'FORGE review-prep', 'FORGE review-close', 'FORGE agents', 'FORGE log',
+    for (const w of ['FORGE triage', 'FORGE validate', 'FORGE review-close', 'FORGE agents', 'FORGE log',
       '## Trivial', '## Small', '## Medium', '## Large', '## Resuming', 'fresh-stronger', 'forge-fable', '--text-file', '--data-file', '<id>-<n>', 'FORGE prep --task <id>-1 --path small --no-baseline',
-      '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`',
-      '--baseline .forge/work/<id>/baseline-<n>.json']) expect(md).toContain(w);
+      '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`']) expect(md).toContain(w);
+    for (const w of ['FORGE review-prep', '--baseline .forge/work/<id>/baseline-<n>.json']) expect(runText(), w).toContain(w);
     for (const w of ['`revert`', '`invalid: true`', '`failures` of every validator with `ok: false` and no `preexisting` in `validators-<n>.json`', 'breaker', 'stalled', 'fresh-stronger']) {
       expect(runRef('review-close'), w).toContain(w);
     }
@@ -709,7 +716,7 @@ describe('plugin layout', () => {
     const refs = ['decisions', 'autonomy', 'large', 'execution', 'ephemeral', 'superpowers-plan', 'manual-member', 'resuming'].map(runRef);
     for (const s of [run, ...refs]) expect(s).not.toContain('FORGE log --kind decision');
     // Every report that closes work lists them: Medium (core), Large, Execution and Ephemeral execution.
-    expect(run).toMatch(/7\. Log the phase `done`[^\n]*automatic decisions/);
+    expect(runText()).toMatch(/7\. Log the phase `done`[^\n]*automatic decisions/);
     expect(runRef('ephemeral')).toContain('automatic decisions');
     const inf = infiniteText();
     expect(inf).toContain('FORGE decision add --data-file <f>');
@@ -768,9 +775,9 @@ describe('plugin layout', () => {
   });
   it('forge:run is split into references: each exists, the core cites it and no longer repeats its text', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
-    for (const f of ['large', 'execution', 'ephemeral', 'superpowers-plan', 'manual-member', 'resuming', 'autonomy', 'decisions', 'verify', 'review-close']) {
+    for (const f of ['large', 'execution', 'ephemeral', 'superpowers-plan', 'manual-member', 'resuming', 'autonomy', 'decisions', 'verify', 'review-close', 'medium']) {
       expect(existsSync(new URL(`../plugins/forge/skills/run/references/${f}.md`, import.meta.url)), f).toBe(true);
-      expect(run, f).toMatch(new RegExp(`[Rr]ead \`references/${f}\\.md\` now`));
+      expect(runText(), f).toMatch(new RegExp(`[Rr]ead \`references/${f}\\.md\` now`));
     }
     for (const w of ['FORGE swarm propose --plan', 'FORGE swarm integrate <T>', 'FORGE swarm start --project loose', 'FORGE sp-plan check', 'FORGE swarm join --session <SID> --role manual',
       'FORGE swarm takeover', '| `design-apply` |', '"type": "design-reopen"', 'final-validators.json']) expect(run, w).not.toContain(w);
@@ -805,7 +812,7 @@ describe('plugin layout', () => {
     expect(cited).toBeGreaterThan(0);
     // Each path that lives in a reference opens with the order to read it.
     const lines = run.split(/\r?\n/);
-    for (const [heading, ref] of [['### Superpowers plan', 'superpowers-plan'], ['## Large', 'large'], ['## Execution', 'execution'], ['### Manual member', 'manual-member'],
+    for (const [heading, ref] of [['## Medium', 'medium'], ['### Superpowers plan', 'superpowers-plan'], ['## Large', 'large'], ['## Execution', 'execution'], ['### Manual member', 'manual-member'],
       ['### Unattended', 'execution'], ['### Ephemeral execution', 'ephemeral'], ['## Resuming', 'resuming']] as const) {
       const at = lines.indexOf(heading);
       expect(at, heading).toBeGreaterThan(-1);
@@ -824,8 +831,7 @@ describe('plugin layout', () => {
         'are fixed', 'breaks nothing', '"origin"', '`previous`', '`fix`', '`untouched`', 'the CLI decides what blocks', 'Round 1']) expect(body, `${name}: ${w}`).toContain(w);
       expect(body).toMatch(/"origin": "previous" \| "fix" \| "untouched"/);
     }
-    const run = read('plugins/forge/skills/run/SKILL.md');
-    const medium = run.slice(run.indexOf('## Medium'), run.indexOf('### Superpowers plan'));
+    const medium = runRef('medium');
     const steps = read('plugins/forge/skills/run/references/task-steps.md');
     for (const [label, s] of [['Medium', medium + runRef('review-close')], ['task-steps', steps]] as const) {
       for (const w of ['FORGE review-prep --task', 'FORGE review-close --task', '`spawn`', "the Agent tool's `model`", '`effort`', 'shadow/',
@@ -852,8 +858,8 @@ describe('plugin layout', () => {
     expect(Buffer.byteLength(member, 'utf8')).toBeLessThan(15 * 1024);
   });
   it('review fixes of T013: loose Medium briefs, twins before the close, deferred handed over, mode passed', () => {
-    const run = read('plugins/forge/skills/run/SKILL.md');
-    const medium = run.slice(run.indexOf('\n## Medium'), run.indexOf('### Superpowers plan'));
+    const run = runText();
+    const medium = runRef('medium');
     const steps = read('plugins/forge/skills/run/references/task-steps.md');
     const member = read('plugins/forge/skills/member/SKILL.md');
     const ephemeral = runRef('ephemeral');
@@ -880,8 +886,7 @@ describe('plugin layout', () => {
     expect(run).not.toContain('diff forge/run-<project>...HEAD');
   });
   it('FORGE prep folds BASE, the phase and the baseline; each stage change is one batch with the printed publish and the lease', () => {
-    const run = read('plugins/forge/skills/run/SKILL.md');
-    const medium = run.slice(run.indexOf('\n## Medium'), run.indexOf('### Superpowers plan'));
+    const medium = runRef('medium');
     const steps = read('plugins/forge/skills/run/references/task-steps.md');
     expect(medium).toContain('FORGE prep --task <id>-<n> --path medium');
     expect(medium).not.toContain('--base-run');
@@ -1072,7 +1077,7 @@ describe('plugin layout', () => {
     expect(runRef('task-steps')).toContain('carries `--baseline`');
     const run = read('plugins/forge/skills/run/SKILL.md').split(/\r?\n/);
     const small1 = run.find(l => l.startsWith('1. A Small task is **always delegated**'))!;
-    const medium2 = run.find(l => l.startsWith('2. For each task, write'))!;
+    const medium2 = runRef('medium').split(/\r?\n/).find(l => l.startsWith('2. For each task, write'))!;
     const steps2 = runRef('task-steps').split(/\r?\n/).find(l => l.startsWith('2. **implement**'))!;
     const brief = runRef('ephemeral').split(/\r?\n/).find(l => l.includes('- **brief:**'))!;
     const member = read('plugins/forge/skills/member/SKILL.md').split(/\r?\n/).find(l => l.startsWith('**Implementer.**'))!;
@@ -1095,7 +1100,7 @@ describe('plugin layout', () => {
     expect(run).toContain('`<BASE>`');
   });
   it('a validators round sends the implementer back without reviewers (C-08)', () => {
-    const run = read('plugins/forge/skills/run/SKILL.md').split(/\r?\n/);
+    const run = runRef('medium').split(/\r?\n/);
     expect(run.find(l => l.startsWith('3. Do not validate or write the diff yourself'))).toContain('`validatorsRound`');
     const step3 = runRef('task-steps').split(/\r?\n/).find(l => l.startsWith('3. **validate**'))!;
     for (const w of ['`validatorsRound`', 'FORGE swarm task <T> --stage implement']) expect(step3).toContain(w);
@@ -1154,8 +1159,7 @@ describe('plugin layout', () => {
   });
 
   it('forge:run and the task steps close without waiting for twins, follow ask, handover and revert, and run an express review\'s validators in the background (C-11, C-13, C-15, J-08, K4-02, measure 7)', () => {
-    const run = read('plugins/forge/skills/run/SKILL.md');
-    const medium = run.slice(run.indexOf('\n## Medium'), run.indexOf('### Superpowers plan'));
+    const medium = runRef('medium');
     const steps = runRef('task-steps');
     const conv = runRef('convergence');
     for (const s of [medium, steps]) expect(s).toContain('references/convergence.md');
@@ -1171,8 +1175,7 @@ describe('plugin layout', () => {
     expect(runRef('step')).toContain('`revert.steps`');
   });
   it('forge:run Medium: every step starts its own line, 0 to 7 in order (I6)', () => {
-    const run = read('plugins/forge/skills/run/SKILL.md').replace(/\r\n/g, '\n');
-    const medium = run.slice(run.indexOf('\n## Medium'), run.indexOf('### Superpowers plan'));
+    const medium = runRef('medium').replace(/\r\n/g, '\n');
     expect(medium.match(/^\d+b?\. /gm)).toEqual(['0. ', '1. ', '2. ', '3. ', '3b. ', '4. ', '5. ', '6. ', '7. ']);
   });
   it('convergence.md: a theme added to threatModel.outOfScope also needs protects without a threatModel, and the config is checked after the edit (I5)', () => {
@@ -1254,7 +1257,7 @@ describe('plugin layout', () => {
     for (const w of ['launch.json', '/forge:run --execute <project>', '/clear', '`mostlySerial`', 'FORGE swarm propose --plan <plan> --locale']) expect(large, w).toContain(w);
     const run = read('plugins/forge/skills/run/SKILL.md');
     expect(run).toContain('/forge:run --execute <project>');
-    expect(run).toContain('~<min> min');
+    expect(runText()).toContain('~<min> min');
     // An express review whose background validation gave no results: review-close exits 2 and the validators run again in the foreground.
     expect(runRef('convergence')).toContain('review-close exits 2');
     // Fix round 1: every turn ends with a marked sleep, the same rule in step.md and Execution step 6; wait 0 only after
@@ -2057,8 +2060,7 @@ describe('plugin layout', () => {
     for (const w of ['FORGE review-close --task <id>-<n> --dir <WORK> --path <path>', '`missing`', '`invalid: true`', '`incomplete`', 'FORGE log --kind ruling --task <id>-<n>',
       '**Findings to send**', '`deferred`', '`resume`', '`fresh-stronger`', '`redo`', '`breaker`', '`stalled`', '`tierUp: true`', '`last: true`', 'references/convergence.md',
       '## After the verdict']) expect(close, w).toContain(w);
-    const run = read('plugins/forge/skills/run/SKILL.md');
-    const medium = run.slice(run.indexOf('\n## Medium'), run.indexOf('### Superpowers plan'));
+    const medium = runRef('medium');
     const step6 = medium.split('\n').find(l => l.startsWith('6. '));
     for (const w of ['references/review-close.md', '--path medium', '`<WORK>`']) expect(step6, w).toContain(w);
     expect(steps.split('\n').find(l => l.startsWith('5. **verdict**'))).toContain('references/review-close.md');
@@ -2088,6 +2090,19 @@ describe('plugin layout', () => {
     expect(sp.find(l => l.startsWith('1. '))!.split('FORGE route stage --stage done --session <CSID>')).toHaveLength(3);
     // M5: the ephemeral start names the id its begin takes.
     expect(runRef('ephemeral').split('\n').find(l => l.startsWith('2. **Start.**'))).toContain('FORGE begin --task');
+  });
+  it('forge:run reads the Medium path from references/medium.md, again at each brief (w7 A2)', () => {
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    expect(Buffer.byteLength(run, 'utf8')).toBeLessThanOrEqual(SKILL_CAP);
+    const lines = run.split(/\r?\n/);
+    expect(lines.slice(lines.indexOf('## Medium') + 1).find(l => l.trim() !== ''))
+      .toMatch(/^Read `references\/medium\.md` now, and again every time you get here: your memory of it does not survive compaction\./);
+    const medium = runRef('medium');
+    expect(medium.replace(/\r\n/g, '\n').match(/^\d+b?\. /gm)).toEqual(['0. ', '1. ', '2. ', '3. ', '3b. ', '4. ', '5. ', '6. ', '7. ']);
+    for (const w of ['FORGE prep --task <id>-<n> --path medium', 'FORGE review-prep --task <id>-<n> --path medium', 'FORGE review-close --task <id>-<n>',
+      '**Briefs in parallel.**', '**Tool verification.**']) expect(medium, w).toContain(w);
+    for (const w of ['FORGE review-prep', '**Briefs in parallel.**']) expect(run, w).not.toContain(w);
+    expect(medium).not.toContain('${CLAUDE_');
   });
   it('forge:route carries the three raising rules of forge:run word for word (K1-10)', () => {
     // T9: every bullet that follows the first one, so a fourth in one file is caught.
