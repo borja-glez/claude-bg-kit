@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parsePlan } from '../src/lib/plan.js';
-import { proposalToTask } from '../src/forge/to-task.js';
+import { proposalToTask, checkPlacement, MAX_ESTIMATE_MIN } from '../src/forge/to-task.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
 
 const planText = (locale: string, extraPhase = '') => `project: demo
@@ -70,5 +70,40 @@ describe('proposalToTask', () => {
     expect(es.phase?.name).toBe('Mejoras');
     expect(es.task.done_when).toBe('Cut dead code — los validadores pasan');
     expect(proposalToTask(parsePlan(planText('en', '  - { id: PX, name: Improvements, plan_status: provisional }\n')), prop(), {}).phase).toBeNull();
+  });
+});
+
+describe('placement (6b-3)', () => {
+  const plan = parsePlan(planText('en', '  - { id: F2, name: Polish, plan_status: committed }\n'));
+  const placement = { phase: 'F2', doneWhen: 'the combo meter doubles the score in the match test', dependsOn: ['T007'], estimateMin: 45 };
+  it('puts the task in its phase with its done_when, dependencies and estimate, and no PX', () => {
+    const { task, phase } = proposalToTask(plan, prop(), { placement });
+    expect(phase).toBeNull();
+    expect(task).toMatchObject({ phase: 'F2', done_when: placement.doneWhen, depends_on: ['T007'], estimate_min: 45 });
+  });
+  it('checkPlacement says what is wrong; an empty phase is a valid target, a done one is not', () => {
+    expect(checkPlacement(plan, 'Combo', placement, new Set())).toEqual([]);
+    expect(checkPlacement(plan, 'Combo', { ...placement, phase: 'F9' }, new Set()).join()).toContain('F9');
+    expect(checkPlacement(plan, 'Combo', { ...placement, dependsOn: ['T099'] }, new Set()).join()).toContain('T099');
+    expect(checkPlacement(plan, 'Combo', { ...placement, doneWhen: ' combo ' }, new Set()).length).toBeGreaterThan(0);
+    expect(checkPlacement(plan, 'Combo', { ...placement, doneWhen: 'short' }, new Set()).length).toBeGreaterThan(0);
+    expect(checkPlacement(plan, 'Combo', { ...placement, estimateMin: 0 }, new Set()).length).toBeGreaterThan(0);
+    expect(checkPlacement(plan, 'Combo', { ...placement, phase: 'F1' }, new Set(['T001', 'T007', 'X9'])).join()).toContain('F1');
+  });
+  it('a done_when that is the title with other capitals and spaces is refused; no dependency is fine; the estimate has a ceiling', () => {
+    const title = 'Combo meter doubles the score';
+    expect(checkPlacement(plan, title, { ...placement, doneWhen: '  combo METER   doubles the score ' }, new Set()).length).toBeGreaterThan(0);
+    expect(checkPlacement(plan, title, { ...placement, dependsOn: [] }, new Set())).toEqual([]);
+    expect(checkPlacement(plan, title, { ...placement, estimateMin: MAX_ESTIMATE_MIN + 1 }, new Set()).length).toBeGreaterThan(0);
+    expect(checkPlacement(plan, title, { ...placement, estimateMin: 2.5 }, new Set()).length).toBeGreaterThan(0);
+    // A phase with one task left open is still a target.
+    expect(checkPlacement(plan, title, { ...placement, phase: 'F1' }, new Set(['T001', 'T007']))).toEqual([]);
+  });
+  it('in a product run the improvements phase is never a placement (L-6)', () => {
+    const withPx = parsePlan(planText('en', '  - { id: PX, name: Improvements, plan_status: provisional }\n'));
+    const px = { ...placement, phase: 'PX' };
+    expect(checkPlacement(withPx, 'Combo', px, new Set(), { product: true }).join()).toContain('PX');
+    expect(checkPlacement(withPx, 'Combo', px, new Set())).toEqual([]);
+    expect(checkPlacement(withPx, 'Combo', { ...placement, phase: 'F1' }, new Set(), { product: true })).toEqual([]);
   });
 });

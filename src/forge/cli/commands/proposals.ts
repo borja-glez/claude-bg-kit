@@ -15,15 +15,18 @@ import {
 import { PAGE_RULES } from '../../../lib/publish.js';
 import { NOTE_ID } from '../../../lib/notes.js';
 import { autoApprovable } from '../../policy.js';
-import { proposalBatch, readVerdicts } from '../../critic.js';
-import { judgeProposal, pendingForJudge, unparkProposal, JudgeError, type Judged, type Unparked } from '../../judge.js';
+import { CRITIC_TEXT_MAX, proposalBatch, readPlacement, readVerdicts } from '../../critic.js';
+import { ancestorsOf, judgeProposal, pendingForJudge, unparkProposal, JudgeError, type Judged, type Unparked } from '../../judge.js';
 import {
   convertedFrom, ideaLink, ideaNote, ideaOrigin, IDEA_MERGED, normalizeOwner, noteOf, pendingIdeas, roadmapOwner, saveOwner, type RoadmapOwner,
 } from '../../ideas.js';
 import { parseRun, readRunText, type RunState } from '../../run.js';
 import { mainCheckout } from '../../local.js';
 import { addDecision, decisionNoteId, decisionWrites, markPublished } from '../../decisions.js';
-import { proposalToTask, proposalOfIncludes, proposalsOfIncludes } from '../../to-task.js';
+import { clean } from '../../../lib/decisions.js';
+import { readDocs } from '../../../lib/read-docs.js';
+import { stateDoc } from '../../../page/normalize.js';
+import { checkPlacement, estimateMinutes, proposalToTask, proposalOfIncludes, proposalsOfIncludes, type Placement } from '../../to-task.js';
 import type { PlanTask } from '../../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { UsageError } from '../errors.js';
@@ -83,6 +86,19 @@ function heldTask(tasks: PlanTask[], id: string, taskId: string | undefined): st
   return tasks.find(t => proposalOfIncludes(t.includes) === id)?.id ?? (taskId !== undefined && tasks.some(t => t.id === taskId) ? taskId : undefined);
 }
 
+/** 6b-3 B-1: the placement of the keep that approved `id`, from its last `judge` event in `cwd`'s ledger; null when that event
+ *  has none that reads (readPlacement, as the critic's file is read: the ledger is a file someone could edit). */
+function judgedPlacement(cwd: string, id: string): Placement | null {
+  const last = readEvents(cwd).filter(e => e.kind === 'proposal' && e.action === 'judge' && e.id === id).at(-1);
+  const p = readPlacement(last?.placement);
+  const estimateMin = p ? estimateMinutes(p.estimate) : null;
+  return p && estimateMin !== null ? { phase: p.phase, doneWhen: p.doneWhen, dependsOn: p.dependsOn, estimateMin } : null;
+}
+
+/** The tasks the roadmap's state listing (`<DB>/state`) says are done. */
+const doneTasks = (stateDir: string): Set<string> =>
+  new Set(Object.entries(readDocs(stateDir, stateDoc).docs).filter(([, s]) => s.status === 'done').map(([task]) => task));
+
 export const command: Command = (args, ctx) => {
   const { io, has, ok, json, ts } = ctx;
   const [sub, ...rest] = args;
@@ -116,7 +132,8 @@ export const command: Command = (args, ctx) => {
       try { raw = JSON.parse(readText(file, '--file')); } catch (e) { if (e instanceof UsageError) throw e; throw new UsageError('proposals add: --file must be a JSON object'); }
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new UsageError('proposals add: --file must be a JSON object');
       const o = raw as Record<string, unknown>;
-      // A v2 names the proposal it revises with --revises, and only that one is exempt from the open-proposal check.
+      // A v2 names the proposal it revises with --revises, and only that one is exempt from the open-proposal check, with (6b-3
+      // H-3) every earlier one of its revises chain: a v3 is close to its open root by nature.
       const revises = subFlag('revises');
       if (has('revises') && (!revises || !PROPOSAL_ID.test(revises))) throw new UsageError('proposals add: --revises needs a proposal id');
       if (noteId && revises) throw new UsageError('proposals add: a note becomes a new proposal, never a v2: --from-note takes no --revises');
@@ -141,10 +158,11 @@ export const command: Command = (args, ctx) => {
       const ofIdea = revises && original?.source === 'user' ? { author: original.author, origin: ideaOrigin(io.cwd, revises) } : null;
       const origin = ofIdea ? ofIdea.origin : idea ? { from: idea.from, owner: idea.owner } : {};
       const author = ofIdea?.author ?? idea?.author ?? subFlag('author') ?? o.author ?? 'session';
+      const chain = revises ? ancestorsOf(readEvents(io.cwd).filter(e => e.kind === 'proposal'), revises) : [];
       let r: AddOutcome;
       try {
         r = addProposal(io.cwd, { ...o, ...(idea || ofIdea ? { source: 'user' } : {}) }, {
-          ts: ts(), author, now: io.now(), rand: io.rand ?? Math.random, ...(revises ? { revises } : {}), ...origin,
+          ts: ts(), author, now: io.now(), rand: io.rand ?? Math.random, ...(revises ? { revises, chain } : {}), ...origin,
           ...(idea?.defaultEvidence ? { defaultEvidence: idea.defaultEvidence } : {}),
         });
       } catch (e) {
@@ -366,6 +384,31 @@ export const command: Command = (args, ctx) => {
       if (!id || !PROPOSAL_ID.test(id)) throw new UsageError('proposals to-task: a proposal id is required');
       const planArg = subFlag('plan');
       if (!planArg) throw new UsageError('proposals to-task: --plan is required');
+      // 6b-3: where the task goes. --phase, --done-when-file and --estimate go together; --depends-on comes with them when the
+      // task waits for any (L-5: none is no dependency).
+      const placing = (['phase', 'done-when-file', 'estimate'] as const).filter(f => has(f)).length;
+      if (placing > 0 && placing < 3) throw new UsageError('proposals to-task: --phase, --done-when-file and --estimate go together');
+      if (has('depends-on') && !placing) throw new UsageError('proposals to-task: --depends-on goes with --phase, --done-when-file and --estimate');
+      let given: Placement | null = null;
+      if (placing) {
+        const [phaseArg, doneWhenFile, estimate, deps] = [subFlag('phase'), subFlag('done-when-file'), subFlag('estimate'), has('depends-on') ? subFlag('depends-on') : ''];
+        if (!phaseArg || !doneWhenFile || !estimate) throw new UsageError('proposals to-task: --phase, --done-when-file and --estimate each need a value');
+        if (deps === undefined) throw new UsageError('proposals to-task: --depends-on needs the ids of the tasks it waits for (T001,T002)');
+        const estimateMin = estimateMinutes(estimate);
+        if (estimateMin === null) throw new UsageError('proposals to-task: --estimate must read as minutes or hours (45m, 2h)');
+        const dependsOn = [...new Set(deps.split(',').map(d => d.trim()).filter(Boolean))];
+        given = { phase: phaseArg, doneWhen: clean(readText(doneWhenFile, '--done-when-file'), CRITIC_TEXT_MAX), dependsOn, estimateMin };
+      }
+      // L-11: the placement is the product run's own, required where that run works (its worktree); an attended to-task
+      // elsewhere keeps the improvements phase unless it is given one. M-11: there it needs the state listing, so a phase
+      // that is done never reads as open, and a --db without that listing is refused anywhere.
+      const run = activeAutonomous(io.cwd);
+      const product = run?.autonomous.profile === 'product' && confinedIn(io.cwd, run.autonomous.worktree);
+      const db = subFlag('db');
+      if (has('db') && !db) throw new UsageError('proposals to-task: --db needs the listed roadmap database');
+      if (product && !db) throw new UsageError('proposals to-task: in a product run --db is required: its state listing says which phases are done');
+      const stateDir = db ? path.resolve(io.cwd, db, 'state') : null;
+      if (stateDir && !existsSync(stateDir)) throw new UsageError(`proposals to-task: ${db} has no state listing: list state first`);
       const found = loadProposals(io.cwd).find(p => p.id === id);
       if (!found) throw new UsageError(`proposals to-task: ${id} not found`);
       if (!isActionable(found)) throw new UsageError(`proposals to-task: ${id} is not approved`);
@@ -397,7 +440,22 @@ export const command: Command = (args, ctx) => {
       }
       const became = plan.tasks.find(t => proposalsOfIncludes(t.includes).includes(id))?.id ?? (spent ? String(spent.taskId ?? '?') : undefined);
       if (became !== undefined) throw new UsageError(`proposals to-task: proposal ${id} already became ${became}: a new approval of a new proposal is needed`);
-      const { task, phase } = proposalToTask(plan, found, { track: subFlag('track') });
+      // B-1: in a product run, without the flags, the task goes where the critic's keep placed it (the flags override it); an
+      // approval no keep placed (an insisted idea, the owner's own) is placed by the session, through the flags.
+      const judged = product && !given ? judgedPlacement(io.cwd, id) : null;
+      const placement = given ?? judged;
+      if (product && !placement) {
+        throw new UsageError(`proposals to-task: in a product run ${id} needs its placement, which no keep of the critic gave: `
+          + '--phase, --done-when-file and --estimate (and --depends-on when it waits for tasks)');
+      }
+      if (placement) {
+        const problems = checkPlacement(plan, found.title, placement, stateDir ? doneTasks(stateDir) : new Set(), { product });
+        if (problems.length) {
+          const from = judged ? ' (the critic\'s: place it with --phase, --done-when-file and --estimate)' : '';
+          throw new UsageError(`proposals to-task: the placement of ${id}${from} does not hold: ${problems.join('; ')}`);
+        }
+      }
+      const { task, phase } = proposalToTask(plan, found, { track: subFlag('track'), ...(placement ? { placement } : {}) });
       // The Document API keeps comments and order; values are nodes, never spliced into text.
       const ydoc = parseDocument(text);
       if (phase) ydoc.addIn(['phases'], ydoc.createNode(phase));

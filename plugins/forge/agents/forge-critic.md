@@ -36,12 +36,22 @@ Judge each proposal in `batch.json` on its own:
 - `drop`: it is not worth doing. Say why.
 - `clash`: it conflicts with the vision. Say why, and in `loses` what would be lost if it were integrated. For a proposal with `source: user`, use `clash` instead of `drop` when the reason is the vision.
 
+A chain of versions gets at most two adapts: forge judges an `adapt` of a third version (the v2 of a v2) as `drop`, so give such a proposal `keep` or `drop`.
+
+In `product`, each `keep` carries a `placement`, chosen by reading the phases of `plan.yaml` and their goals:
+- `phase`: the phase the task belongs to, one that is not done (an empty phase is fine), never the improvements phase `PX`;
+- `doneWhen`: what a check sees when it is done, more than the title;
+- `dependsOn`: the ids of the plan's tasks it waits for, `[]` when none;
+- `estimate`: how long it takes, as `45m` or `2h`.
+
+No other verdict carries one.
+
 ## Output
 
 Write only `<dir>/verdicts.json`, one verdict per proposal of the batch, copying the `digest` from `batch.json`:
 
 `{"verdicts": [{"id": "<id>", "digest": "<digest>", "verdict": "keep", "why": "<reason>"}]}`
 
-where `verdict` is `"keep"`, `"adapt"`, `"drop"` or `"clash"`, `changes` is present for `adapt` and `loses` for `clash`.
+where `verdict` is `"keep"`, `"adapt"`, `"drop"` or `"clash"`, `changes` is present for `adapt` and `loses` for `clash`. In `product` a `keep` adds `"placement": {"phase": "F2", "doneWhen": "<what a check sees>", "dependsOn": ["T004"], "estimate": "45m"}`.
 
 Reply with one line per proposal: `id verdict`.

@@ -140,7 +140,8 @@ export type AddOutcome = { ok: true; id: string; doc: ProposalDoc } | { ok: fals
  * A new proposal (`proposals add`, and the defects verify-close turns into proposals, K2-12): `raw` normalized as a pending
  * one with no decision. Refused (ProposalInputError) when it is not a valid proposal, or is a scout one without a pillar or
  * evidence; not added when it says the same as a rejected one without new evidence, or as one still open (but the one it
- * `revises`). Saved in .forge/proposals/ and logged as a proposal event with the digest of its text, and its `from` when
+ * `revises` and, 6b-3 H-3, the earlier ones of that chain, `chain`: a v3 is close to its open root by nature). Saved in
+ * .forge/proposals/ and logged as a proposal event with the digest of its text, and its `from` when
  * given. 6b-2: a person's idea (`from` a note or the chat) also logs `owner`, whether it is the roadmap owner's, with the
  * author it is the idea of (m-1), and keeps the digest, so judge's edited-text rule applies to it; a verify defect (`from`
  * without `owner`) carries no digest. T6B2-SOURCE-USER: a `source: user` proposal logs it, so an editor who changes the
@@ -149,7 +150,7 @@ export type AddOutcome = { ok: true; id: string; doc: ProposalDoc } | { ok: fals
  * anti-repetition checks: it says whose idea it is, and is no new evidence against a rejected one.
  */
 export function addProposal(root: string, raw: Record<string, unknown>,
-  ctx: { ts: string; author: unknown; now: Date; rand: () => number; revises?: string; from?: string; owner?: boolean; defaultEvidence?: string }): AddOutcome {
+  ctx: { ts: string; author: unknown; now: Date; rand: () => number; revises?: string; chain?: readonly string[]; from?: string; owner?: boolean; defaultEvidence?: string }): AddOutcome {
   // A new proposal carries no decision, and no parked mark either (6b-2: only a judge parks, and a parked one fills no queue).
   const checked = normalizeProposal({ ...raw, ts: typeof raw.ts === 'string' ? raw.ts : ctx.ts, status: 'proposed', decidedBy: undefined, decidedAt: undefined,
     reason: undefined, taskId: undefined, history: undefined, parked: undefined, author: ctx.author });
@@ -158,7 +159,8 @@ export function addProposal(root: string, raw: Record<string, unknown>,
   const existing = loadProposals(root);
   const rejected = similarRejected(checked, existing.filter(p => p.status === 'rejected'));
   if (rejected) return { ok: false, why: 'rejected', similar: rejected };
-  const open = similarOpen(checked, existing.filter(p => p.id !== ctx.revises));
+  const exempt = new Set([...(ctx.revises ? [ctx.revises] : []), ...(ctx.chain ?? [])]);
+  const open = similarOpen(checked, existing.filter(p => !exempt.has(p.id)));
   if (open) return { ok: false, why: 'open', similar: open };
   const doc: ProposalDoc = !checked.evidence.trim() && ctx.defaultEvidence ? { ...checked, evidence: ctx.defaultEvidence } : checked;
   const id = proposalId(ctx.now, ctx.rand);

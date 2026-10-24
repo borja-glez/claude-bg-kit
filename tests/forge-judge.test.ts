@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
 import { startRun, saveRun, parseRun, readRunText } from '../src/forge/run.js';
 import { loadProposal, loadApproval, saveProposal, removeApproval } from '../src/forge/proposals.js';
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { proposalDigest } from '../src/lib/proposals.js';
+import { parsePlan } from '../src/lib/plan.js';
 import { stopContext, lastDecisions, unownedOf } from '../src/forge/cli/shared.js';
 import { profileNames } from '../src/forge/profile.js';
 import { useTempDirs } from './helpers/tmp.js';
@@ -20,7 +21,7 @@ const add = (o: Record<string, unknown>, extra: string[] = []) => {
   writeFileSync(path.join(root, 'p.json'), JSON.stringify({ category: 'feature', risk: 'high', rationale: 'r', evidence: 'e', pillar: 'Juice', source: 'scout', ...o }));
   return JSON.parse(run(['proposals', 'add', '--file', 'p.json', '--author', 'session:main', ...extra], io()).stdout).id as string;
 };
-const verdicts = (...v: { id: string; verdict: string; why: string; changes?: string; loses?: string }[]) => {
+const verdicts = (...v: { id: string; verdict: string; why: string; changes?: string; loses?: string; placement?: Record<string, unknown> }[]) => {
   writeFileSync(path.join(root, 'v.json'), JSON.stringify({ verdicts: v.map(x => ({ ...x, digest: proposalDigest(x.id, loadProposal(root, x.id)!) })) }));
 };
 const judge = (id: string, extra: string[] = []) => run(['proposals', 'judge', id, '--critic', 'v.json', ...extra], io());
@@ -444,11 +445,13 @@ describe('proposals judge: the run around it', () => {
   });
   it('a judge and an unpark are the latest decision, so a judged approval becomes a task (M-2)', () => {
     const id = add({ title: 'Combo meter', path: 'src/combo.ts' });
-    verdicts({ id, verdict: 'keep', why: 'it rewards skill' });
+    // 6b-3: in a product run the task goes where the keep placed it, and to-task reads the state listing (B-1, M-11).
+    verdicts({ id, verdict: 'keep', why: 'it rewards skill', placement: { phase: 'F1', doneWhen: 'a chain of three hits doubles the score', dependsOn: [], estimate: '1h' } });
     expect(judge(id).code).toBe(0);
     expect(lastDecisions(root)[id]).toEqual({ status: 'auto_approved', ts: T0.toISOString() });
     writeFileSync(path.join(root, 'plan.yaml'), PLAN);
-    const r = run(['proposals', 'to-task', id, '--plan', 'plan.yaml'], io());
+    mkdirSync(path.join(root, 'db', 'state'), { recursive: true });
+    const r = run(['proposals', 'to-task', id, '--plan', 'plan.yaml', '--db', 'db'], io());
     expect(r.code, r.stderr).toBe(0);
     expect(JSON.parse(r.stdout)).toMatchObject({ id, taskId: 'T002' });
     appendEvent(root, { ts: '2026-10-22T11:00:00.000Z', kind: 'proposal', action: 'unpark', id: 'p20261022090000zzzz', status: 'approved' });
@@ -470,6 +473,103 @@ describe('proposals judge: the run around it', () => {
     const v2 = add({ title: 'Cosmetic shop' }, ['--revises', orig]);
     verdicts({ id: v2, verdict: 'keep', why: 'e' });
     expect(JSON.parse(judge(v2).stdout)).toMatchObject({ outcome: 'approved', original: { id: orig, write: { status: 'rejected', reason: `sustituida por ${v2}` } } });
+  });
+});
+
+describe('a keep places its task, and to-task takes that placement (6b-3, B-1)', () => {
+  const PLAN = '# keep me\nproject: demo\nlocale: en\nversion: "0.1"\nversions:\n  - id: "0.1"\n    phases: [F1, F2]\ntracks:\n  - { id: backend, name: Backend, color: blue }\n'
+    + 'phases:\n  - { id: F1, name: Base, plan_status: committed }\n  - { id: F2, name: Polish, plan_status: committed }\n'
+    + 'tasks:\n  - { id: T001, title: a, track: backend, phase: F1, done_when: x }\n';
+  const placement = { phase: 'F2', doneWhen: 'the combo meter doubles the score in the match test', dependsOn: ['T001'], estimate: '45m' };
+  const planText = () => readFileSync(path.join(root, 'plan.yaml'), 'utf8');
+  const lastTask = () => parsePlan(planText()).tasks.at(-1);
+  const toTask = (id: string, extra: string[] = []) => run(['proposals', 'to-task', id, '--plan', 'plan.yaml', '--db', 'db', ...extra], io());
+  const flags = (phase: string, estimate = '2h') => ['--phase', phase, '--done-when-file', 'dw.txt', '--estimate', estimate];
+  beforeEach(() => {
+    writeFileSync(path.join(root, 'plan.yaml'), PLAN);
+    writeFileSync(path.join(root, 'dw.txt'), 'a ghost run replays the best lap in the race test');
+    mkdirSync(path.join(root, 'db', 'state'), { recursive: true });
+  });
+  it('judge writes a keep\'s placement into its judge event and prints it; to-task takes it, and the flags override it', () => {
+    const id = add({ title: 'Combo meter' });
+    verdicts({ id, verdict: 'keep', why: 'it rewards skill', placement });
+    expect(JSON.parse(judge(id).stdout)).toMatchObject({ outcome: 'approved', placement });
+    expect(judged().at(-1)).toMatchObject({ id, status: 'auto_approved', placement });
+    const r = toTask(id);
+    expect(r.code, r.stderr).toBe(0);
+    expect(lastTask()).toMatchObject({ phase: 'F2', done_when: placement.doneWhen, depends_on: ['T001'], estimate_min: 45 });
+    const other = add({ title: 'Ghost replays' });
+    verdicts({ id: other, verdict: 'keep', why: 'fun to race', placement });
+    expect(judge(other).code).toBe(0);
+    expect(toTask(other, flags('F1')).code).toBe(0);
+    expect(lastTask()).toMatchObject({ phase: 'F1', done_when: 'a ghost run replays the best lap in the race test', depends_on: [], estimate_min: 120 });
+  });
+  it('only a keep logs a placement: a drop logs none (L-4)', () => {
+    const id = add({ title: 'Rename variables' });
+    verdicts({ id, verdict: 'drop', why: 'moves nothing for the player', placement });
+    expect(JSON.parse(judge(id).stdout)).not.toHaveProperty('placement');
+    expect(judged().at(-1)).not.toHaveProperty('placement');
+  });
+  it('an approval without a verdict placement, or with one the plan no longer takes, is placed by the session through the flags, and the CLI checks it', () => {
+    const id = add({ title: 'Combo meter' });
+    verdicts({ id, verdict: 'keep', why: 'it rewards skill' });
+    expect(JSON.parse(judge(id).stdout)).not.toHaveProperty('placement');
+    expect(judged().at(-1)).not.toHaveProperty('placement');
+    const none = toTask(id);
+    expect(none.code).toBe(2);
+    expect(none.stderr).toContain('--phase');
+    // The verdict placed it in F1, whose only task is done by now.
+    const late = add({ title: 'Ghost replays' });
+    verdicts({ id: late, verdict: 'keep', why: 'fun to race', placement: { ...placement, phase: 'F1', dependsOn: [] } });
+    expect(judge(late).code).toBe(0);
+    writeFileSync(path.join(root, 'db', 'state', 'T001.json'), JSON.stringify({ status: 'done' }));
+    const stale = toTask(late);
+    expect(stale.code).toBe(2);
+    expect(stale.stderr).toContain('F1');
+    // The session's own placement is checked too: the improvements phase and a done phase are refused (L-6).
+    expect(toTask(late, flags('PX')).code).toBe(2);
+    expect(toTask(late, flags('F1')).code).toBe(2);
+    expect(planText()).toBe(PLAN);
+    expect([loadProposal(root, id)?.taskId, loadProposal(root, late)?.taskId]).toEqual([undefined, undefined]);
+    expect(toTask(late, flags('F2')).code).toBe(0);
+    expect(toTask(id, flags('F2', '30m')).code).toBe(0);
+    expect(parsePlan(planText()).tasks.map(t => [t.id, t.phase, t.estimate_min])).toEqual([['T001', 'F1', undefined], ['T002', 'F2', 120], ['T003', 'F2', 30]]);
+  });
+});
+
+describe('the adapt chain ends (6b-3, H-3)', () => {
+  it('add --revises exempts the whole revises chain from the open check: a v3 close to its open root is added', () => {
+    const shop = (rationale: string) => ({ title: 'Big cosmetic shop', rationale });
+    const o = add(shop('sell hats and skins in a shop'));
+    const v2 = add(shop('sell hats and skins in a small shop'), ['--revises', o]);
+    writeFileSync(path.join(root, 'p.json'), JSON.stringify({ category: 'feature', risk: 'high', evidence: 'e', pillar: 'Juice', source: 'scout', ...shop('sell hats and skins in a tiny shop') }));
+    // Not a version of that chain, it is like an open proposal.
+    expect(run(['proposals', 'add', '--file', 'p.json'], io()).code).toBe(3);
+    const v3 = run(['proposals', 'add', '--file', 'p.json', '--revises', v2], io());
+    expect(v3.code, v3.stderr).toBe(0);
+    expect(readEvents(root).filter(e => e.action === 'add').at(-1)).toMatchObject({ id: JSON.parse(v3.stdout).id, revises: v2 });
+  });
+  it('a chain gets at most two adapts: the critic\'s adapt of a v3 is judged as drop, and rejects the chain with it, the decision first', () => {
+    const o = add({ title: 'Big shop' });
+    verdicts({ id: o, verdict: 'adapt', why: 'too big', changes: 'only cosmetic items' });
+    expect(outcome(o)).toBe('adapt');
+    const v2 = add({ title: 'Cosmetic shop', rationale: `r (v2 of ${o})` }, ['--revises', o]);
+    verdicts({ id: v2, verdict: 'adapt', why: 'still too big', changes: 'only hats' });
+    // Positive control: the second adapt of the chain is still an adapt.
+    expect(outcome(v2)).toBe('adapt');
+    const v3 = add({ title: 'Hat stand', rationale: `r (v2 of ${v2})` }, ['--revises', v2]);
+    verdicts({ id: v3, verdict: 'adapt', why: 'hats need a menu first', changes: 'a menu' });
+    const r = JSON.parse(judge(v3).stdout);
+    expect(r).toMatchObject({
+      outcome: 'rejected', write: { status: 'rejected' }, original: { id: v2, write: { status: 'rejected' } }, ancestors: [{ id: o, write: { status: 'rejected' } }],
+    });
+    expect(r.write.reason).toContain('hats need a menu first');
+    expect(r).not.toHaveProperty('changes');
+    expect([o, v2, v3].map(id => [loadProposal(root, id)?.status, loadApproval(root, id)?.status]))
+      .toEqual([['rejected', 'rejected'], ['rejected', 'rejected'], ['rejected', 'rejected']]);
+    expect(decisions()).toMatchObject([{ point: 'approve', what: 'Hat stand', chosen: 'reject it' }]);
+    expect(judged().map(e => [e.id, e.status, e.verdict])).toEqual([[v3, 'rejected', 'drop'], [v2, 'rejected', undefined], [o, 'rejected', undefined]]);
+    expect(JSON.parse(run(['proposals', 'batch', '--pending', '--out', 'b.json'], io()).stdout).ids).toEqual([]);
   });
 });
 

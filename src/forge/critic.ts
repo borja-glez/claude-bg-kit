@@ -1,12 +1,18 @@
 import { loadProposals, PROPOSAL_ID } from './proposals.js';
 import { proposalDigest, type ProposalDoc } from '../lib/proposals.js';
 import { clean as cleanLine } from '../lib/decisions.js';
+import { isPlanId } from '../lib/ids.js';
+import { estimateMinutes } from './to-task.js';
 
 export const CRITIC_VERDICTS = ['keep', 'adapt', 'drop', 'clash'] as const;
 export const CRITIC_TEXT_MAX = 1000;
 
+/** 6b-3: where the critic puts the task of a proposal it keeps in a `product` run: a phase of the plan, a done_when a check can
+ *  see, the plan's tasks it waits for (none is []) and an estimate (`45m`, `2h`). */
+export interface CriticPlacement { phase: string; doneWhen: string; dependsOn: string[]; estimate: string }
+
 export interface CriticVerdict {
-  id: string; digest: string; verdict: (typeof CRITIC_VERDICTS)[number]; why: string; changes?: string; loses?: string;
+  id: string; digest: string; verdict: (typeof CRITIC_VERDICTS)[number]; why: string; changes?: string; loses?: string; placement?: CriticPlacement;
 }
 
 /**
@@ -19,9 +25,25 @@ function clean(x: unknown): string {
 }
 
 /**
+ * 6b-3: a placement from untrusted JSON (the critic's file, or the `judge` event that keeps it), or null unless its four fields
+ * read: a phase and dependencies that are plan ids, a done_when that cleans to some text (clean) and an estimate that reads as
+ * minutes (estimateMinutes). The dependencies are kept once each, in their order.
+ */
+export function readPlacement(x: unknown): CriticPlacement | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const o = x as Record<string, unknown>;
+  const doneWhen = clean(o.doneWhen);
+  const estimate = typeof o.estimate === 'string' ? o.estimate.trim() : '';
+  if (typeof o.phase !== 'string' || !isPlanId(o.phase) || !doneWhen || estimateMinutes(estimate) === null) return null;
+  if (!Array.isArray(o.dependsOn) || !o.dependsOn.every((d): d is string => typeof d === 'string' && isPlanId(d))) return null;
+  return { phase: o.phase, doneWhen, dependsOn: [...new Set(o.dependsOn)], estimate };
+}
+
+/**
  * The verdicts the critic wrote (`{"verdicts": [...]}`): each entry needs an id of PROPOSAL_ID, a digest of 64 hex, a known
  * verdict and a reason; adapt needs its changes and clash what would be lost. A repeated id counts the first time; the rest is
- * dropped. Text that is not read gives [].
+ * dropped. Text that is not read gives []. 6b-3, L-4: a keep keeps its placement when it reads whole (readPlacement); no other
+ * verdict carries one (an adapt approves nothing: its v2's own keep places it).
  */
 export function readVerdicts(text: string): CriticVerdict[] {
   let raw: unknown;
@@ -44,7 +66,8 @@ export function readVerdicts(text: string): CriticVerdict[] {
     const loses = clean(o.loses);
     if (verdict === 'adapt' && !changes) continue;
     if (verdict === 'clash' && !loses) continue;
-    out.push({ id: o.id, digest: o.digest, verdict, why, ...(verdict === 'adapt' ? { changes } : {}), ...(verdict === 'clash' ? { loses } : {}) });
+    const placement = verdict === 'keep' ? readPlacement(o.placement) : null;
+    out.push({ id: o.id, digest: o.digest, verdict, why, ...(verdict === 'adapt' ? { changes } : {}), ...(verdict === 'clash' ? { loses } : {}), ...(placement ? { placement } : {}) });
   }
   return out;
 }

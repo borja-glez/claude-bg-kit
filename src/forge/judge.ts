@@ -12,7 +12,7 @@ import { appendEvent, readEvents, type LedgerEvent } from './ledger.js';
 import { loadApproval, loadProposal, loadProposals, saveApproval, saveProposal } from './proposals.js';
 import { checkDecision, DecisionInputError } from './decisions.js';
 import { normalizeParked, proposalDigest, type ApprovalDoc, type ProposalDoc, type ProposalParked } from '../lib/proposals.js';
-import type { CriticVerdict } from './critic.js';
+import type { CriticPlacement, CriticVerdict } from './critic.js';
 import { OWNER_USER, roadmapOwner } from './ideas.js';
 import type { Write } from '../lib/sync.js';
 
@@ -41,7 +41,14 @@ export interface Judged {
   decision: Record<string, unknown> | null;
   /** adapt: what the critic asks the v2 to change. */
   changes?: string;
+  /** 6b-3 B-1: approved on a keep, the placement of that keep (readVerdicts cleaned it), also in the `judge` event, where
+   *  `proposals to-task` finds it in a product run; absent when the keep has none. */
+  placement?: CriticPlacement;
 }
+
+/** 6b-3 H-3: the adapts a revises chain gets. The critic's adapt of a proposal with this many earlier versions (a v3) is a drop,
+ *  so a chain whose v3 is refused as close to its root can no longer wedge the loop. */
+const MAX_ADAPTS = 2;
 
 /** Records the outcome's decision (the CLI: addDecision in the main checkout). It runs after the decision's checks and before
  *  anything of the proposal is written, so a throw writes nothing. */
@@ -60,6 +67,7 @@ const WORDS = {
     replaced: (v2: string) => `replaced by ${v2}`, dropped: 'its v2 was dropped',
     withdraw: 'withdraw it', withdrawn: 'withdrawn by the person', insists: 'the person insists on it', withdrew: 'the person withdrew their idea',
     insisted: (why: string) => `the person insists on their idea (it was parked: ${why})`,
+    adapts: (why: string) => `a chain of versions gets at most ${MAX_ADAPTS} adapts, and the critic asked for one more: ${why}`,
     undo: {
       approved: (id: string) => `the person can reject it with /forge:decide ${id} reject before it becomes a task`,
       rejected: (id: string) => `the person can approve it with /forge:decide ${id} approve`,
@@ -71,6 +79,7 @@ const WORDS = {
     replaced: (v2: string) => `sustituida por ${v2}`, dropped: 'su v2 se descartó',
     withdraw: 'retirarla', withdrawn: 'retirada por la persona', insists: 'la persona insiste en ella', withdrew: 'la persona retiró su idea',
     insisted: (why: string) => `la persona insiste en su idea (estaba aparcada: ${why})`,
+    adapts: (why: string) => `una cadena de versiones admite como mucho ${MAX_ADAPTS} adaptaciones, y el crítico pidió una más: ${why}`,
     undo: {
       approved: (id: string) => `la persona puede rechazarla con /forge:decide ${id} reject antes de que sea una tarea`,
       rejected: (id: string) => `la persona puede aprobarla con /forge:decide ${id} approve`,
@@ -138,8 +147,9 @@ const revisesOf = (events: readonly LedgerEvent[], id: string): string | null =>
 };
 
 /** Final fix M2: the earlier proposals of `id`'s revises chain, nearest first (its original, that one's original, …), each
- *  once: a chain that comes back to itself stops there. */
-function ancestorsOf(events: readonly LedgerEvent[], id: string): string[] {
+ *  once: a chain that comes back to itself stops there. 6b-3 H-3: `proposals add --revises` exempts them all from the
+ *  open-proposal check, and their count is how many adapts the chain already had. */
+export function ancestorsOf(events: readonly LedgerEvent[], id: string): string[] {
   const out: string[] = [];
   for (let at = revisesOf(events, id); at !== null && at !== id && !out.includes(at); at = revisesOf(events, at)) out.push(at);
   return out;
@@ -224,8 +234,9 @@ function holds(id: string, decision: Record<string, unknown>): void {
  * Judges proposal `id` of `root` (the profile's worktree) by `verdicts` (readVerdicts of the critic's file), at `at`, in
  * Spanish when `es`. T6B2-DECISION-FIRST: the outcome's decision is checked (addDecision's checks) and handed to `record`
  * before anything is written; then the proposal, its mark (and those of the original an approved or rejected v2 decides) and a `proposal` `judge` event with the
- * verdict go to .forge/, as the policy writes them. adapt and every wait write nothing. Throws JudgeError, with nothing
- * written, when it is not judged now, has no verdict of its own text, or its decision does not hold.
+ * verdict go to .forge/, as the policy writes them. adapt and every wait write nothing; 6b-3 H-3: the adapt of a proposal whose
+ * chain already had MAX_ADAPTS is a drop. 6b-3 B-1: a keep's placement goes into its event and its output. Throws JudgeError,
+ * with nothing written, when it is not judged now, has no verdict of its own text, or its decision does not hold.
  */
 export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[], at: string, es: boolean, record: RecordDecision): Judged {
   const doc = loadProposal(root, id);
@@ -236,15 +247,21 @@ export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[
   const verdict = verdictFor(id, doc, verdicts);
   const { held, revises, origDoc } = heldBack(root, events, id, doc);
   if (held) return { outcome: held, write: null, approval: null, decision: null };
+  // 6b-3 H-3: a chain gets at most MAX_ADAPTS adapts, so the critic's adapt of a proposal with that many earlier versions is
+  // judged as a drop, and takes the chain with it below.
+  const overAdapted = verdict.verdict === 'adapt' && ancestorsOf(events, id).length >= MAX_ADAPTS;
   // An adapt changes nothing and logs nothing: the run may write a v2, or the proposal is judged again.
-  if (verdict.verdict === 'adapt') return { outcome: 'adapt', write: null, approval: null, decision: null, changes: verdict.changes ?? '' };
+  if (verdict.verdict === 'adapt' && !overAdapted) return { outcome: 'adapt', write: null, approval: null, decision: null, changes: verdict.changes ?? '' };
   const outcome: Exclude<JudgeOutcome, 'adapt' | 'waits-owner'> = verdict.verdict === 'keep' ? 'approved'
     : verdict.verdict === 'clash' && doc.source === 'user' ? 'parked' : 'rejected';
   const w = es ? WORDS.es : WORDS.en;
+  const why = overAdapted ? w.adapts(verdict.why) : verdict.why;
+  // 6b-3 B-1, L-4: only a keep places its task (readVerdicts keeps a placement on nothing else).
+  const placement = outcome === 'approved' ? verdict.placement : undefined;
   const parked = outcome === 'parked' ? normalizeParked({ why: verdict.why, loses: verdict.loses, at }) : null;
   if (outcome === 'parked' && !parked) throw new JudgeError(`the critic's clash of ${id} does not say what integrating it would lose`);
   const { next, write } = outcome === 'approved' ? decidedDoc(doc, 'auto_approved', at, {})
-    : outcome === 'rejected' ? decidedDoc(doc, 'rejected', at, { reason: verdict.why })
+    : outcome === 'rejected' ? decidedDoc(doc, 'rejected', at, { reason: why })
     : decidedDoc(doc, 'discussing', at, { parked: parked! }, null);
   const mark = outcome === 'parked' ? null : markOf(id, next.status === 'auto_approved' ? 'auto_approved' : 'rejected', at, doc);
   // An approved v2 replaces its original, which its standing keeps open, and a rejected one takes it with it (T6B2-PENDING-V2):
@@ -262,8 +279,8 @@ export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[
     point: doc.source === 'user' ? 'idea' : 'approve',
     what: doc.title,
     chosen: w[outcome],
-    alternatives: [{ option: alternative, whyNot: verdict.why, ...(parked ? { tradeoffs: parked.loses } : {}) }],
-    why: verdict.why,
+    alternatives: [{ option: alternative, whyNot: why, ...(parked ? { tradeoffs: parked.loses } : {}) }],
+    why,
     by: 'auto',
     undo: { type: 'none', reason: w.undo[outcome](id) },
   };
@@ -276,8 +293,10 @@ export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[
     saveProposal(root, r.id, r.next);
     saveApproval(root, r.id, r.mark);
   }
-  // M-2: the event lastDecisions reads, with the verdict that decided it.
-  appendEvent(root, { ts: at, kind: 'proposal', action: 'judge', id, status: next.status, verdict: verdict.verdict, digest: verdict.digest });
+  // M-2: the event lastDecisions reads, with the verdict that decided it (H-3: an adapt past the limit decided it as a drop),
+  // and 6b-3 B-1: a keep's placement, which `proposals to-task` takes in a product run, so nothing is carried in memory.
+  appendEvent(root, { ts: at, kind: 'proposal', action: 'judge', id, status: next.status, verdict: overAdapted ? 'drop' : verdict.verdict, digest: verdict.digest,
+    ...(placement ? { placement } : {}) });
   for (const r of replaced) {
     appendEvent(root, { ts: at, kind: 'proposal', action: 'judge', id: r.id, status: 'rejected', ...(outcome === 'approved' ? { replacedBy: id } : { droppedWith: id }) });
   }
@@ -287,6 +306,7 @@ export function judgeProposal(root: string, id: string, verdicts: CriticVerdict[
     ...(orig ? { original: out(orig) } : {}),
     ...(earlier.length ? { ancestors: earlier.map(out) } : {}),
     decision,
+    ...(placement ? { placement } : {}),
   };
 }
 

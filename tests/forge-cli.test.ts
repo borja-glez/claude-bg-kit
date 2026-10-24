@@ -1921,6 +1921,76 @@ describe('forge waypoint-cli', () => {
         expect(readFileSync(path.join(root, 'plan.yaml'), 'utf8')).toBe(planYaml);
         expect(loadProposals(root).find(x => x.id === ok)!.taskId).toBeUndefined();
       });
+      describe('placement in a product run (6b-3)', () => {
+        // L-11: the placement is the run's own, where to-task runs, so the run's worktree is root.
+        const autonomousRun = (profile: 'product' | 'spike', worktree = root) => saveRun(root, { ...startRun(new Date('2026-10-22T10:00:00Z'), { hours: 1 }, 10, 's1'),
+          autonomous: { profile, name: 'demo', runId: `${profile}-demo`, worktree, branch: `forge/${profile}-demo`, startBranch: 'main', protectedBranches: ['main'] } });
+        const placed = ['--phase', 'F1', '--done-when-file', 'dw.txt', '--depends-on', 'T001', '--estimate', '45m', '--db', 'db'];
+        const lastTask = () => parsePlan(readFileSync(path.join(root, 'plan.yaml'), 'utf8')).tasks.at(-1);
+        beforeEach(() => {
+          writeFileSync(path.join(root, 'plan.yaml'), planYaml);
+          writeFileSync(path.join(root, 'dw.txt'), 'the combo meter doubles the score in the match test');
+          mkdirSync(path.join(root, 'db', 'state'), { recursive: true });
+        });
+        it('requires the placement in a product run and checks it, writing nothing when it is wrong', () => {
+          autonomousRun('product');
+          const id = approved();
+          expect(run(['proposals', 'to-task', id, '--plan', 'plan.yaml', '--db', 'db'], io).code).toBe(2);
+          expect(run(['proposals', 'to-task', id, '--plan', 'plan.yaml', ...placed.map(a => (a === 'F1' ? 'F9' : a))], io).code).toBe(2);
+          expect(readFileSync(path.join(root, 'plan.yaml'), 'utf8')).toBe(planYaml);
+          expect(run(['proposals', 'to-task', id, '--plan', 'plan.yaml', ...placed], io).code).toBe(0);
+          expect(lastTask()).toMatchObject({ phase: 'F1', done_when: 'the combo meter doubles the score in the match test', depends_on: ['T001'], estimate_min: 45 });
+        });
+        it('a spike run still uses PX without the flags', () => {
+          autonomousRun('spike');
+          const id = approved();
+          expect(run(['proposals', 'to-task', id, '--plan', 'plan.yaml'], io).code).toBe(0);
+          expect(lastTask()?.phase).toBe('PX');
+        });
+        it('needs --db and its state listing in a product run, and a done phase takes no task (M-11)', () => {
+          autonomousRun('product');
+          const id = approved();
+          const noDb = placed.slice(0, -2);
+          const r = run(['proposals', 'to-task', id, '--plan', 'plan.yaml', ...noDb], io);
+          expect(r.code).toBe(2);
+          expect(r.stderr).toContain('--db');
+          const missing = run(['proposals', 'to-task', id, '--plan', 'plan.yaml', ...noDb, '--db', 'nodb'], io);
+          expect(missing.code).toBe(2);
+          expect(missing.stderr).toContain('state');
+          writeFileSync(path.join(root, 'db', 'state', 'T001.json'), JSON.stringify({ status: 'done' }));
+          const done = run(['proposals', 'to-task', id, '--plan', 'plan.yaml', ...placed], io);
+          expect(done.code).toBe(2);
+          expect(done.stderr).toContain('F1');
+          expect(readFileSync(path.join(root, 'plan.yaml'), 'utf8')).toBe(planYaml);
+          expect(loadProposals(root)[0].taskId).toBeUndefined();
+          // Positive control: with T001 open again the same call places it.
+          writeFileSync(path.join(root, 'db', 'state', 'T001.json'), JSON.stringify({ status: 'pending' }));
+          expect(run(['proposals', 'to-task', id, '--plan', 'plan.yaml', ...placed], io).code).toBe(0);
+        });
+        it('--phase, --done-when-file and --estimate go together; --depends-on is optional (L-5)', () => {
+          autonomousRun('product');
+          const id = approved();
+          for (const only of [['--phase', 'F1'], ['--phase', 'F1', '--estimate', '45m'], ['--depends-on', 'T001'], ['--phase', 'F1', '--done-when-file', 'dw.txt', '--estimate', 'soon']]) {
+            expect(run(['proposals', 'to-task', id, '--plan', 'plan.yaml', '--db', 'db', ...only], io).code, only.join(' ')).toBe(2);
+          }
+          expect(readFileSync(path.join(root, 'plan.yaml'), 'utf8')).toBe(planYaml);
+          expect(run(['proposals', 'to-task', id, '--plan', 'plan.yaml', '--db', 'db', '--phase', 'F1', '--done-when-file', 'dw.txt', '--estimate', '2h'], io).code).toBe(0);
+          expect(lastTask()).toMatchObject({ phase: 'F1', depends_on: [], estimate_min: 120 });
+        });
+        it('only inside the run\'s worktree: an attended to-task elsewhere still uses PX, and checks the placement it is given (L-11)', () => {
+          autonomousRun('product', path.join(root, 'wt'));
+          const id = approved();
+          expect(run(['proposals', 'to-task', id, '--plan', 'plan.yaml', '--phase', 'F9', '--done-when-file', 'dw.txt', '--estimate', '45m'], io).code).toBe(2);
+          expect(run(['proposals', 'to-task', id, '--plan', 'plan.yaml'], io).code).toBe(0);
+          expect(lastTask()?.phase).toBe('PX');
+          // In an attended run the flags are optional too, and without --db no phase is done.
+          saveRun(root, startRun(new Date('2026-10-22T10:00:00Z'), { hours: 1 }, 10, 's1'));
+          io.rand = () => 0.9;
+          const other = approved({ title: 'Something else entirely' });
+          expect(run(['proposals', 'to-task', other, '--plan', 'plan.yaml', ...placed.slice(0, -2)], io).code).toBe(0);
+          expect(lastTask()).toMatchObject({ phase: 'F1', depends_on: ['T001'], estimate_min: 45 });
+        });
+      });
     });
     it('hook stop counts a tasked approved proposal as pending (no queue-full while approved work remains)', () => {
       run(['infinite', 'start', '--cycles', '9', '--queue-max', '1'], io);

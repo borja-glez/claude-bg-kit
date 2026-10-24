@@ -50,6 +50,24 @@ describe('readVerdicts', () => {
     }
     expect(readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: D, verdict: 'keep', why: `a${bidi}b${c1}c` }] }))[0].why).toBe('a b c');
   });
+  it('keeps a placement only when it reads whole (6b-3)', () => {
+    const p = { phase: 'F2', doneWhen: 'un pago de prueba aprobado', dependsOn: ['T004'], estimate: '45m' };
+    expect(readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: D, verdict: 'keep', why: 'w', placement: p }] }))[0].placement).toEqual(p);
+    expect(readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: D, verdict: 'keep', why: 'w', placement: { ...p, dependsOn: ['../x'] } }] }))[0]).not.toHaveProperty('placement');
+  });
+  it('only a keep carries its placement, cleaned, with an estimate that reads as minutes and a list of dependencies (L-4, L-5)', () => {
+    const p = { phase: 'F2', doneWhen: 'a test payment is approved', dependsOn: [], estimate: '2h' };
+    const one = (o: Record<string, unknown>) => readVerdicts(JSON.stringify({ verdicts: [{ id: ID, digest: D, why: 'w', ...o }] }))[0];
+    expect(one({ verdict: 'keep', placement: p }).placement).toEqual(p);
+    expect(one({ verdict: 'keep', placement: { ...p, doneWhen: `a test${String.fromCharCode(7)}payment is approved` } }).placement).toEqual(p);
+    expect(one({ verdict: 'adapt', changes: 'smaller', placement: p })).not.toHaveProperty('placement');
+    expect(one({ verdict: 'drop', placement: p })).not.toHaveProperty('placement');
+    for (const bad of [{ ...p, estimate: 'a while' }, { ...p, phase: '../F2' }, { ...p, doneWhen: ' ' }, { ...p, dependsOn: 'T004' }, { phase: 'F2', doneWhen: 'x', estimate: '2h' }, 'F2']) {
+      const v = one({ verdict: 'keep', placement: bad });
+      expect(v, JSON.stringify(bad)).toMatchObject({ verdict: 'keep' });
+      expect(v, JSON.stringify(bad)).not.toHaveProperty('placement');
+    }
+  });
   it('is empty for text that is not a verdicts file', () => {
     expect(readVerdicts('[]')).toEqual([]);
     expect(readVerdicts('3')).toEqual([]);
