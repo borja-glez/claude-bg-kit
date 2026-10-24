@@ -10,14 +10,14 @@ import { clean } from '../lib/decisions.js';
 import { isPlanId } from '../lib/ids.js';
 import { isActionable, proposalDigest, type ApprovalDoc, type ProposalDoc } from '../lib/proposals.js';
 import {
-  SATURATION_LIST_MAX, SATURATION_LISTS, type SaturationBlocking, type SaturationInput, type SaturationList, type SaturationReport,
+  SATURATION_LIST_MAX, SATURATION_LISTS, SATURATION_ROUNDS, type SaturationBlocking, type SaturationInput, type SaturationList, type SaturationReport,
 } from '../lib/forge-run.js';
 import type { ForgeDocV2 } from '../lib/roadmap-doc.js';
 import type { NoteDoc, PlanTask, PlanView, TaskState } from '../lib/types.js';
 import type { ValidatorResult } from './validators.js';
 
-/** The exploration rounds in a row that must pass nothing (the spec's N, which starts at 3). */
-export const SATURATION_ROUNDS = 3;
+/** The exploration rounds in a row that must pass nothing: defined in src/lib/forge-run.ts, which the page reads too. */
+export { SATURATION_ROUNDS };
 const NO_OUTPUT = '(no validate output)';
 const NO_VALIDATORS = '(no validators)';
 const NAME_MAX = 80;
@@ -100,7 +100,8 @@ const namedByDebt = (notes: readonly NoteDoc[], id: string): boolean =>
  *   not yet approved here whose owner's mark approves its present text.
  * What waits for the person is `waiting` and never blocks: parked ideas, open questions (no answer, no answering note), the
  * blocked actions (given), the deferred findings of the plan's v2 blocks, the proposals that wait for the owner's mark (an
- * approving mark of an earlier text among them) and the approvals without it (L-18), the tasks blocked for the person and the
+ * approving mark of an earlier text among them, but a parked idea, told once in `parked`) and the approvals without it
+ * (L-18), the tasks blocked for the person and the
  * approvals the run could not place (a debt note of the run names them); a proposal of those lists is no open defect or
  * proposal. A missing input blocks as `inputs`, and what needs it is not computed: the plan's tasks without --plan or --db,
  * notes without --db, validators without --validate. `rounds` blocks below the count and (fix 2) in a cycle without the scout.
@@ -131,7 +132,11 @@ export function saturationOf(i: SaturationFacts): SaturationReport {
   const approving = (p: P) => undecided(p) && p.taskId === undefined && (marks[p.id]?.status === 'approved' || marks[p.id]?.status === 'auto_approved');
   // Fix 2 (N-3): only a mark of the present text; one of an earlier text waits for the owner to mark it again.
   const markedOpen = (p: P) => approving(p) && marks[p.id]?.digest === proposalDigest(p.id, p);
-  const waitsOwner = [...new Set([...(i.waitsOwner ?? []), ...i.proposals.filter(p => approving(p) && !markedOpen(p)).map(p => p.id)])].sort();
+  // R2-2, Task 6 fix 1: a parked idea waits for the person's answer and is told once, in `parked`, even when it holds an
+  // approving mark of an earlier text; one marked approved as it reads now is open work instead.
+  const parked = i.proposals.filter(p => p.status === 'discussing' && p.parked && !markedOpen(p)).map(p => p.id);
+  const waitsOwner = [...new Set([...(i.waitsOwner ?? []), ...i.proposals.filter(p => approving(p) && !markedOpen(p)).map(p => p.id)])]
+    .filter(id => !parked.includes(id)).sort();
   const unowned = [...new Set(i.unowned ?? [])].sort();
   const approvedUntasked = (p: P) => isActionable(p) && p.taskId === undefined && !unowned.includes(p.id);
   const unplaced = i.proposals.filter(p => approvedUntasked(p) && namedByDebt(notes, p.id)).map(p => p.id);
@@ -139,7 +144,6 @@ export function saturationOf(i: SaturationFacts): SaturationReport {
   const open = (p: P) => (p.status === 'proposed' || (p.status === 'discussing' && !p.parked)) && !waitsOwner.includes(p.id);
   const openDefects = i.proposals.filter(p => p.source === 'verify' && (open(p) || untasked(p))).map(p => p.id);
   const openProposals = [...new Set([...(i.toJudge ?? []), ...i.proposals.filter(p => untasked(p) || markedOpen(p)).map(p => p.id)])].sort();
-  const parked = i.proposals.filter(p => p.status === 'discussing' && p.parked && !markedOpen(p)).map(p => p.id);
   const questions = notes.filter(n => n.type === 'question' && !n.answer && !n.answeredByNote).length;
   const blocking: SaturationBlocking[] = [];
   // T6B3-SAT-EXPLORE-ONLY: only an exploration round concludes; a cycle without the scout keeps `rounds`, whatever the count.

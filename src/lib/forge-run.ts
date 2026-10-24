@@ -15,6 +15,9 @@ export interface RunState {
   saturation?: SaturationReport | null;       // 6b-3: the last report, once `dry` reached SATURATION_ROUNDS; null below it
 }
 
+/** 6b-3: the exploration rounds in a row that must pass nothing (the spec's N, which starts at 3). Here, so that forge
+ *  (src/forge/saturation.ts) and the roadmap page read one threshold (Task 6 fix 1). */
+export const SATURATION_ROUNDS = 3;
 /** 6b-3: what keeps an autonomous run from being saturated. `inputs`: an input of the report is missing, unreadable or stale. */
 export const SATURATION_BLOCKING = ['rounds', 'pending-tasks', 'validators', 'findings', 'defects', 'proposals', 'inputs'] as const;
 export type SaturationBlocking = (typeof SATURATION_BLOCKING)[number];
@@ -103,8 +106,9 @@ const idList = (x: unknown): x is string[] =>
 const oneOf = <T extends string>(list: readonly T[], x: unknown): x is T => typeof x === 'string' && (list as readonly string[]).includes(x);
 
 /** 6b-3: a saturation report, or null unless every field reads: `saturated` agrees with `blocking`, each list holds at most
- *  SATURATION_LIST_MAX ids and its count is at least that many (M-10). Other fields are ignored. The one reader of a report:
- *  parseRun's and the roadmap page's (meta/infinite, T6B3-PAGE-ONE-READER). */
+ *  SATURATION_LIST_MAX ids and its count is at least that many (M-10), and (Task 6 fix 1) `inputs` blocks exactly when
+ *  `missing` names some input, as saturationOf writes them. Other fields are ignored. The one reader of a report: parseRun's
+ *  and the roadmap page's (meta/infinite, T6B3-PAGE-ONE-READER). */
 export function saturationReportOf(x: unknown): SaturationReport | null {
   if (!isObj(x)) return null;
   const { saturated, at, rounds, blocking, evidence: e, waiting: w, counts: c, missing } = x;
@@ -124,6 +128,7 @@ export function saturationReportOf(x: unknown): SaturationReport | null {
     counts[k] = n;
   }
   if (missing !== undefined && !(Array.isArray(missing) && missing.length && missing.every(m => oneOf(SATURATION_INPUTS, m)))) return null;
+  if (blocking.includes('inputs') !== (missing !== undefined)) return null;
   const ids = (k: SaturationList) => [...(lists[k] as string[])];
   return {
     saturated, at, rounds, blocking: [...blocking] as SaturationBlocking[],

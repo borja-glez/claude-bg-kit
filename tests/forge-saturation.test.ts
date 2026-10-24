@@ -120,6 +120,17 @@ describe('saturationOf: what waits for the person never blocks, and a missing in
     // Positive control: a rejecting mark is the owner's no, and no work.
     expect(saturationOf({ ...base, proposals: [p], marks: { p9: mark('rejected') } })).toMatchObject({ saturated: true, waiting: { waitsOwner: [] } });
   });
+  it('a parked idea is told once, in parked, even when it holds an approving mark of an earlier text (Task 4 R2-2, Task 6 fix 1)', () => {
+    const p = P({ id: 'p8', source: 'user', status: 'discussing', parked: { why: 'w', loses: 'l', at: 'a' } });
+    const stale = { p8: { status: 'approved' as const, decidedAt: 't', by: 'page' as const, digest: 'f'.repeat(64) } };
+    const r = saturationOf({ ...base, proposals: [p], marks: stale });
+    expect(r).toMatchObject({ saturated: true, waiting: { parked: ['p8'], waitsOwner: [] }, counts: { parked: 1, waitsOwner: 0 } });
+    // Also when the caller's queue names it (judgeQueue never does: a parked idea is not judgeable).
+    expect(saturationOf({ ...base, proposals: [p], marks: stale, waitsOwner: ['p8'] })).toMatchObject({ waiting: { parked: ['p8'], waitsOwner: [] }, counts: { waitsOwner: 0 } });
+    // Positive control: the same mark on an idea that is not parked waits for the owner.
+    const open = P({ id: 'p8', source: 'user', status: 'discussing' });
+    expect(saturationOf({ ...base, proposals: [open], marks: stale })).toMatchObject({ waiting: { parked: [], waitsOwner: ['p8'] } });
+  });
   it('only an exploration round concludes saturated: a cycle without the scout keeps rounds in blocking (T6B3-SAT-EXPLORE-ONLY)', () => {
     expect(saturationOf({ ...base, explored: false })).toMatchObject({ saturated: false, blocking: ['rounds'] });
     expect(saturationOf({ ...base, explored: true })).toMatchObject({ saturated: true, blocking: [] });

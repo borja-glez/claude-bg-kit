@@ -3,7 +3,7 @@
 // something, except «En curso», which with nothing running says which free task is next.
 import { availableTasks, statusOf } from '../../lib/deps.js';
 import { liveness, sessionLiveness } from '../../lib/coordination.js';
-import { SATURATION_BLOCKING, type SaturationBlocking } from '../../lib/forge-run.js';
+import { SATURATION_BLOCKING, SATURATION_ROUNDS, type SaturationBlocking } from '../../lib/forge-run.js';
 import type { ForgeDocV2 } from '../../lib/roadmap-doc.js';
 import type { PlanTask, RunDoc, TaskState } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
@@ -20,17 +20,19 @@ export function renderSummary(m: Model, d: Dict, ui: UiState, loc: string, dv: D
 
 /**
  * 6b-3: the card of an autonomous run (meta/infinite with a profile): its profile, whether it runs or why it stopped, and
- * its last saturation report (none below the count): saturated, its evidence (the rounds and each count it would block on,
- * at zero); else what keeps it going, each of the seven blocks with its full count (M-10) and the inputs it lacked by name
- * (T6B3-PAGE-LABELS); and what waits for the person, each group with its full count and the ids the report kept. The
- * findings of retired tasks are told as information only, out of the total. Every id is the report's, escaped. '' for any
- * other run.
+ * its last saturation report (none below the count): saturated, its evidence (the dry rounds against SATURATION_ROUNDS and
+ * each count it would block on, at zero); else what keeps it going, each of the seven blocks with its full count (M-10)
+ * and the inputs it lacked by name (T6B3-PAGE-LABELS); and what waits for the person, each group with its full count and
+ * the ids the report kept. The findings of retired tasks are told as information only, out of the total. Every id is the
+ * report's, escaped. '' for any other run.
  */
 export function renderAutonomous(m: Model, d: Dict, loc: string): string {
   const inf = m.infinite;
   if (!inf?.profile) return '';
   const a = d.auto;
-  const state = inf.active ? a.active : a.stopped(inf.stopReason ? labelOf(a.reason, inf.stopReason) : '');
+  // Task 6 fix 1: each reason forge writes has its own stop line, which says it once; another reason is shown as written.
+  const r = inf.stopReason ?? '';
+  const state = inf.active ? a.active : Object.hasOwn(a.stop, r) ? a.stop[r]! : a.stopped(r);
   const head = `<h2 class="lbl" id="auto-h">${esc(a.title(inf.profile))}</h2><div class="ast">${esc(state)}</div>`;
   const s = inf.saturation;
   if (!s) return `<section class="card auto" aria-labelledby="auto-h">${head}</section>`;
@@ -42,7 +44,8 @@ export function renderAutonomous(m: Model, d: Dict, loc: string): string {
   const block = (k: SaturationBlocking): string => {
     const e = s.evidence;
     switch (k) {
-      case 'rounds': return fact(a.blocking[k], s.rounds);
+      // Task 6 fix 1: the dry rounds against their threshold, the one forge stops at.
+      case 'rounds': return `<li><b>${esc(d.num(s.rounds))}</b> ${esc(a.blocking.rounds(d.num(SATURATION_ROUNDS)))}</li>`;
       case 'pending-tasks': return fact(a.blocking[k], c.pendingTasks, e.pendingTasks);
       case 'validators': return fact(a.blocking[k], c.validatorsFailed, e.validatorsFailed);
       case 'findings': return fact(a.blocking[k], e.openFindings);

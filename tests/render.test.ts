@@ -2412,6 +2412,7 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     const sources = [
       { title: 'js', url: 'javascript:alert(1)' }, { title: 'data', url: 'data:text/html,<b>x</b>' }, { title: 'plain', url: 'http://p.example:8080/a' },
       { title: HOSTILE, url: `https://h.example/${HOSTILE}` }, { title: '', url: 'https://e.example/z' },
+      { title: 'creds', url: 'https://user:pw@evil.example/' }, { title: 'user', url: 'https://trusted.example@evil.example/' },
     ];
     const m = { ...base(), notes: [note({ id: 'm1', type: 'market', text: 'ver https://t.example/x', sources })] };
     const html = renderApp(m, ui({ view: 'talk' }));
@@ -2419,6 +2420,10 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     expect(html).not.toContain('href="data:');
     expect(html).toContain('<li>js</li>');
     expect(html).toContain('<li>data</li>');
+    // Fix 1 (Minor 4): a URL with a user or a password shows one host and opens another: no link, and no host.
+    expect(html).toContain('<li>creds</li>');
+    expect(html).toContain('<li>user</li>');
+    expect(html).not.toContain('evil.example');
     expect(html).toContain('<a href="http://p.example:8080/a" target="_blank" rel="noopener noreferrer">plain</a> <span class="nhost">p.example:8080</span>');
     expect(html).toContain('<span class="nhost">h.example</span>');
     // An untitled source reads its URL: a link is never empty.
@@ -2449,9 +2454,11 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     // After «Te necesita» and before «En curso».
     expect(html.indexOf('class="card auto"')).toBeLessThan(html.indexOf('class="card now"'));
     const c = autoCard(html);
-    expect(c).toContain('Parada: saturada: no queda nada por hacer');
-    // The evidence: the rounds and every count the report blocks on, at zero; no input is missing.
-    for (const s of ['Rondas de exploración seguidas sin pasar nada: <b>3</b>', 'Tareas pendientes: <b>0</b>', 'Validadores en rojo: <b>0</b>', 'Hallazgos de revisión abiertos: <b>0</b>',
+    // Fix 1 (Minor 5): the stop line says its reason once.
+    expect(c).toContain('<div class="ast">Saturada</div>');
+    // The evidence: the rounds against their threshold (fix 1, Minor 2) and every count the report blocks on, at zero; no
+    // input is missing.
+    for (const s of ['<b>3</b> de 3 rondas sin novedades', 'Tareas pendientes: <b>0</b>', 'Validadores en rojo: <b>0</b>', 'Hallazgos de revisión abiertos: <b>0</b>',
       'Defectos abiertos: <b>0</b>', 'Aprobaciones o propuestas aún abiertas (por juzgar, o aprobadas sin tarea): <b>0</b>']) expect(c, s).toContain(s);
     expect(c).not.toContain('Sin saturar');
     expect(c).not.toContain('Faltan datos');
@@ -2480,7 +2487,7 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     expect(c).toContain('Parada: agotó los ciclos');
     expect(c).toContain('Sin saturar:');
     expect(c).not.toContain('Saturada');
-    for (const s of ['Rondas de exploración seguidas sin pasar nada: <b>1</b>', 'Tareas pendientes: <b>2</b> <span class="aids">T004 &lt;img', 'Validadores en rojo: <b>1</b> <span class="aids">(no validators)</span>',
+    for (const s of ['<li><b>1</b> de 3 rondas sin novedades</li>', 'Tareas pendientes: <b>2</b> <span class="aids">T004 &lt;img', 'Validadores en rojo: <b>1</b> <span class="aids">(no validators)</span>',
       'Hallazgos de revisión abiertos: <b>2</b>', 'Defectos abiertos: <b>1</b> <span class="aids">pd1</span>',
       'Aprobaciones o propuestas aún abiertas (por juzgar, o aprobadas sin tarea): <b>25</b> <span class="aids">po0 po1',
       'Faltan datos: validadores sin ejecutar en este ciclo, plan sin leer, estado sin leer']) expect(c, s).toContain(s);
@@ -2497,11 +2504,46 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     // An unknown stop reason is shown as written (escaped); English labels.
     expect(autoCard(renderApp({ ...base(), infinite: { ...inf, stopReason: '<b>x</b>' } }, ui()))).toContain('Parada: &lt;b&gt;x&lt;/b&gt;');
     const en = autoCard(renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, infinite: inf }, ui()));
-    for (const s of ['Autonomous run · product', 'Stopped: ran out of cycles', 'Not saturated:', 'Exploration rounds in a row that passed nothing: <b>1</b>', 'Pending tasks: <b>2</b>',
+    for (const s of ['Autonomous run · product', 'Stopped: ran out of cycles', 'Not saturated:', '<li><b>1</b> of 3 dry rounds</li>', 'Pending tasks: <b>2</b>',
       'Validators failing: <b>1</b>', 'Open review findings: <b>2</b>', 'Open defects: <b>1</b>', 'Approvals or proposals still open (to judge, or approved without a task): <b>25</b>',
       'Inputs missing: validators not run this cycle, plan not read, state not read', 'po19 +5 more</span>', 'Waiting for you: 15', 'Parked ideas: <b>1</b>', 'Open questions: <b>3</b>',
       'Blocked actions: <b>1</b>', 'Deferred findings: <b>4</b>', 'Waiting for your mark: <b>1</b>', 'Approved without your mark: <b>1</b>',
       'Tasks blocked for you, and those that wait on them: <b>3</b>', 'Approvals the run could not place: <b>1</b>', 'Findings of retired tasks (information only): <b>1</b>']) expect(en, s).toContain(s);
+  });
+  it('the stop line says its reason once, in both locales; a stopped run without a reason reads stopped; with nothing waiting it says so (Task 6 fix 1)', () => {
+    const zero: SaturationReport = {
+      saturated: false, at: '2026-10-22T10:00:00.000Z', rounds: 3, blocking: ['rounds'],
+      evidence: { pendingTasks: [], validatorsFailed: [], openFindings: 0, openDefects: [], openProposals: [] },
+      waiting: { parked: [], questions: 0, blocked: 0, deferred: 0, waitsOwner: [], unowned: [], blockedTasks: [], unplaced: [], orphanFindings: ['T099'] },
+      counts: { pendingTasks: 0, validatorsFailed: 0, openDefects: 0, openProposals: 0, parked: 0, waitsOwner: 0, unowned: 0, blockedTasks: 0, unplaced: 0, orphanFindings: 1 },
+    };
+    const inf = { active: false, cycle: 4, budget: {}, startedAt: '2026-10-22T02:00:00.000Z', lastCycleAt: null, profile: 'product' as const, saturation: zero };
+    const card = (over: object, locale = 'es') => autoCard(renderApp({ ...base(), meta: { ...base().meta!, locale }, infinite: { ...inf, ...over } }, ui()));
+    const stopLine = (html: string) => /<div class="ast">([^<]*)<\/div>/.exec(html)?.[1] ?? '';
+    // Every reason forge writes (src/forge/run.ts stopReason, cli/commands/stop.ts): one colon at most (the command's own
+    // aside), and the stop word once.
+    for (const reason of ['saturated', 'budget-cycles', 'budget-hours', 'stop-file', 'stopped', 'no-progress', 'repeated-error', 'no-cycle', 'queue-full']) {
+      for (const [locale, word] of [['es', 'parada'], ['en', 'stopped']] as const) {
+        const line = stopLine(card({ stopReason: reason }, locale));
+        expect(line, `${locale} ${reason}`).not.toBe('');
+        expect(line.replace('/forge:stop', '').split(':').length, `${locale} ${reason}: ${line}`).toBeLessThanOrEqual(2);
+        expect(line.toLowerCase().split(word).length, `${locale} ${reason}: ${line}`).toBeLessThanOrEqual(2);
+      }
+    }
+    expect(stopLine(card({ stopReason: 'stopped' }))).toBe('Parada: con /forge:stop');
+    expect(stopLine(card({ stopReason: 'stop-file' }))).toBe('Parada: con /forge:stop');
+    // A stopped run without a reason.
+    for (const stopReason of [null, undefined]) expect(stopLine(card({ stopReason })), String(stopReason)).toBe('Parada');
+    expect(stopLine(card({ stopReason: null }, 'en'))).toBe('Stopped');
+    // Every count at 0: nothing waits; the findings of retired tasks are still told, as information only.
+    const c = card({ stopReason: 'budget-cycles' });
+    expect(c).toContain('<div class="lbl">Nada espera tu respuesta</div>');
+    expect(c).toContain('<li class="ainfo">Hallazgos de tareas retiradas (solo información): <b>1</b> <span class="aids">T099</span></li>');
+    expect(card({ stopReason: 'budget-cycles' }, 'en')).toContain('<div class="lbl">Nothing waits for you</div>');
+    const none = card({ saturation: { ...zero, waiting: { ...zero.waiting, orphanFindings: [] }, counts: { ...zero.counts, orphanFindings: 0 } } });
+    expect(none).toContain('<div class="lbl">Nada espera tu respuesta</div></div>');
+    // The rounds against their threshold, also at or past it in a cycle that did not explore.
+    expect(c).toContain('<li><b>3</b> de 3 rondas sin novedades</li>');
   });
 });
 

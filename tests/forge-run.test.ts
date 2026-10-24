@@ -95,6 +95,8 @@ describe('parseRun', () => {
       { ...sat, saturated: false, blocking: ['pending-tasks'], evidence: { ...sat.evidence, pendingTasks: ids(3) } },
       { ...sat, counts: { ...noCounts, unowned: undefined } }, { ...sat, missing: ['--other'] }, { ...sat, waiting: { ...noWaiting, unplaced: undefined } },
       { ...sat, saturated: false, blocking: ['validators'], evidence: { ...sat.evidence, validatorsFailed: [`unit${String.fromCharCode(0x202e)}`] }, counts: { ...noCounts, validatorsFailed: 1 } },
+      // Task 6 fix 1 (Minor 3): `inputs` blocks only with the inputs it names, and named inputs always block.
+      { ...sat, saturated: false, blocking: ['inputs'] }, { ...sat, saturated: false, blocking: ['rounds'], missing: ['--plan'] }, { ...sat, missing: ['--validate'] },
     ]) {
       const r = read({ saturation });
       expect(r, JSON.stringify(saturation)).not.toBeNull();
