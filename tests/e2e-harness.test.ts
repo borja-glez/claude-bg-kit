@@ -3,6 +3,7 @@ import {
   all, hasTools, lastHas, messageBody, not, parseSse, pickStep, sseBody, startMessagesServer, toolResults, turn, userHas,
   type MessagesRequest, type Step,
 } from './e2e/harness/messages-server.js';
+import { announceLine, OBSERVED_WITH, parseVersion, resolveClaude, spawnSpec, type ClaudeBin } from './e2e/harness/claude-bin.js';
 
 const req = (over: Partial<MessagesRequest> = {}): MessagesRequest => ({ model: 'm', stream: true, tools: [{ name: 'Read' }], messages: [{ role: 'user', content: [{ type: 'text', text: 'E2E-X go' }] }], ...over });
 
@@ -87,5 +88,38 @@ describe('the scripted Messages API (A8)', () => {
     const server = await startMessagesServer([]);
     await server.close();
     await expect(fetch(server.url + '/v1/messages', { method: 'POST', body: '{}' })).rejects.toThrow();
+  });
+});
+
+describe('finding claude (A8)', () => {
+  it('on win32 each PATH folder offers claude.exe before claude.cmd, in PATH order; elsewhere claude; none is null', () => {
+    const files = new Set(['C:\\a\\claude.cmd', 'C:\\b\\claude.exe', 'C:\\b\\claude.cmd']);
+    expect(resolveClaude({ Path: 'C:\\a;C:\\b' }, 'win32', f => files.has(f))).toBe('C:\\a\\claude.cmd');
+    expect(resolveClaude({ PATH: 'C:\\b;C:\\a' }, 'win32', f => files.has(f))).toBe('C:\\b\\claude.exe');
+    expect(resolveClaude({ PATH: '/usr/bin:/opt/c' }, 'linux', f => f === '/opt/c/claude')).toBe('/opt/c/claude');
+    expect(resolveClaude({ PATH: '/usr/bin' }, 'linux', () => false)).toBeNull();
+  });
+  it('BGKIT_E2E_CLAUDE names the binary; one that is not a file finds none, never another', () => {
+    expect(resolveClaude({ BGKIT_E2E_CLAUDE: '/x/claude', PATH: '/opt/c' }, 'linux', f => f === '/x/claude' || f === '/opt/c/claude')).toBe('/x/claude');
+    expect(resolveClaude({ BGKIT_E2E_CLAUDE: '/gone', PATH: '/opt/c' }, 'linux', f => f === '/opt/c/claude')).toBeNull();
+  });
+  it('parseVersion reads x.y.z from claude --version', () => {
+    expect(parseVersion('2.1.310 (Claude Code)\n')).toBe('2.1.310');
+    expect(parseVersion('error: unknown option')).toBeNull();
+  });
+  it('an .exe runs without a shell and a path with a space arrives whole; a .cmd goes through cmd.exe and refuses an argument with a space or a quote', () => {
+    const exe: ClaudeBin = { file: 'C:\\x\\claude.exe', prefix: [], version: '1.0.0', viaCmd: false };
+    expect(spawnSpec(exe, ['--debug-file', 'C:\\Users\\A B\\d.log'])).toEqual({ file: 'C:\\x\\claude.exe', args: ['--debug-file', 'C:\\Users\\A B\\d.log'] });
+    const cmd: ClaudeBin = { ...exe, file: 'C:\\x\\claude.cmd', viaCmd: true };
+    expect(spawnSpec(cmd, ['-p', '--verbose'], 'C:\\Windows\\cmd.exe')).toEqual({ file: 'C:\\Windows\\cmd.exe', args: ['/d', '/c', 'C:\\x\\claude.cmd', '-p', '--verbose'] });
+    expect(() => spawnSpec(cmd, ['C:\\Users\\A B\\d.log'])).toThrow('e2e: claude.cmd cannot take');
+    expect(() => spawnSpec(cmd, ['{"a":1}'])).toThrow('e2e: claude.cmd cannot take');
+    expect(() => spawnSpec({ ...cmd, file: 'C:\\Program Files\\claude.cmd' }, ['-p'])).toThrow('e2e: claude.cmd cannot take');
+  });
+  it('announceLine says which claude runs, warns when its version is not the recorded one, or says every scenario is skipped', () => {
+    expect(announceLine(null)).toBe('e2e: no claude CLI found (PATH or BGKIT_E2E_CLAUDE): every scenario is skipped');
+    const bin: ClaudeBin = { file: '/b/claude', prefix: [], version: OBSERVED_WITH, viaCmd: false };
+    expect(announceLine(bin)).toBe(`e2e: claude ${OBSERVED_WITH} (/b/claude)`);
+    expect(announceLine({ ...bin, version: '0.0.1' })).toBe(`e2e: claude 0.0.1 (/b/claude); tests/e2e/README.md was recorded with ${OBSERVED_WITH}: a pinned scenario that fails may be a change of Claude Code`);
   });
 });

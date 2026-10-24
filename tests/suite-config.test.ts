@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import config, { SLOW } from '../vitest.config.js';
+import { walk } from './helpers/files.js';
 
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 type Project = { test: { name: string; include?: string[]; exclude?: string[] } };
@@ -23,5 +25,19 @@ describe('the suite (I-16)', () => {
     const scripts = JSON.parse(read('package.json')).scripts as Record<string, string>;
     expect(scripts.test).toBe('vitest run');
     expect(scripts['test:unit']).toBe('vitest run --project unit');
+  });
+  it('the e2e project runs only with npm run test:e2e: its own config, files that end in .e2e.ts, one file at a time (A8)', async () => {
+    const { default: e2e } = await import('../vitest.e2e.config.js');
+    const t = e2e.test as { name?: string; include?: string[]; fileParallelism?: boolean; globalSetup?: string[]; projects?: unknown };
+    expect(t.name).toBe('e2e');
+    expect(t.include).toEqual(['tests/e2e/**/*.e2e.ts']);
+    expect(t.fileParallelism).toBe(false);
+    expect(t.globalSetup).toEqual(['tests/setup/temp-root.ts', 'tests/e2e/harness/announce.ts']);
+    expect(t.projects).toBeUndefined();
+    const scripts = JSON.parse(read('package.json')).scripts as Record<string, string>;
+    expect(scripts['test:e2e']).toBe('vitest run --config vitest.e2e.config.ts');
+    expect(scripts.test).toBe('vitest run');
+    // a .test.ts under tests/e2e would also run in unit, and so in npm test and in CI
+    expect(walk(fileURLToPath(new URL('./e2e', import.meta.url))).filter(f => f.endsWith('.test.ts'))).toEqual([]);
   });
 });

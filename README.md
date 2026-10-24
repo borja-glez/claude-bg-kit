@@ -233,6 +233,7 @@ npm run mod-types:update # the engine types typecheck:mod compiles against (not 
 npm run ci               # what CI checks: types, mod types, tests, build freshness, claude plugin validate and test
 npm test                 # vitest: the projects unit and slow
 npm run test:unit        # the quick loop, without the slow files
+npm run test:e2e         # the real claude against a scripted local API (tests/e2e/README.md); skipped without claude
 npm run typecheck        # the CLIs and shared sources
 npm run typecheck:mod    # the mods (src/mod, src/lens)
 npm run build            # rebuilds every plugin's dist/, hooks/ and assets/; commit the output

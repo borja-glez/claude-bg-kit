@@ -233,6 +233,7 @@ npm run mod-types:update # los tipos del motor contra los que compila typecheck:
 npm run ci               # lo que comprueba el CI: tipos, tipos de los mods, tests, frescura del build, claude plugin validate y test
 npm test                 # vitest: los proyectos unit y slow
 npm run test:unit        # el bucle rápido, sin los ficheros lentos
+npm run test:e2e         # el claude real contra una API local con guion (tests/e2e/README.md); se salta sin claude
 npm run typecheck        # las CLI y las fuentes compartidas
 npm run typecheck:mod    # los mods (src/mod, src/lens)
 npm run build            # regenera dist/, hooks/ y assets/ de cada plugin; sube el resultado
