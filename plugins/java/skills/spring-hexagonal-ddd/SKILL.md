@@ -62,10 +62,10 @@ Each thought below was seen breaking a rule. The rule wins.
 
 | Thought | Rule |
 |---|---|
-| "The email goes out after the commit, so only a review that was really saved is confirmed. That is enough." | `outbox`: after-commit alone loses the event if the process dies before publishing. Use the outbox, or publish through one adapter and report that loss window. |
-| "I was in a hurry, so I did not mention that there is no outbox." | `outbox`, and the paragraph above: say once which rule could not apply and why. |
-| "A rating out of range or a comment too long is rejected input, not a business rule, so `IllegalArgumentException` and a generic 400 will do." | `domain-exception`: value-object validation is a business failure. Throw a named `DomainException` subtype. |
-| "The base `DomainException` has no `code`, so a generic title is fine." | `domain-exception`: named subtypes with their own title, and report that the `code` is missing. |
+| "The email is sent after the commit of the review, through `ReviewPublishedV1`. That way only a review that really was saved is confirmed." | `outbox`: after-commit alone loses the event if the process dies before publishing. Use the outbox, or publish through one adapter, and say once in your report that there is no outbox and what is lost. |
+| "It translates the domain events into integration events and publishes them after the commit: the confirmation email only goes out if the review was saved." | `outbox`, and the paragraph above: a missing outbox is reported, even in a hurry. |
+| "Rating and comment are value objects. `Rating` validates 1..5. `Comment` counts real characters." | `domain-exception`: value-object validation is a business failure. Throw a named `DomainException` subtype, not `IllegalArgumentException`. |
+| "A value object has rejected the input: rating outside 1..5, long comment, malformed UUID." (answered with a generic `400 InvalidInput`) | `domain-exception`: a named subtype with its own title and a kebab-case `code`; if the base has no `code`, report it. |
 
 ## Before you report
 
