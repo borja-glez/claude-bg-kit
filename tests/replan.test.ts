@@ -136,6 +136,17 @@ describe('applyReplan', () => {
     expect(r.text).not.toMatch(/[^\r]\n/);
     expect(parsePlan(r.text).tasks.find(t => t.id === 'T003')?.phase).toBe('F2');
   });
+  it('fix 3 (N-1): a file mostly LF with one stray CRLF line stays LF', () => {
+    const stray = FIXTURE.replace('project: demo-shop\n', 'project: demo-shop\r\n');
+    const r = applyReplan(stray, ops({ op: 'move', task: 'T003', phase: 'F2' }), 'x', AT);
+    expect(r.text).not.toContain('\r');
+    expect(parsePlan(r.text).tasks.find(t => t.id === 'T003')?.phase).toBe('F2');
+  });
+  it('fix 3 (N-3): a depends_on with the same tasks in another order is no change', () => {
+    expect(applyReplan(FIXTURE, ops({ op: 'edit', task: 'T005', depends_on: ['T004', 'T003'] }), 'x', AT)).toEqual({ text: FIXTURE, changes: [] });
+    const r = applyReplan(FIXTURE, ops({ op: 'edit', task: 'T005', depends_on: ['T004'] }), 'x', AT);
+    expect(r.changes).toEqual(['T005: depends_on']);
+  });
   it('m-5: on a plan with two versions, a new phase joins the version of `after`, else the last one, and each version is reordered', () => {
     const after = parsePlan(applyReplan(TWO_VERSIONS, ops({ op: 'add-phase', id: 'F3', name: 'Tres', after: 'F1' }), 'x', AT).text);
     expect(after.versions.map(v => v.phases)).toEqual([['F1', 'F3'], ['F2']]);
@@ -350,6 +361,18 @@ describe('waypoint replan', () => {
       expect(readFileSync(path.join(dir, 'plan.yaml'), 'utf8')).toBe(FIXTURE);
     }
     expect(readdirSync(dir).sort()).toEqual(['assets', 'ops.json', 'plan.yaml', 'why.txt']);
+  });
+  it('fix 3 (N-2): refuses any argument but the plan, --ops <f>, --why-file <f> and --check, and writes nothing', () => {
+    writeFileSync(path.join(dir, 'ops.json'), JSON.stringify({ ops: [{ op: 'move', task: 'T003', phase: 'F2' }] }));
+    for (const stray of ['check', `${String.fromCharCode(0x2014)}check`, 'plan.yaml']) {
+      const r = replan(stray);
+      expect(r.code, stray).toBe(2);
+      expect(r.stderr).toContain(stray);
+      expect(readFileSync(path.join(dir, 'plan.yaml'), 'utf8')).toBe(FIXTURE);
+    }
+    expect(readdirSync(dir).sort()).toEqual(['assets', 'ops.json', 'plan.yaml', 'why.txt']);
+    // The values of --ops and --why-file are no stray arguments, wherever the flags come.
+    expect(run(['replan', 'plan.yaml', '--check', '--why-file', 'why.txt', '--ops', 'ops.json'], io).code).toBe(0);
   });
   it('fix 2: accepts a UTF-8 BOM at the start of the ops and the why files', () => {
     const bom = String.fromCharCode(0xfeff);

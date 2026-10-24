@@ -252,7 +252,9 @@ function applyOp(doc: Document, n: Nodes, op: ReplanOp, retired: string[]): Step
     case 'edit': {
       const node = mapOf(n.tasks, op.task);
       if (!node) return { issue: `task ${op.task} not found` };
-      const same = (k: (typeof TASK_FIELDS)[number]) => (k === 'depends_on' ? depsOf(node).join() === op.depends_on?.join() : node.get(k) === op[k]);
+      // N-3: dependencies are a set: the same tasks in another order are no change.
+      const sameSet = (a: string[], b: string[]) => { const s = new Set(a); return s.size === new Set(b).size && b.every(x => s.has(x)); };
+      const same = (k: (typeof TASK_FIELDS)[number]) => (k === 'depends_on' ? sameSet(depsOf(node), op.depends_on ?? []) : node.get(k) === op[k]);
       const fields = TASK_FIELDS.filter(k => op[k] !== undefined && !same(k));
       if (!fields.length) return { change: null };
       for (const k of fields) {
@@ -354,7 +356,8 @@ export function applyReplan(text: string, ops: ReplanOp[], why: string, at: stri
   if (issues.length) throw new ReplanError(issues);
   if (!changes.length) return { text, changes: [] };
   if (retired.length) addRetired(doc, retired);
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  // m-3, N-1: CRLF only when most of the file's line breaks are CRLF; one stray CRLF line leaves a file LF.
+  const eol = (text.match(/\r\n/g) ?? []).length * 2 > (text.match(/\n/g) ?? []).length ? '\r\n' : '\n';
   // m-1: a move away and back, say, leaves the plan as it was: nothing to write, no history entry.
   if (shapeOf(checked(serialize(doc, eol))) === shapeOf(before)) return { text, changes: [] };
   addHistory(doc, { at, why: reason, changes: entryChanges(changes) });

@@ -171,10 +171,14 @@ export function run(argv: string[], io: Io): Result {
         // 6b-3 Task 1: moves, orders, adds, edits and retires phases and tasks, never renumbering, with the why in the plan's
         // history. H-1: --check validates and prints the changes, writing nothing. Every check runs before the one atomic
         // write, so a problem (exit 2, the issues on stderr) leaves the plan byte for byte as it was.
-        // T6B3-UNKNOWN-FLAG: a flag it does not know is refused before anything is read, so a typo of --check never writes.
-        const unknown = args.slice(1).filter((a, i, rest) => a.startsWith('-') && !['--ops', '--why-file'].includes(rest[i - 1] ?? '')
-          && a !== '--ops' && a !== '--why-file' && a !== '--check');
-        if (unknown.length) return fail(`replan: unknown option ${unknown.join(', ')} (it takes --ops, --why-file and --check)`, 2);
+        // T6B3-UNKNOWN-FLAG, N-2: after the plan, only --ops <f>, --why-file <f> and --check. Anything else (a typo of --check,
+        // `check`, an em dash for the hyphens) is refused before anything is read, so it never writes.
+        const stray: string[] = [];
+        for (let i = 1; i < args.length; i++) {
+          if (args[i] === '--ops' || args[i] === '--why-file') i++;
+          else if (args[i] !== '--check') stray.push(JSON.stringify(args[i].slice(0, 80)));
+        }
+        if (stray.length) return fail(`replan: unknown argument ${stray.join(', ')} (it takes <plan.yaml> --ops <f> --why-file <f> [--check])`, 2);
         const opsFile = flag('ops'), whyFile = flag('why-file');
         if (!args[0] || args[0].startsWith('--') || !opsFile || !whyFile) return fail('usage: waypoint replan <plan.yaml> --ops <ops.json> --why-file <why.txt> [--check]', 2);
         const file = abs(args[0]);
