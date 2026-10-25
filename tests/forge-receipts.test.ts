@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { defaultGit } from '../src/forge/cli/run.js';
@@ -78,5 +78,21 @@ describe('the merge prediction (A3)', () => {
     expect(predictMerge(() => ({ code: 129, stdout: '' }), 'main', 'run')).toEqual({ state: 'unverified' });
     expect(predictMerge(() => ({ code: null, stdout: '' }), 'main', 'run')).toEqual({ state: 'unverified' });
     expect(predictMerge(() => ({ code: 1, stdout: 'CONFLICT (content): Merge conflict in a.txt\n' }), 'main', 'run')).toEqual({ state: 'unverified' });
+  });
+});
+
+describe('the texts name the receipts, the predicted conflicts and the unverified shadow (A3)', () => {
+  const read = (f: string) => readFileSync(f, 'utf8');
+  it('the run references and both forge READMEs', () => {
+    const exec = read('plugins/forge/skills/run/references/execution.md');
+    for (const w of ['`unreviewed`', 'tree changed since the final review', '`predicted: true`', 'docs/forge/decisions/']) expect(exec, w).toContain(w);
+    expect(exec).not.toContain('judged by its time');
+    for (const f of ['step', 'ephemeral']) expect(read(`plugins/forge/skills/run/references/${f}.md`), f).toContain('`unreviewed`');
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const w of ['`unreviewed`', 'tree changed since the final review', '`predicted`', 'git merge-tree', '.forge/verify/*.md', '`unverified`', '`tree`', 'docs/forge/decisions/']) expect(md, `${f}: ${w}`).toContain(w);
+    }
+    expect(read('plugins/forge/README.md')).not.toContain("by the verdict's time");
+    expect(read('plugins/forge/README.es.md')).not.toContain('por la hora del veredicto');
   });
 });
