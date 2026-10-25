@@ -68,7 +68,7 @@ const skillDocs = (): string[] => ['forge', 'waypoint'].flatMap(p => readdirSync
 const readmes = ['README.md', 'README.es.md', ...['waypoint', 'forge', 'lens'].flatMap(p => [`plugins/${p}/README.md`, `plugins/${p}/README.es.md`])];
 
 describe('plugin layout', () => {
-  it('marketplace bg-kit lists waypoint, lens, forge and java', () => {
+  it('marketplace bg-kit lists waypoint, lens, forge and java first, and every plugin at ./plugins/<name> with its manifest', () => {
     const m = JSON.parse(read('.claude-plugin/marketplace.json'));
     expect(m.name).toBe('bg-kit');
     expect(m.plugins.slice(0, 4)).toEqual([
@@ -77,9 +77,10 @@ describe('plugin layout', () => {
       expect.objectContaining({ name: 'forge', source: './plugins/forge' }),
       expect.objectContaining({ name: 'java', source: './plugins/java' }),
     ]);
-    for (const p of m.plugins) {
+    for (const p of m.plugins as { name: string; source: string }[]) {
       expect(p.source, p.name).toBe(`./plugins/${p.name}`);
       expect(existsSync(new URL(`../plugins/${p.name}/.claude-plugin/plugin.json`, import.meta.url)), p.name).toBe(true);
+      expect(JSON.parse(read(`plugins/${p.name}/.claude-plugin/plugin.json`)).name, p.name).toBe(p.name);
     }
   });
   it('lens manifest, module and contract exist', () => {

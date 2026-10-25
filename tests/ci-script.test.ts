@@ -32,7 +32,7 @@ describe('npm run ci (I-05)', () => {
     expect(gen).toEqual(parse(read('.forge/config.yaml')).generated);
     for (const g of gen) expect(lines[3]).toContain(g);
     expect(lines[5]).toContain('claude plugin validate .');
-    for (const p of ['waypoint', 'lens', 'forge', 'java', 'web']) expect(lines[5]).toContain(`claude plugin validate plugins/${p}`);
+    for (const p of ['waypoint', 'lens', 'forge', 'java', 'web', 'ml']) expect(lines[5]).toContain(`claude plugin validate plugins/${p}`);
     expect(lines[6]).toBe('ci: 7/7 plugin-test: claude plugin test plugins/lens && claude plugin test plugins/waypoint');
   });
   it('in CI, without the engine types (never in git), typecheck:mod is skipped with its warning, and npm audit runs after the tests', () => {
@@ -87,6 +87,7 @@ describe('tag-plugins (C8, I-05)', () => {
     expect(tagCommands(['lens', '--apply'])).toEqual({ cmds: [['plugin', 'tag', 'plugins/lens', '-m', 'lens %s']] });
     expect(tagCommands(['java'])).toEqual({ cmds: [['plugin', 'tag', 'plugins/java', '-m', 'java %s', '--dry-run']] });
     expect(tagCommands(['web'])).toEqual({ cmds: [['plugin', 'tag', 'plugins/web', '-m', 'web %s', '--dry-run']] });
+    expect(tagCommands(['ml'])).toEqual({ cmds: [['plugin', 'tag', 'plugins/ml', '-m', 'ml %s', '--dry-run']] });
     for (const bad of [['--push', 'waypoint'], ['waypoint', '--remote', 'origin'], ['nope'], []]) expect(tagCommands(bad), bad.join(' ')).toHaveProperty('error');
     const r = spawnSync(process.execPath, [path.join(repo, 'scripts', 'tag-plugins.mjs'), 'waypoint', '--push'], { encoding: 'utf8' });
     expect(r.status).toBe(2);

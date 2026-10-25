@@ -41,6 +41,7 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 | 🔍 | **lens** | Un **panel de progreso en vivo** dentro de Claude Code: **el modelo y el esfuerzo en uso**, roadmap, etapas y ejecuciones de forge, ejecuciones de superpowers, pendientes, subagentes, tareas de Claude Code y el **consumo en tokens y dólares** comparado con trabajar sin forge. | [plugins/lens](plugins/lens/README.es.md) |
 | ☕ | **java** | Para Java y Spring Boot: las **reglas de DDD y hexagonal** de un servicio (agregados, puertos, eventos y outbox, errores RFC 9457, ArchUnit), el **mantenimiento de librerías Java** (build-logic, dos starters de Boot, Maven Central) y un **revisor de arquitectura** bajo demanda. No necesita ninguno de los otros plugins. | [plugins/java](plugins/java/README.es.md) |
 | 🌐 | **web** | Skills de dominio para proyectos web. **astro-dokploy-site** reúne lo que cada sitio Astro con islas de Preact en Dokploy redescubre si no: los hashes de la CSP, Lighthouse y Playwright bajo Claude Code, los workers de Vite, MDX, nginx y los campos de Dokploy. | [plugins/web](plugins/web/README.es.md) |
+| 🧪 | **ml** | Machine learning en una GPU NVIDIA local: **entornos uv y ruedas de CUDA**, presupuesto de VRAM y de calor, las APIs de trl y transformers comprobadas contra la versión instalada, particiones sin fugas, notebooks ejecutados enteros, cards de Hugging Face e inferencia ONNX en el navegador. Es solo texto, una skill y sus referencias, y no necesita ninguno de los otros plugins. | [plugins/ml](plugins/ml/README.es.md) |
 
 ## Combínalos a tu manera
 
@@ -85,6 +86,7 @@ claude plugin install forge@bg-kit     # instala waypoint ^0.35.0 como dependenc
 claude plugin install lens@bg-kit
 claude plugin install java@bg-kit      # Java y Spring Boot: dos skills y el revisor de arquitectura
 claude plugin install web@bg-kit
+claude plugin install ml@bg-kit        # skills de machine learning en una GPU local
 ```
 
 Dentro de una sesión, `/plugin marketplace add borja-glez/claude-bg-kit` hace lo mismo. Para recibir versiones nuevas más adelante, ejecuta `claude plugin marketplace update bg-kit`.
@@ -225,6 +227,7 @@ plugins/
   lens/       el mod del panel (hooks/register.js) y sus tests contra el motor
   java/       skills para servicios Spring Boot y librerías Java, el agente architecture-reviewer
   web/        la skill astro-dokploy-site y sus references (solo texto)
+  ml/         la skill ml-local-gpu y sus referencias
 src/          fuentes TypeScript: lib/ (compartido), page/ (roadmap), mod/ (banda de waypoint), lens/, forge/
 tests/        suites de vitest
 docs/

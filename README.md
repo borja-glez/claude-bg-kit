@@ -41,6 +41,7 @@ Design them, plan them, build them with independent review, run them in parallel
 | 🔍 | **lens** | A **live progress panel** inside Claude Code: **model and effort in use**, roadmap, forge stages and executions, superpowers runs, todos, subagents, Claude Code tasks, and **token and dollar usage** compared with working without forge. | [plugins/lens](plugins/lens/README.md) |
 | ☕ | **java** | For Java and Spring Boot: the **DDD and hexagonal rules** of a service (aggregates, ports, events and the outbox, RFC 9457 errors, ArchUnit), the **upkeep of Java libraries** (build-logic, two Boot starters, Maven Central) and an on-demand **architecture reviewer**. It needs none of the other plugins. | [plugins/java](plugins/java/README.md) |
 | 🌐 | **web** | Domain skills for web projects. **astro-dokploy-site** holds what every Astro site with Preact islands on Dokploy otherwise rediscovers: CSP hashes, Lighthouse and Playwright under Claude Code, Vite workers, MDX, nginx and the Dokploy fields. | [plugins/web](plugins/web/README.md) |
+| 🧪 | **ml** | Machine learning on a local NVIDIA GPU: **uv environments and CUDA wheels**, VRAM and heat budgets, trl and transformers APIs checked against the installed version, leak-free splits, notebooks run whole, Hugging Face cards and in-browser ONNX inference. It is text only, a skill and its references, and needs none of the other plugins. | [plugins/ml](plugins/ml/README.md) |
 
 ## Mix and match
 
@@ -85,6 +86,7 @@ claude plugin install forge@bg-kit     # pulls in waypoint ^0.35.0 as a dependen
 claude plugin install lens@bg-kit
 claude plugin install java@bg-kit      # Java and Spring Boot: two skills and the architecture reviewer
 claude plugin install web@bg-kit
+claude plugin install ml@bg-kit        # skills for machine learning on a local GPU
 ```
 
 Inside a session, `/plugin marketplace add borja-glez/claude-bg-kit` does the same. To get new versions later, run `claude plugin marketplace update bg-kit`.
@@ -225,6 +227,7 @@ plugins/
   lens/       the panel mod (hooks/register.js) and its engine tests
   java/       skills for Spring Boot services and Java libraries, the architecture-reviewer agent
   web/        the astro-dokploy-site skill and its references (text only)
+  ml/         the ml-local-gpu skill and its references
 src/          TypeScript sources: lib/ (shared), page/ (roadmap), mod/ (waypoint band), lens/, forge/
 tests/        vitest suites
 docs/
