@@ -15024,13 +15024,13 @@ function learnedNotes(text4) {
   const t = text4.replace(/\r\n/g, "\n");
   return learnedSections(t, t.split("\n").length).flatMap((s2) => s2.body.map((l) => /^- (?:\d{4}-\d{2}-\d{2}: )?(.*)$/.exec(l.text)?.[1]?.trim() ?? "")).filter(Boolean);
 }
-function filterNotes(notes, existing, task) {
+function filterNotes(notes2, existing, task) {
   const ids = task ? [.../* @__PURE__ */ new Set([task, task.replace(/-\d+$/, "")])].filter((id) => ID_SHAPE.test(id)) : [];
   const named = ids.map((id) => new RegExp(`(?<![A-Za-z0-9_])${escapeRe(id)}(?![A-Za-z0-9_])`, "i"));
   const seen = new Set(existing.map(normNote));
   const keep = [];
   const skipped = [];
-  for (const raw of notes) {
+  for (const raw of notes2) {
     const huge = raw.length > NOTE_MAX * 4;
     const note = (huge ? raw.slice(0, NOTE_MAX * 4) : raw).replace(/\s*\r?\n\s*/g, " ").trim();
     const why = huge || note.length > NOTE_MAX ? "too-long" : /\.forge[\\/]+work[\\/]/i.test(note) ? "names-a-work-path" : SECRET.some((re) => re.test(note)) || longSecretRun(note) ? "looks-secret" : INSTRUCTION.some((re) => re.test(note)) ? "looks-like-instruction" : named.some((re) => re.test(note)) ? "names-the-task" : seen.has(normNote(note)) ? "duplicate" : null;
@@ -15188,9 +15188,9 @@ function withoutLearned(t, learned) {
   }
   return lines.filter((_, i) => !drop.has(i)).join("\n");
 }
-function appendLearned(text4, date3, notes, heading = "Learned", guard) {
+function appendLearned(text4, date3, notes2, heading = "Learned", guard) {
   const eol = text4.includes("\r\n") ? "\r\n" : "\n";
-  const notesLines = notes.map((n) => `- ${date3}: ${n.replace(/\s*\r?\n\s*/g, " ").trim()}`);
+  const notesLines = notes2.map((n) => `- ${date3}: ${n.replace(/\s*\r?\n\s*/g, " ").trim()}`);
   const t = text4.replace(/\r\n/g, "\n");
   const lines = t.split("\n");
   const [s2] = learnedSections(t, lines.length);
@@ -23889,14 +23889,14 @@ function submittedOf(x) {
   if ("afkTimeoutMs" in x || present2(x.followUp) || present2(x.response)) return null;
   const answers = /* @__PURE__ */ new Map();
   for (const [q, v] of Object.entries(x.answers)) if (typeof v === "string") answers.set(q, v);
-  const notes = /* @__PURE__ */ new Map();
+  const notes2 = /* @__PURE__ */ new Map();
   if (isObject2(x.annotations)) {
     for (const [q, v] of Object.entries(x.annotations)) {
       const note = isObject2(v) && typeof v.notes === "string" ? v.notes.trim() : "";
-      if (note) notes.set(q, note.slice(0, MAX_NOTE2));
+      if (note) notes2.set(q, note.slice(0, MAX_NOTE2));
     }
   }
-  return { answers, notes };
+  return { answers, notes: notes2 };
 }
 function toolUseIds(message) {
   const content = isObject2(message) ? message.content : null;
@@ -25395,7 +25395,7 @@ function resolveAffected(v, files, platform, exists2) {
 function planAffected(list, files, platform, exists2) {
   const run2 = [];
   const skipped = /* @__PURE__ */ new Map();
-  const notes = [];
+  const notes2 = [];
   for (const v of list) {
     if (v.kind !== "test") {
       run2.push(v);
@@ -25405,13 +25405,13 @@ function planAffected(list, files, platform, exists2) {
     if (a.mode === "cmd") run2.push({ ...v, cmd: a.cmd });
     else if (a.mode === "full") {
       run2.push(v);
-      notes.push(`${v.name}: ${a.why}; it runs in full`);
+      notes2.push(`${v.name}: ${a.why}; it runs in full`);
     } else {
       skipped.set(v.name, { validator: v.name, ok: true, flaky: false, durationMs: 0, failures: [], failing: [], failingKnown: true, skipped: "not-affected" });
-      notes.push(`${v.name}: ${a.why}; review-prep runs it in full`);
+      notes2.push(`${v.name}: ${a.why}; review-prep runs it in full`);
     }
   }
-  return { run: run2, skipped, notes };
+  return { run: run2, skipped, notes: notes2 };
 }
 var CRASH = "segmentation fault|core dumped|javascript heap out of memory|fatal error:";
 var CRASH_RE = new RegExp(CRASH, "i");
@@ -27206,13 +27206,13 @@ function logVerifyResult(cwd2, at2, task, dir, verifyFile) {
   });
   return out;
 }
-function learnSurface(io, dir, name, notes, heading, task = null, write = true) {
+function learnSurface(io, dir, name, notes2, heading, task = null, write = true) {
   const file = import_node_path33.default.join(dir, surfaceFile(name));
   if (!(0, import_node_fs29.existsSync)(file)) return { reason: `${surfaceFile(name)} does not exist` };
   if ((0, import_node_fs29.lstatSync)(file).isSymbolicLink()) return { reason: `${surfaceFile(name)} is a symlink` };
   const before3 = (0, import_node_fs29.readFileSync)(file, "utf8");
   const have = learnedNotes(before3);
-  const { keep, skipped } = filterNotes(notes, have, task);
+  const { keep, skipped } = filterNotes(notes2, have, task);
   if (!keep.length) return { count: have.length, added: 0, keep: [], skipped };
   if (!write) return { count: have.length + keep.length, added: keep.length, keep, skipped };
   const cur = surfacePermissions(io.cwd)[name];
@@ -27879,13 +27879,13 @@ function heldForPerson(tasks, states) {
   }
   return held2;
 }
-var namedByDebt = (notes, id) => notes.some((n) => n.type === "debt" && n.author.startsWith("session:") && n.proposalId === id);
+var namedByDebt = (notes2, id) => notes2.some((n) => n.type === "debt" && n.author.startsWith("session:") && n.proposalId === id);
 function saturationOf(i) {
   const missing = i.missing ?? [];
   const noTasks = missing.includes("--plan") || missing.includes("--db");
   const tasks = noTasks ? [] : i.plan.tasks;
   const states = noTasks ? {} : i.states;
-  const notes = missing.includes("--db") ? [] : i.notes;
+  const notes2 = missing.includes("--db") ? [] : i.notes;
   const held2 = heldForPerson(tasks, states);
   const blockedTasks = tasks.filter((t) => held2.has(t.id)).map((t) => t.id);
   const pendingTasks = tasks.filter((t) => states[t.id]?.status !== "done" && !held2.has(t.id)).map((t) => t.id);
@@ -27906,12 +27906,12 @@ function saturationOf(i) {
   const waitsOwner2 = [.../* @__PURE__ */ new Set([...i.waitsOwner ?? [], ...i.proposals.filter((p) => approving(p) && !markedOpen(p)).map((p) => p.id)])].filter((id) => !parked.includes(id)).sort();
   const unowned = [...new Set(i.unowned ?? [])].sort();
   const approvedUntasked = (p) => isActionable(p) && p.taskId === void 0 && !unowned.includes(p.id);
-  const unplaced = i.proposals.filter((p) => approvedUntasked(p) && namedByDebt(notes, p.id)).map((p) => p.id);
+  const unplaced = i.proposals.filter((p) => approvedUntasked(p) && namedByDebt(notes2, p.id)).map((p) => p.id);
   const untasked = (p) => approvedUntasked(p) && !unplaced.includes(p.id);
   const open2 = (p) => (p.status === "proposed" || p.status === "discussing" && !p.parked) && !waitsOwner2.includes(p.id);
   const openDefects = i.proposals.filter((p) => p.source === "verify" && (open2(p) || untasked(p))).map((p) => p.id);
   const openProposals = [.../* @__PURE__ */ new Set([...i.toJudge ?? [], ...i.proposals.filter((p) => untasked(p) || markedOpen(p)).map((p) => p.id)])].sort();
-  const questions = notes.filter((n) => n.type === "question" && !n.answer && !n.answeredByNote).length;
+  const questions = notes2.filter((n) => n.type === "question" && !n.answer && !n.answeredByNote).length;
   const blocking2 = [];
   if (i.dry < SATURATION_ROUNDS || i.explored === false) blocking2.push("rounds");
   if (pendingTasks.length) blocking2.push("pending-tasks");
@@ -35387,7 +35387,7 @@ var import_node_path69 = __toESM(require("node:path"), 1);
 var TDD_ROW = "tdd";
 var TDD_MAX_FILES = 30;
 var TDD_TIMEOUT_MAX = 300;
-var SKIPS = ["no-tests", "no-command", "same-package", "too-many", "unsafe-path", "lockfile", "linked-code", "no-checkout", "timeout"];
+var SKIPS = ["no-tests", "no-command", "same-package", "too-many", "unsafe-path", "lockfile", "linked-code", "no-deps", "no-checkout", "timeout"];
 var esc2 = (s2) => s2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var slash2 = (s2) => s2.replace(/\\/g, "/");
 var JS_TITLE = /^\s*(?:it|test)(?:\.(?:only|concurrent|sequential|fails))?\s*\(\s*(['"`])((?:\\.|(?!\1).)+)\1/;
@@ -35403,19 +35403,24 @@ function jsTitle(source2) {
 }
 function newTestNames(patch) {
   const lines = patch.split(/\r?\n/);
+  let inHeader = false;
+  const header = lines.map((l) => {
+    if (l.startsWith("diff --git ")) inHeader = true;
+    else if (l.startsWith("@@")) inHeader = false;
+    return inHeader;
+  });
   const removed = /* @__PURE__ */ new Map();
   lines.forEach((l, i) => {
-    if (!l.startsWith("-")) return;
-    if (l.startsWith("---") && lines[i + 1]?.startsWith("+++")) return;
+    if (!l.startsWith("-") || header[i]) return;
     const t = l.slice(1).trim();
     if (t) removed.set(t, (removed.get(t) ?? 0) + 1);
   });
   const out = /* @__PURE__ */ new Map();
   let file = null;
-  for (const l of lines) {
-    if (l.startsWith("+++")) {
-      const m = /^\+\+\+ b\/(.+?)(?:\t.*)?$/.exec(l);
-      file = m ? m[1] : null;
+  for (const [i, l] of lines.entries()) {
+    if (header[i]) {
+      if (l.startsWith("diff --git ")) file = null;
+      else if (l.startsWith("+++")) file = /^\+\+\+ b\/(.+?)(?:\t.*)?$/.exec(l)?.[1] ?? null;
       continue;
     }
     if (!l.startsWith("+") || file === null) continue;
@@ -35456,6 +35461,16 @@ function cleanEntry(entry2, files) {
   if (word2 && !files.some((f) => word2[1].startsWith(f)) && files.some((f) => word2[2].startsWith(f))) return word2[2];
   return e;
 }
+var STOP_LINE = /stopping after \d+ failures?|Interrupted: \d+ errors?\b|^\s*Test Suites:.*\b\d+ of \d+ total\s*$/;
+var VITEST_SUMMARY = /^\s*(?:Test Files|Tests)\s+((?:\d+ (?:failed|passed|expected fail|skipped|todo)(?: \| )?)+)\s+\((\d+)\)\s*$/;
+function stoppedEarly(text4) {
+  for (const l of text4.split(/\r?\n/)) {
+    const v = VITEST_SUMMARY.exec(l);
+    const short = v !== null && [...v[1].matchAll(/\d+/g)].reduce((s2, m) => s2 + Number(m[0]), 0) < Number(v[2]);
+    if (short || STOP_LINE.test(l)) return l.replace(/^[\s!=]+|[\s!=]+$/g, "").replace(/\s+/g, " ").slice(0, 200);
+  }
+  return null;
+}
 function classifyTdd(files, names3, run2, kind, baseFailing) {
   const out = { red: [], passedOnBase: [], alreadyFailing: [], unjudged: [] };
   if (run2.timedOut || NO_TESTS.test(run2.output)) {
@@ -35465,6 +35480,8 @@ function classifyTdd(files, names3, run2, kind, baseFailing) {
   const { names: raw, known } = failingTests(run2.output, kind);
   const entries = raw.map((r2) => ({ raw: r2, text: cleanEntry(r2, files), cut: r2.length >= FAILING_NAME_MAX }));
   const text4 = slash2(run2.output.replace(ANSI2, ""));
+  const stop = stoppedEarly(text4);
+  let withheld = false;
   const owner = (e) => {
     let best = null;
     for (const f of files) if (e.startsWith(f) && SEP_AT.test(e.slice(f.length)) && (best === null || f.length > best.length)) best = f;
@@ -35493,20 +35510,25 @@ function classifyTdd(files, names3, run2, kind, baseFailing) {
         return t !== null && named(t, e.cut);
       });
       const label = `${f} > ${x}`;
+      const passes2 = run2.code === 0 || known && !vague && tidy(` ${x}`) !== "";
       if (hit && (baseFailing.has(hit.raw) || baseFailing.has(hit.text) || baseFailing.has(label))) out.alreadyFailing.push(label);
       else if (hit || !loads) out.red.push(label);
-      else if (run2.code === 0 || known && !vague && tidy(` ${x}`) !== "") out.passedOnBase.push(label);
-      else if (!unread) {
-        unread = true;
-        out.unjudged.push(f);
+      else if (passes2 && stop === null) out.passedOnBase.push(label);
+      else {
+        if (passes2) withheld = true;
+        if (!unread) {
+          unread = true;
+          out.unjudged.push(f);
+        }
       }
     }
   }
-  return out;
+  return withheld && stop !== null ? { ...out, stopped: stop } : out;
 }
 var CONFTEST = /(^|\/)conftest\.py$/;
 var TEST_MODULE = /\.(test|spec)\.[^/]+$/;
 var LINKED_DEP = /^(?:file|link|workspace):/;
+var NODE_RUNNER = /^\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:node|npx|npm|pnpm|yarn|bunx?|vitest|jest|mocha)(?:\.cmd|\.exe)?(?=\s|$)/i;
 var SITE_DIRS = (repo) => {
   const dirs = [];
   for (const venv of [".venv", "venv"]) {
@@ -35554,10 +35576,9 @@ function linkedCode(at2) {
   return false;
 }
 function tddPlan(validators, touched, base, at2) {
-  const live = touched;
-  const overlay = live.filter((f) => at2.repo.exists(f) && (isTestFile(f) || CONFTEST.test(f)));
+  const overlay = touched.filter((f) => at2.repo.exists(f) && (isTestFile(f) || CONFTEST.test(f)));
   const modules = overlay.filter((f) => TEST_MODULE.test(f) || isPytestModule(f));
-  const testPaths = live.filter(isTestFile);
+  const testPaths = touched.filter(isTestFile);
   const lockBase = at2.git(["ls-tree", base, "--", ...LOCKFILES]) ?? "";
   const lockHead = at2.git(["ls-tree", "HEAD", "--", ...LOCKFILES]) ?? "";
   const overlayBlobs = overlay.length ? at2.git(["ls-tree", "HEAD", "--", ...overlay]) ?? "" : "";
@@ -35573,7 +35594,7 @@ function tddPlan(validators, touched, base, at2) {
     return list2.length ? [{ v: v2, list: list2 }] : [];
   });
   if (!fits.length) {
-    if (live.some((f) => f.endsWith("_test.go") || f.endsWith(".rs"))) return done("same-package");
+    if (touched.some((f) => f.endsWith("_test.go") || f.endsWith(".rs"))) return done("same-package");
     return done(modules.length ? "no-command" : "no-tests");
   }
   const { v, list } = fits[0];
@@ -35588,6 +35609,7 @@ function tddPlan(validators, touched, base, at2) {
   plan.cmd = runsPytest(v.affectedCmd) ? `${a.cmd} --continue-on-collection-errors` : a.cmd;
   if (lockBase !== lockHead) return done("lockfile");
   if (linkedCode(at2)) return done("linked-code");
+  if (NODE_RUNNER.test(a.cmd) && linkSource(at2.repoDir, "node_modules") === null) return done("no-deps");
   return done(null);
 }
 function rootCauseOf(report) {
@@ -35597,7 +35619,7 @@ function rootCauseOf(report) {
   const marks = new Set(m[1]);
   let text4 = m[2].trimEnd();
   while (text4.length && marks.has(text4[text4.length - 1]) && /[*`]/.test(text4[text4.length - 1])) text4 = text4.slice(0, -1).trimEnd();
-  return text4 ? text4.slice(0, 300) : null;
+  return text4 ? text4.slice(0, 300).trimEnd() : null;
 }
 function tddRow(check, bug) {
   const failures = [
@@ -35659,6 +35681,8 @@ var TDD_LINKS = ["node_modules", ".venv", "venv"];
 var STALE_MS = 60 * 6e4;
 var SHA3 = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 var RM = { recursive: true, force: true, maxRetries: 3, retryDelay: 100 };
+var notes = (...n) => n.filter(Boolean).join("; ") || null;
+var transient = (c) => c.skipped === "timeout" || c.skipped === "no-checkout";
 var winPath = (s2) => process.platform === "win32" ? import_node_path69.default.resolve(s2).toLowerCase() : import_node_path69.default.resolve(s2);
 var isDir = (p) => {
   try {
@@ -35786,17 +35810,18 @@ function runTdd(plan, ctx) {
     }
     for (const f of plan.overlay) {
       const dest = import_node_path69.default.resolve(baseDir, f);
-      if (import_node_path69.default.relative(baseDir, dest).startsWith("..") || import_node_path69.default.isAbsolute(import_node_path69.default.relative(baseDir, dest))) return done({ skipped: "no-checkout" });
+      const rel3 = import_node_path69.default.relative(baseDir, dest);
+      if (rel3.split(import_node_path69.default.sep)[0] === ".." || import_node_path69.default.isAbsolute(rel3)) return done({ skipped: "no-checkout" });
       const blob = (0, import_node_child_process10.execFileSync)("git", ["-C", ctx.repoDir, "cat-file", "blob", `HEAD:${f}`], { maxBuffer: 256 * 1024 * 1024, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
       (0, import_node_fs66.mkdirSync)(import_node_path69.default.dirname(dest), { recursive: true });
       (0, import_node_fs66.writeFileSync)(dest, blob);
     }
     const names3 = newTestNames(ctx.git(["-c", "core.quotePath=false", "diff", "--no-color", "--no-renames", "-U0", `${plan.base}..HEAD`, "--", ...plan.testPaths]) ?? "");
     const r2 = ctx.execAt(baseDir)(plan.cmd ?? "", Math.min(ctx.timeoutSec, TDD_TIMEOUT_MAX));
-    const verdict = classifyTdd(plan.files, names3, { code: r2.code, output: r2.output, timedOut: r2.timedOut }, plan.kind ?? "test", new Set(baseFailingNames(ctx.baseline, plan.validator ?? "")));
-    return done({ ...verdict, skipped: r2.timedOut ? "timeout" : null });
-  } catch {
-    return done({ skipped: "no-checkout" });
+    const { stopped, ...verdict } = classifyTdd(plan.files, names3, { code: r2.code, output: r2.output, timedOut: r2.timedOut }, plan.kind ?? "test", new Set(baseFailingNames(ctx.baseline, plan.validator ?? "")));
+    return done({ ...verdict, skipped: r2.timedOut ? "timeout" : null, note: notes(check.note, stopped && `not judged: the runner stopped early (${stopped})`) });
+  } catch (e) {
+    return done({ skipped: "no-checkout", note: notes(check.note, (e instanceof Error ? e.message : String(e)).trim()) });
   } finally {
     if (tmpDir !== null) clearCheckDir(tmpDir, { git: ctx.git, repoDir: ctx.repoDir });
   }
@@ -35838,15 +35863,15 @@ function tddForBrief(c) {
     };
     return { check: check2, row: tddRow(check2, bug), file, reused: false };
   }
-  const reused = p.stored !== null && p.stored.key === p.plan.key;
+  const reused = p.stored !== null && p.stored.key === p.plan.key && !transient(p.stored);
   const check = reused ? p.stored : runTdd(p.plan, c);
-  if (!reused) writeTdd(p.file, check);
+  if (!reused && !transient(check)) writeTdd(p.file, check);
   return { check, row: tddRow(check, bug), file: p.file, reused };
 }
 function tddPending(c) {
   const p = planOf2(c);
   if (!p) return false;
-  return p.stored === null || p.stored.key !== p.plan.key || p.stored.passedOnBase.length > 0;
+  return p.stored === null || p.stored.key !== p.plan.key || transient(p.stored) || p.stored.passedOnBase.length > 0;
 }
 
 // src/forge/cli/review.ts
@@ -37476,9 +37501,9 @@ function digestSay(surfaces, runId, es2) {
   if (!surfaces.length) return es2 ? `La ejecuci\xF3n ${runId} no dej\xF3 notas ni propuestas de verificaci\xF3n.` : `The run ${runId} left no verification notes or proposals.`;
   const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
   const parts = surfaces.map((s2) => {
-    const notes = s2.learned.length + (s2.more?.learned ?? 0), props = s2.proposals.length + (s2.more?.proposals ?? 0);
+    const notes2 = s2.learned.length + (s2.more?.learned ?? 0), props = s2.proposals.length + (s2.more?.proposals ?? 0);
     return `${s2.name}: ${[
-      ...notes ? [es2 ? n(notes, "nota", "notas") : n(notes, "note", "notes")] : [],
+      ...notes2 ? [es2 ? n(notes2, "nota", "notas") : n(notes2, "note", "notes")] : [],
       ...props ? [es2 ? n(props, "propuesta", "propuestas") : n(props, "proposal", "proposals")] : []
     ].join(", ")}`;
   });
@@ -37541,18 +37566,18 @@ var command30 = (args, ctx) => {
     const file = import_node_path76.default.join(repoDir, surfaceFile(name));
     if (!(0, import_node_fs74.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
     if ((0, import_node_fs74.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
-    let notes;
+    let notes2;
     try {
-      notes = JSON.parse((0, import_node_fs74.readFileSync)(import_node_path76.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
+      notes2 = JSON.parse((0, import_node_fs74.readFileSync)(import_node_path76.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
     } catch {
       throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
     }
-    if (!Array.isArray(notes) || !notes.every((n) => typeof n === "string" && n.trim())) throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
+    if (!Array.isArray(notes2) || !notes2.every((n) => typeof n === "string" && n.trim())) throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
     const heading = flag("heading") ?? "Learned";
     if (!LEARNED_HEADINGS.includes(heading)) throw new UsageError(`surfaces learn: --heading must be ${LEARNED_HEADINGS.join("|")}`);
     const task = flag("task");
     if (has("task") && (!task || !isSafeId(task))) throw new UsageError("surfaces learn: --task must be a task id");
-    const r2 = learnSurface(io, repoDir, name, notes, heading, task ?? null);
+    const r2 = learnSurface(io, repoDir, name, notes2, heading, task ?? null);
     if ("reason" in r2) throw new UsageError(`surfaces learn: ${r2.reason}`);
     return json4({ name, count: r2.count, skipped: r2.skipped });
   }
@@ -38615,14 +38640,14 @@ var command39 = (args, ctx) => {
     const verifyPath = import_node_path83.default.join(dir, "verify.json");
     const v = parseVerifyFile((0, import_node_fs80.existsSync)(verifyPath) ? (0, import_node_fs80.readFileSync)(verifyPath, "utf8") : null);
     if (!v) throw new UsageError(`verify-close: ${dirArg}/verify.json is not a usable verify result (result pass|fail|blocked, checks, a reason when blocked)`);
-    const notes = /* @__PURE__ */ new Map();
-    for (const l of v.learned) notes.set(l.surface, [...notes.get(l.surface) ?? [], l.note]);
+    const notes2 = /* @__PURE__ */ new Map();
+    for (const l of v.learned) notes2.set(l.surface, [...notes2.get(l.surface) ?? [], l.note]);
     const learn = !has("no-learn");
     const learned = {};
     const skipped = [];
     const commit = [];
     const notesSkipped = [];
-    for (const [name, list] of notes) {
+    for (const [name, list] of notes2) {
       if (!NAME.test(name)) {
         skipped.push({ surface: name.slice(0, 80), reason: "not a surface name" });
         continue;
