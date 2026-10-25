@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -11,6 +11,19 @@ import { stepSay } from '../src/forge/cli/step.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
+
+// A10 polish m3: counts the ledger reads the step makes to look for a task's runner (heldRunner); every call goes through.
+const ledgerReads = vi.hoisted(() => ({ held: 0 }));
+vi.mock('../src/forge/ledger.js', async importOriginal => {
+  const real = await importOriginal<typeof import('../src/forge/ledger.js')>();
+  return {
+    ...real,
+    readEvents: (root: string) => {
+      if (/\bheldRunner\b/.test(new Error().stack ?? '')) ledgerReads.held++;
+      return real.readEvents(root);
+    },
+  };
+});
 
 // A10: the nested task runner. swarm start binds Claude's session id (C1): io.env is {} and the id comes as a flag.
 const run = (argv: string[], io: Io) =>
@@ -209,6 +222,20 @@ describe('swarm step with swarm.nested (A10)', () => {
     expect(s.actions.filter(a => a.type === 'spawnImplementer').map(a => a.task)).toEqual(['T1', 'T2']);
     expect(s.actions.filter(a => a.type === 'spawnRunner')).toEqual([]);
     expect(existsSync(path.join(work('T1'), 'runner.json'))).toBe(false);
+  });
+  it('a running task with no runner.json costs no ledger read to look for its runner, so plain mode pays nothing for it (polish m3)', () => {
+    // The count is real: a task whose runner.json is there is looked up in the ledger.
+    setup(NESTED);
+    step();
+    ledgerReads.held = 0;
+    step();
+    expect(ledgerReads.held).toBeGreaterThan(0);
+    setup('validators: []\n');
+    step();
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', executor: 'subagents' });
+    ledgerReads.held = 0;
+    step();
+    expect(ledgerReads.held).toBe(0);
   });
 });
 

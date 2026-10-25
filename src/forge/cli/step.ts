@@ -211,6 +211,8 @@ function nestedOn(root: string): boolean {
 /** A10: the runner.json of a task the runner holds (this run's, this attempt's, state running); null otherwise. It does
  *  not depend on c.nested: the file decides, so a config changed mid-run leaves the tasks already out with their runner. */
 function heldRunner(c: Ctx, task: string, t: ExecTask): { file: string; doc: RunnerDoc } | null {
+  // runner.json is only ever written in the project's folder (startTask): without it, no ledger read (plain mode pays nothing).
+  if (!existsSync(path.join(c.io.cwd, workRel({ project: c.project, task }), RUNNER_FILE))) return null;
   const file = path.join(c.io.cwd, workOf(c, task, readEvents(c.io.cwd)), RUNNER_FILE);
   const doc = readJson(file);
   if (!isObject(doc) || doc.state !== 'running' || doc.runId !== c.runId || doc.attempts !== t.attempts) return null;
