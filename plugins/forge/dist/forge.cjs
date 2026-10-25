@@ -30360,7 +30360,7 @@ function invocation(args) {
   const sub = DISPATCHERS.has(first) && second !== void 0 && /^[a-z][a-z-]*$/.test(second) ? second : null;
   const valueOf = (flag) => {
     const i = words4.indexOf(flag);
-    return i >= 0 && i + 1 < words4.length ? words4[i + 1] : null;
+    return i >= 0 && i + 1 < words4.length && !words4[i + 1].startsWith("-") ? words4[i + 1] : null;
   };
   let task = valueOf("--task");
   if (task === null && first === "swarm" && sub !== null && SWARM_TASK_SUBS.has(sub)) {
@@ -30382,8 +30382,8 @@ function forgeInvocations(command47) {
     found.push({ at: at2 < 0 ? from : at2, args });
     if (at2 >= 0) from = at2 + args.length;
   }
-  for (const m of command47.matchAll(ALIAS_ASSIGN)) {
-    const use = new RegExp(`\\$(?:${m[1]}|\\{${m[1]}\\})(?=[\\s;|&]|$)([^\\n;|&]*)`, "g");
+  for (const name of new Set(Array.from(command47.matchAll(ALIAS_ASSIGN), (m) => m[1]))) {
+    const use = new RegExp(`\\$(?:${name}|\\{${name}\\})(?=[\\s;|&]|$)([^\\n;|&]*)`, "g");
     for (const u of command47.matchAll(use)) found.push({ at: u.index ?? 0, args: u[1].trim() });
   }
   found.sort((a, b) => a.at - b.at);
@@ -30538,7 +30538,7 @@ function diagnose(main, scope, opts) {
   }
   const load2 = (file, kind) => {
     const facts = readTranscript(file);
-    const bytes = measureJsonl(file)?.bytes ?? null;
+    const bytes = facts && !facts.stats.truncated ? facts.stats.bytes : measureJsonl(file)?.bytes ?? null;
     if (!facts) {
       sources.push({ file, kind, bytes, error: "unreadable" });
       return null;
@@ -30554,7 +30554,6 @@ function diagnose(main, scope, opts) {
     if (facts) mains.push(facts);
   }
   let window = scope.kind === "execution" ? { from: src.exec?.startedAt ?? spanOf(src.scoped.map((l) => l.event.ts)).from, to: spanOf([...src.scoped.map((l) => l.event.ts), src.exec?.lastStepAt]).to } : spanOf(src.scoped.map((l) => l.event.ts));
-  if (scope.kind === "execution" && window.from === null && window.to === null) window = { from: null, to: null };
   const inWindow = (ts) => {
     const x = Date.parse(ts);
     if (Number.isNaN(x)) return true;
@@ -30598,9 +30597,13 @@ function diagnose(main, scope, opts) {
       }
       seenAgents.add(id);
       const sf = subagentFile(mainFile, id);
-      const sub = sf ? load2(sf.file, "subagent") : null;
-      if (!sf || !sub) {
-        if (!sf) coverage.push(`no transcript for agent ${id} (${sc.at})`);
+      if (!sf) {
+        coverage.push(`no transcript for agent ${id} (${sc.at})`);
+        continue;
+      }
+      const sub = load2(sf.file, "subagent");
+      if (!sub) {
+        coverage.push(`could not read transcript of agent ${id} (${sc.at})`);
         continue;
       }
       try {
@@ -30742,7 +30745,7 @@ function diagnose(main, scope, opts) {
   const waiting = [];
   const pending = (facts, all) => {
     for (const c of facts.calls) {
-      if (facts.results.has(c.id) || !c.ts) continue;
+      if (facts.results.has(c.id) || !c.ts || Number.isNaN(time4(c.ts))) continue;
       if (!all && window.from !== null && time4(c.ts) < time4(window.from)) continue;
       if (now - time4(c.ts) < WAITING_MS) continue;
       waiting.push({ at: cite(facts.file, c.line), ts: c.ts, tool: c.tool, forge: c.forge[0]?.name ?? null, minutes: Math.floor((now - time4(c.ts)) / 6e4) });
