@@ -33485,6 +33485,7 @@ function commitOf(git2, rev) {
   return objectOf(git2, rev, "commit");
 }
 function sameReviewedTree(git2, reviewed, now, extraPassive = []) {
+  if (!OBJECT_ID.test(reviewed) || !OBJECT_ID.test(now)) return { ok: false, changed: [] };
   if (reviewed === now) return { ok: true };
   const out = git2(["diff", "--name-only", "-z", "--no-renames", reviewed, now]);
   if (out === null) return { ok: false, changed: [] };
@@ -34366,7 +34367,7 @@ function mergeFinal(rest, io, deps) {
   const receipt = (() => {
     const v = finalVerdictOf(events, e);
     if (v?.action !== "accept") return null;
-    if (typeof v.tree !== "string") return { ok: false, reason: FINAL_NO_RECEIPT, changed: [] };
+    if (typeof v.tree !== "string" || !OBJECT_ID.test(v.tree)) return { ok: false, reason: FINAL_NO_RECEIPT, changed: [] };
     const now = tip ? treeOf(deps.git, tip) : null;
     if (now === null) return { ok: false, reason: FINAL_TREE_CHANGED, changed: [] };
     const same = sameReviewedTree(deps.git, v.tree, now, [`docs/forge/decisions/${e.runId}.md`]);
