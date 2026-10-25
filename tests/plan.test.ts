@@ -116,7 +116,7 @@ describe('plan schema: review_focus (A7)', () => {
     expect(p.tasks[0].review_focus).toEqual(['a cart with a negative quantity', 'two sessions placing the same order']);
   });
   it('refuses an empty list, an empty or multi-line entry, more than six or one over 300 characters, naming review_focus', () => {
-    for (const bad of ['    review_focus: []\n', '    review_focus: [""]\n', '    review_focus: ["a\nb"]\n',
+    for (const bad of ['    review_focus: []\n', '    review_focus: [""]\n', '    review_focus: ["a\\nb"]\n',
       `    review_focus: [${Array(7).fill('"x"').join(', ')}]\n`, `    review_focus: ["${'x'.repeat(301)}"]\n`]) {
       expect(() => parsePlan(withFocus(bad)), bad).toThrow(PlanError);
       expect(() => parsePlan(withFocus(bad)), bad).toThrow(/review_focus/);
