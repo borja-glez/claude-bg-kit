@@ -160,7 +160,7 @@ export function diagnose(main: string, scope: Scope, opts: DiagnoseOpts): Diagno
       } catch { /* no meta file */ }
       subs.push({ facts: sub, agentId: id });
       lastTsOf.set(id, sub.lastTs);
-      if (depth < SPAWN_DEPTH_MAX) follow(mainFile, sub, depth + 1);
+      if (depth + 1 < SPAWN_DEPTH_MAX) follow(mainFile, sub, depth + 1);
       else if (scopedOf(sub).some(s => s.agent && s.res?.agentId)) coverage.push(`agents launched by agent ${id} are not followed: more than ${SPAWN_DEPTH_MAX} levels deep`);
     }
   };

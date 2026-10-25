@@ -4,9 +4,9 @@ import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
 import { sortTimeline, type Entry, type Finding, type StepRow } from '../src/forge/diagnose-rules.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
-import { DIAG_NOW, writeDiagnoseFixture } from './fixtures/diagnose.js';
+import { DIAG_NOW, DIAG_SUBAGENT, writeDiagnoseFixture } from './fixtures/diagnose.js';
 import { walk } from './helpers/files.js';
-import { TX_AT as at } from './helpers/transcript.js';
+import { TX_AT as at, jsonl, toolResult, toolUse, userText } from './helpers/transcript.js';
 import { useTempDirs } from './helpers/tmp.js';
 
 const tmp = useTempDirs();
@@ -82,6 +82,26 @@ describe('forge diagnose (A6)', () => {
     const out = JSON.parse(diag(['--task', 'fix-login', '--transcript', t], { cfg: tmp('diag-none-') }).stdout);
     expect(out.findings.map((f: Finding) => f.kind)).toEqual(['missing-step', 'compact-drift', 'out-of-order', 'failed', 'failed', 'degraded', 'degraded']);
     expect(out.usage.transcripts.map((u: { agentId: string | null }) => u.agentId)).toEqual([null, 'a1']);
+  });
+  it('follows subagents SPAWN_DEPTH_MAX levels deep: a chain of 4 nested Agent calls reads three and notes the fourth as not followed', () => {
+    const r = tmp('diag-deep-');
+    const c = tmp('diag-deep-cfg-');
+    const { transcript, subagent } = writeDiagnoseFixture(r, c);
+    const dir = path.dirname(subagent);
+    const spawn = (n: number, child: string) => [
+      toolUse(at(13), `n${n}`, 'Agent', { subagent_type: 'forge:forge-impl', description: `Nested ${n}`, prompt: 'forge-task: fix-login-1\nGo.' }),
+      toolResult(at(13), `n${n}`, { text: 'Async agent launched successfully.', toolUseResult: { isAsync: true, status: 'async_launched', agentId: child } }),
+    ];
+    const lines = (child: string | null, n: number) => [userText(at(8), 'forge-task: fix-login-1\nGo.'), ...(child ? spawn(n, child) : [])];
+    // main -> a1 -> b1 -> c1 -> d1 (levels 1 to 4)
+    put(subagent, jsonl([...DIAG_SUBAGENT, ...spawn(1, 'b1')]));
+    put(path.join(dir, 'agent-b1.jsonl'), jsonl(lines('c1', 2)));
+    put(path.join(dir, 'agent-c1.jsonl'), jsonl(lines('d1', 3)));
+    put(path.join(dir, 'agent-d1.jsonl'), jsonl(lines(null, 4)));
+    const out = JSON.parse(run(['diagnose', '--task', 'fix-login', '--transcript', transcript], { cwd: r, now: () => new Date(DIAG_NOW), env: { CLAUDE_CONFIG_DIR: c } }).stdout);
+    expect(out.usage.transcripts.map((u: { agentId: string | null }) => u.agentId)).toEqual([null, 'a1', 'b1', 'c1']);
+    expect(out.coverage).toContain('agents launched by agent c1 are not followed: more than 3 levels deep');
+    expect(out.coverage.filter((x: string) => /not followed/.test(x))).toHaveLength(1);
   });
   it('exits 2 without one scope, with both, with an unsafe id, for a task or a run forge has no record of, and with a --transcript that is not a .jsonl file', () => {
     put(path.join(root, 'notes.txt'), 'x');
