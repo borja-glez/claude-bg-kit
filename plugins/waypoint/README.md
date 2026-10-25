@@ -35,7 +35,7 @@ A task that spans dozens of steps and several sessions loses its thread: what wa
 
 ## Features
 
-- **Design in rounds.** A `design-critic` agent reviews the design document and returns numbered proposals with their critical points. You apply all or some of them, ask for another round, have Claude interview you, or rewrite, until you approve it.
+- **Design in rounds.** A `design-critic` agent (Opus, high effort) reviews the design document and returns numbered proposals with their critical points. You apply all or some of them, ask for another round, have Claude interview you, or rewrite, until you approve it.
 - **A plan in the repo.** `docs/waypoint/<project>/plan.yaml` holds tracks, phases and tasks, each with its zones (the files it touches), `done_when` and an estimate. The approved design seeds it. A task forge must handle with care carries `delicate: true` (the roadmap ignores it). `waypoint replan` adds, edits and orders phases, and moves, orders, edits and retires tasks, never renumbering, and keeps why in the plan's `history`.
 - **A live roadmap.** The plan is published as a claude.ai artifact that updates while Claude works. Its views are Summary, Plan, Schedule, Runs, Sessions and Conversation, under a status strip, with «Needs you», a task detail in four tabs, filters, a zoomable timeline, dependencies, a minimap, export and a phone layout.
 - **Parallel sessions.** `/waypoint:launch <track>` starts a background session in its own git worktree. Sessions show up in the roadmap and coordinate through messages: overlap warnings, handoffs and delegation.
