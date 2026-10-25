@@ -31,13 +31,14 @@ Design them, plan them, build them with independent review, run them in parallel
 
 ## What's inside
 
-`bg-kit` is a Claude Code plugin marketplace with three plugins. Each one is useful on its own, and they work best together.
+`bg-kit` is a Claude Code plugin marketplace. Each plugin is useful on its own: waypoint, forge and lens work best together, and each of the others brings skills or agents for one kind of work.
 
 | | Plugin | What it gives you | Read more |
 | --- | --- | --- | --- |
 | 🧭 | **waypoint** | Design docs refined in critic rounds, a `plan.yaml` of tracks, phases and tasks, a **live roadmap** published as a claude.ai artifact, and parallel sessions coordinated across git worktrees. | [plugins/waypoint](plugins/waypoint/README.md) |
 | 🔨 | **forge** | An adaptive way of working: **triage by size**, the right model for each role, your own validators first, **independent weighted review**, an **execution** of parallel tasks (subagents or sessions) and an unattended **infinite mode**. | [plugins/forge](plugins/forge/README.md) |
 | 🔍 | **lens** | A **live progress panel** inside Claude Code: **model and effort in use**, roadmap, forge stages and executions, superpowers runs, todos, subagents, Claude Code tasks, and **token and dollar usage** compared with working without forge. | [plugins/lens](plugins/lens/README.md) |
+| ☕ | **java** | For Java and Spring Boot: the **DDD and hexagonal rules** of a service (aggregates, ports, events and the outbox, RFC 9457 errors, ArchUnit), the **upkeep of Java libraries** (build-logic, two Boot starters, Maven Central) and an on-demand **architecture reviewer**. It needs none of the other plugins. | [plugins/java](plugins/java/README.md) |
 
 ## Mix and match
 
@@ -80,6 +81,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install waypoint@bg-kit
 claude plugin install forge@bg-kit     # pulls in waypoint ^0.35.0 as a dependency
 claude plugin install lens@bg-kit
+claude plugin install java@bg-kit      # Java and Spring Boot: two skills and the architecture reviewer
 ```
 
 Inside a session, `/plugin marketplace add borja-glez/claude-bg-kit` does the same. To get new versions later, run `claude plugin marketplace update bg-kit`.
@@ -218,6 +220,7 @@ plugins/
   waypoint/   skills, design-critic agent, hooks, roadmap and design page templates, built CLI
   forge/      skills, implementer, reviewer, planner and scout agents, hooks, built CLI
   lens/       the panel mod (hooks/register.js) and its engine tests
+  java/       skills for Spring Boot services and Java libraries, the architecture-reviewer agent
 src/          TypeScript sources: lib/ (shared), page/ (roadmap), mod/ (waypoint band), lens/, forge/
 tests/        vitest suites
 docs/

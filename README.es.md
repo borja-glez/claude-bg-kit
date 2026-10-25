@@ -31,13 +31,14 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 ## Qué incluye
 
-`bg-kit` es un marketplace de plugins de Claude Code con tres plugins. Cada uno sirve por sí solo, y juntos funcionan mejor.
+`bg-kit` es un marketplace de plugins de Claude Code. Cada plugin sirve por sí solo: waypoint, forge y lens funcionan mejor juntos, y cada uno de los demás trae skills o agentes para un tipo de trabajo.
 
 | | Plugin | Qué aporta | Más información |
 | --- | --- | --- | --- |
 | 🧭 | **waypoint** | Documentos de diseño que se pulen en rondas de crítica, un `plan.yaml` de frentes, fases y tareas, un **roadmap vivo** publicado como artifact de claude.ai y sesiones en paralelo coordinadas sobre worktrees de git. | [plugins/waypoint](plugins/waypoint/README.es.md) |
 | 🔨 | **forge** | Una forma de trabajar adaptativa: **triaje por tamaño**, el modelo adecuado para cada papel, primero tus propios validadores, **revisión independiente ponderada**, una **ejecución** de tareas en paralelo (con subagentes o con sesiones) y un **modo infinito** desatendido. | [plugins/forge](plugins/forge/README.es.md) |
 | 🔍 | **lens** | Un **panel de progreso en vivo** dentro de Claude Code: **el modelo y el esfuerzo en uso**, roadmap, etapas y ejecuciones de forge, ejecuciones de superpowers, pendientes, subagentes, tareas de Claude Code y el **consumo en tokens y dólares** comparado con trabajar sin forge. | [plugins/lens](plugins/lens/README.es.md) |
+| ☕ | **java** | Para Java y Spring Boot: las **reglas de DDD y hexagonal** de un servicio (agregados, puertos, eventos y outbox, errores RFC 9457, ArchUnit), el **mantenimiento de librerías Java** (build-logic, dos starters de Boot, Maven Central) y un **revisor de arquitectura** bajo demanda. No necesita ninguno de los otros plugins. | [plugins/java](plugins/java/README.es.md) |
 
 ## Combínalos a tu manera
 
@@ -80,6 +81,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install waypoint@bg-kit
 claude plugin install forge@bg-kit     # instala waypoint ^0.35.0 como dependencia
 claude plugin install lens@bg-kit
+claude plugin install java@bg-kit      # Java y Spring Boot: dos skills y el revisor de arquitectura
 ```
 
 Dentro de una sesión, `/plugin marketplace add borja-glez/claude-bg-kit` hace lo mismo. Para recibir versiones nuevas más adelante, ejecuta `claude plugin marketplace update bg-kit`.
@@ -218,6 +220,7 @@ plugins/
   waypoint/   skills, agente design-critic, hooks, plantillas del roadmap y del diseño, CLI compilada
   forge/      skills, agentes implementadores, revisores, planificador y scout, hooks, CLI compilada
   lens/       el mod del panel (hooks/register.js) y sus tests contra el motor
+  java/       skills para servicios Spring Boot y librerías Java, el agente architecture-reviewer
 src/          fuentes TypeScript: lib/ (compartido), page/ (roadmap), mod/ (banda de waypoint), lens/, forge/
 tests/        suites de vitest
 docs/

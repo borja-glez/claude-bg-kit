@@ -68,13 +68,14 @@ const skillDocs = (): string[] => ['forge', 'waypoint'].flatMap(p => readdirSync
 const readmes = ['README.md', 'README.es.md', ...['waypoint', 'forge', 'lens'].flatMap(p => [`plugins/${p}/README.md`, `plugins/${p}/README.es.md`])];
 
 describe('plugin layout', () => {
-  it('marketplace bg-kit lists waypoint, lens and forge', () => {
+  it('marketplace bg-kit lists waypoint, lens, forge and java', () => {
     const m = JSON.parse(read('.claude-plugin/marketplace.json'));
     expect(m.name).toBe('bg-kit');
     expect(m.plugins).toEqual([
       expect.objectContaining({ name: 'waypoint', source: './plugins/waypoint' }),
       expect.objectContaining({ name: 'lens', source: './plugins/lens' }),
       expect.objectContaining({ name: 'forge', source: './plugins/forge' }),
+      expect.objectContaining({ name: 'java', source: './plugins/java' }),
     ]);
   });
   it('lens manifest, module and contract exist', () => {
