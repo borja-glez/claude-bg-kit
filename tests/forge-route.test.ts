@@ -32,6 +32,20 @@ describe('routeOptions', () => {
     // A plan nobody asked to carry out is not recommended.
     expect(routeOptions(input({ plans: [PLAN] })).recommended.option).toBe('forge');
   });
+  it('a plan with no trace of progress counts only when the request names it, and its why says to check it (A1)', () => {
+    const OPEN = { path: 'docs/superpowers/plans/2026-10-20-search.md', title: 'Search', tasks: 2, done: 1 };
+    const FRESH = { path: 'docs/superpowers/plans/2026-10-23-coupons.md', title: 'Coupons', tasks: 2, done: 0 };
+    expect(namedOrFirst([OPEN], 'carry out the coupons plan', [], [FRESH])).toBe(FRESH);
+    expect(namedOrFirst([OPEN], 'carry out docs/superpowers/plans/2026-10-23-coupons.md', [], [FRESH])).toBe(FRESH);
+    expect(namedOrFirst([OPEN], 'carry out 2026-10-23-coupons.md', [], [FRESH])).toBe(FRESH);
+    expect(namedOrFirst([OPEN], 'carry out the plan', [], [FRESH])).toBe(OPEN);
+    expect(namedOrFirst([], 'carry out the plan', [], [FRESH])).toBeUndefined();
+    const pools = { plans: { pending: [OPEN], others: [], untraced: [FRESH] }, specs: { pending: [], others: [] } };
+    const named = routeOptions(input({ plans: [OPEN], runPlan: true, text: 'carry out the coupons plan', pools })).recommended;
+    expect(named).toMatchObject({ option: 'superpowers-plan', plan: FRESH.path });
+    expect(named.why).toContain('no task marked done');
+    expect(routeOptions(input({ plans: [OPEN], runPlan: true, text: 'carry out the search plan', pools })).recommended.why).not.toContain('no task marked done');
+  });
   it('a recent spec the request does not ask to build is listed, never recommended', () => {
     const r = routeOptions(input({ specs: [SPEC] }));
     expect(r.recommended).toEqual({ option: 'forge', why: expect.any(String) });
@@ -347,7 +361,7 @@ describe('forge route CLI', () => {
     const plan = (name: string, title: string, daysAgo: number, box = ' ') => {
       const f = path.join(root, 'docs', 'superpowers', 'plans', name);
       mkdirSync(path.dirname(f), { recursive: true });
-      writeFileSync(f, `# ${title} Implementation Plan\n\n### Task 1: one\n\n- [${box}] a\n`);
+      writeFileSync(f, `# ${title} Implementation Plan\n\n### Task 1: one\n\n- [x] a\n\n### Task 2: two\n\n- [${box}] b\n`);
       const t = new Date(io.now().getTime() - daysAgo * 86_400_000);
       utimesSync(f, t, t);
     };
@@ -363,6 +377,23 @@ describe('forge route CLI', () => {
     const done = rec('Carry out the cart-totals plan and review each task\n');
     expect(done.recommended).toEqual({ option: 'forge', why: expect.any(String) });
     expect(rec('Carry out the plan and review each task\n').recommended).toMatchObject({ plan: 'docs/superpowers/plans/2026-10-12-coupons.md' });
+  });
+  it('a plan with no trace of progress is recommended only when the request names it, and is not listed (A1)', () => {
+    installSuperpowers();
+    const f = path.join(root, 'docs', 'superpowers', 'plans', '2026-10-12-coupons.md');
+    mkdirSync(path.dirname(f), { recursive: true });
+    writeFileSync(f, '# Coupons Implementation Plan\n\n### Task 1: one\n\n- [ ] a\n');
+    utimesSync(f, io.now(), io.now());
+    const rec = (text: string) => {
+      writeFileSync(path.join(root, 'req.txt'), text);
+      return JSON.parse(run(['route', '--task', 't1', '--text-file', 'req.txt', '--path', 'medium', '--run-plan'], io).stdout);
+    };
+    const named = rec('Carry out the coupons plan and review each task\n');
+    expect(named.recommended).toMatchObject({ option: 'superpowers-plan', plan: 'docs/superpowers/plans/2026-10-12-coupons.md', why: expect.stringContaining('no task marked done') });
+    expect(named.plans).toEqual([]);
+    // Unnamed, forge is recommended, and its why names the plan so the person and the session learn it exists.
+    expect(rec('Carry out the plan and review each task\n').recommended).toEqual({ option: 'forge', why: expect.stringContaining('docs/superpowers/plans/2026-10-12-coupons.md') });
+    expect(JSON.parse(run(['sp-plans'], io).stdout)).toEqual([]);
   });
 });
 

@@ -109,7 +109,7 @@ describe('sp-specs and sp-plans', () => {
     expect(specs.pending.map(s => s.path)).toEqual(['b', 'c', 'd', 'e'].map(n => `docs/superpowers/specs/${n}.md`));
     expect(specs.others).toEqual([{ path: 'docs/superpowers/specs/a.md', title: 'Spec a' }, { path: 'docs/superpowers/specs/old.md' }]);
     expect(spSpecs(project, NOW, { declined: ['docs/superpowers/specs/a.md'] })).toEqual(specs.pending.slice(0, 3));
-    const plan = (box: string) => `# P Implementation Plan\n\n### Task 1: one\n\n- [${box}] a\n`;
+    const plan = (box: string) => `# P Implementation Plan\n\n### Task 1: one\n\n- [x] a\n\n### Task 2: two\n\n- [${box}] b\n`;
     for (const d of [1, 2, 3, 4]) file(`docs/superpowers/plans/open-${d}.md`, plan(' '), d);
     file('docs/superpowers/plans/done.md', plan('x'), 1);
     file('docs/superpowers/plans/broken.md', '# no tasks\n', 1);
@@ -119,6 +119,7 @@ describe('sp-specs and sp-plans', () => {
     expect([...plans.others].sort((x, y) => x.path.localeCompare(y.path))).toEqual([
       { path: 'docs/superpowers/plans/broken.md' }, { path: 'docs/superpowers/plans/done.md', title: 'P' }, { path: 'docs/superpowers/plans/old.md' },
     ]);
+    expect(plans.untraced).toEqual([]);
     expect(spPlans(project, NOW)).toEqual(plans.pending.slice(0, 3));
   });
   it('times a tracked file by its last commit, and leaves out declined specs', () => {
@@ -152,7 +153,7 @@ describe('sp-specs and sp-plans', () => {
     expect(JSON.parse(run(['sp-path', 'test-driven-development'], { ...io, env: { CLAUDE_CONFIG_DIR: path.join(cfg, 'none') } }).stdout)).toBeNull();
   });
   it("a plan done elsewhere is not pending: the main checkout's SDD ledger, forge's record there, or its commits (K1-07)", () => {
-    const plan = (title: string) => `# ${title} Implementation Plan\n\n### Task 1: one\n\n- [ ] a\n\n### Task 2: two\n\n- [ ] b\n`;
+    const plan = (title: string) => `# ${title} Implementation Plan\n\n### Task 1: one\n\n- [x] a\n\n### Task 2: two\n\n- [ ] b\n`;
     file('docs/superpowers/plans/main-ledger.md', plan('Main Ledger'), 1);
     file('docs/superpowers/plans/sp-done.md', plan('Sp Done'), 2);
     file('docs/superpowers/plans/commits.md', plan('Cart Totals'), 3);
@@ -168,6 +169,23 @@ describe('sp-specs and sp-plans', () => {
     expect(paths({ main, subjects })).toEqual(['docs/superpowers/plans/open.md']);
     expect(doneByCommits(subjects, 'Cart Totals')).toEqual([1, 2]);
     expect(doneByCommits(['Cart Totals: task 3 done later', 'Cart: task 1 done'], 'Cart Totals')).toEqual([]);
+  });
+  it('a plan with no trace of progress is not pending: no ticked box, ledger, record or done commit, as lens hides it (A1)', () => {
+    const plan = (title: string, a = ' ') => `# ${title} Implementation Plan\n\n### Task 1: one\n\n- [${a}] a\n- [ ] a2\n\n### Task 2: two\n\n- [ ] b\n`;
+    file('docs/superpowers/plans/fresh.md', plan('Fresh'), 1);
+    file('docs/superpowers/plans/half.md', plan('Half', 'x'), 2);
+    file('docs/superpowers/plans/ledger.md', plan('Ledger'), 3);
+    file('.superpowers/sdd/ledger/progress.md', '# SDD ledger — plan: docs/superpowers/plans/ledger.md\n\nTask 1: complete\n', 0);
+    file('docs/superpowers/plans/commit.md', plan('Commit'), 4);
+    const subjects = ['Commit: task 1 done'];
+    // A task half ticked, a live SDD ledger or a done commit is a trace: those stay pending.
+    expect(spPlans(project, NOW, { subjects }).map(p => [p.path, p.done])).toEqual([
+      ['docs/superpowers/plans/half.md', 0], ['docs/superpowers/plans/ledger.md', 1], ['docs/superpowers/plans/commit.md', 1],
+    ]);
+    const pool = spPlanPool(project, NOW, { subjects });
+    expect(pool.untraced).toEqual([{ path: 'docs/superpowers/plans/fresh.md', title: 'Fresh', tasks: 2, done: 0 }]);
+    expect(pool.pending.map(p => p.path)).not.toContain('docs/superpowers/plans/fresh.md');
+    expect(pool.others.map(o => o.path)).not.toContain('docs/superpowers/plans/fresh.md');
   });
   it('a spec a plan cites, or a route handed off or finished, is no longer offered (K1-07)', () => {
     for (const [n, d] of [['cited', 1], ['routed', 2], ['free', 3]] as const) file(`docs/superpowers/specs/${n}.md`, `# Spec ${n}\n\n## A\n`, d);
@@ -242,5 +260,35 @@ describe('tdd: superpowers', () => {
     config('tdd: off\n');
     expect(run(['brief', '--plan', 'plan.yaml', '--task', id], io).stdout).not.toContain('TDD');
     expect(run(['brief', '--superpowers-plan', 'sp.md', '--task', '2'], io).stdout).not.toContain('TDD: required');
+  });
+});
+
+describe('--from-spec follows the triage (A1)', () => {
+  const AT = new Date('2026-10-24T10:00:00.000Z');
+  let io: Io;
+  const put = (rel: string, text: string) => { mk(path.dirname(path.join(project, rel))); writeFileSync(path.join(project, rel), text); };
+  beforeEach(() => {
+    for (const f of ['src/cart/total.ts', 'src/cart/coupon.ts', 'src/auth/login.ts', 'src/app.ts']) put(f, '// x\n');
+    put('README.md', '# x\n');
+    put('package.json', '{"name":"x"}\n');
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: project, stdio: 'ignore' });
+    git('init', '-q', '-b', 'main'); git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
+    git('add', '-A'); git('commit', '-q', '-m', 'init');
+    io = { cwd: project, now: () => AT, env: { CLAUDE_CONFIG_DIR: cfg } };
+  });
+  // What forge:run runs on a spec (references/large.md, From a spec): the triage with the spec itself as --text-file.
+  const triaged = (id: string, text: string): string => {
+    const rel = `docs/superpowers/specs/2026-10-24-${id}-design.md`;
+    put(rel, text);
+    const r = run(['triage', '--task', id, '--text-file', rel, '--locale', 'en'], io);
+    expect(r.code, r.stderr).toBe(0);
+    return JSON.parse(r.stdout).path;
+  };
+  it('a short spec of a small change is Small or Medium by the triage, never Large for being a spec', () => {
+    expect(triaged('coupon', '# Coupon field — design\n\nLet a shopper type a coupon code at checkout: `applyCoupon` in src/cart/coupon.ts takes 10% off the subtotal, and src/cart/total.ts shows the new total. One unit test for each file.\n')).toBe('small');
+    expect(triaged('lockout', '# Login lockout — design\n\nAfter five wrong passwords, src/auth/login.ts locks the account for ten minutes.\n')).toBe('medium');
+  });
+  it('a spec whose title is architecture-scale is Large, so it is imported as the design', () => {
+    expect(triaged('cart', '# Rewrite of the cart subsystem — design\n\n## Goals\n\nOne cart for web and app.\n')).toBe('large');
   });
 });

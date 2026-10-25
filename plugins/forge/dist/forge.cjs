@@ -24696,6 +24696,16 @@ function sddComplete(ledger, planRel) {
 function markDone(plan, done) {
   return { ...plan, tasks: plan.tasks.map((t) => done.includes(t.n) ? { ...t, done: true } : t) };
 }
+function hasTickedBox(text4) {
+  const { lines, ranges } = scan2(text4);
+  return ranges.some((r2) => {
+    for (let i = r2.head + 1; i < r2.end; i++) {
+      const b = lines[i].fenced ? null : BOX.exec(lines[i].text);
+      if (b && b[2] !== " ") return true;
+    }
+    return false;
+  });
+}
 function checkSpTask(text4, n) {
   const { lines, ranges } = scan2(text4);
   const r2 = rangeOf(ranges, n);
@@ -26015,14 +26025,17 @@ function spPlanPool(root, now, opts = {}) {
 }
 function planPool(root, now, opts, max) {
   const all = max === Infinity;
-  const pool = { pending: [], others: [] };
+  const pool = { pending: [], others: [], ...all ? { untraced: [] } : {} };
   const recent = recentMarkdown(root, "docs/superpowers/plans", now, opts.committedAt);
   for (const f of recent) {
     if (pool.pending.length >= max) break;
     const rel3 = `docs/superpowers/plans/${f.name}`;
     let plan;
+    let ticked = false;
     try {
-      const parsed = parseSpPlan((0, import_node_fs24.readFileSync)(f.abs, "utf8"));
+      const text4 = (0, import_node_fs24.readFileSync)(f.abs, "utf8");
+      const parsed = parseSpPlan(text4);
+      ticked = hasTickedBox(text4);
       const ledger = spLedgerDone(opts.main ? [root, opts.main] : [root], f.abs);
       plan = markDone(parsed, [.../* @__PURE__ */ new Set([...ledger, ...doneByCommits(opts.subjects ?? [], parsed.plan.title)])]);
     } catch {
@@ -26035,7 +26048,12 @@ function planPool(root, now, opts, max) {
       if (all) pool.others.push({ path: rel3, title });
       continue;
     }
-    pool.pending.push({ path: rel3, title, tasks: plan.tasks.length, done });
+    const entry2 = { path: rel3, title, tasks: plan.tasks.length, done };
+    if (!ticked && done === 0) {
+      pool.untraced?.push(entry2);
+      continue;
+    }
+    pool.pending.push(entry2);
   }
   if (all) pool.others.push(...olderMarkdown(root, "docs/superpowers/plans", new Set(recent.map((f) => f.name))));
   return pool;
@@ -26786,12 +26804,12 @@ function holdsWhole(t, n) {
   return false;
 }
 var needsPools = (o) => o.runPlan || o.buildSpec || o.text.replace(/\\/g, "/").toLowerCase().includes("docs/superpowers/");
-function namedOrFirst(entries, text4, others = []) {
+function namedOrFirst(entries, text4, others = [], untraced = []) {
   const t = fold(text4).replace(/\\/g, "/");
   const fileOf = (p) => fold(p).split("/").pop() ?? "";
   const stemOf = (p) => fileOf(p).replace(/\.md$/, "");
   const named = /* @__PURE__ */ new Set();
-  for (const dir of new Set([...entries, ...others].map((e) => fold(e.path).split("/").slice(0, -1).join("/")).filter(Boolean))) {
+  for (const dir of new Set([...entries, ...untraced, ...others].map((e) => fold(e.path).split("/").slice(0, -1).join("/")).filter(Boolean))) {
     for (let at2 = t.indexOf(`${dir}/`); at2 >= 0; ) {
       NAMED_FILE.lastIndex = at2 + dir.length + 1;
       const file = NAMED_FILE.exec(t)?.[0] ?? "";
@@ -26801,7 +26819,7 @@ function namedOrFirst(entries, text4, others = []) {
       at2 = t.indexOf(`${dir}/`, at2 + dir.length + 1 + file.length);
     }
   }
-  if (named.size) return entries.find((e) => named.has(fileOf(e.path)) || named.has(stemOf(e.path)));
+  if (named.size) return [...entries, ...untraced].find((e) => named.has(fileOf(e.path)) || named.has(stemOf(e.path)));
   const longest = (e, offered) => {
     const stem = stemOf(e.path);
     const exact = [fold(e.path), fileOf(e.path), ...DATE_PREFIX.test(stem) ? [stem] : []];
@@ -26810,7 +26828,7 @@ function namedOrFirst(entries, text4, others = []) {
     return held2.reduce((m, n) => Math.max(m, n.length), 0);
   };
   let best = { entry: void 0, length: 0 };
-  for (const e of entries) {
+  for (const e of [...entries, ...untraced]) {
     const n = longest(e, true);
     if (n > best.length) best = { entry: e, length: n };
   }
@@ -26832,16 +26850,21 @@ function routeOptions(i) {
   if (!i.superpowers.installed) {
     return { ...base, options: ["forge", "none"], recommended: { option: "forge", why: "superpowers is not installed: forge triages, implements and reviews it" } };
   }
-  const plan = namedOrFirst(i.pools?.plans.pending ?? i.plans, i.text ?? "", i.pools?.plans.others);
+  const untraced = i.pools?.plans.untraced;
+  const plan = namedOrFirst(i.pools?.plans.pending ?? i.plans, i.text ?? "", i.pools?.plans.others, untraced);
   const spec = namedOrFirst(i.pools?.specs.pending ?? i.specs, i.text ?? "", i.pools?.specs.others);
   let recommended;
   if (i.runPlan && plan) {
-    recommended = { option: "superpowers-plan", why: `the unfinished superpowers plan ${plan.path} to carry out: forge executes and reviews each task`, plan: plan.path };
+    const why = untraced?.includes(plan) ? `the superpowers plan ${plan.path}, which has no task marked done (superpowers' own executors never mark one: check it was not carried out already): forge executes and reviews each task` : `the unfinished superpowers plan ${plan.path} to carry out: forge executes and reviews each task`;
+    recommended = { option: "superpowers-plan", why, plan: plan.path };
   } else if (i.buildSpec && spec) {
     recommended = { option: "superpowers-design", why: `the recent superpowers spec ${spec.path}, not imported yet: forge builds from it`, spec: spec.path };
   } else if (i.path === "large" && i.prefs.autonomy === "auto") recommended = { option: "forge", why: "large, in auto mode: forge designs, critiques and approves it without asking" };
   else if (i.path === "large") recommended = { option: "forge", why: "large: forge designs it with waypoint, critiques, plans and builds" };
   else recommended = { option: "forge", why: "forge triages, implements and reviews it" };
+  if (recommended.option === "forge" && i.runPlan && !plan && untraced?.length) {
+    recommended = { ...recommended, why: `${recommended.why}; ${untraced[0].path} has no task marked done (superpowers' own executors never mark one): name it to carry it out` };
+  }
   return { ...base, options: ["forge", "superpowers", "superpowers-design", "superpowers-plan"], recommended };
 }
 var OPTION_LABELS = {
@@ -29310,11 +29333,12 @@ function fresh(r2, now) {
 }
 function routeReminder(r2, now) {
   if (!r2 || r2.stage !== "designing" && r2.stage !== "planning" || !fresh(r2, now)) return null;
+  const close = `FORGE route stage --stage handed-off${r2.session ? ` --session ${r2.session}` : ""}`;
   if (r2.chosen === "superpowers-design") {
-    return `forge: the user routed task ${r2.task} as "${r2.chosen}". When the spec is written and approved, hand off with forge:run --from-spec ${r2.spec ?? "<the spec path>"} instead of writing-plans`;
+    return `forge: the user routed task ${r2.task} as "${r2.chosen}". When the spec is written and approved, hand off with forge:run --from-spec ${r2.spec ?? "<the spec path>"} instead of writing-plans. If brainstorming ends without a spec (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r2.task}/task.txt, run ${close} and invoke forge:run`;
   }
   if (r2.chosen === "superpowers-plan") {
-    return `forge: the user routed task ${r2.task} as "${r2.chosen}". When the plan is written, hand off with forge:run --superpowers-plan ${r2.plan ?? "<the plan path>"} instead of subagent-driven-development or executing-plans`;
+    return `forge: the user routed task ${r2.task} as "${r2.chosen}". When the plan is written, hand off with forge:run --superpowers-plan ${r2.plan ?? "<the plan path>"} instead of subagent-driven-development or executing-plans. If brainstorming ends without a spec or a plan (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r2.task}/task.txt, run ${close} and invoke forge:run`;
   }
   return null;
 }

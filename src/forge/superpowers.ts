@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseDesign } from '../lib/design.js';
 import { specH1 } from '../lib/design-import.js';
-import { markDone, parseSpPlan, sddComplete } from '../lib/sp-plan.js';
+import { hasTickedBox, markDone, parseSpPlan, sddComplete } from '../lib/sp-plan.js';
 import { forgeDir } from './ledger.js';
 import { createIfAbsent } from './execution.js';
 
@@ -19,8 +19,11 @@ export interface SpPlanEntry { path: string; title: string; tasks: number; done:
 export interface SpNamed { path: string; title?: string }
 /** I2: what forge route matches a request against: every plan (or spec) still to take in the window, newest first, with
  *  no SP_MAX cut, and the rest of its folder (`others`: those of the window that are done, cited, handed off or declined,
- *  with their titles, and the older files by name), which only keep a request that names one from getting another. */
-export interface SpPool<T> { pending: T[]; others: SpNamed[] }
+ *  with their titles, and the older files by name), which only keep a request that names one from getting another.
+ *  `untraced`: plan pools without a cut only (spPlanPool), always set there: the plans of the window with tasks left and
+ *  no trace of progress (no ticked box; no task done by a ledger, forge's record or a commit), newest first. They are
+ *  neither in `pending` nor in `others`. */
+export interface SpPool<T> { pending: T[]; others: SpNamed[]; untraced?: T[] }
 
 /** sp-specs and sp-plans look this far back, and list at most SP_MAX, newest first. */
 export const SP_WINDOW_MS = 14 * 24 * 3600_000;
@@ -353,7 +356,9 @@ type PlanOpts = { committedAt?: CommittedAt; main?: string; subjects?: readonly 
 /**
  * The plans superpowers wrote in the last 14 days that still have a task to do; a file that is not a plan is skipped.
  * A task is done by its boxes, by an SDD ledger or forge's record here or in the main checkout (`main`), or by a
- * `<title>: task N done` commit among `subjects` (K1-07: the commits of this branch and the main checkout's).
+ * `<title>: task N done` commit among `subjects` (K1-07: the commits of this branch and the main checkout's). A plan with
+ * no trace of progress (lens's rule: superpowers' own executors never tick a box, so one they finished looks untouched)
+ * is left out.
  */
 export function spPlans(root: string, now: number, opts: PlanOpts = {}): SpPlanEntry[] {
   return planPool(root, now, opts, SP_MAX).pending;
@@ -367,21 +372,26 @@ export function spPlanPool(root: string, now: number, opts: PlanOpts = {}): SpPo
 // The pending plans, at most `max`; the others only without a cut.
 function planPool(root: string, now: number, opts: PlanOpts, max: number): SpPool<SpPlanEntry> {
   const all = max === Infinity;
-  const pool: SpPool<SpPlanEntry> = { pending: [], others: [] };
+  const pool: SpPool<SpPlanEntry> = { pending: [], others: [], ...(all ? { untraced: [] } : {}) };
   const recent = recentMarkdown(root, 'docs/superpowers/plans', now, opts.committedAt);
   for (const f of recent) {
     if (pool.pending.length >= max) break;
     const rel = `docs/superpowers/plans/${f.name}`;
     let plan;
+    let ticked = false;
     try {
-      const parsed = parseSpPlan(readFileSync(f.abs, 'utf8'));
+      const text = readFileSync(f.abs, 'utf8');
+      const parsed = parseSpPlan(text);
+      ticked = hasTickedBox(text);
       const ledger = spLedgerDone(opts.main ? [root, opts.main] : [root], f.abs);
       plan = markDone(parsed, [...new Set([...ledger, ...doneByCommits(opts.subjects ?? [], parsed.plan.title)])]);
     } catch { if (all) pool.others.push({ path: rel }); continue; }
     const done = plan.tasks.filter(t => t.done).length;
     const title = plan.plan.title || f.name.replace(/\.md$/, '');
     if (done === plan.tasks.length) { if (all) pool.others.push({ path: rel, title }); continue; }
-    pool.pending.push({ path: rel, title, tasks: plan.tasks.length, done });
+    const entry = { path: rel, title, tasks: plan.tasks.length, done };
+    if (!ticked && done === 0) { pool.untraced?.push(entry); continue; }
+    pool.pending.push(entry);
   }
   if (all) pool.others.push(...olderMarkdown(root, 'docs/superpowers/plans', new Set(recent.map(f => f.name))));
   return pool;

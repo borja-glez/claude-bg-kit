@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { checkSpTask, markDone, parseSpPlan, renderSpBrief, sddComplete, SpPlanError } from '../src/lib/sp-plan.js';
+import { checkSpTask, hasTickedBox, markDone, parseSpPlan, renderSpBrief, sddComplete, SpPlanError } from '../src/lib/sp-plan.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
@@ -57,6 +57,12 @@ describe('parseSpPlan', () => {
   it('refuses a plan without tasks and a task number used twice', () => {
     expect(() => parseSpPlan('# Plan\n\n**Goal:** x\n\n```md\n### Task 1: in code\n```\n')).toThrow(SpPlanError);
     expect(() => parseSpPlan(`${PLAN}\n### Task 2: again\n\n- [ ] x\n`)).toThrow(/task 2 appears twice/);
+  });
+  it('hasTickedBox: a ticked box of any task counts, one in code or before the first task does not (A1)', () => {
+    expect(hasTickedBox('# P\n\n### Task 1: a\n\n- [ ] x\n- [x] y\n\n### Task 2: b\n\n- [ ] z\n')).toBe(true);
+    expect(hasTickedBox('# P\n\n- [x] header\n\n### Task 1: a\n\n- [ ] x\n\n```md\n- [x] in code\n```\n')).toBe(false);
+    expect(hasTickedBox('# P\n\n### Task 1: a\n\nno boxes\n')).toBe(false);
+    expect(() => hasTickedBox('# no tasks\n')).toThrow(SpPlanError);
   });
 });
 

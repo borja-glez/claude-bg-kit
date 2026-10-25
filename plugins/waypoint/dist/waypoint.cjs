@@ -15130,7 +15130,8 @@ function importSpec(text3, opts) {
   const h1 = lines2.findIndex((l3) => !l3.fenced && /^#\s+\S/.test(l3.text));
   if (h1 < 0) throw new SpecImportError('the spec has no "# " title');
   const after = lines2.slice(h1 + 1);
-  if (!after.some((l3) => !l3.fenced && /^##\s+\S/.test(l3.text))) throw new SpecImportError('the spec has no "## " section');
+  if (!after.some((l3) => l3.text.trim())) throw new SpecImportError('the spec has nothing after its "# " title');
+  const sectioned = after.some((l3) => !l3.fenced && /^##\s+\S/.test(l3.text));
   const title = specTitle(lines2[h1].text.replace(/^#\s+/, "").replace(/\s+#*\s*$/, ""));
   let summary = null;
   for (let i = 0; i < after.length && summary === null; i++) {
@@ -15141,7 +15142,10 @@ function importSpec(text3, opts) {
   }
   summary ??= firstParagraph(after) ?? title;
   const meta2 = { title, project: opts.project, locale: opts.locale, summary, pillars: [], start_prompt: "/waypoint:work <track>", status: "draft", source: opts.source };
-  const body = src.split(/(?<=\n)/).slice(h1 + 1).join("").replace(/^(?:[ \t]*\r?\n)+/, "");
+  const pieces = src.split(/(?<=\n)/);
+  const rest = pieces.slice(h1 + 1).join("").replace(/^(?:[ \t]*\r?\n)+/, "");
+  const eol = /\r?\n$/.exec(pieces[h1])?.[0] ?? "\n";
+  const body = sectioned ? rest : `## ${title}${eol}${eol}${rest}`;
   return `---
 ${(0, import_yaml4.stringify)(meta2, { lineWidth: 0 })}---
 

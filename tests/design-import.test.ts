@@ -39,10 +39,21 @@ describe('importSpec', () => {
     expect(parseDesign(importSpec('# T\n\nfirst\nparagraph   here\n\n## A\n\nx\n', OPTS)).meta.summary).toBe('first paragraph here');
     expect(parseDesign(importSpec('# T\n\n## A\n\n| a | b |\n|---|---|\n', OPTS)).meta.summary).toBe('T');
   });
-  it('refuses a spec without a title, without sections, or whose only title is inside code', () => {
+  it('refuses a spec without a title, with nothing after it, or whose only title is inside code', () => {
     expect(() => importSpec('no title\n\n## A\n', OPTS)).toThrow(SpecImportError);
-    expect(() => importSpec('# T\n\njust text\n', OPTS)).toThrow(SpecImportError);
     expect(() => importSpec('```md\n# Not a title\n```\n\n## A\n', OPTS)).toThrow(SpecImportError);
+    for (const bare of ['# T\n', '# T', '# T\n\n  \n\n']) expect(() => importSpec(bare, OPTS), JSON.stringify(bare)).toThrow('nothing after its "# " title');
+  });
+  it('a spec without "## " sections is one section named after its title (A1)', () => {
+    const short = parseDesign(importSpec('# Coupon field — design\n\nLet a shopper type a coupon at checkout.\n\n### Testing\n\nOne unit test.\n', OPTS));
+    expect(short.meta).toMatchObject({ title: 'Coupon field', summary: 'Let a shopper type a coupon at checkout.' });
+    expect(short.sections.map(s => [s.level, s.slug])).toEqual([[2, 'coupon-field'], [3, 'testing']]);
+    expect(short.body).toContain('## Coupon field\n\nLet a shopper');
+    // A "## " inside code is no section.
+    expect(parseDesign(importSpec('# T\n\n```md\n## Not a section\n```\n', OPTS)).sections.map(s => s.slug)).toEqual(['t']);
+    // The spec's own line endings, and a byte order mark dropped.
+    const bom = String.fromCharCode(0xfeff);
+    expect(importSpec(`${bom}# T\r\n\r\njust text\r\n`, OPTS).endsWith('---\n\n## T\r\n\r\njust text\r\n')).toBe(true);
   });
   it("keeps the spec's own line endings in the body", () => {
     expect(importSpec('# T\r\n\r\n## A\r\n\r\ntext\r\n', OPTS).endsWith('## A\r\n\r\ntext\r\n')).toBe(true);

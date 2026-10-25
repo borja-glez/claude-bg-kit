@@ -73,7 +73,7 @@ Un recorrido típico:
 /waypoint:work                    # o lanza una sesión por frente
 ```
 
-`/waypoint:design new --from docs/superpowers/specs/<fichero>.md` parte de un spec escrito con superpowers: sus secciones se copian tal cual y la página del diseño dice «Importado de».
+`/waypoint:design new --from docs/superpowers/specs/<fichero>.md` parte de un spec escrito con superpowers: sus secciones se copian tal cual y la página del diseño dice «Importado de». Un spec sin secciones `##` (el corto que superpowers 7.0.1 escribe para un cambio pequeño) queda como una sola sección con su título.
 
 Una propuesta que no aplicas sigue pendiente entre rondas: la banda cuenta las pendientes de todas las rondas, el crítico de la ronda siguiente no las repite y `approve` lista las critical y major que siguen abiertas y te pide aplicarlas o descartarlas.
 

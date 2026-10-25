@@ -54,14 +54,16 @@ export const needsPools = (o: { runPlan: boolean; buildSpec: boolean; text: stri
  *   date, or its title. One of the others: its path, its file name, or its stem with the date; its stem without the date
  *   and its title only when they have several words and the text holds them whole, so a common word («Refactor») never
  *   takes a pending plan's place. An entry's: that entry; one of the others': none.
+ * - `untraced` (plans with no trace of progress, which lens hides) are matched by name as the entries are, ties going to
+ *   the entries, and are recommended only when named: never the fallback first.
  * - Nothing named: the first.
  */
-export function namedOrFirst<T extends { path: string; title: string }>(entries: readonly T[], text: string, others: readonly SpNamed[] = []): T | undefined {
+export function namedOrFirst<T extends { path: string; title: string }>(entries: readonly T[], text: string, others: readonly SpNamed[] = [], untraced: readonly T[] = []): T | undefined {
   const t = fold(text).replace(/\\/g, '/');
   const fileOf = (p: string) => fold(p).split('/').pop() ?? '';
   const stemOf = (p: string) => fileOf(p).replace(/\.md$/, '');
   const named = new Set<string>();
-  for (const dir of new Set([...entries, ...others].map(e => fold(e.path).split('/').slice(0, -1).join('/')).filter(Boolean))) {
+  for (const dir of new Set([...entries, ...untraced, ...others].map(e => fold(e.path).split('/').slice(0, -1).join('/')).filter(Boolean))) {
     // Each search starts where the last file ended, so a long request is read once per folder.
     for (let at = t.indexOf(`${dir}/`); at >= 0;) {
       NAMED_FILE.lastIndex = at + dir.length + 1;
@@ -73,7 +75,7 @@ export function namedOrFirst<T extends { path: string; title: string }>(entries:
       at = t.indexOf(`${dir}/`, at + dir.length + 1 + file.length);
     }
   }
-  if (named.size) return entries.find(e => named.has(fileOf(e.path)) || named.has(stemOf(e.path)));
+  if (named.size) return [...entries, ...untraced].find(e => named.has(fileOf(e.path)) || named.has(stemOf(e.path)));
   const longest = (e: SpNamed, offered: boolean) => {
     const stem = stemOf(e.path);
     const exact = [fold(e.path), fileOf(e.path), ...(DATE_PREFIX.test(stem) ? [stem] : [])];
@@ -84,7 +86,7 @@ export function namedOrFirst<T extends { path: string; title: string }>(entries:
   };
   // Ties go to the entries, the most recent first.
   let best: { entry: T | undefined; length: number } = { entry: undefined, length: 0 };
-  for (const e of entries) { const n = longest(e, true); if (n > best.length) best = { entry: e, length: n }; }
+  for (const e of [...entries, ...untraced]) { const n = longest(e, true); if (n > best.length) best = { entry: e, length: n }; }
   for (const o of others) { const n = longest(o, false); if (n > best.length) best = { entry: undefined, length: n }; }
   return best.length ? best.entry : entries[0];
 }
@@ -105,17 +107,27 @@ export function routeOptions(i: {
   if (!i.superpowers.installed) {
     return { ...base, options: ['forge', 'none'], recommended: { option: 'forge', why: 'superpowers is not installed: forge triages, implements and reviews it' } };
   }
-  const plan = namedOrFirst(i.pools?.plans.pending ?? i.plans, i.text ?? '', i.pools?.plans.others);
+  const untraced = i.pools?.plans.untraced;
+  const plan = namedOrFirst(i.pools?.plans.pending ?? i.plans, i.text ?? '', i.pools?.plans.others, untraced);
   const spec = namedOrFirst(i.pools?.specs.pending ?? i.specs, i.text ?? '', i.pools?.specs.others);
   let recommended: Recommendation;
   // The why names the plan or the spec, so the person can tell at the question whether it is the one they meant.
   if (i.runPlan && plan) {
-    recommended = { option: 'superpowers-plan', why: `the unfinished superpowers plan ${plan.path} to carry out: forge executes and reviews each task`, plan: plan.path };
+    const why = untraced?.includes(plan)
+      ? `the superpowers plan ${plan.path}, which has no task marked done (superpowers' own executors never mark one: check it was not carried out already): forge executes and reviews each task`
+      : `the unfinished superpowers plan ${plan.path} to carry out: forge executes and reviews each task`;
+    recommended = { option: 'superpowers-plan', why, plan: plan.path };
   } else if (i.buildSpec && spec) {
     recommended = { option: 'superpowers-design', why: `the recent superpowers spec ${spec.path}, not imported yet: forge builds from it`, spec: spec.path };
   } else if (i.path === 'large' && i.prefs.autonomy === 'auto') recommended = { option: 'forge', why: 'large, in auto mode: forge designs, critiques and approves it without asking' };
   else if (i.path === 'large') recommended = { option: 'forge', why: 'large: forge designs it with waypoint, critiques, plans and builds' };
   else recommended = { option: 'forge', why: 'forge triages, implements and reviews it' };
+  // A request to carry out a plan that gets none while a plan with no trace of progress is in the window (one
+  // writing-plans wrote and nobody ran yet): forge stays the choice, but its why names the newest such plan, so the
+  // person at the question and the session learn it exists and can name it.
+  if (recommended.option === 'forge' && i.runPlan && !plan && untraced?.length) {
+    recommended = { ...recommended, why: `${recommended.why}; ${untraced[0].path} has no task marked done (superpowers' own executors never mark one): name it to carry it out` };
+  }
   return { ...base, options: ['forge', 'superpowers', 'superpowers-design', 'superpowers-plan'], recommended };
 }
 
