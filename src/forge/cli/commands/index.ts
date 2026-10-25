@@ -5,6 +5,7 @@ import { command as brief } from './brief.js';
 import { command as config } from './config.js';
 import { command as cycle } from './cycle.js';
 import { command as decision } from './decision.js';
+import { command as doctor } from './doctor.js';
 import { command as hook } from './hook.js';
 import { command as infinite } from './infinite.js';
 import { command as last } from './last.js';
@@ -46,7 +47,7 @@ import { command as waypointCli } from './waypoint-cli.js';
 
 /** I-12: every forge command by the name it is called with, the same names as USAGE in ../run.ts (tests/forge-cli-modules). */
 export const COMMANDS: Readonly<Record<string, Command>> = {
-  triage, brief, validate, stats, verdict, round,
+  triage, doctor, brief, validate, stats, verdict, round,
   'review-prep': review, 'review-close': review, prep: review, shadow: review,
   log, decision, agents, last, proposals, surfaces, tools, local, prefs, begin, route,
   'verify-env': verifyEnv, 'verify-plan': verifyPlan, 'verify-preflight': verifyPreflight,
