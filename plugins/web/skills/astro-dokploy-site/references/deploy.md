@@ -12,8 +12,8 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@<version from packageManager> --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Monorepo: copy each workspace package.json by hand, and add a line for every new package.
-COPY packages/ui/package.json packages/ui/
-COPY packages/icons/package.json packages/icons/
+COPY packages/<name>/package.json packages/<name>/
+# one COPY per workspace package.json; a new package needs its own line
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build

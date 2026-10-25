@@ -8,10 +8,10 @@ Preact does not repair attributes when it hydrates. Anything that depends on the
 const [mounted, setMounted] = useState(false);
 useEffect(() => setMounted(true), []);
 const theme = mounted ? readTheme() : 'light'; // server and first client render agree
-return <div class="island" data-theme={theme} style="min-height: 22rem">{/* stable placeholder first */}</div>;
+return <div class="island" data-theme={theme}>{/* stable placeholder first */}</div>;
 ```
 
-SSR islands used to grow when they hydrated (layout shift). Reserve their height with `min-height` and render a stable marker in the server HTML, so hydration swaps content without moving the page.
+SSR islands used to grow when they hydrated (layout shift). Reserve their height with a class whose `min-height` lives in a stylesheet Vite bundles (a CSS module the island imports, or a scoped `<style>` on the wrapper in the `.astro` page), and render a stable marker in the server HTML, so hydration swaps content without moving the page. Never a `style` attribute: under `security.csp` without `kind: 'attribute'` the server-rendered attribute is blocked, and hydration does not restore it.
 
 ## Workers
 

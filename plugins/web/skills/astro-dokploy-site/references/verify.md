@@ -35,20 +35,20 @@ CLAUDECODE= pnpm preview --host 127.0.0.1 --port <free port>
 
 ## Lighthouse
 
-CI: `lhci autorun`, with `numberOfRuns: 3` (a single run flips around the 0.95 edge on GitHub's runner) and one assertion per category, `categories:performance`, `categories:accessibility`, `categories:best-practices` and `categories:seo`, each with `minScore: 0.95`. The assertions carry no `assert.preset`; the config collects with `collect.settings.preset` (desktop), and any local run uses that same `--preset`.
+CI: `lhci autorun`, with `numberOfRuns: 3` (a single run flips around the 0.95 edge on GitHub's runner) and one assertion per category, `categories:performance`, `categories:accessibility`, `categories:best-practices` and `categories:seo`, each with `minScore: 0.95`. The assertions carry no `assert.preset`; the config collects with `collect.settings.preset`, and a local run uses whatever that key says as `--preset`, with no `--preset` when the config has none.
 
 On Windows `lhci` ends with `EPERM` while deleting `...\Temp\lighthouse.*` (the Chrome profile, removed by chrome-launcher). Do not alter lhci, the CI or the project: run Lighthouse by hand.
 
 1. Start the preview on a free port (see above), in the background.
 2. Launch Chrome on its own, in the background, and note its PID:
    `chrome --headless=new --remote-debugging-port=9333 --user-data-dir=<temp dir>`
-3. Run `npx lighthouse <url> --port=9333 --preset=desktop --output=json --output-path=<file>`.
+3. Run `npx lighthouse <url> --port=9333 [--preset=<config's preset>] --output=json --output-path=<file>`.
 4. Stop Chrome and the preview by those PIDs, never by process name.
 
 Shorter alternative, which writes the report even though it prints the EPERM:
 
 ```bash
-npx lighthouse <url> --preset=desktop --chrome-flags=--headless=new --output=json --output-path=<file>
+npx lighthouse <url> [--preset=<config's preset>] --chrome-flags=--headless=new --output=json --output-path=<file>
 ```
 
 Read the report, not the exit message.

@@ -47,6 +47,8 @@ This is for a static Astro site with Preact islands, built by pnpm into a Docker
 | Playwright webServer without `env` or `--ignore-lock`, or a port from a custom variable | Rule 7: `PORT` with 4321 as default, `CLAUDECODE: ''`, `--ignore-lock`, `reuseExistingServer: false`. |
 | `reuseExistingServer: !isCI` | A running server may be another project's: always `false`. |
 | Running `lhci assert` or a TEMP workaround on Windows | `npx lighthouse` against a separate headless Chrome (verify reference). |
+| Lighthouse against a server that lhci starts | Start `astro preview` yourself on a free port with `CLAUDECODE=` blank, and point `npx lighthouse` at it. |
+| Comparing with CI through an ad-hoc Docker run | Use the Playwright container with `CHROME_PATH`. |
 | Trusting a local Lighthouse pass | A local pass is not the gate; the GitHub run is. The local Chrome also follows the system's dark theme. |
 | Theme script as an external file in `public/` | An `is:inline` script with its `sha256-` hash in `security.csp`. |
 | Figure animation on by default, switched off under `reduce` | Animate only under `prefers-reduced-motion: no-preference`. |
