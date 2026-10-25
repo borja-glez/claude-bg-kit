@@ -197,7 +197,7 @@ export function isBugTask(text: string): boolean {
   return BUG.some(re => re.test(t)) && !isMechanical(text);
 }
 
-export type ReviewRole ='review-correctness' | 'review-security' | 'review-perf';
+export type ReviewRole = 'review-correctness' | 'review-security' | 'review-perf';
 export type ReviewEffort = 'medium' | 'high' | 'xhigh';
 export interface ReviewPlan { light: boolean; reviewers: { role: ReviewRole; model: 'sonnet' | null; effort: ReviewEffort }[]; flags: ('--sensitive' | '--perf')[] }
 /** `delicate`: the task was marked delicate; `final`: Large's final review; `profile`: the configured one (quality lifts every reviewer). */
