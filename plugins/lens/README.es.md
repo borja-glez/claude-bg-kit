@@ -3,11 +3,11 @@
 # 🔍 lens
 
 **Un panel de progreso en vivo para las sesiones de Claude Code.**
-El modelo y el esfuerzo en uso, el roadmap, las etapas y ejecuciones de forge, las ejecuciones de superpowers, pendientes, subagentes, tareas de Claude Code, y lo que cuesta todo.
+El modelo y el esfuerzo en uso, el roadmap, las etapas y ejecuciones de forge, las ejecuciones de superpowers, lo que te toca, pendientes, subagentes, tareas de Claude Code, y lo que cuesta todo.
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.13.11](https://img.shields.io/badge/versi%C3%B3n-0.13.11-b4befe?style=flat-square)
+![versión 0.14.0](https://img.shields.io/badge/versi%C3%B3n-0.14.0-b4befe?style=flat-square)
 ![sin coste en tokens](https://img.shields.io/badge/coste%20en%20tokens-ninguno-a6e3a1?style=flat-square)
 
 </div>

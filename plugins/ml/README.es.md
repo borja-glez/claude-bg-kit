@@ -7,6 +7,8 @@ Machine learning en una GPU NVIDIA local: entornos uv y ruedas de CUDA, presupue
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
+![versión 0.1.0](https://img.shields.io/badge/versi%C3%B3n-0.1.0-f5c2e7?style=flat-square)
+
 </div>
 
 ## Contenido

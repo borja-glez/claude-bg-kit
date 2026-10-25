@@ -7,6 +7,8 @@ Machine learning on a local NVIDIA GPU: uv environments and CUDA wheels, VRAM an
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
+![version 0.1.0](https://img.shields.io/badge/version-0.1.0-f5c2e7?style=flat-square)
+
 </div>
 
 ## Contents

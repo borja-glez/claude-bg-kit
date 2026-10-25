@@ -7,10 +7,13 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 [English](README.md) · **Español** · [Historial de cambios](CHANGELOG.md)
 
-![waypoint 0.35.1](https://img.shields.io/badge/waypoint-0.35.1-cba6f7?style=flat-square)
-![forge 0.30.1](https://img.shields.io/badge/forge-0.30.1-fab387?style=flat-square)
-![lens 0.13.11](https://img.shields.io/badge/lens-0.13.11-b4befe?style=flat-square)
+![waypoint 0.36.0](https://img.shields.io/badge/waypoint-0.36.0-cba6f7?style=flat-square)
+![forge 0.31.0](https://img.shields.io/badge/forge-0.31.0-fab387?style=flat-square)
+![lens 0.14.0](https://img.shields.io/badge/lens-0.14.0-b4befe?style=flat-square)
+![java 0.1.0](https://img.shields.io/badge/java-0.1.0-f9e2af?style=flat-square)
 ![web 0.1.0](https://img.shields.io/badge/web-0.1.0-94e2d5?style=flat-square)
+![ml 0.1.0](https://img.shields.io/badge/ml-0.1.0-f5c2e7?style=flat-square)
+![crew 0.1.0](https://img.shields.io/badge/crew-0.1.0-89dceb?style=flat-square)
 ![Marketplace de Claude Code](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -32,16 +35,21 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 ## Qué incluye
 
-`bg-kit` es un marketplace de plugins de Claude Code. Cada plugin sirve por sí solo: waypoint, forge y lens funcionan mejor juntos, y cada uno de los demás trae skills o agentes para un tipo de trabajo.
+`bg-kit` es un marketplace de plugins de Claude Code. waypoint, forge y lens dan forma a tu manera de trabajar: cada uno sirve por sí solo, y juntos funcionan mejor.
 
 | | Plugin | Qué aporta | Más información |
 | --- | --- | --- | --- |
 | 🧭 | **waypoint** | Documentos de diseño que se pulen en rondas de crítica, un `plan.yaml` de frentes, fases y tareas, un **roadmap vivo** publicado como artifact de claude.ai y sesiones en paralelo coordinadas sobre worktrees de git. | [plugins/waypoint](plugins/waypoint/README.es.md) |
 | 🔨 | **forge** | Una forma de trabajar adaptativa: **triaje por tamaño**, el modelo adecuado para cada papel, primero tus propios validadores, **revisión independiente ponderada**, una **ejecución** de tareas en paralelo (con subagentes o con sesiones) y un **modo infinito** desatendido. | [plugins/forge](plugins/forge/README.es.md) |
-| 🔍 | **lens** | Un **panel de progreso en vivo** dentro de Claude Code: **el modelo y el esfuerzo en uso**, roadmap, etapas y ejecuciones de forge, ejecuciones de superpowers, pendientes, subagentes, tareas de Claude Code y el **consumo en tokens y dólares** comparado con trabajar sin forge. | [plugins/lens](plugins/lens/README.es.md) |
-| ☕ | **java** | Para Java y Spring Boot: las **reglas de DDD y hexagonal** de un servicio (agregados, puertos, eventos y outbox, errores RFC 9457, ArchUnit), el **mantenimiento de librerías Java** (build-logic, dos starters de Boot, Maven Central) y un **revisor de arquitectura** bajo demanda. No necesita ninguno de los otros plugins. | [plugins/java](plugins/java/README.es.md) |
-| 🌐 | **web** | Skills de dominio para proyectos web. **astro-dokploy-site** reúne lo que cada sitio Astro con islas de Preact en Dokploy redescubre si no: los hashes de la CSP, Lighthouse y Playwright bajo Claude Code, los workers de Vite, MDX, nginx y los campos de Dokploy. | [plugins/web](plugins/web/README.es.md) |
-| 🧪 | **ml** | Machine learning en una GPU NVIDIA local: **entornos uv y ruedas de CUDA**, presupuesto de VRAM y de calor, las APIs de trl y transformers comprobadas contra la versión instalada, particiones sin fugas, notebooks ejecutados enteros, cards de Hugging Face e inferencia ONNX en el navegador. Es solo texto, una skill y sus referencias, y no necesita ninguno de los otros plugins. | [plugins/ml](plugins/ml/README.es.md) |
+| 🔍 | **lens** | Un **panel de progreso en vivo** dentro de Claude Code: **el modelo y el esfuerzo en uso**, roadmap, etapas y ejecuciones de forge, ejecuciones de superpowers, lo que te toca, pendientes, subagentes, tareas de Claude Code y el **consumo en tokens y dólares** comparado con trabajar sin forge. | [plugins/lens](plugins/lens/README.es.md) |
+
+**Los plugins de dominio** traen skills y agentes para un tipo de trabajo, para que un proyecto no redescubra lo mismo cada vez. Son solo texto (skills, sus referencias y agentes, sin hooks ni código) y no necesitan ninguno de los otros plugins:
+
+| | Plugin | Qué aporta | Más información |
+| --- | --- | --- | --- |
+| ☕ | **java** | Para Java y Spring Boot: las **reglas de DDD y hexagonal** de un servicio (agregados, puertos, eventos y outbox, errores RFC 9457, ArchUnit), el **mantenimiento de librerías Java** (build-logic, dos starters de Boot, Maven Central) y un agente **revisor de arquitectura** bajo demanda. | [plugins/java](plugins/java/README.es.md) |
+| 🌐 | **web** | **astro-dokploy-site**, una skill con lo que cada sitio Astro con islas de Preact en Dokploy redescubre si no: los hashes de la CSP, Lighthouse y Playwright bajo Claude Code, los workers de Vite, MDX, nginx y los campos de Dokploy. | [plugins/web](plugins/web/README.es.md) |
+| 🧪 | **ml** | Machine learning en una GPU NVIDIA local: **entornos uv y ruedas de CUDA**, presupuesto de VRAM y de calor, las APIs de trl y transformers comprobadas contra la versión instalada, particiones sin fugas, notebooks ejecutados enteros, cards de Hugging Face e inferencia ONNX en el navegador. | [plugins/ml](plugins/ml/README.es.md) |
 | 👥 | **crew** | Dos agentes bajo demanda: **novice-reader** dice dónde se pierde una persona novata en un documento, un curso o una página web, con la cita exacta y su gravedad, y nunca reescribe; **playtest-qa** juega un prototipo de navegador como un jugador nuevo, con teclado y ratón reales en Chrome headless con la GPU, y da cifras por minuto. | [plugins/crew](plugins/crew/README.es.md) |
 
 ## Combínalos a tu manera
@@ -54,6 +62,7 @@ Los plugins están desacoplados: instala solo los que quieras. La única depende
 | **waypoint + lens** | Lo anterior más el panel en vivo y el consumo, todavía sin forge. |
 | **waypoint + forge** | El bucle de construcción completo y la ejecución en paralelo; lens no hace falta. |
 | **lens** | El panel por sí solo: pendientes, subagentes, modelo, esfuerzo y consumo de cualquier sesión. |
+| **java, web, ml o crew** | Las skills o los agentes de ese tipo de trabajo, solos o junto a cualquiera de los demás. |
 | **cualquiera + [superpowers](https://github.com/obra/superpowers)** | Conviven con las skills de superpowers; lens además enseña sus planes y ejecuciones con subagentes. |
 
 lens detecta waypoint, forge y superpowers por sus ficheros en el proyecto, así que nunca necesita ninguno de ellos.
@@ -83,12 +92,12 @@ Añade el marketplace directamente desde GitHub e instala los plugins que quiera
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # instala waypoint ^0.35.0 como dependencia
+claude plugin install forge@bg-kit     # instala waypoint ^0.36.0 como dependencia
 claude plugin install lens@bg-kit
 claude plugin install java@bg-kit      # Java y Spring Boot: dos skills y el revisor de arquitectura
-claude plugin install web@bg-kit
-claude plugin install ml@bg-kit        # skills de machine learning en una GPU local
-claude plugin install crew@bg-kit
+claude plugin install web@bg-kit       # sitios Astro en Dokploy: una skill y sus referencias
+claude plugin install ml@bg-kit        # machine learning en una GPU local: una skill y sus referencias
+claude plugin install crew@bg-kit      # dos agentes: novice-reader y playtest-qa
 ```
 
 Dentro de una sesión, `/plugin marketplace add borja-glez/claude-bg-kit` hace lo mismo. Para recibir versiones nuevas más adelante, ejecuta `claude plugin marketplace update bg-kit`.

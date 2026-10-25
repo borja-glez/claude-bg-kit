@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.35.1](https://img.shields.io/badge/versi%C3%B3n-0.35.1-cba6f7?style=flat-square)
+![versión 0.36.0](https://img.shields.io/badge/versi%C3%B3n-0.36.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -72,6 +72,8 @@ Un recorrido típico:
 /waypoint:plan                    # plan.yaml + la URL del roadmap
 /waypoint:work                    # o lanza una sesión por frente
 ```
+
+**Tras compactar.** Claude Code solo vuelve a adjuntar los primeros 5.000 tokens de cada skill que usó la conversación. `/waypoint:design` y `/waypoint:work` guardan cada subcomando y cada paso en sus `references/`, que leen al llegar a ellos y de nuevo cada vez que vuelven, así que cada `SKILL.md` pesa menos de 16.000 bytes y vuelve entero.
 
 `/waypoint:design new --from docs/superpowers/specs/<fichero>.md` parte de un spec escrito con superpowers: sus secciones se copian tal cual y la página del diseño dice «Importado de». Un spec sin secciones `##` (el corto que superpowers 7.0.1 escribe para un cambio pequeño) queda como una sola sección con su título.
 

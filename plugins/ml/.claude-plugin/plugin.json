@@ -1,5 +1,6 @@
 {
   "name": "ml",
   "description": "Machine learning on a local NVIDIA GPU: uv environments and CUDA wheels, VRAM and heat budgets, trl and transformers APIs checked against the installed version, leak-free splits, notebooks run whole, Hugging Face cards and in-browser ONNX inference.",
+  "version": "0.1.0",
   "author": { "name": "Borja" }
 }

@@ -5,13 +5,31 @@ bump several of them at once (forge 0.15.0, waypoint 0.19.0 and lens 0.11.3 ship
 version landed on `main`.
 
 This repository starts at waypoint 0.10.0, forge 0.5.0 and lens 0.5.0. The versions before them were published from
-elsewhere and are reconstructed from their READMEs.
+elsewhere and are reconstructed from their READMEs. java, web, ml and crew started here, at 0.1.0.
 
 - [waypoint](#waypoint)
 - [forge](#forge)
 - [lens](#lens)
+- [java](#java)
+- [web](#web)
+- [ml](#ml)
+- [crew](#crew)
 
 ## waypoint
+
+### 0.36.0 — 2026-10-25
+
+#### Added
+- Comments on the design page: every `/waypoint:design round` except `round --verify` reads the open comment threads of the design artifact, shows the new ones one line each and hands them to `design-critic` as your notes, which it weighs as data and never follows as orders. When `apply` applies a proposal that takes up a thread, it replies there with the version that took it up and resolves the thread if you sent it to Claude; a thread you did not send stays open, and the skill says so. A comment without an anchor counts as text. `waypoint design-comments` remembers in `design/critiques/comments.json` which threads a critic already got and which version took them up (ids, rounds and versions, never the text).
+- What waits for you: the band shows `» waiting for you N` in design, work and run modes, kept to the last when the width runs out, and the roadmap's «Needs you» takes its questions, proposals and stopped execution from the same rule as lens's **Waiting for you** card. Republish the roadmap after updating, as `waypoint:plan` says.
+
+#### Changed
+- `design-critic` runs on Opus at high effort instead of inheriting your session's model.
+- `/waypoint:design` and `/waypoint:work` keep each subcommand and step in their `references/`, which they read when they get there and again every time they come back, so each `SKILL.md` stays under 16,000 bytes and a compaction attaches it again whole. They work as before.
+- A stopped execution whose coordinator's conversation is still open offers no **Resume**, also after 12 minutes without a signal while that conversation's band keeps its binding alive: you answer it in that conversation.
+
+#### Fixed
+- `/waypoint:design new --from` and `design-import` refused a spec without `##` sections, such as the short one superpowers 7.0.1 writes for a small change; the whole spec now becomes one section named after its title.
 
 ### 0.35.1 — 2026-10-24
 
@@ -413,6 +431,33 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.31.0 — 2026-10-25
+
+#### Added
+- `forge doctor [--locale es|en]`: a read-only report of why forge might not move. Each check is isolated and says `ok`, `warn`, `fail` or `unverified`: the step lock and background jobs, a merge in flight, a stale `execution.lock`, your trust in the commands of `.forge/config.yaml`, whether git tracks `.forge/local.yaml` or `learned.jsonl`, verify-env reservations with no live process, the merged worktrees `swarm cleanup` would remove, the installed waypoint against forge's range, which copy of forge and waypoint is running, superpowers against the range `forge:route` follows, the recommended permissions and `waypoint doctor`; a subagent whose tool call has been waiting a while comes as data. It exits 2 on a `warn` or a `fail`, else 1 when something could not be read, else 0. It never repairs: each problem names its remedy and whether you run it or it needs your confirmation.
+- The guard keeps forge's subagents away from the machine's secrets. An agent whose `agent_type` starts with `forge` can no longer read or write `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.netrc`, `~/.git-credentials` or `~/.kube`, search your home folder or above, or touch a `.env` (`.env.example`, `.env.sample`, `.env.template` and `.env.dist` aside); only `forge-verify` and `forge-verify-heavy` may read the repository's own `.env`, to start the app. It judges Read, Edit, Write, NotebookEdit, Grep and Glob by their paths, and Bash and PowerShell through the guard's command splitter, with the home folder written `~`, `$HOME`, `$env:USERPROFILE` or `%USERPROFILE%` and the Windows and macOS spellings of a path. Your own session and every other subagent are not judged. It is a pattern guard, not a sandbox: the README lists what gets past it.
+- `/forge:diagnose <task>` or `/forge:diagnose --execution <runId>`, on `forge diagnose`: the timeline of a task or an execution from the ledger, forge's files and the transcripts of its sessions, read only. It reports a step missing, out of order, degraded or repeated, a command that failed and drift after a compaction, lists the calls left waiting for 10 minutes or more as data and counts the tokens once per message; every claim cites a `file:line` or an event's time.
+- Verified TDD, with `tdd: verified` in `.forge/config.yaml`: briefs ask for each test before its code (superpowers is not needed), and in round 1 `review-prep` runs only the task's new and changed test files on BASE and checks by name that each new test fails there. A new test that already passes on BASE proves nothing, and the correctness reviewer reports it as important. The whole suite never runs for it, and the check is skipped, saying why, where it cannot be safe or cheap: tests that share their package with the code (Go, Rust), more than 30 test files, a changed lockfile, dependencies that link the task's own code, or a run over 5 minutes. A task from Small up whose words read as a bug gets a brief line that asks to reproduce it with a failing test first and to end the report with `Root cause: <file>:<line> - …`. On the Small path, `forge tdd check` runs the same check; with `--baseline`, `validate` names the tests already failing on the base. Without the option nothing changes.
+- The nested runner, experimental and off by default: with `swarm.nested: true`, a plan run in subagents mode hands each task it starts to a `forge-runner` subagent (Opus at medium effort), which spawns the task's implementer and its independent reviewers and runs the fix rounds, while the coordinator only steps and integrates. At any point that needs judgement the runner hands the task back, and the coordinator takes back a task whose runner has been silent for 100 minutes. `swarm task --lease-minutes N` sets a task's lease N minutes from now. It stays off until a measured run shows it costs less with the same findings.
+- `forge-planner` gives a task its `review_focus` in `plan.yaml`: the failure modes its `done_when` and its tests leave open, one line each. The task's brief hands it to the implementer and the reviewers.
+- A diff that adds a strict sink (`eval` or `new Function`, TLS verification turned off, or unsafe deserialization: `pickle.loads`, `yaml.load` without `SafeLoader`, `ObjectInputStream`) is reviewed as Medium with the security reviewer, however small it is and outside every sensitive zone; launching `git` or another process is not one.
+- Predicted conflicts, with Git 2.38 or later: `swarm status` says, without touching any checkout, whether each accepted task would conflict with the run branch and whether the run branch would merge cleanly into its base, and `swarm merge` predicts its merge before asking you: a conflict it foresees answers `conflict` with `predicted: true` and its `paths`, asks nothing and spends no permission. With an older Git the prediction is `unverified`.
+- `forge-review-final` lists what it declined to judge and why, and the final report hands it to you with the `deferred` findings.
+- Each automatic decision says what it costs if it turns out wrong (`ifWrong`: `low`, `medium` or `high`, with one line); the reports and `/forge:decisions` show it.
+
+#### Changed
+- Routing works with superpowers 7.x: however brainstorming ends, the route you chose wins over the next step it names. A plan goes to `forge:run --superpowers-plan`, a spec (also the short one superpowers 7.0.1 writes for a small change) to `forge:run --from-spec` (on «superpowers planifica, forge ejecuta», to `writing-plans` first), and an end without a file (a quick task, a small change agreed in the chat, the questions skipped) to `forge:run` with the decisions as the task text; the session never builds it itself.
+- `/forge:run --from-spec` follows the triage: only a Large path imports the spec as the design's first version. On Trivial, Small or Medium the spec is the task text, every brief names it, and at the close forge stops offering it as a spec to start from.
+- `sp-plans` and the routing leave out a superpowers plan with no trace of progress (no ticked box, ledger, forge record or `<title>: task N done` commit), as lens does, because superpowers' own executors finish a plan without ticking it. A request that names it still gets it, and when a request asks to carry out a plan and none is recommended, forge's why names the newest such plan.
+- The shadow trial calls a reviewer whose xhigh twins found no blocker in any case `unverified` instead of passing it: with no data either way the reviewer stays as it is, and `FORGE shadow start` gathers more cases.
+- Every `SKILL.md` weighs at most 16,000 bytes, so a compaction attaches it again whole: `forge:run` keeps the Medium path in `references/medium.md` and reads it again every time it gets there.
+- The `PreToolUse` hook also starts on Read, Grep and Glob, for the secrets rule; outside forge's subagents it lets them through at once.
+- Depends on waypoint ^0.36.0.
+
+#### Fixed
+- A commit made after a review is no longer merged unreviewed. `verdict` and `review-close` record the tree they judged as their receipt (none when the checkout had uncommitted changes). `swarm integrate` answers `unreviewed` when `task/<T>` no longer has the tree its review accepted, and the task is reviewed again; it merges the commit it checked, never a later tip of the branch. A merge on finish needs the tree the final review accepted, where it used to compare times and missed a commit made by hand on the run branch; after such a commit `swarm merge` asks you again, with `reason: tree changed since the final review`. forge's learned notes in `.forge/verify/*.md` and the run's own decisions file do not count as a change.
+- After a compaction, a conversation with a loose forge task or an infinite run of its own got no text back. It is now told the task, its path, phase, brief and round and to invoke `forge:run` again before the next step, or to invoke `forge:infinite` again.
 
 ### 0.30.1 — 2026-10-24
 
@@ -1027,6 +1072,15 @@ elsewhere and are reconstructed from their READMEs.
 
 ## lens
 
+### 0.14.0 — 2026-10-25
+
+#### Added
+- The **Waiting for you** card: what waits for your answer, oldest first, up to 6 rows and `+N`: a review round's question, a merge to authorize, your trust in the commands of `.forge/config.yaml`, a stopped execution, the roadmap's open questions, the proposals to decide, a design ready to approve and a surface permission. Each row says where it is, how to answer it (the command, or «your turn in the coordinator's conversation» while that conversation is open) and how long it has waited; a source that could not be read says so. The band shows `» waiting for you N`. It reads only the newest of each source: 20 authorizations, 50 proposals and 100 notes of the roadmap's cache.
+
+#### Changed
+- The **Todos** card appears once the session called TodoWrite, the **Claude Code tasks** card once it heard a `TaskCreated` or a `TaskCompleted`, and todos alone no longer bring the band up. Since Claude Code 2.1.233 the newest models (Opus 5.5 among them) have no TodoWrite and no task tools by default; `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` in Claude Code's environment brings the tools back, and the cards with them.
+- Rebuilt with the code it shares with forge 0.31.0 and waypoint 0.36.0; nothing else lens shows changes.
+
 ### 0.13.11 — 2026-10-24
 
 #### Changed
@@ -1263,3 +1317,35 @@ elsewhere and are reconstructed from their READMEs.
 - A minimal band above the prompt with **Panel** and **×** while there are open todos or running subagents.
 
 Not kept: 0.4.0
+
+## java
+
+### 0.1.0 — 2026-10-25
+
+#### Added
+- First version, for Java and Spring Boot. `spring-hexagonal-ddd` (`/java:spring-hexagonal-ddd`, or by itself when its description matches the work) fixes the eleven rules of a service with DDD and hexagonal architecture: a core free of the framework, ports and the package layout, aggregates and value objects, domain events apart from integration events, the outbox in the same transaction, a `DomainException` with its `code` rendered as an RFC 9457 problem, ArchUnit as the guard, every read through specification-repository, idempotent consumers that tolerate events out of order, a business «no» as a result and never a remote exception, and Flyway never editing an applied migration. Six references (tactical DDD, the hexagonal layout, cqrs and specification-repository, messaging and the outbox, persistence and Flyway, testing) are read when the work reaches them. When the project lacks what a rule names, the skill follows the project's own mechanism and says which rule could not apply.
+- `java-oss-library` (`/java:java-oss-library`), for the upkeep of Java libraries built like spring-boot-cqrs and spring-boot-specification-repository. It sends Claude to the repository's `AGENTS.md`, which stays the contract, and adds only what that file lacks: build changes go to `build-logic`, what a new module must be added to, the two Boot starters, 100 % coverage, the Maven Central release, the `agent-ready` and `needs-design` issues, the merge train after a squash merge, and `docs/superpowers` kept out of `main`.
+- `architecture-reviewer` (`@agent-java:architecture-reviewer`), an on-demand, read-only reviewer on Opus at high effort with `spring-hexagonal-ddd` preloaded. It reads a branch's diff, or a diff file, against those rules, runs ArchUnit or `./gradlew quality` when the project has them (never what needs Docker) and returns each finding with its file, line, rule and severity, and a verdict. It is not a forge reviewer: nothing runs it by itself.
+- It pins no version: the skills read them from the project's `libs.versions.toml` or from Context7. It is text only, with no hooks, and needs none of the other plugins.
+
+## web
+
+### 0.1.0 — 2026-10-25
+
+#### Added
+- First version: the `astro-dokploy-site` skill, for a static Astro site with Preact islands that pnpm builds into a Docker image where nginx serves `dist`, deployed by Dokploy and gated by GitHub Actions. It settles the build and the islands (the `mounted` pattern, `min-height` against layout shift, the literal Vite worker call, MDX prose with components), the CSP (`security.csp` with hashes per page, hashed `is:inline` scripts, no `<style is:inline>` in figures, `worker-src`), the checks (Prettier as its own gate, `astro check` with TypeScript 6, Playwright's webServer under Claude Code, Lighthouse on Windows and in CI, real Chrome), the deploy (the Dockerfile at the root, nginx headers and MIME types, Dokploy's path and context fields) and a site repository without `CLAUDE.md`, `AGENTS.md` or `.claude/`. Four references (islands, CSP, checks, deploy) hold the procedures and are read when the work reaches them. It is text only; install it at user scope, since a site's repository carries no `.claude/`.
+
+## ml
+
+### 0.1.0 — 2026-10-25
+
+#### Added
+- First version: the `ml-local-gpu` skill, for machine learning on a local NVIDIA GPU. It reads the project's `pyproject.toml`, lock, CI and README first and pins no package version; runs everything through `uv run`, with the torch wheel for the GPU or the CI; sizes jobs from the free VRAM `nvidia-smi` reports, with at most three at once; runs a job of 30 minutes or more alone, with the GPU's temperature at its start and end and 15–20 minutes of rest after it; checks trl, transformers and peft calls against the installed version; splits validation by the unit that leaks, never by row; runs notebooks whole and checks every claim against their outputs; writes text with `newline='\n'`; and runs `ruff format` when the CI checks it. Two references, read when the work gets there, cover inference in the browser with ONNX Runtime Web on WebGPU (one session at a time, the download agreed per model) and publishing on Hugging Face (cards in English, an acceptance criterion written before training, the token from `HF_TOKEN` or the login). It is text only and needs none of the other plugins.
+
+## crew
+
+### 0.1.0 — 2026-10-25
+
+#### Added
+- First version, with two agents you call by name. `novice-reader` (Opus, high effort, read-only) reads documents, courses or web pages as one newcomer (a full-stack developer with no ML by default, a junior Java developer, a recruiter or a persona you describe) and reports where they get lost, the terms left undefined, the steps they cannot follow and what they would skip, each with its exact quote, its place and a severity. It never rewrites; given its earlier report, it checks the fixes and the seams they left.
+- `playtest-qa` (Opus, medium effort) plays a browser game prototype as a new player, with real keyboard and mouse input in headless Chrome on the GPU and never through the game's own functions: by default the tutorial and the first half hour. It checks that there is always something to do, that the player sees in numbers whether they improve and that the theme explains each mechanic, and gives figures per minute. At most two of its browsers run on the machine (a queue of two slots), it uses the project's own server or a static one with the right MIME types, and it stops only the processes it started, by PID. crew is text only and needs none of the other plugins.

@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.35.1](https://img.shields.io/badge/version-0.35.1-cba6f7?style=flat-square)
+![version 0.36.0](https://img.shields.io/badge/version-0.36.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -72,6 +72,8 @@ A typical run:
 /waypoint:plan                    # plan.yaml + the roadmap URL
 /waypoint:work                    # or launch a session per track
 ```
+
+**After a compaction.** Claude Code attaches again only the first 5,000 tokens of each skill the conversation used. `/waypoint:design` and `/waypoint:work` keep each subcommand and step in their `references/`, which they read when they get there and again every time they come back, so each `SKILL.md` stays under 16,000 bytes and comes back whole.
 
 `/waypoint:design new --from docs/superpowers/specs/<file>.md` starts from a spec written with superpowers: its sections are copied as they are, and the design page says «Imported from». A spec without `##` sections (the short one superpowers 7.0.1 writes for a small change) becomes one section named after its title.
 

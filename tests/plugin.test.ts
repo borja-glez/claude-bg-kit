@@ -267,7 +267,7 @@ describe('plugin layout', () => {
     const md = read('CHANGELOG.md');
     // Each plugin's section, newest version first.
     const section = (p: string) => md.split(/^## /m).find(s => s.startsWith(`${p}\n`) || s.startsWith(`${p}\r\n`)) ?? '';
-    for (const p of ['waypoint', 'forge', 'lens']) {
+    for (const p of ['waypoint', 'forge', 'lens', 'java', 'web', 'ml', 'crew']) {
       const first = /^### (\d+\.\d+\.\d+) — /m.exec(section(p))?.[1];
       expect(first, p).toBe(JSON.parse(read(`plugins/${p}/.claude-plugin/plugin.json`)).version);
     }
@@ -335,9 +335,9 @@ describe('plugin layout', () => {
     const dep = (JSON.parse(read('plugins/forge/.claude-plugin/plugin.json')).dependencies as { version: string }[])[0].version;
     for (const lang of ['', '.es']) {
       const root = read(`README${lang}.md`);
-      for (const p of ['waypoint', 'forge', 'lens']) expect(root).toContain(`badge/${p}-${v(p)}-`);
+      for (const p of ['waypoint', 'forge', 'lens', 'java', 'web', 'ml', 'crew']) expect(root).toContain(`badge/${p}-${v(p)}-`);
       expect(root).toContain(`waypoint ${dep} `);
-      for (const p of ['waypoint', 'forge', 'lens']) expect(read(`plugins/${p}/README${lang}.md`)).toMatch(new RegExp(`badge/versi(on|%C3%B3n)-${v(p).replace(/\./g, '\\.')}-`));
+      for (const p of ['waypoint', 'forge', 'lens', 'java', 'web', 'ml', 'crew']) expect(read(`plugins/${p}/README${lang}.md`)).toMatch(new RegExp(`badge/versi(on|%C3%B3n)-${v(p).replace(/\./g, '\\.')}-`));
       const forge = read(`plugins/forge/README${lang}.md`);
       expect(forge).toContain(`waypoint%20${encodeURIComponent(dep)}-`);
       expect(forge).toContain(`) ${dep},`);

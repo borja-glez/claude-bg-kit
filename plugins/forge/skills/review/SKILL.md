@@ -1,6 +1,6 @@
 ---
 name: review
-description: Review a branch with forge's weighted independent review - validators against a baseline of its base, correctness (plus security on sensitive zones, perf when asked) and a scored verdict - without fixing anything. Use for "/forge:review [<base>]", "revisa esta rama", "review this branch with forge", and after work done with another method (superpowers).
+description: Review a branch with forge's weighted independent review - validators against a baseline of its base, correctness (plus security on sensitive zones or a strict sink, perf when asked) and a scored verdict - without fixing anything. Use for "/forge:review [<base>]", "revisa esta rama", "review this branch with forge", and after work done with another method (superpowers).
 ---
 
 # forge: review a branch

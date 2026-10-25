@@ -7,6 +7,8 @@ One reads as a newcomer and says where they get lost; the other plays a browser 
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
+![version 0.1.0](https://img.shields.io/badge/version-0.1.0-89dceb?style=flat-square)
+
 </div>
 
 ## Contents

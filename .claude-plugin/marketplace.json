@@ -1,7 +1,7 @@
 {
   "name": "bg-kit",
   "owner": { "name": "Borja" },
-  "description": "Borja's Claude Code plugins: waypoint roadmaps, the lens progress panel and the forge method.",
+  "description": "Borja's Claude Code plugins: waypoint roadmaps, the lens progress panel and the forge method, plus skills and agents for one kind of work: java for Spring Boot services and Java libraries, web for Astro sites on Dokploy, ml for machine learning on a local GPU, and crew's newcomer reader and playtester.",
   "plugins": [
     {
       "name": "waypoint",

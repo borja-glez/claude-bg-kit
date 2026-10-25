@@ -1,5 +1,6 @@
 {
   "name": "crew",
   "description": "On-demand agents: novice-reader tells where a newcomer gets lost in docs and courses, and playtest-qa plays browser prototypes with real input on the GPU.",
+  "version": "0.1.0",
   "author": { "name": "Borja" }
 }
