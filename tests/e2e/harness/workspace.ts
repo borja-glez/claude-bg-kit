@@ -44,8 +44,8 @@ export function readHooks(ws: Pick<Workspace, 'hookLog'>): HookRecord[] {
   return readFileSync(ws.hookLog, 'utf8').split('\n').filter(l => l.trim() !== '').map(l => JSON.parse(l) as HookRecord);
 }
 
-/** Keys of tests/fixtures/hooks/session-start-*.json that the real `claude -p` (2.1.310) does not send in SessionStart,
- *  and that no forge or waypoint hook reads. */
+/** Keys of tests/fixtures/hooks/session-start-startup.json that the real `claude -p` (2.1.310) does not send in SessionStart
+ *  `startup`, and that no forge or waypoint hook reads. (`compact` does send `model`.) */
 export const FIXTURE_KEYS_NOT_SENT: readonly string[] = ['model'];
 
 /** A recorded hook input of the repo's fixtures: tests/fixtures/hooks/<name>.json. */

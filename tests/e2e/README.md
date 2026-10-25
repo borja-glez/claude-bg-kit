@@ -52,3 +52,14 @@ Recorded with Claude Code 2.1.310 by `subagents.e2e.ts`, with the default `CLAUD
 ## permissions.deny in subagents (for A4)
 
 `permissions.deny: ['Read(**/e2e-denied.txt)']` passed with `--settings` (and `--permission-prompts none`) denies the main session's `Read` of the file (the control) and denies the subagent's `Read` of it too: both `tool_result`s are errors with `File is in a directory that is denied by your permission settings.`, and the content never reaches the model. The rule reaches subagents. A4's guard B does not depend on this answer (spec, "Riesgos"): it relies on PreToolUse carrying `agent_type`, which the nested scenario pins.
+
+## Compaction (for A2)
+
+Recorded with Claude Code 2.1.310 by `compact.e2e.ts`. The session invokes `forge:run` with the `Skill` tool (the smoke row says the main request offers it), reads `references/large.md` of that skill, then runs `/compact` and sends one more prompt. The summary request is told apart from the title and other side requests by `compacting()` in `harness/compact.ts`: the marker is in the conversation and the last `user` message asks to summarize. `/compact` yields its own `success` result (with an empty `result`), so the driver goes on to the next turn.
+
+- `PreCompact` input keys: `session_id`, `transcript_path`, `cwd`, `prompt_id`, `hook_event_name`, `trigger` (`manual`), `custom_instructions`.
+- `SessionStart` with `source: compact` has the keys `session_id`, `transcript_path`, `cwd`, `prompt_id`, `hook_event_name`, `source`, `model`: every key of `tests/fixtures/hooks/session-start-compact.json` arrives (unlike `startup`, `model` is sent here). The scenario therefore checks the fixture's keys with no exception and has no reverse check; `FIXTURE_KEYS_NOT_SENT` applies to `session-start-startup` only.
+- The first request after `/compact` carries the scripted summary as its first `user` message (`This session is being continued from a previous conversation...`). Then, in a later `user` message of that request:
+  - the skill is attached again in a `<system-reminder>` that starts `The following skills were invoked EARLIER in this session (before the conversation was compacted)`: its head (`# forge: run a task`) and its tail (the last line of `SKILL.md`), 17,786 bytes of skill in all, so at this size nothing is cut at either end (the 5,000 tokens per skill of the A2 spec are above that size, so this run does not show where the cut falls);
+  - the reference read before is attached again, whole, as a `Called the Read tool with the following input` / `Result of calling the Read tool` pair of `<system-reminder>` blocks. The `references/` of a skill are not attached by being the skill's: only a file that was read comes back.
+- Task 8 runs the scenario again once A2 has trimmed `forge:run`; the pins are in `PINNED_COMPACT`.
