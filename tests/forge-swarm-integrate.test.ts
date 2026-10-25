@@ -1466,3 +1466,22 @@ describe('a task is integrated only with the tree its review accepted (A3)', () 
     expect(g(runWt(), 'rev-parse', 'HEAD^2')).toBe(reviewed);
   });
 });
+
+describe('swarm status predicts the merges (A3)', () => {
+  it('names the accepted tasks that would conflict with the run branch, and whether the run branch would merge into its base, touching no checkout', () => {
+    accept('T1', 'a.txt', 'a\n');
+    out(run(['swarm', 'integrate', 'T1'], io));
+    accept('T2', 'base.txt', 'from T2\n');
+    accept('T3', 'c.txt', 'c\n');
+    commitIn(runWt(), 'base.txt', 'from run\n', 'run change');
+    const runHead = g(runWt(), 'rev-parse', 'HEAD');
+    expect(out(run(['swarm', 'status'], io)).predicted).toEqual({
+      merge: { state: 'clean' }, tasks: { T2: { state: 'conflict', paths: ['base.txt'] }, T3: { state: 'clean' } },
+    });
+    commitIn(root, 'a.txt', 'main\n', 'main side');
+    expect(out(run(['swarm', 'status'], io)).predicted.merge).toEqual({ state: 'conflict', paths: ['a.txt'] });
+    expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(runHead);
+    expect(g(runWt(), 'status', '--porcelain')).toBe('');
+    expect(git('status', '--porcelain')).toBe('');
+  });
+});
