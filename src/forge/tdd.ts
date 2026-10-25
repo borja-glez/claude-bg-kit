@@ -1,9 +1,15 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync,
+  unlinkSync, writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { ExecResult } from './cli/run.js';
 import { LOCKFILES } from './validate-cache.js';
 import {
-  failingTests, isPytestModule, isTestFile, NO_TESTS, resolveAffected, runsPytest,
+  baseFailingNames, failingTests, isPytestModule, isTestFile, NO_TESTS, resolveAffected, runsPytest,
   type RepoReader, type Validator, type ValidatorResult,
 } from './validators.js';
 
@@ -288,3 +294,181 @@ export function sayTdd(check: TddCheck, locale: 'es' | 'en'): string {
 
 /** A brief of the bug route. */
 export const BUG_BRIEF = /^Bug:/m;
+
+export type Exec = (cmd: string, timeoutSec: number) => ExecResult;
+/** The dependency folders of the task a BASE checkout links, never copies. */
+export const TDD_LINKS = ['node_modules', '.venv', 'venv'] as const;
+/** A forge-tdd-* folder older than this is a check that died: the next check clears it. */
+export const STALE_MS = 60 * 60_000;
+export interface TddRunCtx {
+  repoDir: string; git: (args: string[]) => string | null; execAt: (cwd: string) => Exec;
+  /** validatorTimeoutSec; the run gets at most TDD_TIMEOUT_MAX. */
+  timeoutSec: number;
+  /** The brief's baseline (prep's baseline-<n>.json); null without one. */
+  baseline: unknown;
+  /** Where forge-tdd-* folders go: os.tmpdir() by default. */
+  tmpRoot?: string; now?: () => number;
+}
+
+const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const RM = { recursive: true, force: true, maxRetries: 3, retryDelay: 100 } as const;
+const winPath = (s: string) => (process.platform === 'win32' ? path.resolve(s).toLowerCase() : path.resolve(s));
+
+const isDir = (p: string): boolean => { try { return statSync(p).isDirectory(); } catch { return false; } };
+const isLink = (p: string): boolean => { try { return lstatSync(p).isSymbolicLink(); } catch { return false; } };
+const lexists = (p: string): boolean => { try { lstatSync(p); return true; } catch { return false; } };
+
+/** The folder to link as `name`: repoDir's own; for node_modules, else the nearest ancestor's (the task may sit in a workspace). */
+function linkSource(repoDir: string, name: string): string | null {
+  const own = path.join(repoDir, name);
+  if (isDir(own)) return own;
+  if (name !== 'node_modules') return null;
+  for (let dir = path.dirname(path.resolve(repoDir)); ; dir = path.dirname(dir)) {
+    const up = path.join(dir, name);
+    if (isDir(up)) return up;
+    if (path.dirname(dir) === dir) return null;
+  }
+}
+
+/** The git dir a linked checkout names in its `.git` file, or null. */
+function gitdirOf(baseDir: string): string | null {
+  try {
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(path.join(baseDir, '.git'), 'utf8'));
+    return m ? path.resolve(baseDir, m[1]) : null;
+  } catch { return null; }
+}
+
+/**
+ * Clears one forge-tdd-* folder: unlinks the dependency links first (a recursive rm through a junction would delete what it
+ * points to), and removes nothing else while any link remains. `own` is the run's: git removes the checkout's entry, and
+ * the entry folder goes only when it lies under the clone's worktrees. Returns whether the folder is gone.
+ */
+function clearCheckDir(entry: string, own?: { git: (args: string[]) => string | null; repoDir: string }): boolean {
+  const baseDir = path.join(entry, 'base');
+  for (const name of TDD_LINKS) {
+    const link = path.join(baseDir, name);
+    try { if (isLink(link)) unlinkSync(link); } catch { /* the check below sees it */ }
+  }
+  if (TDD_LINKS.some(name => isLink(path.join(baseDir, name)))) return false;
+  const gitdir = gitdirOf(baseDir);
+  let common: string | null = null;
+  if (own) {
+    try {
+      const c = (own.git(['rev-parse', '--git-common-dir']) ?? '').trim();
+      if (c) common = path.resolve(own.repoDir, c);
+    } catch { /* no common dir: the entry folder stays */ }
+    try { own.git(['worktree', 'remove', '--force', baseDir]); } catch { /* the entry folder is cleared below */ }
+  }
+  try { rmSync(entry, RM); } catch { /* a later check sweeps it */ }
+  try {
+    if (gitdir && path.basename(path.dirname(gitdir)) === 'worktrees' && existsSync(gitdir)) {
+      const points = readFileSync(path.join(gitdir, 'gitdir'), 'utf8').trim();
+      const inside = !own || (common !== null && winPath(gitdir).startsWith(winPath(path.join(common, 'worktrees')) + path.sep));
+      if (inside && winPath(points) === winPath(path.join(baseDir, '.git'))) rmSync(gitdir, RM);
+    }
+  } catch { /* ignore */ }
+  return !lexists(entry);
+}
+
+/** Clears the forge-tdd-* folders of `tmpRoot` older than STALE_MS: the checks that died. Returns the paths it removed. */
+export function sweepStale(tmpRoot: string, now: number): string[] {
+  const gone: string[] = [];
+  let names: string[] = [];
+  try { names = readdirSync(tmpRoot); } catch { return gone; }
+  for (const n of names) {
+    if (!n.startsWith('forge-tdd-')) continue;
+    const entry = path.join(tmpRoot, n);
+    try {
+      if (lstatSync(entry).mtimeMs >= now - STALE_MS) continue;
+      if (clearCheckDir(entry)) gone.push(entry);
+    } catch { /* one entry's error does not stop the others */ }
+  }
+  return gone;
+}
+
+/**
+ * Runs the plan on a temporary checkout of BASE: the task's dependency folders linked in, the changed test files written
+ * over it as HEAD has them, the plan's command with the timeout. The checkout and its links are gone when it returns.
+ */
+export function runTdd(plan: TddPlan, ctx: TddRunCtx): TddCheck {
+  const check: TddCheck = {
+    v: 1, key: plan.key, base: plan.base, validator: plan.validator, cmd: plan.cmd, files: plan.files,
+    red: [], passedOnBase: [], alreadyFailing: [], unjudged: [], skipped: plan.skipped, note: plan.note, durationMs: 0,
+  };
+  if (plan.skipped) return check;
+  const now = ctx.now ?? Date.now;
+  const t0 = now();
+  const tmpRoot = ctx.tmpRoot ?? tmpdir();
+  const done = (over: Partial<TddCheck>): TddCheck => ({ ...check, ...over, durationMs: Math.max(1, now() - t0) });
+  sweepStale(tmpRoot, t0);
+  let tmpDir: string | null = null;
+  try {
+    tmpDir = mkdtempSync(path.join(tmpRoot, 'forge-tdd-'));
+    const hooks = path.join(tmpDir, 'no-hooks');
+    mkdirSync(hooks);
+    const baseDir = path.join(tmpDir, 'base');
+    if (ctx.git(['-c', `core.hooksPath=${hooks}`, 'worktree', 'add', '--detach', '--quiet', baseDir, plan.base]) === null) return done({ skipped: 'no-checkout' });
+    for (const name of TDD_LINKS) {
+      const src = linkSource(ctx.repoDir, name);
+      if (!src || lexists(path.join(baseDir, name))) continue;
+      symlinkSync(realpathSync(src), path.join(baseDir, name), process.platform === 'win32' ? 'junction' : 'dir');
+    }
+    for (const f of plan.overlay) {
+      const dest = path.resolve(baseDir, f);
+      if (path.relative(baseDir, dest).startsWith('..') || path.isAbsolute(path.relative(baseDir, dest))) return done({ skipped: 'no-checkout' });
+      const blob = execFileSync('git', ['-C', ctx.repoDir, 'cat-file', 'blob', `HEAD:${f}`], { maxBuffer: 256 * 1024 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      mkdirSync(path.dirname(dest), { recursive: true });
+      writeFileSync(dest, blob);
+    }
+    const names = newTestNames(ctx.git(['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-renames', '-U0', `${plan.base}..HEAD`, '--', ...plan.files]) ?? '');
+    const r = ctx.execAt(baseDir)(plan.cmd ?? '', Math.min(ctx.timeoutSec, TDD_TIMEOUT_MAX));
+    const verdict = classifyTdd(plan.files, names, { code: r.code, output: r.output, timedOut: r.timedOut }, plan.kind ?? 'test', new Set(baseFailingNames(ctx.baseline, plan.validator ?? '')));
+    return done({ ...verdict, skipped: r.timedOut ? 'timeout' : null });
+  } catch {
+    return done({ skipped: 'no-checkout' });
+  } finally {
+    if (tmpDir !== null) clearCheckDir(tmpDir, { git: ctx.git, repoDir: ctx.repoDir });
+  }
+}
+
+export interface TddBriefCtx extends TddRunCtx { validators: Validator[]; repo: RepoReader; platform?: NodeJS.Platform; base: string; dir: string; n: string }
+type PlanCtx = Pick<TddBriefCtx, 'repoDir' | 'git' | 'validators' | 'repo' | 'platform' | 'base' | 'dir' | 'n'>;
+
+/** BASE resolved to its sha, the files HEAD changed since it, the plan and the stored check; null when BASE is no commit. */
+function planOf(c: PlanCtx): { plan: TddPlan; file: string; stored: TddCheck | null } | null {
+  const base = (c.git(['rev-parse', '--verify', '-q', `${c.base}^{commit}`]) ?? '').trim();
+  if (!SHA.test(base)) return null;
+  const touched = (c.git(['-c', 'core.quotePath=false', 'diff', '--name-only', '--no-renames', `${base}..HEAD`]) ?? '')
+    .split('\n').map(l => l.replace(/\r$/, '')).filter(Boolean);
+  const plan = tddPlan(c.validators, touched, base, { git: c.git, repo: c.repo, platform: c.platform ?? process.platform, repoDir: c.repoDir });
+  const file = tddFile(c.dir, c.n);
+  return { plan, file, stored: readTdd(file) };
+}
+
+const readText = (file: string): string | null => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
+
+/** The brief's check: tdd-<n>.json when its key still holds, else a run that writes it; the row with the bug's root cause. */
+export function tddForBrief(c: TddBriefCtx): { check: TddCheck; row: TddRow; file: string; reused: boolean } {
+  const bug = BUG_BRIEF.test(readText(path.join(c.dir, `brief-${c.n}.md`)) ?? '')
+    ? { rootCause: rootCauseOf(readText(path.join(c.dir, `report-${c.n}.txt`))) } : null;
+  const p = planOf(c);
+  const file = tddFile(c.dir, c.n);
+  if (!p) {
+    const check: TddCheck = {
+      v: 1, key: '', base: c.base, validator: null, cmd: null, files: [], red: [], passedOnBase: [], alreadyFailing: [], unjudged: [],
+      skipped: 'no-checkout', note: null, durationMs: 0,
+    };
+    return { check, row: tddRow(check, bug), file, reused: false };
+  }
+  const reused = p.stored !== null && p.stored.key === p.plan.key;
+  const check = reused ? (p.stored as TddCheck) : runTdd(p.plan, c);
+  if (!reused) writeTdd(p.file, check);
+  return { check, row: tddRow(check, bug), file: p.file, reused };
+}
+
+/** True when tddForBrief would run, or the stored check has tests that pass on BASE (the express review waits). */
+export function tddPending(c: PlanCtx): boolean {
+  const p = planOf(c);
+  if (!p) return false;
+  return p.stored === null || p.stored.key !== p.plan.key || p.stored.passedOnBase.length > 0;
+}
