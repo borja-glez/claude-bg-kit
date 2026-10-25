@@ -39,7 +39,7 @@ Reinicia Claude Code tras instalar o actualizar.
 - **VRAM**: `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader` antes de cada trabajo y `torch.cuda.max_memory_allocated()` para cada pico, con un margen del 10 % y como mucho tres trabajos a la vez.
 - **Descanso**: un trabajo de 30 minutos o más va solo, con `nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader` al empezar y al acabar, y 15-20 minutos sin carga después.
 - **APIs**: Context7 e `inspect.signature` sobre el trl, transformers o peft instalado antes de escribir una llamada.
-- **Hugging Face**: cards en inglés, el criterio de aceptación escrito antes de entrenar y el token solo desde `HF_TOKEN`.
+- **Hugging Face**: cards en inglés, el criterio de aceptación escrito antes de entrenar y el token solo desde `HF_TOKEN` o el login.
 - **Notebooks**: `uv run jupyter nbconvert --to notebook --execute --inplace`, y luego cada afirmación contrastada con las salidas.
 - **Finales de línea**: `newline='\n'` y `encoding='utf-8'` en cada fichero de texto que escribe Python.
 - **Formateador**: `uv run ruff format .` y `uv run ruff check .` antes del commit cuando la CI ejecuta `ruff format --check`.
