@@ -110,9 +110,10 @@ describe('what the TDD check reads and decides (A9)', () => {
   const GO: Validator = { name: 'go-test', cmd: 'go test ./...', kind: 'test', affectedCmd: 'go test {packages}', source: 'detected' };
   const PLAIN: Validator = { name: 'unit', cmd: 'node --test', kind: 'test', source: 'manual' };
   const q = (f: string) => (process.platform === 'win32' ? `"${f}"` : `'${f}'`);
-  /** BASE with `files`, HEAD with `change` on top: the plan's git and files, and the paths HEAD changed. */
-  const planRepo = (files: Record<string, string>, change: Record<string, string>) => {
+  /** BASE with `files`, HEAD with `change` on top: the plan's git and files, and the paths HEAD changed; `deps`: a node_modules. */
+  const planRepo = (files: Record<string, string>, change: Record<string, string>, deps = true) => {
     const { dir } = repo('tdd: verified\n', files);
+    if (deps) mkdirSync(path.join(dir, 'node_modules'));
     const base = git(dir, 'rev-parse', 'HEAD');
     for (const [f, text] of Object.entries(change)) { mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); writeFileSync(path.join(dir, f), text); }
     git(dir, 'add', '-A');
@@ -135,6 +136,9 @@ describe('what the TDD check reads and decides (A9)', () => {
       'diff --git a/tests/gone.test.ts b/tests/gone.test.ts', '--- a/tests/gone.test.ts', '+++ /dev/null', '@@ -1 +0,0 @@', "-it('gone', () => {})",
     ].join('\n');
     expect(Object.fromEntries(newTestNames(patch))).toEqual({ 'tests/a.test.ts': ['adds two', 'adds three', 'focused'], 'tests/test_b.py': ['test_b_one', 'test_b_two'] });
+    // An added line whose text starts with ++ is no file header: the titles after it are still read.
+    const plus = ['diff --git a/tests/c.test.ts b/tests/c.test.ts', '--- a/tests/c.test.ts', '+++ b/tests/c.test.ts', '@@ -1,0 +1,2 @@', '+++count;', "+it('after the count', () => {"].join('\n');
+    expect(Object.fromEntries(newTestNames(plus))).toEqual({ 'tests/c.test.ts': ['after the count'] });
   });
   it('classifyTdd: red by name, passed on BASE, already failing, and a file that does not load (vitest, pytest and jest output)', () => {
     const names = new Map([['tests/a.test.ts', ['adds two', 'still adds', 'old broken']], ['tests/fresh.test.ts', ['fresh works']]]);
@@ -175,6 +179,25 @@ describe('what the TDD check reads and decides (A9)', () => {
     expect(classifyTdd(files, mixed, { code: 1, output: collect, timedOut: false }, 'test', new Set()))
       .toEqual({ red: ['tests/test_a.py > test_x', 'tests/test_b.py > test_y'], passedOnBase: [], alreadyFailing: [], unjudged: ['tests/test_a.py'] });
     expect(classifyTdd(['tests/c.test.ts'], new Map(), { code: 0, output: '', timedOut: false }, 'test', new Set())).toMatchObject({ passedOnBase: [], unjudged: ['tests/c.test.ts'] });
+  });
+  it('classifyTdd says nothing passed on BASE when the runner stopped early, and gives the line that says so: pytest -x or --maxfail, a vitest or jest bail', () => {
+    const failed = (output: string) => ({ code: 1, output, timedOut: false });
+    const py = new Map([['tests/test_a.py', ['test_x', 'test_y']]]);
+    expect(classifyTdd(['tests/test_a.py'], py, failed('FAILED tests/test_a.py::test_x - assert 1 == 2\n!!!!!!!!!! stopping after 1 failures !!!!!!!!!!\n'), 'test', new Set()))
+      .toEqual({ red: ['tests/test_a.py > test_x'], passedOnBase: [], alreadyFailing: [], unjudged: ['tests/test_a.py'], stopped: 'stopping after 1 failures' });
+    // vitest prints no bail line: its summary counts more files or tests than ended.
+    const js = new Map([['tests/a.test.ts', ['adds two', 'still adds']]]);
+    const vitest = (files: string) => failed(` FAIL  tests/a.test.ts > adds two\n\n Test Files  ${files}\n      Tests  1 failed | 1 passed (2)\n`);
+    expect(classifyTdd(['tests/a.test.ts'], js, vitest('1 failed | 1 passed (3)'), 'test', new Set()))
+      .toEqual({ red: ['tests/a.test.ts > adds two'], passedOnBase: [], alreadyFailing: [], unjudged: ['tests/a.test.ts'], stopped: 'Test Files 1 failed | 1 passed (3)' });
+    expect(classifyTdd(['tests/a.test.ts'], js, vitest('1 failed | 2 passed (3)'), 'test', new Set()))
+      .toEqual({ red: ['tests/a.test.ts > adds two'], passedOnBase: ['tests/a.test.ts > still adds'], alreadyFailing: [], unjudged: [] });
+    // jest names its bail by the suites it ran: «N of M total».
+    const jn = new Map([['src/a.test.js', ['adds two', 'still adds']]]);
+    const jest = (total: string) => failed(` FAIL  src/a.test.js\n  ● math › adds two\n\nTest Suites: 1 failed, ${total} total\nTests:       1 failed, 1 passed, 2 total\n`);
+    expect(classifyTdd(['src/a.test.js'], jn, jest('1 of 3'), 'test', new Set()))
+      .toEqual({ red: ['src/a.test.js > adds two'], passedOnBase: [], alreadyFailing: [], unjudged: ['src/a.test.js'], stopped: 'Test Suites: 1 failed, 1 of 3 total' });
+    expect(classifyTdd(['src/a.test.js'], jn, jest('1'), 'test', new Set())).toEqual({ red: ['src/a.test.js > adds two'], passedOnBase: ['src/a.test.js > still adds'], alreadyFailing: [], unjudged: [] });
   });
   it('classifyTdd finds a title as the runner prints it: escapes undone, a trailing duration and spaces tidied, a cut entry by its start', () => {
     const patch = ['diff --git a/tests/a.test.ts b/tests/a.test.ts', '--- a/tests/a.test.ts', '+++ b/tests/a.test.ts', '@@ -1,0 +1,6 @@',
@@ -239,6 +262,13 @@ describe('what the TDD check reads and decides (A9)', () => {
       expect(skip({ ...T, 'package.json': `{${dep}}\n` }, T2), dep).toBe('linked-code');
     }
     expect(skip({ ...T, 'pnpm-workspace.yaml': 'packages: ["p/*"]\n' }, T2)).toBe('linked-code');
+    // A Node runner with no node_modules of the task's own for BASE to link: never run (npx would download the runner).
+    const bare = planRepo(T, T2, false);
+    for (const cmd of [VITEST.affectedCmd as string, 'pnpm exec vitest related --run {files}', 'node --test {tests}']) {
+      expect(tddPlan([{ ...VITEST, affectedCmd: cmd }], bare.touched, bare.base, bare.at).skipped, cmd).toBe('no-deps');
+    }
+    const py = planRepo({ 'tests/test_a.py': 'def test_a():\n    pass\n' }, { 'tests/test_a.py': 'def test_a():\n    pass\ndef test_b():\n    pass\n' }, false);
+    expect(tddPlan([PYTEST], py.touched, py.base, py.at).skipped).toBeNull();
     // A venv that links the task's code: an editable install or a .pth that names the repository. A venv's own .pth
     // (setuptools' distutils-precedence.pth, in every venv) names no path of it and skips nothing.
     const venv = (site: string[], file: string, text: (dir: string) => string) => {
@@ -262,6 +292,7 @@ describe('what the TDD check reads and decides (A9)', () => {
     expect(rootCauseOf('no such line')).toBeNull();
     expect(rootCauseOf(null)).toBeNull();
     expect(rootCauseOf(`Root cause: ${'x'.repeat(400)}`)).toHaveLength(300);
+    expect(rootCauseOf(`Root cause: ${'x'.repeat(299)} tail`)).toBe('x'.repeat(299));
     const row = tddRow(CHECK, { rootCause: null });
     expect(row).toMatchObject({ validator: 'tdd', ok: true, flaky: false, durationMs: 5, failing: [], failingKnown: true, tdd: { ...CHECK, bug: { rootCause: null } } });
     expect(blocking(row)).toBe(false);

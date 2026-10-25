@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, utimesSync, writeFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { runTdd, sweepStale, tddForBrief, tddPending, tddPlan, tddFile, readTdd, type TddBriefCtx } from '../src/forge/tdd.js';
+import { runTdd, sayTdd, sweepStale, tddForBrief, tddPending, tddPlan, tddFile, readTdd, writeTdd, type TddBriefCtx } from '../src/forge/tdd.js';
 import { BUG_LINE } from '../src/forge/brief.js';
 import { detectValidators } from '../src/forge/validators.js';
 import { parseConfig } from '../src/forge/config.js';
@@ -147,6 +147,34 @@ describe('the TDD check on BASE (A9)', () => {
     expect(readTdd(tddFile(f.work, '1'))).toEqual(again.check);
     expect(tddPending(counted)).toBe(false);
   });
+  it('a check that timed out or could not check out BASE is neither written nor reused, and no-checkout keeps its error in note', () => {
+    const slow = fixture({ config: CONFIG.replace('affected_cmd: node run-tests.mjs {tests}', 'affected_cmd: node -e "setTimeout(() => {}, 20000)" {tests}') });
+    expect(tddForBrief(slow.ctx({ timeoutSec: 1 }))).toMatchObject({ reused: false, check: { skipped: 'timeout' } });
+    expect(existsSync(tddFile(slow.work, '1'))).toBe(false);
+    expect(tddPending(slow.ctx())).toBe(true);
+    const f = fixture();
+    const lost = tddForBrief(f.ctx({ tmpRoot: path.join(f.root, 'no', 'such') }));
+    expect(lost.check).toMatchObject({ skipped: 'no-checkout', note: expect.stringContaining('ENOENT') });
+    expect(existsSync(tddFile(f.work, '1'))).toBe(false);
+    // One stored before, under the same key, is run again.
+    writeTdd(tddFile(f.work, '1'), lost.check);
+    expect(tddPending(f.ctx())).toBe(true);
+    expect(tddForBrief(f.ctx())).toMatchObject({ reused: false, check: { skipped: null, red: ['tests/fresh.test.mjs > fresh works', 'tests/math.test.mjs > mul multiplies'] } });
+  });
+  it('a runner that stopped early leaves the tests it did not report unjudged, and says why in note', () => {
+    const stop = "node -e \"console.log(' FAIL  tests/math.test.mjs > mul multiplies'); console.log('!!! stopping after 1 failures !!!'); process.exit(1)\" {tests}";
+    const f = fixture({ config: CONFIG.replace('affected_cmd: node run-tests.mjs {tests}', `affected_cmd: ${stop}`) });
+    expect(tddForBrief(f.ctx()).check).toMatchObject({
+      skipped: null, red: ['tests/math.test.mjs > mul multiplies'], passedOnBase: [], unjudged: ['tests/fresh.test.mjs', 'tests/math.test.mjs'],
+      note: 'not judged: the runner stopped early (stopping after 1 failures)',
+    });
+  });
+  it('a test file in a folder whose name starts with .. is written over BASE and judged', () => {
+    const f = fixture();
+    f.put('..foo/dots.test.mjs', "test('dots', () => { throw new Error('new'); });\n");
+    f.git('add', '-A'); f.git('commit', '-q', '-m', 'dots');
+    expect(tddForBrief(f.ctx()).check).toMatchObject({ skipped: null, red: expect.arrayContaining(['..foo/dots.test.mjs > dots']) });
+  });
   it('a brief with the Bug: line gets the root cause of its report, null without the line in the report, and none without the Bug: line', () => {
     const f = fixture();
     writeFileSync(path.join(f.work, 'brief-1.md'), `# T1\n\n${BUG_LINE}\n`);
@@ -205,6 +233,7 @@ describe('review-prep with tdd: verified (A9)', () => {
     const out = f.prep('--locale', 'en');
     expect(out.validators).toMatchObject({ ok: true, failing: [], preexisting: [] });
     expect(out.tdd).toMatchObject({ file: '.forge/work/T1/tdd-1.json', red: 2, passedOnBase: ['tests/math.test.mjs > add still sums'], skipped: null, reused: false });
+    expect(out.say).toContain(sayTdd(readTdd(tddFile(f.work, '1'))!, 'en'));
     expect(rows(f.work).map(r => [r.validator, r.ok])).toEqual([['unit', true], ['tdd', true]]);
     expect(readEvents(f.root).filter(e => e.kind === 'validate').at(-1)!.results).toEqual([expect.objectContaining({ validator: 'unit' })]);
     expect(out.spawn[0].inputs.report).toBeUndefined();

@@ -17,8 +17,8 @@ export const TDD_ROW = 'tdd';
 export const TDD_MAX_FILES = 30;
 export const TDD_TIMEOUT_MAX = 300;
 /** Why a check ran nothing; `timeout`: it ran and judged nothing. */
-export type TddSkip = 'no-tests' | 'no-command' | 'same-package' | 'too-many' | 'unsafe-path' | 'lockfile' | 'linked-code' | 'no-checkout' | 'timeout';
-const SKIPS: readonly string[] = ['no-tests', 'no-command', 'same-package', 'too-many', 'unsafe-path', 'lockfile', 'linked-code', 'no-checkout', 'timeout'];
+export type TddSkip = 'no-tests' | 'no-command' | 'same-package' | 'too-many' | 'unsafe-path' | 'lockfile' | 'linked-code' | 'no-deps' | 'no-checkout' | 'timeout';
+const SKIPS: readonly string[] = ['no-tests', 'no-command', 'same-package', 'too-many', 'unsafe-path', 'lockfile', 'linked-code', 'no-deps', 'no-checkout', 'timeout'];
 /** What a check would run, and the key of its result, without running anything. */
 export interface TddPlan {
   key: string; base: string; validator: string | null; kind: string | null; cmd: string | null;
@@ -60,23 +60,29 @@ function jsTitle(source: string): string | null {
 /**
  * The tests a diff adds, file by file: the titles of the it/test calls and the def test_* of its `+` lines. A comment, a
  * dynamic title (`${`, or an escape other than \' \" \` \\), a `.skip` or `.todo` and a title that only moved (the same
- * trimmed line is removed anywhere in the patch) give none. A file without names is not in the map.
+ * trimmed line is removed anywhere in the patch) give none. A file without names is not in the map. A file's header runs
+ * from its `diff --git` line to its first `@@`, so an added line whose text starts with `++` is still content.
  */
 export function newTestNames(patch: string): Map<string, string[]> {
   const lines = patch.split(/\r?\n/);
+  let inHeader = false;
+  const header = lines.map(l => {
+    if (l.startsWith('diff --git ')) inHeader = true;
+    else if (l.startsWith('@@')) inHeader = false;
+    return inHeader;
+  });
   const removed = new Map<string, number>();
   lines.forEach((l, i) => {
-    if (!l.startsWith('-')) return;
-    if (l.startsWith('---') && lines[i + 1]?.startsWith('+++')) return;
+    if (!l.startsWith('-') || header[i]) return;
     const t = l.slice(1).trim();
     if (t) removed.set(t, (removed.get(t) ?? 0) + 1);
   });
   const out = new Map<string, string[]>();
   let file: string | null = null;
-  for (const l of lines) {
-    if (l.startsWith('+++')) {
-      const m = /^\+\+\+ b\/(.+?)(?:\t.*)?$/.exec(l);
-      file = m ? m[1] : null;
+  for (const [i, l] of lines.entries()) {
+    if (header[i]) {
+      if (l.startsWith('diff --git ')) file = null;
+      else if (l.startsWith('+++')) file = /^\+\+\+ b\/(.+?)(?:\t.*)?$/.exec(l)?.[1] ?? null;
       continue;
     }
     if (!l.startsWith('+') || file === null) continue;
@@ -126,16 +132,35 @@ function cleanEntry(entry: string, files: string[]): string {
   return e;
 }
 
+/** pytest -x or --maxfail, pytest interrupted by errors, and jest's bail, which counts the suites it ran: «N of M total». */
+const STOP_LINE = /stopping after \d+ failures?|Interrupted: \d+ errors?\b|^\s*Test Suites:.*\b\d+ of \d+ total\s*$/;
+/** vitest's summary of files or tests: what ended, and the count in parentheses (a bail leaves some unended). */
+const VITEST_SUMMARY = /^\s*(?:Test Files|Tests)\s+((?:\d+ (?:failed|passed|expected fail|skipped|todo)(?: \| )?)+)\s+\((\d+)\)\s*$/;
+
+/** The line of a run's output that shows the runner stopped before it ran every test, tidied, or null. */
+function stoppedEarly(text: string): string | null {
+  for (const l of text.split(/\r?\n/)) {
+    const v = VITEST_SUMMARY.exec(l);
+    const short = v !== null && [...v[1].matchAll(/\d+/g)].reduce((s, m) => s + Number(m[0]), 0) < Number(v[2]);
+    if (short || STOP_LINE.test(l)) return l.replace(/^[\s!=]+|[\s!=]+$/g, '').replace(/\s+/g, ' ').slice(0, 200);
+  }
+  return null;
+}
+
 /**
  * Splits the new tests of `files` by what running them on BASE showed: red (they fail there by name, or their file does
  * not load), passed on BASE (proving nothing), already failing (in `baseFailing`) and unjudged (the run cannot tell).
+ * A runner that stopped early (pytest -x, a bail) says nothing of the tests it did not report: their files are unjudged,
+ * and `stopped` is the line that shows it.
  */
-export function classifyTdd(files: string[], names: ReadonlyMap<string, string[]>, run: BaseRun, kind: string, baseFailing: ReadonlySet<string>): Pick<TddCheck, 'red' | 'passedOnBase' | 'alreadyFailing' | 'unjudged'> {
+export function classifyTdd(files: string[], names: ReadonlyMap<string, string[]>, run: BaseRun, kind: string, baseFailing: ReadonlySet<string>): Pick<TddCheck, 'red' | 'passedOnBase' | 'alreadyFailing' | 'unjudged'> & { stopped?: string } {
   const out = { red: [] as string[], passedOnBase: [] as string[], alreadyFailing: [] as string[], unjudged: [] as string[] };
   if (run.timedOut || NO_TESTS.test(run.output)) { out.unjudged.push(...files); return out; }
   const { names: raw, known } = failingTests(run.output, kind);
   const entries = raw.map(r => ({ raw: r, text: cleanEntry(r, files), cut: r.length >= FAILING_NAME_MAX }));
   const text = slash(run.output.replace(ANSI, ''));
+  const stop = stoppedEarly(text);
+  let withheld = false;
   // The module an entry names (the longest of `files` it starts with, followed by a separator), or null.
   const owner = (e: string): string | null => {
     let best: string | null = null;
@@ -160,18 +185,24 @@ export function classifyTdd(files: string[], names: ReadonlyMap<string, string[]
     for (const { x, named } of tests) {
       const hit = entries.find(e => { const t = rest(e.text, f); return t !== null && named(t, e.cut); });
       const label = `${f} > ${x}`;
+      const passes = run.code === 0 || (known && !vague && tidy(` ${x}`) !== '');
       if (hit && (baseFailing.has(hit.raw) || baseFailing.has(hit.text) || baseFailing.has(label))) out.alreadyFailing.push(label);
       else if (hit || !loads) out.red.push(label);
-      else if (run.code === 0 || (known && !vague && tidy(` ${x}`) !== '')) out.passedOnBase.push(label);
-      else if (!unread) { unread = true; out.unjudged.push(f); }
+      else if (passes && stop === null) out.passedOnBase.push(label);
+      else {
+        if (passes) withheld = true;
+        if (!unread) { unread = true; out.unjudged.push(f); }
+      }
     }
   }
-  return out;
+  return withheld && stop !== null ? { ...out, stopped: stop } : out;
 }
 
 const CONFTEST = /(^|\/)conftest\.py$/;
 const TEST_MODULE = /\.(test|spec)\.[^/]+$/;
 const LINKED_DEP = /^(?:file|link|workspace):/;
+/** A command run by Node or one of its package managers or test runners (after any VAR=value). */
+const NODE_RUNNER = /^\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:node|npx|npm|pnpm|yarn|bunx?|vitest|jest|mocha)(?:\.cmd|\.exe)?(?=\s|$)/i;
 const SITE_DIRS = (repo: RepoReader): string[] => {
   const dirs: string[] = [];
   for (const venv of ['.venv', 'venv']) {
@@ -221,10 +252,9 @@ function linkedCode(at: PlanAt): boolean {
  * and the lockfiles, so a result is reused only for the same question.
  */
 export function tddPlan(validators: Validator[], touched: string[], base: string, at: PlanAt): TddPlan {
-  const live = touched;
-  const overlay = live.filter(f => at.repo.exists(f) && (isTestFile(f) || CONFTEST.test(f)));
+  const overlay = touched.filter(f => at.repo.exists(f) && (isTestFile(f) || CONFTEST.test(f)));
   const modules = overlay.filter(f => TEST_MODULE.test(f) || isPytestModule(f));
-  const testPaths = live.filter(isTestFile);
+  const testPaths = touched.filter(isTestFile);
   const lockBase = at.git(['ls-tree', base, '--', ...LOCKFILES]) ?? '';
   const lockHead = at.git(['ls-tree', 'HEAD', '--', ...LOCKFILES]) ?? '';
   const overlayBlobs = overlay.length ? at.git(['ls-tree', 'HEAD', '--', ...overlay]) ?? '' : '';
@@ -241,7 +271,7 @@ export function tddPlan(validators: Validator[], touched: string[], base: string
     return list.length ? [{ v, list }] : [];
   });
   if (!fits.length) {
-    if (live.some(f => f.endsWith('_test.go') || f.endsWith('.rs'))) return done('same-package');
+    if (touched.some(f => f.endsWith('_test.go') || f.endsWith('.rs'))) return done('same-package');
     return done(modules.length ? 'no-command' : 'no-tests');
   }
   const { v, list } = fits[0];
@@ -256,6 +286,9 @@ export function tddPlan(validators: Validator[], touched: string[], base: string
   plan.cmd = runsPytest(v.affectedCmd as string) ? `${a.cmd} --continue-on-collection-errors` : a.cmd;
   if (lockBase !== lockHead) return done('lockfile');
   if (linkedCode(at)) return done('linked-code');
+  // Without a node_modules of repoDir's own BASE gets no link: the runner would run without the task's dependencies, and
+  // npx would download it. Never.
+  if (NODE_RUNNER.test(a.cmd) && linkSource(at.repoDir, 'node_modules') === null) return done('no-deps');
   return done(null);
 }
 
@@ -267,7 +300,7 @@ export function rootCauseOf(report: string | null): string | null {
   const marks = new Set(m[1]);
   let text = m[2].trimEnd();
   while (text.length && marks.has(text[text.length - 1]) && /[*`]/.test(text[text.length - 1])) text = text.slice(0, -1).trimEnd();
-  return text ? text.slice(0, 300) : null;
+  return text ? text.slice(0, 300).trimEnd() : null;
 }
 
 /** The check as a validator row: it never turns the validators red (ok: true), and the file carries the verdict. */
@@ -345,6 +378,10 @@ export interface TddRunCtx {
 
 const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const RM = { recursive: true, force: true, maxRetries: 3, retryDelay: 100 } as const;
+/** A check's notes in one: the given ones, `; ` between them, or null without any. */
+const notes = (...n: (string | null | undefined)[]): string | null => n.filter(Boolean).join('; ') || null;
+/** A check that timed out or could not check out BASE says nothing that lasts: it is never written nor reused. */
+const transient = (c: TddCheck): boolean => c.skipped === 'timeout' || c.skipped === 'no-checkout';
 const winPath = (s: string) => (process.platform === 'win32' ? path.resolve(s).toLowerCase() : path.resolve(s));
 
 const isDir = (p: string): boolean => { try { return statSync(p).isDirectory(); } catch { return false; } };
@@ -442,7 +479,8 @@ export function runTdd(plan: TddPlan, ctx: TddRunCtx): TddCheck {
     }
     for (const f of plan.overlay) {
       const dest = path.resolve(baseDir, f);
-      if (path.relative(baseDir, dest).startsWith('..') || path.isAbsolute(path.relative(baseDir, dest))) return done({ skipped: 'no-checkout' });
+      const rel = path.relative(baseDir, dest);
+      if (rel.split(path.sep)[0] === '..' || path.isAbsolute(rel)) return done({ skipped: 'no-checkout' });
       const blob = execFileSync('git', ['-C', ctx.repoDir, 'cat-file', 'blob', `HEAD:${f}`], { maxBuffer: 256 * 1024 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       mkdirSync(path.dirname(dest), { recursive: true });
       writeFileSync(dest, blob);
@@ -450,10 +488,10 @@ export function runTdd(plan: TddPlan, ctx: TddRunCtx): TddCheck {
     // Over every changed test path, so the lines a renamed, split or deleted file removes cancel the titles they moved.
     const names = newTestNames(ctx.git(['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-renames', '-U0', `${plan.base}..HEAD`, '--', ...plan.testPaths]) ?? '');
     const r = ctx.execAt(baseDir)(plan.cmd ?? '', Math.min(ctx.timeoutSec, TDD_TIMEOUT_MAX));
-    const verdict = classifyTdd(plan.files, names, { code: r.code, output: r.output, timedOut: r.timedOut }, plan.kind ?? 'test', new Set(baseFailingNames(ctx.baseline, plan.validator ?? '')));
-    return done({ ...verdict, skipped: r.timedOut ? 'timeout' : null });
-  } catch {
-    return done({ skipped: 'no-checkout' });
+    const { stopped, ...verdict } = classifyTdd(plan.files, names, { code: r.code, output: r.output, timedOut: r.timedOut }, plan.kind ?? 'test', new Set(baseFailingNames(ctx.baseline, plan.validator ?? '')));
+    return done({ ...verdict, skipped: r.timedOut ? 'timeout' : null, note: notes(check.note, stopped && `not judged: the runner stopped early (${stopped})`) });
+  } catch (e) {
+    return done({ skipped: 'no-checkout', note: notes(check.note, (e instanceof Error ? e.message : String(e)).trim()) });
   } finally {
     if (tmpDir !== null) clearCheckDir(tmpDir, { git: ctx.git, repoDir: ctx.repoDir });
   }
@@ -475,7 +513,10 @@ function planOf(c: PlanCtx): { plan: TddPlan; file: string; stored: TddCheck | n
 
 const readText = (file: string): string | null => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
 
-/** The brief's check: tdd-<n>.json when its key still holds, else a run that writes it; the row with the bug's root cause. */
+/**
+ * The brief's check: tdd-<n>.json when its key still holds, else a run that writes it (a `timeout` or `no-checkout` is
+ * neither written nor reused); the row with the bug's root cause.
+ */
 export function tddForBrief(c: TddBriefCtx): { check: TddCheck; row: TddRow; file: string; reused: boolean } {
   const bug = BUG_BRIEF.test(readText(path.join(c.dir, `brief-${c.n}.md`)) ?? '')
     ? { rootCause: rootCauseOf(readText(path.join(c.dir, `report-${c.n}.txt`))) } : null;
@@ -488,9 +529,9 @@ export function tddForBrief(c: TddBriefCtx): { check: TddCheck; row: TddRow; fil
     };
     return { check, row: tddRow(check, bug), file, reused: false };
   }
-  const reused = p.stored !== null && p.stored.key === p.plan.key;
+  const reused = p.stored !== null && p.stored.key === p.plan.key && !transient(p.stored);
   const check = reused ? (p.stored as TddCheck) : runTdd(p.plan, c);
-  if (!reused) writeTdd(p.file, check);
+  if (!reused && !transient(check)) writeTdd(p.file, check);
   return { check, row: tddRow(check, bug), file: p.file, reused };
 }
 
@@ -498,5 +539,5 @@ export function tddForBrief(c: TddBriefCtx): { check: TddCheck; row: TddRow; fil
 export function tddPending(c: PlanCtx): boolean {
   const p = planOf(c);
   if (!p) return false;
-  return p.stored === null || p.stored.key !== p.plan.key || p.stored.passedOnBase.length > 0;
+  return p.stored === null || p.stored.key !== p.plan.key || transient(p.stored) || p.stored.passedOnBase.length > 0;
 }
