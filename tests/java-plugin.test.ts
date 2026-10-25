@@ -42,6 +42,7 @@ const checkSkill = (dir: string, name: string) => {
   expect(bytes(read(`${dir}/SKILL.md`))).toBeLessThanOrEqual(SKILL_CAP);
 };
 const AGENT = 'plugins/java/agents/architecture-reviewer.md';
+const OSS = 'plugins/java/skills/java-oss-library';
 
 describe('the java plugin (w7 D1)', () => {
   it('the marketplace lists java, and its manifest names it at 0.1.0 with the same description', () => {
@@ -91,5 +92,17 @@ describe('the java plugin (w7 D1)', () => {
     const body = read(AGENT).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
     for (const w of ['rules not loaded', 'rules: spring-hexagonal-ddd', 'tests: ', 'not run: ', 'findings:', '- [<critical|important|minor>] <file>:<line> `<rule id>`',
       'pre-existing (outside the diff, at most 5):', 'not applicable:', 'verdict: ', '*ArchitectureTest*', './gradlew quality', '600000']) expect(body, w).toContain(w);
+  });
+  it('java-oss-library: its frontmatter, under the cap, AGENTS.md as the contract it points to, and the release in its reference', () => {
+    checkSkill(OSS, 'java-oss-library');
+    const md = read(`${OSS}/SKILL.md`);
+    expect(readdirSync(path.join(repo, OSS, 'references'))).toEqual(['release.md']);
+    expect(md).toContain(pointer('release'));
+    for (const w of ['AGENTS.md', 'build-logic', 'quality', 'coverage', 'spotlessCheckAll', 'spotlessApplyAll', 'verifyBoot3Compatibility', 'verifyBoot4Compatibility',
+      'agent-ready', 'needs-design', '### Decision', 'rebase --onto', 'docs/superpowers']) expect(md, w).toContain(w);
+    const release = read(`${OSS}/references/release.md`);
+    for (const w of ['vanniktech', 'Maven Central', 'apiBaseline', 'japicmp', 'chore: bump version to', 'CHANGELOG.md']) expect(release, w).toContain(w);
+    // AGENTS.md stays the contract: the skill names it and never copies its steps.
+    for (const w of ['Check the labels first', 'Regression test first', 'Stay in scope', 'When blocked']) expect(md + release, w).not.toContain(w);
   });
 });
