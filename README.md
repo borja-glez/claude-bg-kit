@@ -42,6 +42,7 @@ Design them, plan them, build them with independent review, run them in parallel
 | ☕ | **java** | For Java and Spring Boot: the **DDD and hexagonal rules** of a service (aggregates, ports, events and the outbox, RFC 9457 errors, ArchUnit), the **upkeep of Java libraries** (build-logic, two Boot starters, Maven Central) and an on-demand **architecture reviewer**. It needs none of the other plugins. | [plugins/java](plugins/java/README.md) |
 | 🌐 | **web** | Domain skills for web projects. **astro-dokploy-site** holds what every Astro site with Preact islands on Dokploy otherwise rediscovers: CSP hashes, Lighthouse and Playwright under Claude Code, Vite workers, MDX, nginx and the Dokploy fields. | [plugins/web](plugins/web/README.md) |
 | 🧪 | **ml** | Machine learning on a local NVIDIA GPU: **uv environments and CUDA wheels**, VRAM and heat budgets, trl and transformers APIs checked against the installed version, leak-free splits, notebooks run whole, Hugging Face cards and in-browser ONNX inference. It is text only, a skill and its references, and needs none of the other plugins. | [plugins/ml](plugins/ml/README.md) |
+| 👥 | **crew** | Two on-demand agents: **novice-reader** tells where a newcomer gets lost in a doc, a course or a web page, with the exact quote and its severity, and never rewrites; **playtest-qa** plays a browser prototype as a new player, with real keyboard and mouse input in headless Chrome on the GPU, and gives figures per minute. | [plugins/crew](plugins/crew/README.md) |
 
 ## Mix and match
 
@@ -87,6 +88,7 @@ claude plugin install lens@bg-kit
 claude plugin install java@bg-kit      # Java and Spring Boot: two skills and the architecture reviewer
 claude plugin install web@bg-kit
 claude plugin install ml@bg-kit        # skills for machine learning on a local GPU
+claude plugin install crew@bg-kit
 ```
 
 Inside a session, `/plugin marketplace add borja-glez/claude-bg-kit` does the same. To get new versions later, run `claude plugin marketplace update bg-kit`.
@@ -228,6 +230,7 @@ plugins/
   java/       skills for Spring Boot services and Java libraries, the architecture-reviewer agent
   web/        the astro-dokploy-site skill and its references (text only)
   ml/         the ml-local-gpu skill and its references
+  crew/       two on-demand agents, novice-reader and playtest-qa (text only)
 src/          TypeScript sources: lib/ (shared), page/ (roadmap), mod/ (waypoint band), lens/, forge/
 tests/        vitest suites
 docs/
