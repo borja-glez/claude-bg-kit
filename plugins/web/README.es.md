@@ -37,16 +37,15 @@ Se carga cuando trabajas en un sitio Astro estático con islas de Preact, constr
 
 | Área | Qué resuelve |
 | --- | --- |
-| Build and islands | El patrón `mounted`, el `min-height` de las islas, la llamada literal al worker de Vite, la prosa MDX con componentes, pnpm fijado en `packageManager`. |
+| Build e islas | El patrón `mounted`, el `min-height` de las islas, la llamada literal al worker de Vite, la prosa MDX con componentes, pnpm fijado en `packageManager`. |
 | CSP | `security.csp` con hashes por página, los scripts `is:inline` con su hash en la config, nada de `<style is:inline>` en las figuras, `worker-src`. |
-| Checks | Prettier como puerta propia, `astro check` con TypeScript 6, el webServer de Playwright bajo Claude Code, Lighthouse en Windows y en CI, Chrome real. |
-| Deploy | El Dockerfile en la raíz, las cabeceras y los tipos MIME de nginx, los campos de ruta y contexto de Dokploy. |
-| Repo hygiene | Ni `CLAUDE.md`, ni `AGENTS.md`, ni `.claude/` en el repo de un sitio. |
+| Comprobaciones | Prettier como puerta propia, `astro check` con TypeScript 6, el webServer de Playwright bajo Claude Code, Lighthouse en Windows y en CI, Chrome real. |
+| Despliegue | El Dockerfile en la raíz, las cabeceras y los tipos MIME de nginx, los campos de ruta y contexto de Dokploy. |
+| Higiene del repo | Ni `CLAUDE.md`, ni `AGENTS.md`, ni `.claude/` en el repo de un sitio. |
 
 Las reglas viven en `SKILL.md`, que no pasa de 16 000 bytes para que una compactación lo conserve entero. Cuatro references guardan los procedimientos; cada una se lee al llegar a su momento y otra vez cada vez que se vuelve.
 
 ## Cómo se comprueba
 
 - `tests/plugin-web.test.ts` cubre el manifiesto, el solo texto, la higiene, el tope de tamaño, los punteros y los valores que debe llevar cada fichero.
-- La skill se probó con y sin ella sobre escenarios (superpowers:writing-skills), y esas pruebas se repiten cada vez que la skill cambia.
-- No enlaza al ledger, que no se versiona, ni lleva cifras que se queden viejas.
+- Los escenarios se ejecutan con y sin la skill (superpowers:writing-skills) cada vez que esta cambia.

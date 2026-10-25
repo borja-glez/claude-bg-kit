@@ -14,7 +14,6 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Monorepo: copy each workspace package.json by hand, the app's too, and add a line for every new package.
 COPY apps/<app>/package.json apps/<app>/
 COPY packages/<name>/package.json packages/<name>/
-# one COPY per workspace package.json; a new package needs its own line
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build
@@ -64,7 +63,7 @@ server {
   absolute_redirect off;          # behind Dokploy's proxy, redirects must stay relative
   gzip on;
   gzip_static on;
-  gzip_types text/css application/javascript application/json image/svg+xml;   # no application/wasm
+  gzip_types text/css application/javascript text/javascript application/json image/svg+xml;   # no application/wasm
   error_page 404 /404.html;
 
   include /etc/nginx/security-headers.conf;
@@ -77,9 +76,20 @@ server {
     default_type application/wasm;
     include /etc/nginx/security-headers.conf;
   }
-  location /_astro/ {
+  location ^~ /_astro/ {
     add_header Cache-Control "public, max-age=31536000, immutable";
     include /etc/nginx/security-headers.conf;
+
+    location ~* \.mjs$ {
+      default_type text/javascript;
+      add_header Cache-Control "public, max-age=31536000, immutable";
+      include /etc/nginx/security-headers.conf;
+    }
+    location ~* \.wasm$ {
+      default_type application/wasm;
+      add_header Cache-Control "public, max-age=31536000, immutable";
+      include /etc/nginx/security-headers.conf;
+    }
   }
   location / {
     try_files $uri $uri/index.html =404;
@@ -96,6 +106,6 @@ add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" alway
 add_header X-Content-Type-Options "nosniff" always;
 ```
 
-Why every `location` repeats them: an `add_header` inside a `location` replaces all the `add_header` lines inherited from the `server`. Either repeat the headers or `include` the same file in each one, as above; the `/_astro/` block keeps its own `Cache-Control` next to the include.
+Why every `location` repeats them: an `add_header` inside a `location` replaces all the `add_header` lines inherited from the `server`. Either repeat the headers or `include` the same file in each one, as above; the `/_astro/` block keeps its own `Cache-Control` next to the include. The `.mjs` and `.wasm` regex locations win over a plain prefix, so `/_astro/` is `^~` and repeats them inside, each with `immutable`; the top-level two serve the files outside `/_astro/`.
 
 Why `frame-ancestors 'none'` comes from nginx: a CSP delivered in a `<meta>` cannot carry `frame-ancestors`. nginx's CSP header holds only that directive; the page's own policy stays in the generated `<meta>`.

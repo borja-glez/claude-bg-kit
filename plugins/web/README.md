@@ -48,5 +48,4 @@ The rules live in `SKILL.md`, which stays under 16,000 bytes so a compaction kee
 ## How it is checked
 
 - `tests/plugin-web.test.ts` covers the manifest, text only, hygiene, the size cap, the pointers and the values each file must hold.
-- The skill was tried with and without it on scenarios (superpowers:writing-skills), and those runs are repeated every time the skill changes.
-- There is no link to the ledger, which is not versioned, and no figure that goes stale.
+- Scenarios are run with and without the skill (superpowers:writing-skills) whenever it changes.

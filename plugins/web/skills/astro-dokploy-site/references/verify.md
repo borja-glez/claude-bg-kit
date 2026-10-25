@@ -41,7 +41,8 @@ On Windows `lhci` ends with `EPERM` while deleting `...\Temp\lighthouse.*` (the 
 
 1. Start the preview on a free port (see above), in the background.
 2. Launch Chrome on its own, in the background, and note its PID:
-   `chrome --headless=new --remote-debugging-port=9333 --user-data-dir=<temp dir>`
+   `<path to chrome.exe> --headless=new --remote-debugging-port=9333 --user-data-dir=<temp dir>`
+   (`chrome` is not on PATH on Windows; chrome.exe usually sits under `C:\Program Files\Google\Chrome\Application\`.)
 3. Run `npx lighthouse <url> --port=9333 [--preset=<config's preset>] --output=json --output-path=<file>`.
 4. Stop Chrome and the preview by those PIDs, never by process name.
 
