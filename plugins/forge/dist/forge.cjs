@@ -30220,7 +30220,7 @@ function forgeSources(main, scope) {
       }
     }
   }
-  const inScope = new Set(tasks.map((t) => t.task));
+  const inScope = new Set(tasks.map((t) => JSON.stringify([t.project, t.task])));
   for (const f of names3(jobsDir(main)).filter((n) => n.endsWith(".json")).slice(0, JOB_FILES_MAX)) {
     const abs = import_node_path47.default.join(jobsDir(main), f);
     let raw;
@@ -30234,7 +30234,8 @@ function forgeSources(main, scope) {
     const job = normalizeJob(raw);
     if (!job) continue;
     const owner = job.task === null ? scope.kind === "execution" ? "" : null : baseOf(job.task);
-    if (owner === null || owner !== "" && !inScope.has(owner)) continue;
+    if (owner === null) continue;
+    if (owner !== "" && !inScope.has(JSON.stringify([projectOfDir(job.out, job.task), owner]))) continue;
     addDoc(abs, "job", owner === "" ? null : owner, () => job.startedAt);
   }
   if (scope.kind === "execution" && exec) {
