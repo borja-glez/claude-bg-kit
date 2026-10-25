@@ -117,16 +117,18 @@ export function buildCase(task: string, reviewer: string, high: Finding[], xhigh
   };
 }
 
+export type ShadowStatus = 'passes' | 'fails' | 'unverified';
+
 export interface ShadowReviewerReport {
   reviewer: string;
   cases: number;
   xhighBlockers: number;
   recovered: number;
-  recoveredPct: number; // rounded; 100 when xhigh found no blockers
+  recoveredPct: number | null; // rounded; null when the twins found no blocker
   missedCritical: number;
   highOnly: number;
   missedCases: { task: string; missed: Finding[] }[];
-  passes: boolean;      // recovered >= 90 % and no critical missed
+  status: ShadowStatus;        // passes: recovered >= 90 % and no critical missed; unverified: no xhigh blocker in any case
 }
 
 export function shadowReport(cases: ShadowCase[]): ShadowReviewerReport[] {
@@ -136,23 +138,24 @@ export function shadowReport(cases: ShadowCase[]): ShadowReviewerReport[] {
     const xhighBlockers = cs.reduce((n, c) => n + c.xhigh.length, 0);
     const recovered = cs.reduce((n, c) => n + c.recovered.length, 0);
     const missedCritical = cs.reduce((n, c) => n + c.missedCritical.length, 0);
-    const ratio = xhighBlockers ? recovered / xhighBlockers : 1;
+    const status: ShadowStatus = !xhighBlockers ? 'unverified'
+      : recovered / xhighBlockers >= PASS_RATIO && missedCritical === 0 ? 'passes' : 'fails';
     return {
       reviewer, cases: cs.length, xhighBlockers, recovered,
-      recoveredPct: Math.round(ratio * 100),
+      recoveredPct: xhighBlockers ? Math.round(recovered / xhighBlockers * 100) : null,
       missedCritical,
       highOnly: cs.reduce((n, c) => n + c.highOnly.length, 0),
       missedCases: cs.filter(c => c.missed.length).map(c => ({ task: c.task, missed: c.missed })),
-      passes: ratio >= PASS_RATIO && missedCritical === 0,
+      status,
     };
   });
 }
 
 const TEXT = {
   es: { none: 'No hay casos en sombra.', cases: 'casos', xhigh: 'bloqueantes de xhigh', rec: 'recuperados por high',
-    crit: 'críticos perdidos', only: 'solo de high', pass: 'cumple', fail: 'no cumple', missed: 'perdidos' },
+    crit: 'críticos perdidos', only: 'solo de high', passes: 'cumple', fails: 'no cumple', unverified: 'sin verificar', missed: 'perdidos' },
   en: { none: 'No shadow cases.', cases: 'cases', xhigh: 'xhigh blockers', rec: 'recovered by high',
-    crit: 'criticals missed', only: 'high only', pass: 'passes', fail: 'fails', missed: 'missed' },
+    crit: 'criticals missed', only: 'high only', passes: 'passes', fails: 'fails', unverified: 'unverified', missed: 'missed' },
 };
 
 const where = (f: Finding) => f.file ? (f.line != null ? `${f.file}:${f.line}` : f.file) : '-';
@@ -163,8 +166,8 @@ export function renderShadowReport(report: ShadowReviewerReport[], lang: 'es' | 
   if (!report.length) return t.none + '\n';
   const out: string[] = [];
   for (const r of report) {
-    out.push(`${r.reviewer}: ${r.passes ? t.pass : t.fail}`);
-    out.push(`  ${t.cases}: ${r.cases} · ${t.xhigh}: ${r.xhighBlockers} · ${t.rec}: ${r.recovered} (${r.recoveredPct} %) · ${t.crit}: ${r.missedCritical} · ${t.only}: ${r.highOnly}`);
+    out.push(`${r.reviewer}: ${t[r.status]}`);
+    out.push(`  ${t.cases}: ${r.cases} · ${t.xhigh}: ${r.xhighBlockers} · ${t.rec}: ${r.recovered} (${r.recoveredPct == null ? '-' : `${r.recoveredPct} %`}) · ${t.crit}: ${r.missedCritical} · ${t.only}: ${r.highOnly}`);
     for (const c of r.missedCases) {
       out.push(`  ${c.task} — ${t.missed}:`);
       for (const f of c.missed) out.push(`    [${f.severity}] ${where(f)} ${f.problem}`);

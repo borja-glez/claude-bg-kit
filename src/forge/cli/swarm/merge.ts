@@ -11,6 +11,9 @@ import { claudeSessionId } from '../../../lib/claude-session.js';
 // auth's isForgeBranch (any forge/… branch: merging into it needs no answer) is not cleanup's (task/* and forge/run-*).
 import { checkMergeAuth, isForgeBranch as isForgeTarget, mergeAsk, pendingAuth, readAuths, useAuth, writeAuth, type AuthRecord } from '../../auth.js';
 import { loadTrustedConfig } from '../../trust.js';
+import { OBJECT_ID } from '../../local.js';
+import { commitOf, treeOf, sameReviewedTree, changedOut, FINAL_TREE_CHANGED, FINAL_NO_RECEIPT } from '../../receipts.js';
+import { predictMerge, gitRun } from '../../merge-predict.js';
 import { publishFor, type StateWrite } from '../../roadmap-sources.js';
 import { finalVerdictOf } from '../../roadmap-run.js';
 import type { Result } from '../context.js';
@@ -31,6 +34,8 @@ function mergedPublish(io: Io, e: ExecutionState): { publish: StateWrite[]; publ
   return { publish, ...(errors.length ? { publishErrors: errors } : {}) };
 }
 
+type FinalReceipt = { ok: true } | { ok: false; reason: string; changed: string[] };
+
 function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   const e = readExecution(io.cwd);
   if (!e) throw new UsageError('swarm merge: no execution (forge swarm start)');
@@ -46,11 +51,20 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     const m = inFlight.doc;
     return out({ result: 'busy', detail: `${m ? `an integration (${m.task ?? m.ref}, pid ${m.pid}) is merging in ${m.dir}` : 'an integration is starting'}; run swarm merge again once it ends` });
   }
+  // A3: the commit the run branch has now is the one merged, whatever lands on it while the validators run.
+  const tip = commitOf(deps.git, `refs/heads/${e.branch}`);
+  // A permission for a merge that will end in a conflict is of no use, so none is asked for.
+  const predicted = predictMerge(gitRun(io.cwd), e.base, e.branch);
+  if (predicted.state === 'conflict') {
+    const { paths } = predicted;
+    return out({ result: 'conflict', predicted: true, paths, detail: `merging ${e.branch} into ${e.base} would conflict: ${paths.slice(0, 5).join(', ')}` });
+  }
   // I-03: a merge into a branch that is not forge's needs a permission of the person's, recorded by the hook `answer` from
   // their AskUserQuestion answer (--yes alone is none), and each permission allows one merge:
   // - their yes to the start question (mergeOnFinish) allows the one final merge of this run once it finished (inactive,
-  //   `finished`, not closed) and its final review accepted it; while the run is active, stopped or closed, or its final
-  //   review has not accepted the run as it is, the merge asks as any other does;
+  //   `finished`, not closed) and its final review accepted the tree the run branch still has (forge's notes in
+  //   .forge/verify/*.md aside); while the run is active, stopped or closed, or its final review has not accepted the run
+  //   as it is, the merge asks as any other does;
   // - their yes to this merge's question, from the session that merges (C1's: the flag wins over
   //   CLAUDE_CODE_SESSION_ID), less than an hour old, whose question named this run branch and this base.
   const es = spanish(locale, io.cwd, e.project);
@@ -69,21 +83,27 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   const needsYes = (v: { reason: string; note?: string }): Result => out({ result: 'needs-authorization', reason: v.reason, ...(v.note ? { note: v.note } : {}), ...ask() });
   /** The question path: without --yes the question; with it the yes recorded for it, or why not. */
   const askYes = (): Result | AuthRecord => {
-    if (!rest.includes('--yes')) return out({ result: 'needs-authorization', ...ask() });
+    if (!rest.includes('--yes')) return out({ result: 'needs-authorization', ...why, ...ask() });
     const v = check();
     return v.ok ? v.record : needsYes(v);
   };
   const events = readEvents(io.cwd);
   // The start question's promise: «when everything is done and the final review passes». The run's final review last
-  // said `accept` (fix and redo do not), and no task was integrated into the run branch after that verdict.
-  const reviewed = (x: ExecutionState): boolean => {
-    const v = finalVerdictOf(events, x);
-    const at = v?.action === 'accept' ? Date.parse(v.ts) : NaN;
-    if (Number.isNaN(at)) return false;
-    return Object.values(x.tasks).every(t => t.status !== 'integrated' || !t.finishedAt || !(Date.parse(t.finishedAt) > at));
-  };
+  // said `accept` (fix and redo do not), and the run branch still has the tree it accepted, forge's notes in
+  // .forge/verify/*.md and this run's decisions file aside. It depends only on the branch and the events of run `e`.
+  const receipt = ((): FinalReceipt | null => {
+    const v = finalVerdictOf(events, e);
+    if (v?.action !== 'accept') return null;
+    // A tree that is no object id (one logged by hand, or a `-s` git would read as an option) is no receipt.
+    if (typeof v.tree !== 'string' || !OBJECT_ID.test(v.tree)) return { ok: false, reason: FINAL_NO_RECEIPT, changed: [] };
+    const now = tip ? treeOf(deps.git, tip) : null;
+    if (now === null) return { ok: false, reason: FINAL_TREE_CHANGED, changed: [] };
+    const same = sameReviewedTree(deps.git, v.tree, now, [`docs/forge/decisions/${e.runId}.md`]);
+    return same.ok ? { ok: true } : { ok: false, reason: FINAL_TREE_CHANGED, changed: same.changed };
+  })();
+  const why = receipt && !receipt.ok ? { reason: receipt.reason, ...(receipt.changed.length ? changedOut(receipt.changed) : {}) } : {};
   const finishedRun = (x: ExecutionState | null): x is ExecutionState =>
-    !!x && x.runId === e.runId && x.mergeOnFinish && !x.active && x.stopReason === 'finished' && !x.closedAt && reviewed(x);
+    !!x && x.runId === e.runId && x.mergeOnFinish && !x.active && x.stopReason === 'finished' && !x.closedAt && receipt?.ok === true;
   const asks = !isForgeTarget(e.base);
   const onFinish = asks && finishedRun(e);
   let auth: AuthRecord | null = null;
@@ -96,12 +116,14 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   if (branch !== e.base) return out({ result: 'main-dirty', detail: `the main checkout is on ${branch ?? '?'}, not ${e.base}` });
   // I-03: before any permission is spent: without the person's trust in the commands, exit 2 with nothing merged.
   const config = loadTrustedConfig(io.cwd);
+  const runAt = cleanRunWorktree(deps, runWorktree(io.cwd), e.branch);
   const opts: MergeOpts = {
     message: `forge: merge ${e.branch}`, scope: 'final', timeoutSec: config.validatorTimeoutSec, configRoot: io.cwd,
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'main', setup: config.swarm.setup,
-    runAt: cleanRunWorktree(deps, runWorktree(io.cwd), e.branch), personal: true, retryDeps: rest.includes('--retry-deps'),
+    runAt: runAt && tip && runAt.git(['rev-parse', 'HEAD'])?.trim() === tip ? runAt : null,
+    personal: true, retryDeps: rest.includes('--retry-deps'),
     run: runOptions(config, events, io.now()),
-    main: io.cwd, cache: { read: false, write: config.validate.cache }, now: io.now, slot: io.slot, branch: e.base,
+    main: io.cwd, cache: { read: false, write: config.validate.cache }, now: io.now, slot: io.slot, branch: e.base, ...(tip ? { commit: tip } : {}),
   };
   // I-03: the permission is spent before the merge, the one step that cannot be undone, so none ever allows two merges.
   // Each is checked again and spent while this process holds the execution's lock, which another merge of the run takes

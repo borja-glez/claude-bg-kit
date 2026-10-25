@@ -6,6 +6,11 @@ import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, typ
 import { UsageError } from '../errors.js';
 import { eventsOf, isTask, resolveProject } from '../../task-ref.js';
 import { blocking } from '../../validators.js';
+import { readExecution, runWorktree } from '../../execution.js';
+import { mainCheckout } from '../../local.js';
+import { loadConfig } from '../../config.js';
+import { cleanTree, cacheGit } from '../../validate-cache.js';
+import { defaultGit } from '../exec.js';
 import { logVerifyResult, verifyAwaited } from '../shared.js';
 
 export const command: Command = (args, ctx) => {
@@ -58,9 +63,20 @@ export const command: Command = (args, ctx) => {
   const result = synthesize(reviews, weightsFor({ sensitive: has('sensitive'), perf: has('perf') }), validatorsOk, failing);
   if (!recorded) result.reasons.push('no validation recorded');
   if (preexisting.length) result.reasons.push(`already failing on the base commit, not counted: ${preexisting.join(', ')}`);
+  // The final review judges the run's branch, even when verdict runs in the main checkout: its receipt is the run worktree's tree.
+  const main = mainCheckout(io.cwd);
+  const exec = readExecution(main);
+  const run = runWorktree(main);
+  const inRun = exec !== null && exec.kind === 'plan' && task === `${exec.project}-final` && existsSync(run);
+  const judged = inRun ? run : ctx.repoDir;
+  const git = inRun ? defaultGit(run) : (io.git ?? defaultGit(ctx.repoDir));
+  let generated: string[] = [];
+  try { generated = loadConfig(judged).generated; } catch { /* a config that does not load names no generated paths */ }
+  const tree = cleanTree(cacheGit(git), generated);
   // dir lets `round` count a re-run verdict on the same review dir once.
   appendEvent(io.cwd, { ts: ts(), kind: 'verdict', task, dir: path.relative(io.cwd, dir).split(path.sep).join('/') || '.', action: result.action, score: result.score, signature: result.signature,
-    critical: result.critical.length, important: result.important.length, minor: result.minor.length });
+    critical: result.critical.length, important: result.important.length, minor: result.minor.length,
+    ...(tree ? { tree } : {}) });
   if (verifyFile !== undefined && !verifyArg) logVerifyResult(io.cwd, ts(), task, dir, verifyFile);
   // invalid and incomplete (a draft with "complete": false) name the reviewers to respawn once.
   return json({ ...result, invalid: result.reviewers.filter(r => r.invalid).map(r => r.name), incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name) });

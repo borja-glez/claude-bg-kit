@@ -641,6 +641,7 @@ const SAY: Record<string, [string, string]> = {
   blocked: ['{t} bloqueada', '{t} blocked'],
   integrated: ['{t} integrada', '{t} integrated'],
   conflict: ['{t} en conflicto', '{t} in conflict'],
+  unreviewed: ['{t} vuelve a revisión: su rama no tiene el árbol que aceptó su revisión', '{t} back to review: its branch does not hold the tree its review accepted'],
   'run-dirty': ['{t} espera: el worktree de la ejecución no está listo para integrar', '{t} waits: the run worktree is not ready to integrate'],
   'run-deps': ['{t} espera: las dependencias del worktree de la ejecución no se instalaron', '{t} waits: the run worktree dependencies did not install'],
   error: ['{t}: falló {x}', '{t}: {x} failed'],

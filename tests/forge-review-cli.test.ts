@@ -1321,6 +1321,25 @@ describe('forge review-close', () => {
     write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
     expect(JSON.parse(close().stdout).minor).toEqual([expect.objectContaining({ problem: 'naming', file: 'a.txt' })]);
   });
+
+  it('the verdict records the reviewed tree only on a clean checkout still at the commit review-prep saw (A3, Review Focus 2)', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    const lastVerdict = () => readEvents(root).filter(e => e.kind === 'verdict').at(-1)!;
+    expect(JSON.parse(close().stdout).action).toBe('accept');
+    expect(lastVerdict().tree).toBe(git('rev-parse', 'HEAD^{tree}'));
+    // Something uncommitted, as a file a validator left: no receipt.
+    writeFileSync(path.join(wt, 'stray.txt'), 'x\n');
+    expect(close().code).toBe(0);
+    expect(lastVerdict()).not.toHaveProperty('tree');
+    rmSync(path.join(wt, 'stray.txt'));
+    // A commit since review-prep: the reviewers never saw that tree.
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo\nthree\n');
+    git('commit', '-q', '-am', 'late');
+    expect(close().code).toBe(0);
+    expect(lastVerdict()).not.toHaveProperty('tree');
+  });
 });
 
 describe('the tree cache (C6), with forge in the worktree itself', () => {

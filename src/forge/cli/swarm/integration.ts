@@ -67,6 +67,8 @@ export interface MergeOpts {
   task?: string | null;
   /** The branch `at` must still be on when the merge starts, checked under the marker as HEAD's commit is. */
   branch?: string;
+  /** The commit whose receipt was checked: it is what gets merged. A commit that reaches `ref` afterwards is not merged. */
+  commit?: string;
 }
 
 // The untracked paths git does not ignore, forge's own state aside (a directory collapsed into `dir/`).
@@ -155,13 +157,14 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
       main: o.main, git: cacheGit(where.git), dir: o.cache.read || o.cache.write ? checkoutPrefix(where.git) : null, repo: where.repo, generated,
       read: o.cache.read, write: o.cache.write, tree, now: o.now,
     });
+  const rev = o.commit ?? ref;
   const key = `${o.scope}-${o.target}`;
   const selection: Scope = o.scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null };
   const merging = () => at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null;
   if (merging()) return { result: 'dirty', detail: 'an unfinished merge is in progress there (git merge --abort to clear it)' };
   const dirty = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
   if (dirty === null || dirty.trim() !== '') return { result: 'dirty', detail: 'it has uncommitted changes' };
-  if (at.git(['rev-parse', '--verify', '-q', `${ref}^{commit}`]) === null) return { result: 'conflict', detail: `unknown ref ${ref}` };
+  if (at.git(['rev-parse', '--verify', '-q', `${rev}^{commit}`]) === null) return { result: 'conflict', detail: `unknown ref ${ref}` };
   const pre = at.git(['rev-parse', 'HEAD'])?.trim();
   if (!pre) return { result: 'conflict', detail: 'cannot read HEAD' };
   const place = workdirOf(at);
@@ -268,7 +271,7 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   };
   // The final merge into a target that has not moved since the run branched: the merged tree is the run tip's, which
   // the run worktree validates with its own dependencies; nothing is installed in the person's checkout.
-  const unmoved = !!o.runAt && at.git(['merge-base', '--is-ancestor', 'HEAD', ref]) !== null;
+  const unmoved = !!o.runAt && at.git(['merge-base', '--is-ancestor', 'HEAD', rev]) !== null;
   // The tip's dependencies are missing: installed before the baseline. In the run worktree, which is forge's, also when
   // forge's last install there failed or was for other manifests (a manifest changed by hand). The person's checkout
   // only gets missing ones: dependencies they installed themselves for a change of their own are never reinstalled on
@@ -330,14 +333,14 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
     const on = at.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
     if (on !== o.branch) return { result: 'dirty', detail: `is on ${on ?? '?'}, not ${o.branch}`, ...withSetup() };
   }
-  if (at.git(['merge', '--no-ff', '--no-commit', ref]) === null) {
+  if (at.git(['merge', '--no-ff', '--no-commit', rev]) === null) {
     if (!merging()) return { result: 'conflict', detail: `git refused to merge ${ref}`, ...withSetup() };
     return rollback(`merge conflict with ${ref}`);
   }
   if (!merging()) return { result: 'merged', sha: pre, preexisting: [], newValidators: [], surfacesChanged: [], ...withSetup() };
   // The index holds the merged tree (HEAD is still the pre-merge commit until the commit below).
   const merged = at.git(['write-tree'])?.trim() || null;
-  const inRun = !!o.runAt && merged !== null && merged === (at.git(['rev-parse', '--verify', '-q', `${ref}^{tree}`])?.trim() || null);
+  const inRun = !!o.runAt && merged !== null && merged === (at.git(['rev-parse', '--verify', '-q', `${rev}^{tree}`])?.trim() || null);
   const v = inRun ? o.runAt! : at;
   if (!inRun && at.repo.exists('package.json')) {
     const changed = at.git(['diff', '--name-only', pre, '--', ...DEP_FILES]);

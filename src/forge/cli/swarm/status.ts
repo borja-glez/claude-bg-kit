@@ -5,6 +5,7 @@ import { UNBOUND_WARNING } from '../../hook.js';
 import { isSafeId, type ExecutionState } from '../../../lib/execution-state.js';
 import { mainCheckout } from '../../local.js';
 import { readWorkDir, workDir, workRel } from '../../task-ref.js';
+import { gitRun, predictMerge, type MergePrediction } from '../../merge-predict.js';
 import { runDocOf } from '../../run-doc.js';
 import { boundLiveness, releaseWrites, openTasks } from './shared.js';
 
@@ -24,6 +25,22 @@ function tasksWork(main: string, e: ExecutionState): Record<string, string> {
   }));
 }
 
+/**
+ * A3: what would conflict, before anyone integrates. Each accepted task's branch against the run branch, and (in a plan
+ * run) the run branch against its base; an ephemeral run has no base to merge into (merge null). It touches no
+ * checkout: git merge-tree writes objects, not files. With a Git older than 2.38 (no merge-tree --write-tree) every
+ * prediction comes out unverified.
+ */
+function predictionsOf(main: string, e: ExecutionState): { merge: MergePrediction | null; tasks: Record<string, MergePrediction> } {
+  const run = gitRun(main);
+  const accepted = Object.entries(e.tasks).filter(([, t]) => t.status === 'accepted');
+  return {
+    merge: e.kind === 'plan' ? predictMerge(run, e.base, e.branch) : null,
+    // An ephemeral run's branch is its base (swarm start sets it so): its tasks are predicted against the branch they integrate into.
+    tasks: Object.fromEntries(accepted.map(([id, t]) => [id, predictMerge(run, e.branch, t.branch)])),
+  };
+}
+
 export const subcommand: SwarmCommand = (rest, ctx) => {
   const { io, json, now } = ctx;
   // K2-01: the execution of the main checkout, from any worktree.
@@ -37,6 +54,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   return json({
     present: state !== null, state, ...(state ? { work: tasksWork(main, state) } : {}), ...(coordinator ? { coordinator } : {}),
     ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}),
+    ...(state && !state.closedAt ? { predicted: predictionsOf(main, state) } : {}),
     // J-15: meta/run as the roadmap takes it, built by the CLI; carry 10: once the run ended, the writes that free the
     // coordinator's tasks it left running or stopped.
     publish: state ? { run: runDocOf(main, state), ...(!state.active ? { release: releaseWrites(state, openTasks(state)) } : {}) } : null,

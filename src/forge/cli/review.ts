@@ -28,9 +28,10 @@ import { collectTwins, shadowCommand } from './shadow.js';
 import { restoringRegenerated } from './swarm.js';
 import { verifyAwaited } from './shared.js';
 import { mainCheckout } from '../local.js';
+import { treeOf } from '../receipts.js';
 import { loadTrustedConfig } from '../trust.js';
 import { eventsSince, executionHolding } from '../execution.js';
-import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
+import { runWithCache, cacheGit, checkoutPrefix, cleanTree } from '../validate-cache.js';
 import { noSlot, type Slot } from '../jobs.js';
 import { reviewRound, reviewerKey, withSecurity, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type SpawnEntry, type TriageReview } from '../review-round.js';
 
@@ -775,13 +776,19 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   if (!Array.isArray(rows)) result.reasons.push('no validation recorded');
   if (preexisting.length) result.reasons.push(`already failing on the base commit, not counted: ${preexisting.join(', ')}`);
 
+  // The receipt is the tree the reviewers saw: HEAD's tree must still be that of head.txt, and the checkout clean.
+  const reviewed = (readText(path.join(roundDir, 'head.txt')) ?? '').trim();
+  const seen = SHA.test(reviewed) ? treeOf(deps.git, reviewed) : null;
+  const clean = seen ? cleanTree(cacheGit(deps.git), config.generated) : null;
+  const tree = clean !== null && clean === seen ? clean : null;
+
   const ts = deps.now().toISOString();
   appendPhase(deps.cwd, { ts, kind: 'phase', task: id, phase: 'verdict', brief: Number(n), round });
   appendEvent(deps.cwd, { ts, kind: 'verdict', task, dir: rel(deps.cwd, roundDir), action: result.action, score: result.score, signature: result.signature,
     critical: result.critical.length, important: result.important.length, minor: result.minor.length, deferred: result.deferred.length, reviews: reviewsCount,
     ...(result.ask.length ? { ask: result.ask.length } : {}), ...(express ? { express: true } : {}),
     // A held review never counts toward stalled (roundDecision): its blocking set is not a re-review result.
-    ...(held ? { held: true } : {}) });
+    ...(held ? { held: true } : {}), ...(tree ? { tree } : {}) });
   if (verifyFile !== undefined) {
     // As FORGE verdict logs it.
     const evidence = rel(deps.cwd, roundDir).replace(/reviews-(\d+-\d+)$/, 'evidence/$1');

@@ -6,7 +6,7 @@ import { run, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/
 import { swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
 import { readExecution } from '../src/forge/execution.js';
 import { readLocal } from '../src/forge/local.js';
-import { readEvents } from '../src/forge/ledger.js';
+import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { loadConfig } from '../src/forge/config.js';
 import { SLOT_MAX_WAIT_MS } from '../src/forge/jobs.js';
 import { mergingFile, readMerging, readMergingFile, removeMergingIf, takeMerging, MERGING_UNREADABLE_MS } from '../src/forge/merging.js';
@@ -1200,6 +1200,106 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     writeFileSync(path.join(root, '.forge', 'work', 'shop', 'final-validators.json'), '[]');
     return out(run(['verdict', '--task', 'shop-final', '--dir', '.forge/work/shop/final', '--validators', '.forge/work/shop/final-validators.json'], at)).action;
   };
+  it('the final review run from the main checkout, as large.md runs it, records the tree of the run worktree; with something uncommitted there, none (A3, Review Focus 1)', () => {
+    finished();
+    expect(finalReview(true)).toBe('accept');
+    const last = () => readEvents(root).filter(e => e.kind === 'verdict' && e.task === 'shop-final').at(-1)!;
+    expect(last().tree).toBe(g(runWt(), 'rev-parse', 'HEAD^{tree}'));
+    expect(last().tree).not.toBe(git('rev-parse', 'HEAD^{tree}'));
+    writeFileSync(path.join(runWt(), 'stray.txt'), 'x\n');
+    expect(finalReview(true)).toBe('accept');
+    expect(last()).not.toHaveProperty('tree');
+  });
+  const onFinish = () => seedExecution(root, { ...readExecution(root)!, mergeOnFinish: true, active: false, stopReason: 'finished' });
+  it('the merge on finish needs the tree its final review accepted: a commit by hand asks again, with why; forge\'s notes alone do not (A3)', () => {
+    finished();
+    onFinish();
+    expect(finalReview(true)).toBe('accept');
+    commitIn(runWt(), 'late.txt', 'late\n', 'by hand');
+    expect(merge([])).toMatchObject({ result: 'needs-authorization', reason: 'tree changed since the final review', changed: ['late.txt'] });
+    expect(readExecution(root)!.mergeOnFinish).toBe(true);
+    expect(mergeCommits()).toBe(0);
+    expect(finalReview(true)).toBe('accept');
+    mkdirSync(path.join(runWt(), '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(runWt(), '.forge', 'verify', 'web.md'), '# Web\n- learned\n');
+    g(runWt(), 'add', '-f', '.forge/verify/web.md');
+    g(runWt(), 'commit', '-qm', 'notes of the flow pass');
+    expect(merge([])).toMatchObject({ result: 'merged', closed: true });
+  });
+  it('the decisions file of the run is set aside too, and only that exact path (A3)', () => {
+    finished();
+    onFinish();
+    expect(finalReview(true)).toBe('accept');
+    const decisions = `docs/forge/decisions/${readExecution(root)!.runId}.md`;
+    mkdirSync(path.join(runWt(), 'docs', 'forge', 'decisions'), { recursive: true });
+    writeFileSync(path.join(runWt(), 'late.txt'), 'late\n');
+    writeFileSync(path.join(runWt(), decisions), '# Decisions\n');
+    g(runWt(), 'add', 'late.txt', decisions);
+    g(runWt(), 'commit', '-qm', 'late and decisions');
+    expect(merge([])).toMatchObject({ result: 'needs-authorization', reason: 'tree changed since the final review', changed: ['late.txt'] });
+    expect(mergeCommits()).toBe(0);
+    expect(finalReview(true)).toBe('accept');
+    writeFileSync(path.join(runWt(), decisions), '# Decisions\n- one more\n');
+    g(runWt(), 'commit', '-qam', 'decisions grew');
+    expect(merge([])).toMatchObject({ result: 'merged', closed: true });
+  });
+  it('the decisions file of the run added alone right after the final accept: the merge on finish merges (A3 polish)', () => {
+    finished();
+    onFinish();
+    expect(finalReview(true)).toBe('accept');
+    const decisions = `docs/forge/decisions/${readExecution(root)!.runId}.md`;
+    mkdirSync(path.join(runWt(), 'docs', 'forge', 'decisions'), { recursive: true });
+    writeFileSync(path.join(runWt(), decisions), '# Decisions\n');
+    g(runWt(), 'add', decisions);
+    g(runWt(), 'commit', '-qm', 'decisions of the run');
+    expect(merge([])).toMatchObject({ result: 'merged', closed: true });
+    expect(mergeCommits()).toBe(1);
+  });
+  it('a run branch far from its final receipt names at most 20 changed paths, with changedTotal (A3 polish)', () => {
+    finished();
+    onFinish();
+    expect(finalReview(true)).toBe('accept');
+    const names = Array.from({ length: 25 }, (_, i) => `late-${String(i).padStart(2, '0')}.txt`);
+    for (const n of names) writeFileSync(path.join(runWt(), n), 'late\n');
+    g(runWt(), 'add', ...names);
+    g(runWt(), 'commit', '-qm', 'many by hand');
+    const r = merge([]);
+    expect(r).toMatchObject({ result: 'needs-authorization', reason: 'tree changed since the final review', changedTotal: 25 });
+    expect(r.changed).toEqual(names.slice(0, 20));
+    expect(mergeCommits()).toBe(0);
+  });
+  it('a final review with something uncommitted in the run worktree leaves no receipt: the merge on finish asks (A3)', () => {
+    finished();
+    onFinish();
+    writeFileSync(path.join(runWt(), 'stray.txt'), 'x\n');
+    expect(finalReview(true)).toBe('accept');
+    rmSync(path.join(runWt(), 'stray.txt'));
+    expect(merge([])).toMatchObject({ result: 'needs-authorization', reason: 'no receipt from the final review: its run worktree had uncommitted changes' });
+    expect(mergeCommits()).toBe(0);
+  });
+  it('a final accept whose tree is no object id, as one logged by hand can carry, is no receipt: the merge on finish asks (A3)', () => {
+    finished();
+    onFinish();
+    run(['log', '--kind', 'verdict', '--task', 'shop-final', '--data', '{"action":"accept","tree":"-s"}'], io);
+    expect(merge([])).toMatchObject({ result: 'needs-authorization', reason: 'no receipt from the final review: its run worktree had uncommitted changes' });
+    expect(readExecution(root)!.mergeOnFinish).toBe(true);
+    expect(mergeCommits()).toBe(0);
+  });
+  it('a merge that would conflict says so with its paths before asking and spends nothing; one that would not asks as before (A3)', () => {
+    finished();
+    expect(merge([])).toMatchObject({ result: 'needs-authorization' });
+    expect(merge([])).not.toHaveProperty('predicted');
+    const auths = readAuths(root).length;
+    const head = commitIn(root, 'a.txt', 'main\n', 'main side');
+    onFinish();
+    expect(finalReview(true)).toBe('accept');
+    const r = merge([]);
+    expect(r).toMatchObject({ result: 'conflict', predicted: true, paths: ['a.txt'] });
+    expect(r).not.toHaveProperty('ask');
+    expect(readAuths(root)).toHaveLength(auths);
+    expect(readExecution(root)!.mergeOnFinish).toBe(true);
+    expect(git('rev-parse', 'HEAD')).toBe(head);
+  });
   it('a yes to the start question allows the one final merge of the finished run once its final review accepts: none before, none after', () => {
     finished();
     seedExecution(root, { ...readExecution(root)!, mergeOnFinish: true });
@@ -1322,5 +1422,157 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     expect(out(run(['swarm', 'merge', '--yes', '--hook-session', 'hook-x'], { ...io, env: { CLAUDE_CODE_SESSION_ID: 'hook-main' } })))
       .toMatchObject({ result: 'needs-authorization', reason: 'other session' });
     expect(git('log', '-1', '--format=%s')).toBe('init');
+  });
+});
+
+describe('a task is integrated only with the tree its review accepted (A3)', () => {
+  /** The accept review-close logs for brief 1 of `task`, with the tree of `w` unless `extra` says otherwise. */
+  const accepted = (task: string, w: string, extra: Record<string, unknown> = {}) => appendEvent(root, { ts: '2026-10-12T12:00:00.000Z', kind: 'verdict',
+    task: `${task}-1`, project: 'shop', action: 'accept', dir: `.forge/work/shop/${task}/reviews-1-1`, tree: g(w, 'rev-parse', 'HEAD^{tree}'), ...extra });
+  /** head.txt of that round, under `at` (the main checkout, or a member's worktree). */
+  const headTxt = (at: string, task: string, w: string) => {
+    const d = path.join(at, '.forge', 'work', 'shop', task, 'reviews-1-1');
+    mkdirSync(d, { recursive: true });
+    writeFileSync(path.join(d, 'head.txt'), `${g(w, 'rev-parse', 'HEAD')}\n`);
+  };
+  it('a commit made by hand after the accept sends the task back to review; a commit of forge\'s notes alone does not', () => {
+    const w1 = accept('T1', 'a.txt', 'a\n');
+    accepted('T1', w1);
+    commitIn(w1, 'late.txt', 'late\n', 'by hand');
+    const before = g(runWt(), 'rev-parse', 'HEAD');
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'unreviewed', reason: 'tree changed since its review', changed: ['late.txt'] });
+    expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(before);
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'validate', executor: 'subagents', agent: null, detail: 'unreviewed: tree changed since its review' });
+    expect(readEvents(root).filter(e => e.kind === 'phase' && e.task === 'T1').at(-1)).toMatchObject({ phase: 'validate', project: 'shop' });
+    const w2 = accept('T2', 'b.txt', 'b\n');
+    accepted('T2', w2);
+    mkdirSync(path.join(w2, '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(w2, '.forge', 'verify', 'web.md'), '# Web\n- learned\n');
+    g(w2, 'add', '-f', '.forge/verify/web.md');
+    g(w2, 'commit', '-qm', 'T2: learned notes of its verification');
+    expect(out(run(['swarm', 'integrate', 'T2'], io))).toMatchObject({ result: 'integrated' });
+  });
+  it('an accept without a tree is bound by the head.txt of its round; with neither, the task is reviewed again (Review Focus 2)', () => {
+    const w1 = accept('T1', 'a.txt', 'a\n');
+    headTxt(root, 'T1', w1);
+    accepted('T1', w1, { tree: undefined });
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated' });
+    const w2 = accept('T2', 'b.txt', 'b\n');
+    headTxt(root, 'T2', w2);
+    accepted('T2', w2, { tree: undefined });
+    commitIn(w2, 'late.txt', 'late\n', 'by hand');
+    expect(out(run(['swarm', 'integrate', 'T2'], io))).toMatchObject({ result: 'unreviewed', reason: 'tree changed since its review', changed: ['late.txt'] });
+    const w3 = accept('T3', 'c.txt', 'c\n');
+    accepted('T3', w3, { tree: undefined });
+    expect(out(run(['swarm', 'integrate', 'T3'], io))).toMatchObject({ result: 'unreviewed', reason: 'no review receipt', changed: [] });
+  });
+  it('a run member\'s task: its head.txt is found in its worktree, and one sent back is the coordinator\'s, in that worktree, with its brief and baseline (Review Focus 5)', () => {
+    const asMember = (task: string) => { const e = readExecution(root)!; seedExecution(root, { ...e, tasks: { ...e.tasks, [task]: { ...e.tasks[task], executor: 'sessions' } } }); };
+    const w1 = accept('T1', 'a.txt', 'a\n');
+    asMember('T1');
+    headTxt(w1, 'T1', w1);
+    accepted('T1', w1, { tree: undefined });
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated' });
+    const w2 = accept('T2', 'b.txt', 'b\n');
+    asMember('T2');
+    headTxt(w2, 'T2', w2);
+    writeFileSync(path.join(w2, '.forge', 'work', 'shop', 'T2', 'baseline-1.json'), '[]\n');
+    writeFileSync(path.join(w2, '.forge', 'work', 'shop', 'T2', 'brief-1.md'), '# T2\n');
+    accepted('T2', w2, { tree: undefined });
+    commitIn(w2, 'late.txt', 'late\n', 'by hand');
+    expect(out(run(['swarm', 'integrate', 'T2'], io))).toMatchObject({ result: 'unreviewed' });
+    const t2 = readExecution(root)!.tasks.T2;
+    expect(t2).toMatchObject({ status: 'running', stage: 'validate', executor: 'subagents' });
+    expect(path.resolve(t2.worktree)).toBe(path.resolve(w2));
+    expect(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T2', 'baseline-1.json'), 'utf8')).toBe('[]\n');
+    expect(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T2', 'brief-1.md'), 'utf8')).toBe('# T2\n');
+  });
+  it('the merge takes the commit whose tree was checked, never a later tip of the task branch (Review Focus 3)', () => {
+    const w = accept('T1', 'a.txt', 'a\n');
+    const reviewed = g(w, 'rev-parse', 'HEAD');
+    accepted('T1', w);
+    // A commit lands on task/T1 while the integration runs its validators in the run worktree.
+    mkdirSync(path.join(runWt(), '.forge'), { recursive: true });
+    writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), 'validators:\n  - name: late\n    cmd: git -C ../task-T1 commit --allow-empty -qm late\n');
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated' });
+    expect(g(w, 'log', '-1', '--format=%s')).toBe('late');
+    expect(g(runWt(), 'rev-parse', 'HEAD^2')).toBe(reviewed);
+  });
+  it('a branch far from its receipt names at most 20 changed paths, with changedTotal (A3 polish)', () => {
+    const w = accept('T1', 'a.txt', 'a\n');
+    accepted('T1', w);
+    const names = Array.from({ length: 25 }, (_, i) => `late-${String(i).padStart(2, '0')}.txt`);
+    for (const n of names) writeFileSync(path.join(w, n), 'late\n');
+    g(w, 'add', ...names);
+    g(w, 'commit', '-qm', 'many by hand');
+    const r = out(run(['swarm', 'integrate', 'T1'], io));
+    expect(r).toMatchObject({ result: 'unreviewed', reason: 'tree changed since its review', changedTotal: 25 });
+    expect(r.changed).toEqual(names.slice(0, 20));
+    const w2 = accept('T2', 'b.txt', 'b\n');
+    accepted('T2', w2);
+    commitIn(w2, 'late.txt', 'late\n', 'by hand');
+    expect(out(run(['swarm', 'integrate', 'T2'], io))).not.toHaveProperty('changedTotal');
+  });
+  it('a task no longer accepted when the lock is taken is not sent back: the output says its state (A3 polish)', () => {
+    const w = accept('T1', 'a.txt', 'a\n');
+    accepted('T1', w);
+    commitIn(w, 'late.txt', 'late\n', 'by hand');
+    // A swarm task blocks T1 while the integration compares the trees.
+    const block = () => { const e = readExecution(root)!; seedExecution(root, { ...e, tasks: { ...e.tasks, T1: { ...e.tasks.T1, status: 'blocked' } } }); };
+    const deps: SwarmDeps = {
+      git: defaultGit(root), exec: defaultExec(root), repo: repoReader(root),
+      at: dir => ({ git: a => { if (a[0] === 'diff') block(); return defaultGit(dir)(a); }, exec: defaultExec(dir), repo: repoReader(dir) }),
+    };
+    const r = out(swarmCommand(['integrate', 'T1'], io, deps));
+    expect(r).toMatchObject({ result: 'unreviewed', reason: 'tree changed since its review', changed: ['late.txt'] });
+    expect(r.detail).toBe('T1: tree changed since its review; it is blocked now, so it is not reviewed again');
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'blocked' });
+  });
+});
+
+describe('swarm status predicts the merges (A3)', () => {
+  it('names the accepted tasks that would conflict with the run branch, and whether the run branch would merge into its base, touching no checkout', () => {
+    accept('T1', 'a.txt', 'a\n');
+    out(run(['swarm', 'integrate', 'T1'], io));
+    accept('T2', 'base.txt', 'from T2\n');
+    accept('T3', 'c.txt', 'c\n');
+    commitIn(runWt(), 'base.txt', 'from run\n', 'run change');
+    const runHead = g(runWt(), 'rev-parse', 'HEAD');
+    expect(out(run(['swarm', 'status'], io)).predicted).toEqual({
+      merge: { state: 'clean' }, tasks: { T2: { state: 'conflict', paths: ['base.txt'] }, T3: { state: 'clean' } },
+    });
+    commitIn(root, 'a.txt', 'main\n', 'main side');
+    expect(out(run(['swarm', 'status'], io)).predicted.merge).toEqual({ state: 'conflict', paths: ['a.txt'] });
+    expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(runHead);
+    expect(g(runWt(), 'status', '--porcelain')).toBe('');
+    expect(git('status', '--porcelain')).toBe('');
+  });
+  it('a closed run and a missing execution print no predicted (A3 polish)', () => {
+    accept('T1', 'a.txt', 'a\n');
+    expect(out(run(['swarm', 'status'], io))).toHaveProperty('predicted');
+    run(['swarm', 'stop'], io);
+    out(run(['swarm', 'close'], io));
+    const closed = out(run(['swarm', 'status'], io));
+    expect(closed.state.closedAt).toBe('2026-10-12T12:00:00.000Z');
+    expect(closed).not.toHaveProperty('predicted');
+    rmSync(path.join(root, '.forge', 'execution.json'));
+    const none = out(run(['swarm', 'status'], io));
+    expect(none).toMatchObject({ present: false, state: null });
+    expect(none).not.toHaveProperty('predicted');
+  });
+  it('an ephemeral run predicts no merge, and its tasks against the branch it started from (A3 polish)', () => {
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    writeFileSync(path.join(root, '.forge', 'tasks.json'), JSON.stringify([
+      { id: 'fix-a', title: 'fix a', path: 'small', zones: ['base.txt'], depends_on: [] },
+      { id: 'fix-b', title: 'fix b', path: 'small', zones: ['b.txt'], depends_on: [] },
+    ]));
+    expect(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--hook-session', 'hook-main', '--tasks', '.forge/tasks.json'], io).stderr).toBe('');
+    out(run(['swarm', 'tick'], io));
+    const w = out(run(['swarm', 'worktree', 'fix-a'], io)).worktree;
+    commitIn(w, 'base.txt', 'from fix-a\n', 'fix-a: work');
+    out(run(['swarm', 'task', 'fix-a', '--stage', 'verdict', '--status', 'accepted'], io));
+    expect(out(run(['swarm', 'status'], io)).predicted).toEqual({ merge: null, tasks: { 'fix-a': { state: 'clean' } } });
+    commitIn(root, 'base.txt', 'from main\n', 'main side');
+    expect(out(run(['swarm', 'status'], io)).predicted).toEqual({ merge: null, tasks: { 'fix-a': { state: 'conflict', paths: ['base.txt'] } } });
   });
 });
