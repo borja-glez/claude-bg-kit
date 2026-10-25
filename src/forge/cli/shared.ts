@@ -491,7 +491,7 @@ export function triageCore(io: Io, args: string[]): TriageCore {
   const profile = config.profile;
   // A9: under tdd: verified a bug task from Small up reproduces the bug first; a Trivial one never gets the route.
   const kind = config.tdd === 'verified' && result.path !== 'trivial' && isBugTask(wordText) ? 'bug' as const : null;
-  const implementer ={ ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
+  const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
   const known = readLocal(io.cwd).known;
   const fresh = names.filter(n => !known.includes(n));
   // Who reviews, by the size reached and the configured profile: printed always and logged for review-prep.
