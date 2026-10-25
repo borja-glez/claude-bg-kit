@@ -36,7 +36,7 @@ Restart Claude Code after installing or updating.
 - **Read the project first**: `pyproject.toml`, the lock, the CI config and the README win over the skill, which pins no package version.
 - **Environment**: everything runs through `uv run`, never the global `python` or `pip`.
 - **Torch wheel**: the right index for the GPU or the CI, `https://download.pytorch.org/whl/cu128` or `https://download.pytorch.org/whl/cpu`.
-- **VRAM**: `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader` before any job and `torch.cuda.max_memory_allocated()` for each peak, with a 10 % margin and at most three jobs at once.
+- **VRAM**: `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader` before any job (or `torch.cuda.mem_get_info()` without `nvidia-smi`), and `torch.cuda.max_memory_reserved()` plus the CUDA context for each peak. The peaks of the jobs that run together, plus the memory already in use, stay under the total minus 10 %, with at most three jobs at once.
 - **Rest**: a job of 30 minutes or more runs alone, with `nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader` at its start and end, and 15-20 minutes without load after it.
 - **APIs**: Context7 and `inspect.signature` on the installed trl, transformers or peft before writing a call.
 - **Hugging Face**: cards in English, the acceptance criterion written before training, the token only from `HF_TOKEN` or the login.
