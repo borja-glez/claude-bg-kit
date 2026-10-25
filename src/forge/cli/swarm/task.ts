@@ -4,7 +4,7 @@ import path from 'node:path';
 import { UsageError } from '../errors.js';
 import { appendPhase } from '../../ledger.js';
 import { writePublicTask, executionTaskFile } from '../../execution.js';
-import { LEASE_MINUTES } from '../../../lib/coordination.js';
+import { LEASE_MINUTES, LEASE_CAP_MINUTES } from '../../../lib/coordination.js';
 import { STAGES, isSafeId, type ExecTask } from '../../../lib/execution-state.js';
 import type { Stage } from '../../../lib/types.js';
 import { publishFor, startedEvent } from '../../roadmap-sources.js';
@@ -33,6 +33,11 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   }
   const roundArg = has('round') ? Number(flag('round')) : undefined;
   if (roundArg !== undefined && (!Number.isInteger(roundArg) || roundArg < 0 || roundArg > 99)) throw new UsageError('swarm task: --round must be an integer from 0 to 99');
+  if (has('lease-minutes') && has('lease')) throw new UsageError('swarm task: use --lease or --lease-minutes, not both');
+  const leaseMinutes = has('lease-minutes') ? Number(flag('lease-minutes')) : undefined;
+  if (leaseMinutes !== undefined && (!Number.isInteger(leaseMinutes) || leaseMinutes < 1 || leaseMinutes > LEASE_CAP_MINUTES)) {
+    throw new UsageError(`swarm task: --lease-minutes must be a whole number of minutes from 1 to ${LEASE_CAP_MINUTES}`);
+  }
   const agentArg = has('no-agent') ? null : flag('agent');
   // Only the fields given here change; the rest keep what the task holds when the lock is taken (I-15).
   const build = (base: ExecTask): ExecTask => {
@@ -58,7 +63,8 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     next = build(base);
     return { ...cur, tasks: { ...cur.tasks, [task]: next } };
   });
-  const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
+  const lease = leaseMinutes !== undefined ? new Date(now.getTime() + leaseMinutes * 60000).toISOString()
+    : flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
   writePublicTask(io.cwd, { task, runId: e.runId, stage: next.stage, status: next.status, agent: next.agent, round: next.round, since: next.stageSince,
     updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: base.executor });
   if (base.stage !== next.stage) appendPhase(io.cwd, { ts: iso, kind: 'phase', task, phase: next.stage, ...(e.kind === 'plan' && isSafeId(e.project) ? { project: e.project } : {}) });

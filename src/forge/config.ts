@@ -44,6 +44,8 @@ export interface ForgeConfig {
     setup?: string;
     /** C-03: how many background jobs (prep, review-prep, integrate, step) run their validators at once. */
     validateJobs: number;
+    /** A10: a plan run in subagents mode hands each task to a forge-runner subagent; absent or false: off. */
+    nested?: boolean;
   };
   /** How validators run: through the tree cache (C6), at most `parallel` at once, and which failures run again (C-12). */
   validate: { cache: boolean; parallel: number; retry: RetryPolicy };
@@ -136,6 +138,7 @@ const Schema = z.object({
     }).strict().default({ effort: 'medium' }),
     setup: z.string().min(1).max(500).transform(lf).optional(),
     validateJobs: z.number().int().min(1).max(8).default(2),
+    nested: z.boolean().optional(),
   }).strict().default({ parallel: 3, launcher: 'bg', member: { effort: 'medium' }, validateJobs: 2 }),
 }).strict();
 

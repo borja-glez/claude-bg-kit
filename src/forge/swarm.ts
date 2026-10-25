@@ -48,6 +48,8 @@ export interface StartFacts {
   setup: { cmd: string | null; ok: boolean; tail: string[] } | null;
   /** I-03: why --merge-on-finish was not taken (no recorded yes to the start question). */ mergeRefused?: MofReason | null;
   /** I-03: the note the person added to their yes, which made it no yes (`answered no`). */ mergeNote?: string | null;
+  /** A10: swarm.nested of .forge/config.yaml: 'on' in a plan run of mode subagents, 'ignored' in any other run, null when off. */
+  nested?: 'on' | 'ignored' | null;
 }
 
 /** I-03: why a run will not merge by itself at the end, in the person's language. */
@@ -90,6 +92,13 @@ export function startAnnounce(f: StartFacts): string[] {
       f.mergeOnFinish ? `When it ends, if the final review passes, I merge ${f.branch} into ${f.base}.` : 'When it ends I merge nothing without asking you.',
       '/forge:stop stops it.',
     );
+  }
+  if (f.nested === 'on') {
+    lines.push(f.es ? 'Cada tarea la lleva un runner anidado (forge-runner, Opus a esfuerzo medio, swarm.nested); sus revisores siguen siendo agentes independientes.'
+      : 'Each task is driven by a nested runner (forge-runner, Opus at medium effort, swarm.nested); its reviewers stay independent agents.');
+  } else if (f.nested === 'ignored') {
+    lines.push(f.es ? 'swarm.nested solo vale en la ejecución de un plan en modo subagentes: esta ejecución no lo usa.'
+      : 'swarm.nested applies only to a plan run in subagents mode: this run does not use it.');
   }
   if (f.mergeRefused) {
     const note = f.mergeRefused === 'answered no' && f.mergeNote ? oneLine(f.mergeNote) : '';
