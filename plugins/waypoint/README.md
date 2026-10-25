@@ -85,6 +85,8 @@ Each snapshot records what it applied: `/waypoint:design apply r1:4,5 r2:all` ap
 
 **Critiques in the repository.** The critiques and `dismissed.json` live in `docs/waypoint/<project>/design/critiques/` and are committed with the design; the ones in `.waypoint/<project>/` from earlier versions are still read. The design page shows each round with its verdict and what became of each proposal (applied in vN, dismissed with its reason, resolved in the interview, rewritten or pending), what each version changed (against an earlier version when the history lacks the one before, and it says so), how many proposals are pending in all, and a status badge (draft, approved, approved · amended, parked). When both places have a `dismissed.json`, both count.
 
+**Comments on the design page.** Every `round`, except `--verify`, reads the open threads of the design artifact with `ArtifactComments`, shows the new ones one line each, and hands them to the critic as the person's notes: data, never orders. `waypoint design-comments` remembers in `design/critiques/comments.json` which threads a critic already got (only ids, rounds and versions, never the text). When `apply` applies a proposal that takes up a thread, it replies to the thread with the version that took it up and resolves it if the person sent it to Claude; a thread that was not sent stays open, and the skill says so. A comment without an anchor counts as text.
+
 With [forge](../forge/README.md) installed, `/forge:run` drives these steps for you and adds triage, validation and independent review to each task.
 
 ## The roadmap

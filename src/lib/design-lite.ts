@@ -1,6 +1,7 @@
 import { parse } from 'yaml';
 import { DESIGN_STATUSES, frontMatterOf, type DesignMeta } from './design.js';
 import { ENTRY_KINDS, normalizeApplied, normalizeResolved, type ChangelogEntry, type EntryKind } from './history.js';
+import { THREAD_ID } from './design-comments.js';
 import { CATEGORIES, SEVERITIES, VERDICTS, verdictOf, type Critique, type Proposal } from './critique.js';
 
 // I-13: what the design band reads, without zod. These modules build their zod schemas on first use, so importing the
@@ -70,8 +71,11 @@ export function critiqueLite(text: string): Critique | null {
   for (const [i, p] of (raw.proposals as unknown[]).entries()) {
     if (!isObj(p) || p.n !== i + 1 || !(CATEGORIES as readonly unknown[]).includes(p.category) || !(SEVERITIES as readonly unknown[]).includes(p.severity)
       || !nonEmpty(p.section) || !nonEmpty(p.problem) || !nonEmpty(p.change)) return null;
+    // w7 A2: the threads a proposal takes up, read as ProposalSchema does: absent stays absent, anything but a short list of thread ids is a failure.
+    if (p.threads !== undefined && !(Array.isArray(p.threads) && p.threads.length <= 20 && p.threads.every(t => isStr(t) && THREAD_ID.test(t)))) return null;
     proposals.push({
       n: i + 1, category: p.category as Proposal['category'], severity: p.severity as Proposal['severity'], section: p.section, problem: p.problem, change: p.change,
+      ...(p.threads === undefined ? {} : { threads: p.threads as string[] }),
     });
   }
   const verdict = verdictOf({ proposals });

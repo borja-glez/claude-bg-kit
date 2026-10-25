@@ -48,6 +48,9 @@ describe('the readers of the design band, without zod (I-13)', () => {
       c({ proposals: [p(2)] }), c({ round: 0 }), c({ scope: 'all' }), c({ proposals: [{ ...p(1), severity: 'huge' }] }),
       c({ proposals: [{ ...p(1), change: '' }] }), c({ verdict: 'maybe' }), '{oops', '[]',
     ];
+    // w7 A2: the threads a proposal takes up read alike in the band and in the CLI (Review Focus 4).
+    const t = (threads: unknown) => c({ proposals: [{ ...p(1), threads }, p(2, 'minor')] });
+    texts.push(t(['t-1', 'c:42']), t(['a b']), t(['a,b']), t(['']), t([7]), t(null), t('t1'), t(Array.from({ length: 21 }, (_, i) => `t${i}`)));
     for (const t of texts) expect(critiqueLite(t), t).toEqual(orNull(() => parseCritique(t)));
   });
 });

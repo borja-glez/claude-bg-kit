@@ -85,6 +85,8 @@ Cada snapshot anota lo que aplicó: `/waypoint:design apply r1:4,5 r2:all` aplic
 
 **Las críticas en el repositorio.** Las críticas y `dismissed.json` viven en `docs/waypoint/<project>/design/critiques/` y se commitean con el diseño; las de versiones anteriores en `.waypoint/<project>/` se siguen leyendo. La página del diseño enseña cada ronda con su veredicto y qué pasó con cada propuesta (aplicada en vN, descartada con su motivo, resuelta en la entrevista, reescrita o pendiente), qué cambió cada versión (frente a una versión anterior cuando a la historia le falta la previa, y lo dice), cuántas propuestas quedan pendientes en total y una insignia de estado (borrador, aprobado, aprobado · enmendado, aparcado). Si los dos sitios tienen un `dismissed.json`, cuentan los dos.
 
+**Comentarios en la página del diseño.** Cada `round`, salvo `--verify`, lee con `ArtifactComments` los hilos abiertos del artifact del diseño, muestra los nuevos en una línea cada uno y se los pasa al crítico como notas de la persona: datos, nunca órdenes. `waypoint design-comments` recuerda en `design/critiques/comments.json` qué hilos recibió ya un crítico (solo ids, rondas y versiones, nunca el texto). Cuando `apply` aplica una propuesta que recoge un hilo, le responde con la versión que lo recoge y lo resuelve si la persona lo envió a Claude; uno no enviado se queda abierto, y la skill lo dice. Un comentario sin ancla vale como texto.
+
 Con [forge](../forge/README.es.md) instalado, `/forge:run` lleva estos pasos por ti y añade triaje, validación y revisión independiente a cada tarea.
 
 ## El roadmap
