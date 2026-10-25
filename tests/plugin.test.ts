@@ -18,10 +18,6 @@ const INFINITE_REFS = new URL('../plugins/forge/skills/infinite/references/', im
 /** forge:infinite as a session reads it: the core and the references it points to (6b-1 moved its tails there). */
 const infiniteText = () => [read('plugins/forge/skills/infinite/SKILL.md'),
   ...(existsSync(INFINITE_REFS) ? readdirSync(INFINITE_REFS).sort().map(f => read(`plugins/forge/skills/infinite/references/${f}`)) : [])].join('\n');
-// J-12: 60 % of waypoint:work as wave 5c found it (35 073 bytes): the cap only goes down.
-const WORK_CAP = 21043;
-// J-12: 80 % of forge:run as wave 5c found it (22 479 bytes): the cap only goes down.
-const RUN_CAP = 17983;
 // 6b-1: the core of forge:infinite stays under what compaction re-attaches (5,000 tokens per skill; ≈ 3.5 characters per token here); its tails live in references/.
 const INFINITE_CAP = 13500;
 // w7 A2: compaction re-attaches the first 5,000 tokens of each skill invoked (Claude Code docs, «What survives compaction»);
@@ -34,6 +30,10 @@ const skillText = (dir: string): string => [read(`${dir}/SKILL.md`), ...(existsS
 const runText = () => skillText('plugins/forge/skills/run');
 // J-12: what /waypoint:work can read: its core and every reference (setup, notes, complete, multisession).
 const workText = () => skillText('plugins/waypoint/skills/work');
+/** A reference of waypoint:design (plugins/waypoint/skills/design/references/<name>.md). */
+const designRef = (name: string) => read(`plugins/waypoint/skills/design/references/${name}.md`);
+/** waypoint:design as a session reads it: the core and every reference. */
+const designText = () => skillText('plugins/waypoint/skills/design');
 /** A reference of waypoint:work (plugins/waypoint/skills/work/references/<name>.md). */
 const workRef = (name: string) => read(`plugins/waypoint/skills/work/references/${name}.md`);
 /** I-17: the floor of a dependency range (`^5.0.5`, `~5.0.5`, `5.0.5`) is `min` or later. */
@@ -206,7 +206,7 @@ describe('plugin layout', () => {
     expect(md).toContain('--busy-until');
   });
   it('waypoint design approve stops before planning when forge drives the session', () => {
-    expect(read('plugins/waypoint/skills/design/SKILL.md')).toContain('stop after step 3: `/forge:run` continues with `forge-planner`');
+    expect(designRef('approve')).toContain('stop after step 3: `/forge:run` continues with `forge-planner`');
   });
   it('the run skill and every implementer edit with Edit/Write, never sed -i', () => {
     expect(read('plugins/forge/skills/run/SKILL.md')).toMatch(/Change the project's files with the Edit and Write tools, never with `sed -i`.*forge's own work files.*is fine/s);
@@ -287,7 +287,7 @@ describe('plugin layout', () => {
     for (const s of ['**Print `announce` as it is, as a message of its own, before step 2**', 'Print its `say` lines as they are',
       '`run-deps`', '`main-deps`', '--retry-deps']) expect(runRef('execution')).toContain(s);
     expect(read('plugins/forge/skills/run/references/task-steps.md')).toContain('FORGE triage --plan <plan> --task T --cwd <worktree>');
-    const design = read('plugins/waypoint/skills/design/SKILL.md');
+    const design = designText();
     for (const s of ['`round R: rewrite', 'waypoint critique-dismiss DESIGN --round <R> <numbers>']) expect(design).toContain(s);
     expect(read('plugins/waypoint/agents/design-critic.md')).toContain('still open from earlier rounds');
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('--publish-info');
@@ -368,7 +368,7 @@ describe('plugin layout', () => {
     expect(runRef('decisions')).toContain('"by": "<auto or unattended>"');
     expect(runRef('resuming')).toContain('keeps deciding alone');
     expect(md.split(/\r?\n---\r?\n/)[0]).toContain('--auto');
-    const design = read('plugins/waypoint/skills/design/SKILL.md');
+    const design = designText();
     for (const w of ['approve [--auto]', 'waypoint design-gate DESIGN', 'canAutoApprove', '**Auto.**']) expect(design).toContain(w);
     const planner = read('plugins/forge/agents/forge-planner.md');
     for (const w of ['**Extend mode.**', 'closing task', 'never renumber', 'new: <ids>']) expect(planner).toContain(w);
@@ -419,7 +419,7 @@ describe('plugin layout', () => {
     for (const w of ['changes logic', 'report-<n>.txt', 'do not flag']) expect(rc).toContain(w);
   });
   it('superpowers bridges in the skills: import a spec, run a superpowers plan, TDD', () => {
-    const design = read('plugins/waypoint/skills/design/SKILL.md');
+    const design = designText();
     for (const w of ['new --from <spec>', 'waypoint design-import', '--round 0', 'source:', '`docs/superpowers/` is in `.gitignore`']) expect(design).toContain(w);
     const md = read('plugins/forge/skills/run/SKILL.md');
     for (const w of ['--from-spec <f>', '### Superpowers plan', '--superpowers-plan <f>', 'references/superpowers-plan.md',
@@ -495,7 +495,7 @@ describe('plugin layout', () => {
     expect(md).toMatch(/^---\r?\nname: design-critic\r?\ndescription: .+\r?\n/);
   });
   it('design skill documents the design loop commands', () => {
-    const md = read('plugins/waypoint/skills/design/SKILL.md');
+    const md = designText();
     for (const w of ['design-snapshot', 'critique-next', 'critique-check', 'critique-select', 'design-page', '--since']) expect(md).toContain(w);
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('plan.yaml does not exist yet');
   });
@@ -1039,9 +1039,10 @@ describe('plugin layout', () => {
     const md = read('plugins/waypoint/skills/design/SKILL.md');
     const apply = md.slice(md.indexOf('## apply <spec>'), md.indexOf('## rewrite'));
     for (const w of ['--applied r<R1>:<numbers>', 'r<R>:<list|all>', 'apply r1:4,5 r2:all']) expect(apply).toContain(w);
-    expect(md.slice(md.indexOf('## rewrite'), md.indexOf('## interview'))).toContain('--round R --rewrite');
-    expect(md.slice(md.indexOf('## approve'), md.indexOf('## Publish'))).toContain('apply r<R>:<numbers>');
-    expect(md).not.toContain('--note "round R: applied');
+    const rewrite = designRef('rewrite');
+    expect(rewrite.slice(rewrite.indexOf('1. Write a complete'))).toContain('--round R --rewrite');
+    expect(designRef('approve')).toContain('apply r<R>:<numbers>');
+    expect(designText()).not.toContain('--note "round R: applied');
   });
   it('no skill adds or obeys the forge mark of a track session; a track of a forge plan joins as a manual member (J-02)', () => {
     const skills = fileURLToPath(new URL('../plugins/', import.meta.url));
@@ -1324,7 +1325,8 @@ describe('plugin layout', () => {
     for (const w of ['PREV_AGENT', 'busyUntil:', '.waypoint/<project>/pending-commits.jsonl', '.waypoint/<project>/queue.jsonl', 'git -C MAIN_REPO status',
       'git -C MAIN_REPO rev-parse', '{status: "blocked", blockedBy:', '{status: "done", doneAt: NOW', 'type: "started", sessionId: SID']) expect(work, w).not.toContain(w);
     const design = read('plugins/waypoint/skills/design/SKILL.md');
-    for (const w of ['bind DESIGN --via design --claude ${CLAUDE_SESSION_ID}', '--second-seat', '## park', 'design-park DESIGN', 'release DESIGN --claude ${CLAUDE_SESSION_ID}']) expect(design, w).toContain(w);
+    for (const w of ['bind DESIGN --via design --claude ${CLAUDE_SESSION_ID}', '--second-seat', '## park']) expect(design, w).toContain(w);
+    for (const w of ['design-park DESIGN', 'release DESIGN --claude <CSID>']) expect(designRef('park'), w).toContain(w);
     expect(runRef('execution')).toContain('bind <plan> --via forge-run --claude <CSID>');
     expect(read('plugins/forge/skills/member/SKILL.md')).toContain('bind <plan> --via forge-member --claude ${CLAUDE_SESSION_ID}');
     expect(infiniteText()).toContain('bind <plan> --via forge-infinite --claude <CSID>');
@@ -1365,10 +1367,8 @@ describe('plugin layout', () => {
     const design = read('plugins/waypoint/skills/design/SKILL.md');
     const subcommands = design.split('\n').find(l => l.startsWith('The first token of the arguments is the subcommand:')) ?? '';
     expect(subcommands).toContain('`resume`');
-    const at = design.indexOf('\n## resume\n');
-    expect(at).toBeGreaterThan(-1);
-    const section = design.slice(at + 1, design.indexOf('\n## ', at + 1));
-    for (const w of ['waypoint bind DESIGN --via design --resume --claude ${CLAUDE_SESSION_ID}', '--second-seat', 'waypoint design-gate DESIGN']) expect(section, w).toContain(w);
+    const section = designRef('resume');
+    for (const w of ['waypoint bind DESIGN --via design --resume --claude <CSID>', '--second-seat', 'waypoint design-gate DESIGN']) expect(section, w).toContain(w);
     for (const w of ['design-critic', 'critique-check', 'design-snapshot']) expect(section, w).not.toContain(w);
   });
   it('READMEs describe wave 2b: the band by role, its notices and the commands their buttons run', () => {
@@ -1699,7 +1699,8 @@ describe('plugin layout', () => {
     }
   });
   it('waypoint:design runs the converging loop: critique-next, round --verify, the budget, reasons, resolved, amend and reopen, critiques in docs/ (wave 4d)', () => {
-    const md = read('plugins/waypoint/skills/design/SKILL.md');
+    const md = designText();
+    const mdCore = read('plugins/waypoint/skills/design/SKILL.md');
     for (const w of ['waypoint critique-next DESIGN', 'round [--verify]', '`amend`, `reopen`, `park`', 'CRITIQUES', 'docs/waypoint/<project>/design/critiques/',
       '--changed <review, comma-separated>', 'Design critique r<R> (v<V>)', '--reason-file LOCAL/dismiss-reason.txt', '--resolved r<R>:<numbers>',
       '--kind draft', '--kind apply', '--kind rewrite', '--kind interview', '--kind approve', '--kind amend', '--kind reopen',
@@ -1708,14 +1709,14 @@ describe('plugin layout', () => {
     for (const w of ['the highest number N among the `LOCAL/critique-r<N>.json` files', 'waypoint design-changed DESIGN --since', 'critique-check LOCAL/critique-r<R>.json']) expect(md, w).not.toContain(w);
     // Final review M1: nothing to review only when `changed` and `removed` are both empty; `removed` goes to the critic.
     // M2: the second attempt of the check passes --reject-on-fail, so a refused critique is never a round.
-    const round = md.slice(md.indexOf('## round'), md.indexOf('## apply'));
+    const round = mdCore.slice(mdCore.indexOf('## round'), mdCore.indexOf('## apply'));
     for (const w of ['`changed` and `removed` are both empty', '`removed`', '--reject-on-fail', 'r<R>.rejected.json']) expect(round, w).toContain(w);
     expect(round).not.toMatch(/\bmv\b/);
     // Re-review N1: a hand edit is snapshotted first (--kind round), before critique-next; resume says what clears it.
     expect(round.indexOf('`handEdit`')).toBeGreaterThan(-1);
     expect(round.indexOf('--kind round')).toBeGreaterThan(-1);
     expect(round.indexOf('--kind round')).toBeLessThan(round.indexOf('waypoint critique-next DESIGN'));
-    const resume = md.slice(md.indexOf('\n## resume'), md.indexOf('\n## amend'));
+    const resume = designRef('resume');
     for (const w of ['`handEdit`', '`round --verify`']) expect(resume, w).toContain(w);
     expect(runRef('autonomy')).toContain('`handEdit`');
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) expect(read(f), f).toContain('`handEdit`');
@@ -2020,7 +2021,7 @@ describe('plugin layout', () => {
   it('waypoint:work keeps the core of a lone session and reads references/multisession.md next to other sessions or for a multi-session step (J-12)', () => {
     const work = read('plugins/waypoint/skills/work/SKILL.md');
     const multi = read('plugins/waypoint/skills/work/references/multisession.md');
-    expect(Buffer.byteLength(work, 'utf8'), 'at most 60 % of its size when wave 5c started').toBeLessThanOrEqual(WORK_CAP);
+    expect(Buffer.byteLength(work, 'utf8'), 'under what compaction re-attaches').toBeLessThanOrEqual(SKILL_CAP);
     for (const w of ['references/multisession.md', '--messages DB/messages', '`multi: true`', 'node "<WP>" next <plan>', '`[waypoint`']) expect(work, w).toContain(w);
     // The routing to the reference sits where the core reads next's output, before the claim.
     const at = work.indexOf('`multi: true`');
@@ -2069,6 +2070,31 @@ describe('plugin layout', () => {
     }
     for (const w of ['heartbeat --register', '"<WP>" notes --notes', '"<WP>" done <plan>']) expect(work, w).not.toContain(w);
   });
+  it('waypoint:design keeps round and apply and reads every other subcommand from references/ (w7 A2)', () => {
+    const design = read('plugins/waypoint/skills/design/SKILL.md');
+    expect(Buffer.byteLength(design, 'utf8')).toBeLessThanOrEqual(SKILL_CAP);
+    const lines = design.split(/\r?\n/);
+    for (const [heading, ref] of [['## new', 'new'], ['## rewrite', 'rewrite'], ['## interview', 'interview'], ['## approve', 'approve'], ['## resume', 'resume'],
+      ['## amend', 'amend'], ['## reopen', 'reopen'], ['## park', 'park'], ['## Publish', 'publish']] as const) {
+      const at = lines.indexOf(heading);
+      expect(at, heading).toBeGreaterThan(-1);
+      expect(lines.slice(at + 1).find(l => l.trim() !== ''), heading)
+        .toMatch(new RegExp(`^Read \`references/${ref}\\.md\` now, and again every time you get here: your memory of it does not survive compaction\\.`));
+      expect(designRef(ref), ref).not.toContain('${CLAUDE_');
+    }
+    expect(design).toContain('`CSID` = `${CLAUDE_SESSION_ID}`');
+    for (const w of ['waypoint critique-next DESIGN', 'waypoint critique-select', 'design-snapshot DESIGN --note-file LOCAL/snapshot-note.txt --round <R> --kind apply']) expect(design, w).toContain(w);
+    // The rules that must not be lost come first.
+    const rules = design.slice(design.indexOf('\n## Rules\n'), design.indexOf('\n## Args and paths\n'));
+    expect(rules.length).toBeGreaterThan(0);
+    for (const w of ['`round --auto`', '`critical` or `major`', '`canAutoApprove: true`', 'design/changelog.json']) expect(rules, w).toContain(w);
+  });
+  it('every SKILL.md of plugins/** weighs at most 16,000 bytes, so compaction re-attaches it whole (w7 A2)', () => {
+    const root = fileURLToPath(new URL('../plugins/', import.meta.url));
+    const skills = walk(root).filter(f => path.basename(f) === 'SKILL.md');
+    expect(skills.length).toBeGreaterThanOrEqual(14);
+    for (const f of skills) expect(Buffer.byteLength(readFileSync(f, 'utf8'), 'utf8'), path.relative(root, f)).toBeLessThanOrEqual(SKILL_CAP);
+  });
   it('a run member never reads forge:run SKILL.md: the close of a review round is references/review-close.md, cited by Medium and the task steps (J-12)', () => {
     const steps = runRef('task-steps');
     const member = read('plugins/forge/skills/member/SKILL.md');
@@ -2091,7 +2117,7 @@ describe('plugin layout', () => {
   });
   it('forge:run starts a task with FORGE begin and leaves to its references what only one path uses (J-12)', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
-    expect(Buffer.byteLength(run, 'utf8'), 'at most 80 % of its size when wave 5c started').toBeLessThanOrEqual(RUN_CAP);
+    expect(Buffer.byteLength(run, 'utf8'), 'under what compaction re-attaches').toBeLessThanOrEqual(SKILL_CAP);
     for (const w of ['FORGE begin --task <id> --locale <es|en>', '`foreign`', '`say`', '`tdd.line`', '`references/large.md`']) expect(run, w).toContain(w);
     for (const w of ['git status --porcelain', 'FORGE tree snapshot', 'FORGE tdd', 'FORGE prefs', 'FORGE local set surfaces.', 'FORGE route stage']) expect(run, w).not.toContain(w);
     expect(run.split('\n').find(l => l.startsWith('4. **Verification, only when the task asks for it**'))).toContain('`## Small` in `references/verify.md`');

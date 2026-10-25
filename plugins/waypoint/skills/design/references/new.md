@@ -1,0 +1,10 @@
+Read from waypoint:design (`## new` in `SKILL.md`). `waypoint`, `DESIGN`, `LOCAL`, `CRITIQUES`, `<CSID>`, the commit pathspecs, the approved-design rule, **Auto** and **Publish** mean what that skill says.
+
+0. If `DESIGN` already exists, stop: tell the user it exists (version and status) and offer `round` (improve it) or `rewrite` (replace it with a new version). Never overwrite it.
+1. **From a spec** (`new --from <spec>`: a superpowers spec, or any Markdown spec with a `# ` title and `##` sections): `waypoint design-import <spec> --project <project> --locale <user language> --out DESIGN`. `<project>` is the one the user named, else a kebab slug of the spec's file name without its date prefix and its `-design` suffix (`2026-10-12-forge-route-design.md` → `forge-route`). Exit 2: tell the user its message and stop. Then fill `pillars` (2-6, in the spec's own words) in the front matter with Edit and change nothing else: the body stays as the spec wrote it, and `source` names the spec. In many projects `docs/superpowers/` is in `.gitignore`; that does not matter, `DESIGN` goes to git. Skip step 2.
+   **Otherwise** ask for the user's draft (text, file or the current conversation) and collect it.
+2. Write `DESIGN` with the front matter above (`status: draft`, no `artifact`) and a body with `##` sections.
+3. Run `waypoint design-validate DESIGN` and fix every reported issue until it passes.
+4. `waypoint design-snapshot DESIGN --note-file LOCAL/snapshot-note.txt --round 0 --kind draft` (prints `{"version","path"}`); the note: <initial draft, in the user's language>, and after an import "<imported from <spec>, in the user's language>".
+5. Commit with the message `Design v1` (pathspecs as above; include the `.gitignore` if you edited it for `.waypoint/`).
+6. Publish (see **Publish**), give the URL and offer the first round, then **end the turn**. After an import, offer **another round (recommended)**, since the spec has not been through the critic, or **approve now**. A round runs only when the user asks for it, also when forge drives the session; the one exception is forge's auto mode, which calls `round --auto` itself.
