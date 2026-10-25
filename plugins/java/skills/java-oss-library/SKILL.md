@@ -15,7 +15,7 @@ description: Use when maintaining spring-boot-cqrs, spring-boot-specification-re
 - Leave a new module out of `apiCompatibility` until its first release. That check resolves the module's artifact at `apiBaseline` from Maven Central, and the artifact does not exist yet: listing the module breaks `quality`. Do not patch the convention to skip it, and do not touch `apiBaseline`. The first release of the module is what puts it in the list.
 - Two starters, Boot 3 (Jackson 2) and Boot 4 (Jackson 3): an auto-configuration change goes into both, and `verifyBoot3Compatibility verifyBoot4Compatibility` proves it.
 - Every library module keeps 100 % JaCoCo coverage, lines and branches, with its tests in the same change.
-- Spotless runs Google Java Format with the import order `java, javax, jakarta, org, com, io`: run `spotlessApplyAll` before every commit.
+- Spotless runs Google Java Format with the import order `java, javax, jakarta, org, com, io`: run `spotlessApplyAll` before every commit. Write new files with LF line endings even when git has `core.autocrlf=true`: Spotless in these repositories fails `spotlessJavaCheck` on CRLF, so never convert files to CRLF. Run the module's `spotlessApply` (or `spotlessApplyAll`) before the single `check` run, so that run reaches the tests and the JaCoCo gate.
 
 ## Issues and milestones
 
