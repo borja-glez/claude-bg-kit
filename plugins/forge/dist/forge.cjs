@@ -17869,10 +17869,10 @@ function bashWrite(seg) {
     return W2(script ? ops : ops.slice(1));
   }
   if (name === "find") {
-    const starts = ops.filter((w) => !/^[()!,]$/.test(w.text));
+    const starts2 = ops.filter((w) => !/^[()!,]$/.test(w.text));
     const out = [...V("-fprint", "-fprint0", "-fls"), ...V("-fprintf").slice(0, 1)];
     if (!has("-delete") && !out.length) return NONE2;
-    return W2([...has("-delete") ? starts : [], ...out]);
+    return W2([...has("-delete") ? starts2 : [], ...out]);
   }
   return W2(ops);
 }
@@ -22223,9 +22223,9 @@ var scratchpadOf = (input) => {
   const s2 = str5(input.scratchpad_dir);
   return s2 !== null && import_node_path17.default.isAbsolute(s2) ? s2 : null;
 };
-function runMainsOf(starts) {
+function runMainsOf(starts2) {
   const found = [];
-  for (const start of starts) {
+  for (const start of starts2) {
     for (let dir = import_node_path17.default.resolve(start); ; dir = import_node_path17.default.dirname(dir)) {
       if ((0, import_node_fs13.existsSync)(runFile(dir)) && !found.some((f) => samePath(f, dir))) found.push(dir);
       if (import_node_path17.default.dirname(dir) === dir) break;
@@ -24144,7 +24144,7 @@ function isPerfTask(text4) {
 var BUG = [
   /\b(?:bugs?|bugfix|crash(?:es|ed|ing)?(?!\s+report)|regressions?|broken|segfaults?|stack trace|(?:throws|raises|unhandled)(?:\s+\S+){0,2}?\s+(?:exception|error)|does not work|doesn't work|no longer works|stopped working|isn't working|is not working|fails\s+(?:on|when|with|for|if|after))\b/i,
   es(
-    "crashe|lanza una excepci|salta una excepci",
+    "crashe(?![sd])|lanza una excepci|salta una excepci",
     "bugs?|fallos?|fallan?\\s+(?:al|con|cuando|en|tras|si)|no funciona|ya no funciona|no va(?!\\s+al?(?![\\p{L}\\p{N}_]))|regresi[o\xF3]n|rot[oa]s?|se rompe|se cuelga|cuelgue|(?<!\\bde\\s)error(?:es)? al"
   )
 ];
@@ -25425,7 +25425,8 @@ var ESC = String.fromCharCode(27);
 var ANSI = new RegExp(`${ESC}\\[[0-9;]*[A-Za-z]`, "g");
 var MAX_FAILING = 200;
 var DURATION = /\s+[([]?\d+(?:\.\d+)?\s?m?s[)\]]?$/;
-var tidy = (s2) => s2.replace(DURATION, "").replace(/\s+/g, " ").trim().slice(0, 300);
+var FAILING_NAME_MAX = 300;
+var tidy = (s2) => s2.replace(DURATION, "").replace(/\s+/g, " ").trim().slice(0, FAILING_NAME_MAX);
 var TEST_LINE = [/^\s*FAILED\s+(\S+)/, /^\s*ERROR\s+(\S+::\S+)/, /^\s*--- FAIL:\s+(\S+)/, /^test\s+(\S+)\s+\.\.\.\s+FAILED/, /^\s*Failed\s+(\S+)\s+\[[^\]]+\]\s*$/];
 var TEST_KINDS = /* @__PURE__ */ new Set(["test", "e2e", "other"]);
 var RUNNER_ERROR = new RegExp(String.raw`unhandled (?:errors?|rejections?)|test suite failed to run|error collecting|errors? during collection|^\s*Interrupted:|${CRASH}`, "im");
@@ -29481,9 +29482,9 @@ function perDir(answer2) {
 }
 function guardCtx(io, input) {
   const dir = hookRoot(io, input);
-  const starts = typeof input.cwd === "string" && input.cwd !== "" ? [dir, input.cwd] : [dir];
+  const starts2 = typeof input.cwd === "string" && input.cwd !== "" ? [dir, input.cwd] : [dir];
   let autonomous = null;
-  for (const m of runMainsOf(starts)) {
+  for (const m of runMainsOf(starts2)) {
     autonomous = autonomousFor(m, input);
     if (autonomous) break;
   }
@@ -35391,6 +35392,15 @@ var esc2 = (s2) => s2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var slash2 = (s2) => s2.replace(/\\/g, "/");
 var JS_TITLE = /^\s*(?:it|test)(?:\.(?:only|concurrent|sequential|fails))?\s*\(\s*(['"`])((?:\\.|(?!\1).)+)\1/;
 var PY_TEST = /^\s*(?:async\s+)?def\s+(test\w*)\s*\(/;
+function jsTitle(source2) {
+  let other = false;
+  const title = source2.replace(/\\(.)/g, (_, c) => {
+    if (`'"\`\\`.includes(c)) return c;
+    other = true;
+    return "";
+  });
+  return other ? null : title;
+}
 function newTestNames(patch) {
   const lines = patch.split(/\r?\n/);
   const removed = /* @__PURE__ */ new Map();
@@ -35412,7 +35422,8 @@ function newTestNames(patch) {
     const text4 = l.slice(1);
     const trimmed = text4.trim();
     if (/^(?:\/\/|#|\*)/.test(trimmed)) continue;
-    const name = JS_TITLE.exec(text4)?.[2] ?? PY_TEST.exec(text4)?.[1];
+    const js = JS_TITLE.exec(text4)?.[2];
+    const name = js !== void 0 ? jsTitle(js) : PY_TEST.exec(text4)?.[1];
     if (!name || name.includes("${")) continue;
     const left = removed.get(trimmed) ?? 0;
     if (left > 0) {
@@ -35429,6 +35440,14 @@ var ESC2 = String.fromCharCode(27);
 var ANSI2 = new RegExp(`${ESC2}\\[[0-9;]*[A-Za-z]`, "g");
 var SEP = String.raw`(?: > | › |::)`;
 var SEP_AT = new RegExp(`^${SEP}`);
+var SEP_ALL = new RegExp(SEP, "g");
+var starts = (t) => [t, ...[...t.matchAll(SEP_ALL)].map((m) => t.slice((m.index ?? 0) + m[0].length))];
+function namer(x) {
+  const y = slash2(x);
+  const wants = [.../* @__PURE__ */ new Set([tidy(y), y.replace(/\s+/g, " ").trim()])].filter(Boolean);
+  const re = new RegExp(`(?:^|${SEP})(?:${wants.map(esc2).join("|")})(?:\\[[^\\]]*\\])?$`);
+  return (t, cut4) => wants.length > 0 && re.test(t) || cut4 && starts(t).some((s2) => s2 !== "" && wants.some((w) => w.startsWith(s2)));
+}
 function cleanEntry(entry2, files) {
   const e = slash2(entry2);
   const label = /^\|[^|]*\|\s+/.exec(e);
@@ -35444,12 +35463,16 @@ function classifyTdd(files, names3, run2, kind, baseFailing) {
     return out;
   }
   const { names: raw, known } = failingTests(run2.output, kind);
-  const entries = raw.map((r2) => ({ raw: r2, text: cleanEntry(r2, files) }));
+  const entries = raw.map((r2) => ({ raw: r2, text: cleanEntry(r2, files), cut: r2.length >= FAILING_NAME_MAX }));
   const text4 = slash2(run2.output.replace(ANSI2, ""));
   const owner = (e) => {
     let best = null;
     for (const f of files) if (e.startsWith(f) && SEP_AT.test(e.slice(f.length)) && (best === null || f.length > best.length)) best = f;
     return best;
+  };
+  const rest = (e, f) => {
+    const o = owner(e);
+    return o === null ? e : o === f ? e.slice(o.length) : null;
   };
   for (const f of files) {
     const list = names3.get(f);
@@ -35458,18 +35481,21 @@ function classifyTdd(files, names3, run2, kind, baseFailing) {
       continue;
     }
     const loads = !(entries.some((e) => e.text.startsWith(`${f} [ `) && e.text.trimEnd().endsWith("]")) || !known && entries.some((e) => e.text === f) || !known && run2.code !== 0 && text4.includes(f) && !entries.some((e) => e.text.startsWith(f) && SEP_AT.test(e.text.slice(f.length))));
+    const tests = list.map((x) => ({ x, named: namer(x) }));
+    const vague = entries.some((e) => {
+      const t = rest(e.text, f);
+      return e.cut && t !== null && !tests.some((n) => n.named(t, true));
+    });
     let unread = false;
-    for (const x of list) {
-      const re = new RegExp(`(?:^|${SEP})${esc2(x)}(?:\\[[^\\]]*\\])?$`);
+    for (const { x, named } of tests) {
       const hit = entries.find((e) => {
-        const o = owner(e.text);
-        if (o !== null && o !== f) return false;
-        return re.test(o === null ? e.text : e.text.slice(o.length));
+        const t = rest(e.text, f);
+        return t !== null && named(t, e.cut);
       });
       const label = `${f} > ${x}`;
       if (hit && (baseFailing.has(hit.raw) || baseFailing.has(hit.text) || baseFailing.has(label))) out.alreadyFailing.push(label);
       else if (hit || !loads) out.red.push(label);
-      else if (known || run2.code === 0) out.passedOnBase.push(label);
+      else if (run2.code === 0 || known && !vague && tidy(` ${x}`) !== "") out.passedOnBase.push(label);
       else if (!unread) {
         unread = true;
         out.unjudged.push(f);
@@ -35531,13 +35557,14 @@ function tddPlan(validators, touched, base, at2) {
   const live = touched;
   const overlay = live.filter((f) => at2.repo.exists(f) && (isTestFile(f) || CONFTEST.test(f)));
   const modules = overlay.filter((f) => TEST_MODULE.test(f) || isPytestModule(f));
+  const testPaths = live.filter(isTestFile);
   const lockBase = at2.git(["ls-tree", base, "--", ...LOCKFILES]) ?? "";
   const lockHead = at2.git(["ls-tree", "HEAD", "--", ...LOCKFILES]) ?? "";
   const overlayBlobs = overlay.length ? at2.git(["ls-tree", "HEAD", "--", ...overlay]) ?? "" : "";
-  const plan = { key: "", base, validator: null, kind: null, cmd: null, overlay, files: [], skipped: null, note: null };
+  const plan = { key: "", base, validator: null, kind: null, cmd: null, overlay, files: [], testPaths, skipped: null, note: null };
   const done = (skipped) => {
     plan.skipped = skipped;
-    plan.key = (0, import_node_crypto8.createHash)("sha256").update(JSON.stringify([1, base, plan.validator, plan.cmd, overlayBlobs, lockBase, lockHead, skipped])).digest("hex");
+    plan.key = (0, import_node_crypto8.createHash)("sha256").update(JSON.stringify([1, base, plan.validator, plan.cmd, overlayBlobs, testPaths, lockBase, lockHead, skipped])).digest("hex");
     return plan;
   };
   const fits = validators.flatMap((v2) => {
@@ -35764,7 +35791,7 @@ function runTdd(plan, ctx) {
       (0, import_node_fs66.mkdirSync)(import_node_path69.default.dirname(dest), { recursive: true });
       (0, import_node_fs66.writeFileSync)(dest, blob);
     }
-    const names3 = newTestNames(ctx.git(["-c", "core.quotePath=false", "diff", "--no-color", "--no-renames", "-U0", `${plan.base}..HEAD`, "--", ...plan.files]) ?? "");
+    const names3 = newTestNames(ctx.git(["-c", "core.quotePath=false", "diff", "--no-color", "--no-renames", "-U0", `${plan.base}..HEAD`, "--", ...plan.testPaths]) ?? "");
     const r2 = ctx.execAt(baseDir)(plan.cmd ?? "", Math.min(ctx.timeoutSec, TDD_TIMEOUT_MAX));
     const verdict = classifyTdd(plan.files, names3, { code: r2.code, output: r2.output, timedOut: r2.timedOut }, plan.kind ?? "test", new Set(baseFailingNames(ctx.baseline, plan.validator ?? "")));
     return done({ ...verdict, skipped: r2.timedOut ? "timeout" : null });
