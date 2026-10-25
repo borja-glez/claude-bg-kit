@@ -49,4 +49,21 @@ describe('crew plugin (w7 D4)', () => {
     for (const w of ['## Verdict', '## Earlier points', '## Findings', '## Not checked', '[blocker]', '[major]', '[minor]', 'seam']) expect(body, w).toContain(w);
     expect(Buffer.byteLength(md)).toBeLessThan(12000);
   });
+  it('playtest-qa: one browser at a time on the GPU, real input only, its own processes by PID, figures per minute', () => {
+    const { md, head, body } = agent('playtest-qa');
+    expect(field(head, 'name')).toBe('playtest-qa');
+    expect(field(head, 'description')).toContain('at most two at a time');
+    expect([field(head, 'model'), field(head, 'effort'), field(head, 'maxTurns')]).toEqual(['opus', 'medium', '150']);
+    expect(toolsOf(head)).toEqual(['Read', 'Write', 'Grep', 'Glob', 'Bash']);
+    for (const w of ['--enable-gpu --use-angle=d3d11 --enable-unsafe-webgpu', 'window.game', 'Input.dispatchKeyEvent', 'Input.dispatchMouseEvent',
+      'playtest-qa-slots', 'owner.json', 'text/javascript', 'SwiftShader', 'by PID', 'log/segment-',
+      '## Environment', '## Tutorial', '## Per minute', '## Theme', '## Findings', '## Not checked']) expect(body, w).toContain(w);
+    expect(Buffer.byteLength(md)).toBeLessThan(12000);
+  });
+  it('crew has exactly its two agents, and neither has Edit or NotebookEdit nor can spawn agents', () => {
+    expect(files().filter(f => f.startsWith('agents/')).sort()).toEqual(['agents/novice-reader.md', 'agents/playtest-qa.md']);
+    for (const n of ['novice-reader', 'playtest-qa']) {
+      for (const t of ['Agent', 'Task', 'Edit', 'NotebookEdit']) expect(toolsOf(agent(n).head), `${n}: ${t}`).not.toContain(t);
+    }
+  });
 });
