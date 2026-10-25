@@ -46,7 +46,7 @@ Recorded with Claude Code 2.1.310 by `subagents.e2e.ts`, with the default `CLAUD
 - The agent tool starts agents in the background (`Async agent launched successfully` is the `tool_result` the caller gets), so the main session goes on while they run. The scenario holds the main session's last `Read` until level one is done, to get a fixed order.
 - SubagentStart fires at both levels, in the main session's `session_id`, with `agent_type: general-purpose` and a distinct `agent_id` each. There is no field that says which agent started which, or at what depth.
 - PreToolUse carries `agent_type` and `agent_id` inside each subagent, at both levels (`general-purpose`), and carries neither in the main session. In order: level one, level two, main.
-- Forge's live signal of the coordinator (`.forge/live/<session>.json`) lists one agent while level one runs and two while level two runs, and the level-one id is still in the list: the signal sees the second level.
+- Forge's live signal of the coordinator (`.forge/live/<session>.json`) lists one agent while level one runs and two while level two runs, by the `agent_id`s SubagentStart carried (level one's is still there while level two runs): the signal sees the second level.
 - What is not measured: the subagent state the engine gives the mod (lens) does not exist in `-p`.
 
 ## permissions.deny in subagents (for A4)

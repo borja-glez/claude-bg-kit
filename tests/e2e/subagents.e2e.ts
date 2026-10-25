@@ -2,9 +2,9 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { agentTool, agentUse, denied } from './harness/agents.js';
+import { agentTool, agentUse } from './harness/agents.js';
 import { findClaude } from './harness/claude-bin.js';
-import { all, hasTools, not, startMessagesServer, turn, userHas, type ReplyBlock } from './harness/messages-server.js';
+import { all, hasTools, not, startMessagesServer, toolResults, turn, userHas, type ReplyBlock } from './harness/messages-server.js';
 import { failureReport, runClaude } from './harness/session.js';
 import { makeWorkspace } from './harness/workspace.js';
 import { liveFile } from '../../src/forge/live.js';
@@ -26,7 +26,6 @@ const PINNED_NESTED = {
   readAgentTypes: ['general-purpose', 'general-purpose', null],
   liveAtL1: 1,
   liveAtL2: 2,
-  liveIdsAgree: true,
 };
 const PINNED_DENY = { subagentDenied: true };
 
@@ -91,9 +90,12 @@ describe.skipIf(!CLAUDE)('subagents against the real claude (A8)', () => {
         distinctAgentIds: new Set(starts.map(h => h.input.agent_id)).size === starts.length,
         readAgentTypes: r.hooks.filter(h => h.event === 'PreToolUse' && h.input.tool_name === 'Read').map(h => h.input.agent_type ?? null),
         liveAtL1: liveAtL1.length, liveAtL2: liveAtL2.length,
-        liveIdsAgree: liveAtL1.every(id => liveAtL2.includes(id)),
       };
       expect(observed).toEqual(PINNED_NESTED);
+      // the agents of each snapshot are the agent_ids SubagentStart carried: level one's, then both levels'
+      const startIds = starts.map(h => String(h.input.agent_id));
+      expect({ liveAtL1, liveAtL2: [...liveAtL2].sort() }, 'the live signal lists the agent_ids of SubagentStart')
+        .toEqual({ liveAtL1: startIds.slice(0, 1), liveAtL2: [...startIds].sort() });
     } finally { await server.close(); }
   });
 
@@ -117,8 +119,13 @@ describe.skipIf(!CLAUDE)('subagents against the real claude (A8)', () => {
     try {
       const r = await runClaude(CLAUDE!, { ws, server, turns: ['E2E-DENY: read e2e-denied.txt'], permissions: 'deny-prompts', settings });
       expect(r.timedOut, failureReport(r, server)).toBe(false);
-      expect(denied(server.log, 'toolu_e2e_deny_main'), 'the control: the rule must deny the main session first').toBe(true);
-      expect({ subagentDenied: denied(server.log, 'toolu_e2e_deny_sub') }).toEqual(PINNED_DENY);
+      // denied(id): the tool_result of id, in the next request of its thread, is an error and lacks the file's content
+      const denied = (id: string): boolean => {
+        const res = server.log.flatMap(l => (l.body ? toolResults(l.body) : [])).find(t => t.tool_use_id === id);
+        return res !== undefined && res.is_error && !res.text.includes('E2E-DENIED-CONTENT');
+      };
+      expect(denied('toolu_e2e_deny_main'), 'the control: the rule must deny the main session first').toBe(true);
+      expect({ subagentDenied: denied('toolu_e2e_deny_sub') }).toEqual(PINNED_DENY);
     } finally { await server.close(); }
   });
 });
