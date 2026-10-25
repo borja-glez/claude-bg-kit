@@ -9,7 +9,7 @@ import { readExecution, updateExecution, runWorktree, writePublicTask } from '..
 import { isSafeId, type ExecTask, type ExecutionState } from '../../../lib/execution-state.js';
 import { LEASE_MINUTES } from '../../../lib/coordination.js';
 import { workRel } from '../../task-ref.js';
-import { taskReceipt, sameReviewedTree, treeOf, commitOf, TASK_TREE_CHANGED, TASK_NO_RECEIPT } from '../../receipts.js';
+import { taskReceipt, sameReviewedTree, treeOf, commitOf, changedOut, TASK_TREE_CHANGED, TASK_NO_RECEIPT } from '../../receipts.js';
 import { isPlanId } from '../../../lib/plan.js';
 import { updateLocal } from '../../local.js';
 import { integratedSay } from '../../swarm.js';
@@ -38,9 +38,11 @@ function reviewAgain(io: Io, e: ExecutionState, task: string, t: ExecTask, reaso
   }
   const lease = new Date(io.now().getTime() + LEASE_MINUTES * 60000).toISOString();
   let changedNow = false;
+  // The task's status under the lock when it was no longer accepted (a tick or a swarm task meanwhile), null when it is gone.
+  let state = null as string | null;
   updateExecution(io.cwd, cur => {
     const c = cur?.tasks[task];
-    if (!cur || !c || c.status !== 'accepted') return null;
+    if (!cur || !c || c.status !== 'accepted') { state = c?.status ?? null; return null; }
     changedNow = true;
     const next: ExecTask = {
       ...c, status: 'running', stage: 'validate', executor: 'subagents', agent: null, detail: `unreviewed: ${reason}`,
@@ -54,7 +56,8 @@ function reviewAgain(io: Io, e: ExecutionState, task: string, t: ExecTask, reaso
     });
     appendPhase(io.cwd, { ts: at, kind: 'phase', task, phase: 'validate', ...(e.kind === 'plan' && isSafeId(e.project) ? { project: e.project } : {}) });
   }
-  return { code: 0, stdout: JSON.stringify({ result: 'unreviewed', reason, changed, detail: `${task}: ${reason}; it is reviewed again` }) + '\n', stderr: '' };
+  const outcome = changedNow ? 'it is reviewed again' : `${state === null ? 'it is no longer in the execution' : `it is ${state} now`}, so it is not reviewed again`;
+  return { code: 0, stdout: JSON.stringify({ result: 'unreviewed', reason, ...changedOut(changed), detail: `${task}: ${reason}; ${outcome}` }) + '\n', stderr: '' };
 }
 
 function integrate(rest: string[], io: Io, deps: SwarmDeps, planArg?: string, db?: string): Result {

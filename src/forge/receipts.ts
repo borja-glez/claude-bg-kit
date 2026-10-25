@@ -41,6 +41,12 @@ export function sameReviewedTree(git: Git, reviewed: string, now: string, extraP
   return changed.length === 0 ? { ok: true } : { ok: false, changed };
 }
 
+/** At most CHANGED_MAX paths go into an output, with `changedTotal` when there are more (a receipt far from the tip). */
+export const CHANGED_MAX = 20;
+export function changedOut(changed: readonly string[]): { changed: string[]; changedTotal?: number } {
+  return { changed: changed.slice(0, CHANGED_MAX), ...(changed.length > CHANGED_MAX ? { changedTotal: changed.length } : {}) };
+}
+
 export type TaskReceipt = { tree: string } | 'none' | 'unknown';
 
 /** The tree the last accept of `task` in run `e` reviewed (Precisiones: its `tree`, else its round's head.txt under one of `roots`). */

@@ -163,6 +163,7 @@ describe('shadowReport', () => {
     expect(r).not.toHaveProperty('passes');
     const es = renderShadowReport([r], 'es');
     expect(es).toContain('perf: sin verificar');
+    expect(es).toContain('(-)');
     expect(es).not.toContain('cumple');
     expect(renderShadowReport([r], 'en')).toContain('perf: unverified');
   });

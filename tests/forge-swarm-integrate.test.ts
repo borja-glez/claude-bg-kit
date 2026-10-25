@@ -1243,6 +1243,31 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     g(runWt(), 'commit', '-qam', 'decisions grew');
     expect(merge([])).toMatchObject({ result: 'merged', closed: true });
   });
+  it('the decisions file of the run added alone right after the final accept: the merge on finish merges (A3 polish)', () => {
+    finished();
+    onFinish();
+    expect(finalReview(true)).toBe('accept');
+    const decisions = `docs/forge/decisions/${readExecution(root)!.runId}.md`;
+    mkdirSync(path.join(runWt(), 'docs', 'forge', 'decisions'), { recursive: true });
+    writeFileSync(path.join(runWt(), decisions), '# Decisions\n');
+    g(runWt(), 'add', decisions);
+    g(runWt(), 'commit', '-qm', 'decisions of the run');
+    expect(merge([])).toMatchObject({ result: 'merged', closed: true });
+    expect(mergeCommits()).toBe(1);
+  });
+  it('a run branch far from its final receipt names at most 20 changed paths, with changedTotal (A3 polish)', () => {
+    finished();
+    onFinish();
+    expect(finalReview(true)).toBe('accept');
+    const names = Array.from({ length: 25 }, (_, i) => `late-${String(i).padStart(2, '0')}.txt`);
+    for (const n of names) writeFileSync(path.join(runWt(), n), 'late\n');
+    g(runWt(), 'add', ...names);
+    g(runWt(), 'commit', '-qm', 'many by hand');
+    const r = merge([]);
+    expect(r).toMatchObject({ result: 'needs-authorization', reason: 'tree changed since the final review', changedTotal: 25 });
+    expect(r.changed).toEqual(names.slice(0, 20));
+    expect(mergeCommits()).toBe(0);
+  });
   it('a final review with something uncommitted in the run worktree leaves no receipt: the merge on finish asks (A3)', () => {
     finished();
     onFinish();
@@ -1473,6 +1498,36 @@ describe('a task is integrated only with the tree its review accepted (A3)', () 
     expect(g(w, 'log', '-1', '--format=%s')).toBe('late');
     expect(g(runWt(), 'rev-parse', 'HEAD^2')).toBe(reviewed);
   });
+  it('a branch far from its receipt names at most 20 changed paths, with changedTotal (A3 polish)', () => {
+    const w = accept('T1', 'a.txt', 'a\n');
+    accepted('T1', w);
+    const names = Array.from({ length: 25 }, (_, i) => `late-${String(i).padStart(2, '0')}.txt`);
+    for (const n of names) writeFileSync(path.join(w, n), 'late\n');
+    g(w, 'add', ...names);
+    g(w, 'commit', '-qm', 'many by hand');
+    const r = out(run(['swarm', 'integrate', 'T1'], io));
+    expect(r).toMatchObject({ result: 'unreviewed', reason: 'tree changed since its review', changedTotal: 25 });
+    expect(r.changed).toEqual(names.slice(0, 20));
+    const w2 = accept('T2', 'b.txt', 'b\n');
+    accepted('T2', w2);
+    commitIn(w2, 'late.txt', 'late\n', 'by hand');
+    expect(out(run(['swarm', 'integrate', 'T2'], io))).not.toHaveProperty('changedTotal');
+  });
+  it('a task no longer accepted when the lock is taken is not sent back: the output says its state (A3 polish)', () => {
+    const w = accept('T1', 'a.txt', 'a\n');
+    accepted('T1', w);
+    commitIn(w, 'late.txt', 'late\n', 'by hand');
+    // A swarm task blocks T1 while the integration compares the trees.
+    const block = () => { const e = readExecution(root)!; seedExecution(root, { ...e, tasks: { ...e.tasks, T1: { ...e.tasks.T1, status: 'blocked' } } }); };
+    const deps: SwarmDeps = {
+      git: defaultGit(root), exec: defaultExec(root), repo: repoReader(root),
+      at: dir => ({ git: a => { if (a[0] === 'diff') block(); return defaultGit(dir)(a); }, exec: defaultExec(dir), repo: repoReader(dir) }),
+    };
+    const r = out(swarmCommand(['integrate', 'T1'], io, deps));
+    expect(r).toMatchObject({ result: 'unreviewed', reason: 'tree changed since its review', changed: ['late.txt'] });
+    expect(r.detail).toBe('T1: tree changed since its review; it is blocked now, so it is not reviewed again');
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'blocked' });
+  });
 });
 
 describe('swarm status predicts the merges (A3)', () => {
@@ -1491,5 +1546,33 @@ describe('swarm status predicts the merges (A3)', () => {
     expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(runHead);
     expect(g(runWt(), 'status', '--porcelain')).toBe('');
     expect(git('status', '--porcelain')).toBe('');
+  });
+  it('a closed run and a missing execution print no predicted (A3 polish)', () => {
+    accept('T1', 'a.txt', 'a\n');
+    expect(out(run(['swarm', 'status'], io))).toHaveProperty('predicted');
+    run(['swarm', 'stop'], io);
+    out(run(['swarm', 'close'], io));
+    const closed = out(run(['swarm', 'status'], io));
+    expect(closed.state.closedAt).toBe('2026-10-12T12:00:00.000Z');
+    expect(closed).not.toHaveProperty('predicted');
+    rmSync(path.join(root, '.forge', 'execution.json'));
+    const none = out(run(['swarm', 'status'], io));
+    expect(none).toMatchObject({ present: false, state: null });
+    expect(none).not.toHaveProperty('predicted');
+  });
+  it('an ephemeral run predicts no merge, and its tasks against the branch it started from (A3 polish)', () => {
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    writeFileSync(path.join(root, '.forge', 'tasks.json'), JSON.stringify([
+      { id: 'fix-a', title: 'fix a', path: 'small', zones: ['base.txt'], depends_on: [] },
+      { id: 'fix-b', title: 'fix b', path: 'small', zones: ['b.txt'], depends_on: [] },
+    ]));
+    expect(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--hook-session', 'hook-main', '--tasks', '.forge/tasks.json'], io).stderr).toBe('');
+    out(run(['swarm', 'tick'], io));
+    const w = out(run(['swarm', 'worktree', 'fix-a'], io)).worktree;
+    commitIn(w, 'base.txt', 'from fix-a\n', 'fix-a: work');
+    out(run(['swarm', 'task', 'fix-a', '--stage', 'verdict', '--status', 'accepted'], io));
+    expect(out(run(['swarm', 'status'], io)).predicted).toEqual({ merge: null, tasks: { 'fix-a': { state: 'clean' } } });
+    commitIn(root, 'base.txt', 'from main\n', 'main side');
+    expect(out(run(['swarm', 'status'], io)).predicted).toEqual({ merge: null, tasks: { 'fix-a': { state: 'conflict', paths: ['base.txt'] } } });
   });
 });

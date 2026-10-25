@@ -12,7 +12,7 @@ import { claudeSessionId } from '../../../lib/claude-session.js';
 import { checkMergeAuth, isForgeBranch as isForgeTarget, mergeAsk, pendingAuth, readAuths, useAuth, writeAuth, type AuthRecord } from '../../auth.js';
 import { loadTrustedConfig } from '../../trust.js';
 import { OBJECT_ID } from '../../local.js';
-import { commitOf, treeOf, sameReviewedTree, FINAL_TREE_CHANGED, FINAL_NO_RECEIPT } from '../../receipts.js';
+import { commitOf, treeOf, sameReviewedTree, changedOut, FINAL_TREE_CHANGED, FINAL_NO_RECEIPT } from '../../receipts.js';
 import { predictMerge, gitRun } from '../../merge-predict.js';
 import { publishFor, type StateWrite } from '../../roadmap-sources.js';
 import { finalVerdictOf } from '../../roadmap-run.js';
@@ -101,7 +101,7 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     const same = sameReviewedTree(deps.git, v.tree, now, [`docs/forge/decisions/${e.runId}.md`]);
     return same.ok ? { ok: true } : { ok: false, reason: FINAL_TREE_CHANGED, changed: same.changed };
   })();
-  const why = receipt && !receipt.ok ? { reason: receipt.reason, ...(receipt.changed.length ? { changed: receipt.changed } : {}) } : {};
+  const why = receipt && !receipt.ok ? { reason: receipt.reason, ...(receipt.changed.length ? changedOut(receipt.changed) : {}) } : {};
   const finishedRun = (x: ExecutionState | null): x is ExecutionState =>
     !!x && x.runId === e.runId && x.mergeOnFinish && !x.active && x.stopReason === 'finished' && !x.closedAt && receipt?.ok === true;
   const asks = !isForgeTarget(e.base);
