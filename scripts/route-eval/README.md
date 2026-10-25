@@ -57,7 +57,7 @@ node scripts/route-eval/run.mjs --dry-run
 node scripts/route-eval/run.mjs [--only <id>] [--config with-superpowers|without-superpowers|no-hint] [--reps <k>] [--resume <fichero>] [--keep]
 ```
 
-- `--dry-run` imprime los comandos `claude` sin lanzarlos; los de `no-hint` empiezan por `FORGE_ROUTE_HINT=off`. Imprime un comando por sesión pendiente: con --reps, uno por repetición; con --resume, solo los que faltan.
+- `--dry-run` imprime los comandos `claude` sin lanzarlos; los de `no-hint` empiezan por `FORGE_ROUTE_HINT=off`. Imprime un comando por sesión pendiente: con `--reps`, uno por repetición; con `--resume`, solo los que faltan.
 - `--reps <k>` (de 1 a 10) lanza cada prompt k veces en cada configuración; sin él, una. La tabla da, junto a cada tasa de `forge:route`, su intervalo de Wilson al 95 %.
 - `--resume <fichero>` sigue una pasada cortada: lee su `results/<fecha>.jsonl`, lanza solo lo que aún no tiene un ensayo válido (con un `--reps` mayor, también las repeticiones nuevas) y escribe en el mismo fichero. Un fichero que no existe sale con código 2.
 - `--only <id>` lanza un solo prompt, en cada configuración.
@@ -69,7 +69,7 @@ Imprime una línea por sesión con su coste, la tabla y `PASS` o `FAIL`, y termi
 
 ## Coste
 
-Cada pasada llama al modelo y cuesta dinero: lánzala solo cuando quien paga esté de acuerdo. Una completa son 60 sesiones de 2 turnos (20 prompts por 3 configuraciones). La de octubre, de 20 sesiones, costó unos pocos dólares sin que se midiera: calcula entre 2,5 y 3 veces eso. Una sola configuración es un tercio. Desde esta versión cada sesión guarda su `total_cost_usd`, y la tabla suma lo que costó cada configuración: la estimación de la pasada siguiente sale de `results/`. Con --reps k, k veces eso. Un error del proveedor o una sesión sin hook también se pagan: cuentan en el coste.
+Cada pasada llama al modelo y cuesta dinero: lánzala solo cuando quien paga esté de acuerdo. Una completa son 60 sesiones de 2 turnos (20 prompts por 3 configuraciones). La de octubre, de 20 sesiones, costó unos pocos dólares sin que se midiera: calcula entre 2,5 y 3 veces eso. Una sola configuración es un tercio. Desde esta versión cada sesión guarda su `total_cost_usd`, y la tabla suma lo que costó cada configuración: la estimación de la pasada siguiente sale de `results/`. Con `--reps k`, k veces eso. Un error del proveedor o una sesión sin hook también se pagan: cuentan en el coste.
 
 ## Qué hacer con el resultado
 
