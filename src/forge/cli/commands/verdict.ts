@@ -67,7 +67,7 @@ export const command: Command = (args, ctx) => {
   const main = mainCheckout(io.cwd);
   const exec = readExecution(main);
   const run = runWorktree(main);
-  const inRun = exec !== null && exec.kind === 'plan' && task === `${exec.project}-final` &&existsSync(run);
+  const inRun = exec !== null && exec.kind === 'plan' && task === `${exec.project}-final` && existsSync(run);
   const judged = inRun ? run : ctx.repoDir;
   const git = inRun ? defaultGit(run) : (io.git ?? defaultGit(ctx.repoDir));
   let generated: string[] = [];

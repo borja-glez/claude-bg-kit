@@ -36,6 +36,7 @@ function predictionsOf(main: string, e: ExecutionState): { merge: MergePredictio
   const accepted = Object.entries(e.tasks).filter(([, t]) => t.status === 'accepted');
   return {
     merge: e.kind === 'plan' ? predictMerge(run, e.base, e.branch) : null,
+    // An ephemeral run's branch is its base (swarm start sets it so): its tasks are predicted against the branch they integrate into.
     tasks: Object.fromEntries(accepted.map(([id, t]) => [id, predictMerge(run, e.branch, t.branch)])),
   };
 }
