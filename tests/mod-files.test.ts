@@ -622,4 +622,11 @@ describe('loadBandFiles · what waits for the person (w7 A5)', () => {
     expect((await loadBandFiles(moved.$))!.files.proposals).toEqual({ p20261024100000abcd: 'P2' });
     expect(moved.reads).toContain(file);
   });
+  it('loadBandModel carries what waits, with and without a waypoint project', async () => {
+    const root = main;
+    const pending = JSON.stringify({ authId: 'merge-r1-ab12', kind: 'merge', runId: 'r1', target: 'main', question: 'q', yes: 'Sí', createdAt: iso(now - 60_000), session: ID });
+    const forge = { [`${root}/.forge/execution.json`]: EXEC, [auth('merge-r1-ab12')]: pending };
+    expect(await loadBandModel(fake(root, { ...base(root), ...forge }).$)).toMatchObject({ needs: { total: 1, items: [{ kind: 'authorization', what: 'main', place: 'coordinator' }] } });
+    expect(await loadBandModel(fake(root, forge).$)).toMatchObject({ mode: 'none', needs: { total: 1 } });
+  });
 });

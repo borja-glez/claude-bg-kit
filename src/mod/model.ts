@@ -1,11 +1,11 @@
 import { computeMetrics } from '../lib/metrics.js';
 import { escalationCandidates, inboxFor } from '../lib/coordination.js';
-import { parseDismissed, pendingProposals, unionDismissed, type GateCritique } from '../lib/design-gate.js';
-import { changelogLite, critiqueLite, designMetaLite } from '../lib/design-lite.js';
+import { designMetaLite } from '../lib/design-lite.js';
 import { planLite } from '../lib/plan-lite.js';
 import { oneLine } from '../lib/one-line.js';
 import { isPlanId } from '../lib/ids.js';
-import { coordinatorGone, coordinatorLiveness, executionView, isVisibleRun } from '../lib/execution-view.js';
+import { coordinatorGone, executionView, isVisibleRun } from '../lib/execution-view.js';
+import { bandNeeds, coordinatorOpen, coordinatorSignals, designReview } from './needs.js';
 import { isSafeId, normalizeLive, normalizePublicTask, parseExecution, type ExecutionState, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import type { MessageDoc, Plan, States } from '../lib/types.js';
 import { decisionsSummary } from '../lib/decisions.js';
@@ -81,7 +81,9 @@ export type BandModel = (
   | { mode: 'notice'; project: string; locale: string; kind: 'other-live' | 'previous'; subject: 'task' | 'run' | 'design';
       seat: string | null; task: string | null; title: string | null; since: string | null; runId: string | null;
       integrated?: number; total?: number; stopReason?: string | null; joinable?: boolean; coordinatorOpen?: boolean; roadmapUrl: string | null; key: string }
-) & { viewer: { role: 'owner' | 'other-live' | 'previous' | 'none'; coordinator: boolean; runId: string | null } };
+) & { viewer: { role: 'owner' | 'other-live' | 'previous' | 'none'; coordinator: boolean; runId: string | null };
+  // what waits for the person (src/lib/needs-you.ts), oldest first: the first ten and how many in all; absent when nothing does.
+  needs?: { total: number; items: { kind: 'review-question' | 'authorization' | 'untrusted-commands' | 'run' | 'question' | 'proposal' | 'design-approval' | 'surface'; id: string; what: string; task: string | null; runId: string | null; file: string | null; since: string | null; command: string | null; place: 'coordinator' | 'conversation' | 'roadmap' | null; unverified?: true }[] } };
 
 /** C3: the role of the conversation that looks, as every band publishes it. */
 export type BandViewer = BandModel['viewer'];
@@ -207,11 +209,6 @@ function runInput(exec: ExecutionState | null, f: BandFiles, now: number): Pick<
   const { signal, bindings } = coordinatorSignals(f, now);
   return { execution: exec, members: exec ? membersOf(f, exec.runId) : [], coordinatorEnded: coordinatorGone(exec, signal, now, { bindings }) };
 }
-/** The coordinator's own signal and bindings, as the hooks read them: what coordinatorGone and coordinatorLiveness judge. */
-function coordinatorSignals(f: BandFiles, now: number): { signal: LiveDoc | null; bindings: BoundDoc[] } {
-  const bindings = Object.values(f.coordinatorBindings ?? {}).flatMap(text => { const b = parseBound(text, now); return b ? [b] : []; });
-  return { signal: normalizeLive(json(f.coordinatorLive)), bindings };
-}
 /** The role from the execution alone, with no binding: there is no waypoint project whose seats could be held. */
 function forgeViewer(exec: ExecutionState | null, f: BandFiles, now: number): BandViewer {
   return viewerOf(describeViewer({ bound: null, ...runInput(exec, f, now), sessionId: isSafeId(f.sessionId) ? f.sessionId : null, now }), exec, now);
@@ -234,7 +231,15 @@ export function executionViewer(f: BandFiles): BandViewer {
  * role as `viewer`, and its free text comes clean (M1: cleaned).
  */
 export function buildBandModel(project: string, f: BandFiles): BandModel {
-  return cleaned(bandOf(project, f));
+  return withNeeds(cleaned(bandOf(project, f)), project, f);
+}
+
+/** The band with what waits for the person (w7 A5); the band as it is when that cannot be worked out. */
+export function withNeeds(m: BandModel, project: string | null, f: BandFiles): BandModel {
+  try {
+    const needs = bandNeeds(project, f, f.now ?? Date.now());
+    return needs ? { ...m, needs } : m;
+  } catch { return m; }
 }
 
 type BandPhase = { index: number; total: number; name: string };
@@ -337,7 +342,7 @@ function noticeModel(project: string, f: BandFiles, plan: Plan | null, v: Viewer
     // H5: a stopped run whose coordinator's conversation is still open (judged as swarm status and /forge:run --resume do,
     // as if the run were active) is not taken up from here.
     const { signal, bindings } = coordinatorSignals(f, now);
-    const open = kind === 'previous' && coordinatorLiveness({ ...exec, active: true }, signal, now, { bindings }) !== 'stopped';
+    const open = kind === 'previous' && coordinatorOpen(exec, signal, now, bindings);
     return { ...base, subject: 'run', seat: null, task: null, title: null, runId: exec.runId, integrated: view.integrated, total: view.total,
       stopReason: exec.active ? null : exec.stopReason, joinable: exec.active && exec.kind === 'plan', ...(open ? { coordinatorOpen: true } : {}), key: `run:${exec.runId}` };
   }
@@ -474,24 +479,14 @@ function runModel(project: string, f: BandFiles, exec: ExecutionState, plan: Pla
 }
 
 function designModel(project: string, f: BandFiles, viewer: BandViewer): BandModel {
-  const meta = designMetaLite(f.design!);
-  if (!meta) return noneBand(knownLocale(f));
+  const review = designReview(f);
+  if (!review) return noneBand(knownLocale(f));
+  const { meta, latest, pending } = review;
   if (meta.status !== 'draft') return noneBand(meta.locale, viewer);
-  const changelog = changelogLite(f.changelog ?? null) ?? [];
-  const critiques = Object.entries(f.critiques)
-    .map(([name, text]) => ({ n: Number(/^critique-r(\d+)\.json$/.exec(name)?.[1] ?? NaN), text }))
-    .filter(c => Number.isFinite(c.n))
-    .sort((a, b) => b.n - a.n);
-  const valid: GateCritique[] = critiques.map(c => ({ round: c.n, critique: critiqueLite(c.text) }));
-  // The highest round with a valid critique; invalid ones are skipped.
-  const top = valid.find(c => c.critique !== null);
-  const latest = top?.critique ?? null;
-  // Carry 8: the dismissals of both places, merged as the CLI's readDismissedOf merges them.
-  const pending = pendingProposals(changelog, valid, unionDismissed(parseDismissed(f.dismissedLegacy), parseDismissed(f.dismissed)));
   return {
     mode: 'design', project, locale: meta.locale,
-    version: changelog.at(-1)?.version ?? 0,
-    round: top?.round ?? 0,
+    version: review.version,
+    round: review.round,
     proposals: latest?.proposals.length ?? 0,
     critical: latest?.proposals.filter(p => p.severity === 'critical').length ?? 0,
     pending: pending.length,
