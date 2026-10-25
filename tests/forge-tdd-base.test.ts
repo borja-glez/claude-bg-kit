@@ -9,6 +9,7 @@ import { parseConfig } from '../src/forge/config.js';
 import { defaultExec, defaultGit, repoReader } from '../src/forge/cli/exec.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { run, type Io } from '../src/forge/cli/run.js';
+import { appendEvent, readEvents } from '../src/forge/ledger.js';
 const tmp = useTempDirs();
 
 const RUNNER = [
@@ -171,5 +172,76 @@ describe('forge tdd check (A9)', () => {
     const loose = f.git('commit-tree', `${f.base}^{tree}`, '-m', 'not below HEAD');
     expect(run(['tdd', 'check', '--task', 'T1-1', '--base', loose, '--dir', '.forge/work/T1', '--cwd', f.wt], io(f)).code).toBe(2);
     for (const x of [off, f]) expect(existsSync(path.join(x.work, 'tdd-1.json'))).toBe(false);
+  });
+});
+
+describe('review-prep with tdd: verified (A9)', () => {
+  const REVIEW = { light: false, flags: [], reviewers: [{ role: 'review-correctness', model: null, effort: 'high', agent: 'forge-review-correctness' }] };
+  const setup = (o: Parameters<typeof fixture>[0] = {}) => {
+    const f = fixture(o);
+    writeFileSync(path.join(f.work, 'brief-1.md'), '# T1\n');
+    const io: Io = { cwd: f.root, now: () => new Date('2026-10-24T10:00:00.000Z'), env: { CLAUDE_CONFIG_DIR: tmp('cfg-') } };
+    appendEvent(f.root, { ts: '2026-10-24T09:00:00.000Z', kind: 'triage', task: 'T1', path: 'medium', sensitive: [], review: REVIEW });
+    const prep = (...extra: string[]) => JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', f.base, '--baseline', '.forge/work/T1/baseline-1.json',
+      '--dir', '.forge/work/T1', '--cwd', f.wt, ...extra], io).stdout);
+    const close = () => JSON.parse(run(['review-close', '--task', 'T1-1', '--dir', '.forge/work/T1', '--path', 'medium', '--cwd', f.wt], io).stdout);
+    return { ...f, io, prep, close };
+  };
+  const rows = (work: string) => JSON.parse(readFileSync(path.join(work, 'validators-1.json'), 'utf8')) as { validator: string; ok: boolean }[];
+
+  it('appends the tdd row to validators-<n>.json and prints it; the ledger validate event and the validators verdict do not change', () => {
+    const f = setup();
+    const out = f.prep('--locale', 'en');
+    expect(out.validators).toMatchObject({ ok: true, failing: [], preexisting: [] });
+    expect(out.tdd).toMatchObject({ file: '.forge/work/T1/tdd-1.json', red: 2, passedOnBase: ['tests/math.test.mjs > add still sums'], skipped: null, reused: false });
+    expect(rows(f.work).map(r => [r.validator, r.ok])).toEqual([['unit', true], ['tdd', true]]);
+    expect(readEvents(f.root).filter(e => e.kind === 'validate').at(-1)!.results).toEqual([expect.objectContaining({ validator: 'unit' })]);
+    expect(out.spawn[0].inputs.report).toBeUndefined();
+  });
+  it('without the option nothing changes: no tdd row, no tdd output, no tdd-<n>.json', () => {
+    const f = setup({ config: CONFIG.replace('tdd: verified', 'tdd: off') });
+    expect(f.prep()).not.toHaveProperty('tdd');
+    expect(rows(f.work).map(r => r.validator)).toEqual(['unit']);
+    expect(existsSync(path.join(f.work, 'tdd-1.json'))).toBe(false);
+  });
+  it('a validators round runs no TDD check', () => {
+    const f = setup({ config: CONFIG.replace('cmd: node run-tests.mjs\n', 'cmd: node -e "process.exit(1)"\n') });
+    const out = f.prep();
+    expect(out.validatorsRound).toBeDefined();
+    expect(out).not.toHaveProperty('tdd');
+    expect(existsSync(path.join(f.work, 'tdd-1.json'))).toBe(false);
+  });
+  it('a later round reuses the check while the test files did not change, and runs it again when one did', () => {
+    const f = setup();
+    expect(f.prep().tdd.reused).toBe(false);
+    appendEvent(f.root, { ts: '2026-10-24T10:30:00.000Z', kind: 'verdict', task: 'T1-1', dir: '.forge/work/T1/reviews-1-1', action: 'fix' });
+    expect(f.prep()).toMatchObject({ round: 2, tdd: { reused: true } });
+    f.put('tests/math.test.mjs', MATH_BASE + "test('mul multiplies', () => { if (m.mul(2, 3) !== 6) throw new Error('mul'); });\n");
+    f.git('commit', '-q', '-am', 'drop the test that proves nothing');
+    expect(f.prep().tdd).toMatchObject({ reused: false, passedOnBase: [] });
+  });
+  it('no express review while a test passes on BASE; with every new test red and the tests unchanged, the express review is back', () => {
+    // As firstReview of describe('the express review (measure 7)') in tests/forge-review-cli.test.ts: review 1 asks to fix
+    // one important finding with green validators, and the implementer commits a fix that touches no test file.
+    const second = (passing: boolean) => {
+      const f = setup({ passing });
+      f.prep();
+      writeFileSync(path.join(f.work, 'reviews-1-1', 'correctness.json'),
+        JSON.stringify({ verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'src/math.mjs', line: 2, problem: 'mul is wrong' }] }));
+      expect(f.close()).toMatchObject({ action: 'fix', next: 'resume' });
+      f.put('src/math.mjs', 'export const add = (a, b) => a + b;\nexport const mul = (a, b) => a * b; // checked\n');
+      f.git('commit', '-q', '-am', 'fix');
+      return f.prep();
+    };
+    expect(second(true)).not.toHaveProperty('express');
+    expect(second(false)).toMatchObject({ express: true });
+  });
+  it('correctness gets the report for a brief with the Bug: line, and the row carries its root cause', () => {
+    const f = setup();
+    writeFileSync(path.join(f.work, 'brief-1.md'), `# T1\n\n${BUG_LINE}\n`);
+    writeFileSync(path.join(f.work, 'report-1.txt'), 'Root cause: src/math.mjs:2 - mul was missing\n');
+    const out = f.prep();
+    expect(out.spawn[0].inputs.report).toBe('.forge/work/T1/report-1.txt');
+    expect(rows(f.work).at(-1)).toMatchObject({ validator: 'tdd', tdd: { bug: { rootCause: 'src/math.mjs:2 - mul was missing' } } });
   });
 });
