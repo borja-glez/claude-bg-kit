@@ -98,13 +98,13 @@ const trackedCheck: DoctorCheck = {
   run(ctx) {
     const names = ['local.yaml', 'learned.jsonl'] as const;
     const states = names.map(name => ({ name, state: trackedState(ctx.main, name) }));
-    const tracked = states.find(s => s.state === 'tracked');
-    if (tracked) {
+    const tracked = states.filter(s => s.state === 'tracked').map(s => s.name);
+    if (tracked.length) {
       return {
         id: 'tracked-state', status: 'warn',
-        detail: `git tracks .forge/${tracked.name}, so a repository could ship it; it grants nothing`,
-        data: { tracked: states.filter(s => s.state === 'tracked').map(s => s.name) },
-        fix: { do: `git rm --cached .forge/${tracked.name}`, kind: 'manual' },
+        detail: `git tracks .forge/${tracked[0]}, so a repository could ship it; it grants nothing`,
+        data: { tracked },
+        fix: { do: `git rm --cached ${tracked.map(n => `.forge/${n}`).join(' ')}`, kind: 'manual' },
       };
     }
     const unknown = states.find(s => s.state === 'unknown');
@@ -148,6 +148,12 @@ const verifyEnvCheck: DoctorCheck = {
   },
 };
 
+/** defaultGit with --no-optional-locks: a plain git status refreshes a worktree's index and rewrites it under index.lock, and doctor writes nothing. */
+const readOnlyGit = (cwd: string) => {
+  const git = defaultGit(cwd);
+  return (args: string[]) => git(['--no-optional-locks', ...args]);
+};
+
 function worktreesCheck(ctx: DoctorCtx): CheckResult {
   const peek = peekExecution(ctx.main);
   const skip = peek.exec?.active ? 'a run is active'
@@ -159,8 +165,8 @@ function worktreesCheck(ctx: DoctorCtx): CheckResult {
   if (skip) return { id: 'worktrees', status: 'ok', detail: `skipped: ${skip}` };
   try {
     const r = swarmCommand(['cleanup', '--dry-run'], { cwd: ctx.main, now: () => ctx.now, env: ctx.env }, {
-      git: defaultGit(ctx.main), exec: defaultExec(ctx.main), repo: repoReader(ctx.main),
-      at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
+      git: readOnlyGit(ctx.main), exec: defaultExec(ctx.main), repo: repoReader(ctx.main),
+      at: dir => ({ git: readOnlyGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
     });
     if (r.code !== 0) return { id: 'worktrees', status: 'unverified', detail: (r.stderr || r.stdout).trim() || `swarm cleanup --dry-run exited ${r.code}` };
     const { removed } = JSON.parse(r.stdout) as { removed?: { worktrees?: string[]; branches?: string[] } };

@@ -178,23 +178,27 @@ const waypointDoctorCheck: DoctorCheck = {
     try { names = readdirSync(base).sort(); } catch { /* no docs/waypoint */ }
     const plans = names.map(n => `docs/waypoint/${n}/plan.yaml`).filter(rel => existsSync(path.join(ctx.main, rel))).slice(0, MAX_PLANS);
     if (!plans.length) return { id, status: 'ok', detail: 'no waypoint project here' };
-    const leftovers: string[] = [];
+    const leftovers: { plan: string; path: string }[] = [];
     for (const plan of plans) {
       try {
-        // Never --fix: the check only reports.
-        const out = execFileSync(process.execPath, [wp, 'doctor', plan], { cwd: ctx.main, input: '', timeout: 10000, windowsHide: true, encoding: 'utf8' });
+        // Never --fix: the check only reports. stderr is piped, so a failing waypoint does not write into doctor's.
+        const out = execFileSync(process.execPath, [wp, 'doctor', plan], {
+          cwd: ctx.main, input: '', timeout: 10000, windowsHide: true, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+        });
         const parsed: unknown = JSON.parse(out);
         const list = isObj(parsed) ? parsed.leftovers : null;
         if (!Array.isArray(list)) return { id, status: 'unverified', detail: `waypoint doctor ${plan} gave no leftovers list` };
-        for (const l of list) leftovers.push(isObj(l) && typeof l.path === 'string' ? l.path : String(l));
+        for (const l of list) leftovers.push({ plan, path: isObj(l) && typeof l.path === 'string' ? l.path : String(l) });
       } catch (e) {
         return { id, status: 'unverified', detail: `waypoint doctor ${plan} did not run: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}` };
       }
     }
     if (!leftovers.length) return { id, status: 'ok', detail: 'waypoint left nothing under .waypoint/' };
+    // --fix removes only the leftovers of the plan it is given: one command for each plan that left some.
+    const fixes = plans.filter(p => leftovers.some(l => l.plan === p)).map(p => `waypoint doctor ${p} --fix`);
     return {
       id, status: 'warn', detail: `waypoint left ${leftovers.length} leftover(s) under .waypoint/`, data: { leftovers },
-      fix: { do: `waypoint doctor ${plans[0]} --fix removes them`, kind: 'confirm' },
+      fix: { do: fixes.length === 1 ? `${fixes[0]} removes them` : `${fixes.join(' and ')} remove them`, kind: 'confirm' },
     };
   },
 };

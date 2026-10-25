@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { doctorExit, doctorSay, runChecks, satisfiesRange, type CheckResult, type DoctorCheck, type DoctorCtx } from '../src/forge/doctor.js';
 import { run, type Io } from '../src/forge/cli/run.js';
@@ -116,11 +116,34 @@ describe('forge doctor (the command)', () => {
     git(root, 'add', '-f', '.forge/local.yaml'); git(root, 'commit', '-q', '-m', 'x');
     expect(check('tracked-state')).toMatchObject({ status: 'warn', fix: { kind: 'manual' } });
   });
+  it('git tracking both state files: the fix names each, so one run of it clears the warning', () => {
+    put('local.yaml', 'surfaces: {}\n');
+    put('learned.jsonl', '');
+    git(root, 'add', '-f', '.forge/local.yaml', '.forge/learned.jsonl'); git(root, 'commit', '-q', '-m', 'x');
+    expect(check('tracked-state')).toMatchObject({
+      status: 'warn', data: { tracked: ['local.yaml', 'learned.jsonl'] }, fix: { do: 'git rm --cached .forge/local.yaml .forge/learned.jsonl', kind: 'manual' },
+    });
+  });
   it('a merged task branch: the dry run of swarm cleanup warns with a confirm fix, and the branch stays', () => {
     git(root, 'commit', '--allow-empty', '-q', '-m', 'init');
     git(root, 'branch', 'task/T1');
     expect(check('worktrees')).toMatchObject({ status: 'warn', fix: { kind: 'confirm' } });
     expect(git(root, 'branch', '--list', 'task/T1')).not.toBe('');
+  });
+  it('a merged worktree: its index keeps its bytes and mtime, though git status would refresh it (spec: read-only)', () => {
+    writeFileSync(path.join(root, 'a.txt'), 'a\n');
+    git(root, 'add', 'a.txt'); git(root, 'commit', '-q', '-m', 'init');
+    const wt = path.join(root, '.claude', 'worktrees', 'task-T1');
+    git(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt);
+    // a stat the index does not hold: a plain git status refreshes the entry and rewrites the index under index.lock
+    const past = new Date('2026-01-01T00:00:00.000Z');
+    utimesSync(path.join(wt, 'a.txt'), past, past);
+    const index = path.join(root, '.git', 'worktrees', 'task-T1', 'index');
+    utimesSync(index, past, past);
+    const bytes = readFileSync(index), mtime = statSync(index).mtimeMs;
+    expect(check('worktrees')).toMatchObject({ status: 'warn', data: { worktrees: ['.claude/worktrees/task-T1'] } });
+    expect(readFileSync(index).equals(bytes)).toBe(true);
+    expect(statSync(index).mtimeMs).toBe(mtime);
   });
   it('reads and never writes: a dead job, step.lock, execution.lock and merging.json and a legacy swarm.json stay byte for byte (Review Focus 4)', () => {
     const dead = deadPid(), at = '2026-10-24T09:00:00.000Z';
@@ -226,8 +249,33 @@ describe('forge doctor · install', () => {
     const left = path.join(root, '.waypoint', 'demo-shop', 'last-head');
     mkdirSync(path.dirname(left), { recursive: true });
     writeFileSync(left, 'abc\n');
-    expect(check('waypoint-doctor')).toMatchObject({ status: 'warn', fix: { kind: 'confirm' }, data: { leftovers: ['.waypoint/demo-shop/last-head'] } });
+    expect(check('waypoint-doctor')).toMatchObject({
+      status: 'warn', fix: { kind: 'confirm' }, data: { leftovers: [{ plan: 'docs/waypoint/demo-shop/plan.yaml', path: '.waypoint/demo-shop/last-head' }] },
+    });
     expect(readFileSync(left, 'utf8')).toBe('abc\n');
+  });
+  it('waypoint doctor: the fix names the plan each leftover came from, not the first plan, and every plan that left one', () => {
+    const wp = path.join(root, 'plugins', 'waypoint', 'dist', 'waypoint.cjs');
+    mkdirSync(path.dirname(wp), { recursive: true });
+    copyFileSync(new URL('../plugins/waypoint/dist/waypoint.cjs', import.meta.url), wp);
+    const plan = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8');
+    for (const project of ['alpha-shop', 'demo-shop']) {
+      mkdirSync(path.join(root, 'docs', 'waypoint', project), { recursive: true });
+      writeFileSync(path.join(root, 'docs', 'waypoint', project, 'plan.yaml'), plan.replace('project: demo-shop', `project: ${project}`));
+    }
+    const leave = (project: string) => { const f = path.join(root, '.waypoint', project, 'last-head'); mkdirSync(path.dirname(f), { recursive: true }); writeFileSync(f, 'abc\n'); };
+    // only the second plan, by name, left something
+    leave('demo-shop');
+    expect(check('waypoint-doctor')).toMatchObject({
+      status: 'warn', data: { leftovers: [{ plan: 'docs/waypoint/demo-shop/plan.yaml', path: '.waypoint/demo-shop/last-head' }] },
+      fix: { do: 'waypoint doctor docs/waypoint/demo-shop/plan.yaml --fix removes them', kind: 'confirm' },
+    });
+    leave('alpha-shop');
+    expect(check('waypoint-doctor')).toMatchObject({
+      status: 'warn',
+      data: { leftovers: [{ plan: 'docs/waypoint/alpha-shop/plan.yaml', path: '.waypoint/alpha-shop/last-head' }, { plan: 'docs/waypoint/demo-shop/plan.yaml', path: '.waypoint/demo-shop/last-head' }] },
+      fix: { do: 'waypoint doctor docs/waypoint/alpha-shop/plan.yaml --fix and waypoint doctor docs/waypoint/demo-shop/plan.yaml --fix remove them', kind: 'confirm' },
+    });
   });
 });
 
