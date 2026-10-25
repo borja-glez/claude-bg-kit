@@ -1032,3 +1032,31 @@ describe('swarm step hands out the task line of each agent (E-02)', () => {
     for (const e of entries) expect(e.taskLine).toBe('forge-task: T1-1 @shop');
   });
 });
+
+describe('swarm step: a task whose branch changed after its accept is reviewed again (A3)', () => {
+  it('a commit by hand between the accept and the integration: unreviewed, and the next step prepares review 2', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'export const a = 1;\n', 'T1: a');
+    writeFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'report-1.txt'), 'done\n');
+    const review = step().actions.find(a => a.task === 'T1')!;
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T1', 'reviews-1-1');
+    for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), pass);
+    // The person commits on task/T1 just as the step integrates it.
+    const r = swarmStep(['--plan', 'plan.yaml', '--db', 'db'], io, {
+      cli: argv => { if (isCmd(argv, 'swarm', 'integrate', 'T1')) commitIn(wt('T1'), 'src/t1/late.ts', 'x\n', 'T1: by hand'); return run(argv, io); },
+      gitAt: d => defaultGit(d),
+    });
+    const s = JSON.parse(r.stdout) as ReturnType<typeof step>;
+    expect(s.actions.find(a => a.type === 'accepted')).toMatchObject({ task: 'T1' });
+    expect(s.actions.find(a => a.type === 'unreviewed')).toMatchObject({ task: 'T1', reason: 'tree changed since its review', changed: ['src/t1/late.ts'] });
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'validate' });
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnReviewers', round: 2 });
+  });
+  it('says unreviewed in both locales', () => {
+    for (const locale of ['es', 'en'] as const) {
+      const said = stepSay([{ type: 'unreviewed', task: 'T9' }], 300, locale);
+      expect(said, locale).not.toBe(stepSay([], 300, locale));
+      expect(said, locale).toContain('T9');
+    }
+  });
+});

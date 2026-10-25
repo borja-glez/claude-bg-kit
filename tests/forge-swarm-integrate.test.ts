@@ -6,7 +6,7 @@ import { run, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/
 import { swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
 import { readExecution } from '../src/forge/execution.js';
 import { readLocal } from '../src/forge/local.js';
-import { readEvents } from '../src/forge/ledger.js';
+import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { loadConfig } from '../src/forge/config.js';
 import { SLOT_MAX_WAIT_MS } from '../src/forge/jobs.js';
 import { mergingFile, readMerging, readMergingFile, removeMergingIf, takeMerging, MERGING_UNREADABLE_MS } from '../src/forge/merging.js';
@@ -1332,5 +1332,69 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     expect(out(run(['swarm', 'merge', '--yes', '--hook-session', 'hook-x'], { ...io, env: { CLAUDE_CODE_SESSION_ID: 'hook-main' } })))
       .toMatchObject({ result: 'needs-authorization', reason: 'other session' });
     expect(git('log', '-1', '--format=%s')).toBe('init');
+  });
+});
+
+describe('a task is integrated only with the tree its review accepted (A3)', () => {
+  /** The accept review-close logs for brief 1 of `task`, with the tree of `w` unless `extra` says otherwise. */
+  const accepted = (task: string, w: string, extra: Record<string, unknown> = {}) => appendEvent(root, { ts: '2026-10-12T12:00:00.000Z', kind: 'verdict',
+    task: `${task}-1`, project: 'shop', action: 'accept', dir: `.forge/work/shop/${task}/reviews-1-1`, tree: g(w, 'rev-parse', 'HEAD^{tree}'), ...extra });
+  /** head.txt of that round, under `at` (the main checkout, or a member's worktree). */
+  const headTxt = (at: string, task: string, w: string) => {
+    const d = path.join(at, '.forge', 'work', 'shop', task, 'reviews-1-1');
+    mkdirSync(d, { recursive: true });
+    writeFileSync(path.join(d, 'head.txt'), `${g(w, 'rev-parse', 'HEAD')}\n`);
+  };
+  it('a commit made by hand after the accept sends the task back to review; a commit of forge\'s notes alone does not', () => {
+    const w1 = accept('T1', 'a.txt', 'a\n');
+    accepted('T1', w1);
+    commitIn(w1, 'late.txt', 'late\n', 'by hand');
+    const before = g(runWt(), 'rev-parse', 'HEAD');
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'unreviewed', reason: 'tree changed since its review', changed: ['late.txt'] });
+    expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(before);
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'validate', executor: 'subagents', agent: null, detail: 'unreviewed: tree changed since its review' });
+    expect(readEvents(root).filter(e => e.kind === 'phase' && e.task === 'T1').at(-1)).toMatchObject({ phase: 'validate', project: 'shop' });
+    const w2 = accept('T2', 'b.txt', 'b\n');
+    accepted('T2', w2);
+    mkdirSync(path.join(w2, '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(w2, '.forge', 'verify', 'web.md'), '# Web\n- learned\n');
+    g(w2, 'add', '-f', '.forge/verify/web.md');
+    g(w2, 'commit', '-qm', 'T2: learned notes of its verification');
+    expect(out(run(['swarm', 'integrate', 'T2'], io))).toMatchObject({ result: 'integrated' });
+  });
+  it('an accept without a tree is bound by the head.txt of its round; with neither, the task is reviewed again (Review Focus 2)', () => {
+    const w1 = accept('T1', 'a.txt', 'a\n');
+    headTxt(root, 'T1', w1);
+    accepted('T1', w1, { tree: undefined });
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated' });
+    const w2 = accept('T2', 'b.txt', 'b\n');
+    headTxt(root, 'T2', w2);
+    accepted('T2', w2, { tree: undefined });
+    commitIn(w2, 'late.txt', 'late\n', 'by hand');
+    expect(out(run(['swarm', 'integrate', 'T2'], io))).toMatchObject({ result: 'unreviewed', reason: 'tree changed since its review', changed: ['late.txt'] });
+    const w3 = accept('T3', 'c.txt', 'c\n');
+    accepted('T3', w3, { tree: undefined });
+    expect(out(run(['swarm', 'integrate', 'T3'], io))).toMatchObject({ result: 'unreviewed', reason: 'no review receipt', changed: [] });
+  });
+  it('a run member\'s task: its head.txt is found in its worktree, and one sent back is the coordinator\'s, in that worktree, with its brief and baseline (Review Focus 5)', () => {
+    const asMember = (task: string) => { const e = readExecution(root)!; seedExecution(root, { ...e, tasks: { ...e.tasks, [task]: { ...e.tasks[task], executor: 'sessions' } } }); };
+    const w1 = accept('T1', 'a.txt', 'a\n');
+    asMember('T1');
+    headTxt(w1, 'T1', w1);
+    accepted('T1', w1, { tree: undefined });
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated' });
+    const w2 = accept('T2', 'b.txt', 'b\n');
+    asMember('T2');
+    headTxt(w2, 'T2', w2);
+    writeFileSync(path.join(w2, '.forge', 'work', 'shop', 'T2', 'baseline-1.json'), '[]\n');
+    writeFileSync(path.join(w2, '.forge', 'work', 'shop', 'T2', 'brief-1.md'), '# T2\n');
+    accepted('T2', w2, { tree: undefined });
+    commitIn(w2, 'late.txt', 'late\n', 'by hand');
+    expect(out(run(['swarm', 'integrate', 'T2'], io))).toMatchObject({ result: 'unreviewed' });
+    const t2 = readExecution(root)!.tasks.T2;
+    expect(t2).toMatchObject({ status: 'running', stage: 'validate', executor: 'subagents' });
+    expect(path.resolve(t2.worktree)).toBe(path.resolve(w2));
+    expect(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T2', 'baseline-1.json'), 'utf8')).toBe('[]\n');
+    expect(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T2', 'brief-1.md'), 'utf8')).toBe('# T2\n');
   });
 });

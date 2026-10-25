@@ -1,11 +1,15 @@
 import type { SwarmCommand, SwarmDeps } from './context.js';
 import path from 'node:path';
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { UsageError } from '../errors.js';
 import type { Io } from '../run.js';
 import { runOptions } from '../../validators.js';
-import { readEvents } from '../../ledger.js';
-import { readExecution, updateExecution, runWorktree } from '../../execution.js';
-import { isSafeId, type ExecTask } from '../../../lib/execution-state.js';
+import { readEvents, appendPhase } from '../../ledger.js';
+import { readExecution, updateExecution, runWorktree, writePublicTask } from '../../execution.js';
+import { isSafeId, type ExecTask, type ExecutionState } from '../../../lib/execution-state.js';
+import { LEASE_MINUTES } from '../../../lib/coordination.js';
+import { workRel } from '../../task-ref.js';
+import { taskReceipt, sameReviewedTree, treeOf, commitOf, TASK_TREE_CHANGED, TASK_NO_RECEIPT } from '../../receipts.js';
 import { isPlanId } from '../../../lib/plan.js';
 import { updateLocal } from '../../local.js';
 import { integratedSay } from '../../swarm.js';
@@ -14,6 +18,44 @@ import { loadTrustedConfig } from '../../trust.js';
 import type { Result } from '../context.js';
 import { mergeIn, attemptExtras, commitInfo, integratedPublish, logValidations } from './integration.js';
 import { localeArg, spanish } from './shared.js';
+
+const WORK_FILES = /^(?:baseline-\d+\.json|brief-\d+\.md|report-\d+\.txt)$/;
+
+/** The task goes back to stage validate as the coordinator's, so the next swarm step prepares its review again. */
+function reviewAgain(io: Io, e: ExecutionState, task: string, t: ExecTask, reason: string, changed: string[], at: string): Result {
+  // A member's task passes to the coordinator: the tick would take a `sessions` task with its state/T `done` for accepted again (schedule.ts:80-82).
+  if (t.executor !== 'subagents') {
+    const rel = workRel({ project: e.kind === 'plan' ? e.project : null, task });
+    try {
+      const from = path.join(t.worktree, rel);
+      const to = path.join(io.cwd, rel);
+      mkdirSync(to, { recursive: true });
+      for (const f of readdirSync(from)) {
+        if (!WORK_FILES.test(f) || existsSync(path.join(to, f))) continue;
+        try { copyFileSync(path.join(from, f), path.join(to, f)); } catch { /* the review is prepared without it */ }
+      }
+    } catch { /* nothing to copy */ }
+  }
+  const lease = new Date(io.now().getTime() + LEASE_MINUTES * 60000).toISOString();
+  let changedNow = false;
+  updateExecution(io.cwd, cur => {
+    const c = cur?.tasks[task];
+    if (!cur || !c || c.status !== 'accepted') return null;
+    changedNow = true;
+    const next: ExecTask = {
+      ...c, status: 'running', stage: 'validate', executor: 'subagents', agent: null, detail: `unreviewed: ${reason}`,
+      updatedAt: at, stageSince: at, finishedAt: null,
+    };
+    return { ...cur, tasks: { ...cur.tasks, [task]: next } };
+  }, { now: io.now, sleep: io.sleep });
+  if (changedNow) {
+    writePublicTask(io.cwd, {
+      task, runId: e.runId, stage: 'validate', status: 'running', agent: null, round: t.round, since: at, updatedAt: at, leaseUntil: lease, by: e.coordinator, mode: 'subagents',
+    });
+    appendPhase(io.cwd, { ts: at, kind: 'phase', task, phase: 'validate', ...(e.kind === 'plan' && isSafeId(e.project) ? { project: e.project } : {}) });
+  }
+  return { code: 0, stdout: JSON.stringify({ result: 'unreviewed', reason, changed, detail: `${task}: ${reason}; it is reviewed again` }) + '\n', stderr: '' };
+}
 
 function integrate(rest: string[], io: Io, deps: SwarmDeps, planArg?: string, db?: string): Result {
   const task = rest[0];
@@ -33,6 +75,17 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps, planArg?: string, db
   } else if (head !== e.branch) {
     // An ephemeral run integrates into the user's own branch: never into whatever the user switched to since.
     throw new UsageError(`swarm integrate: the main checkout is on ${head ?? '?'}, not ${e.branch} (the branch this ephemeral run started from); switch back to ${e.branch} to integrate ${task}`);
+  }
+  // A3: the branch must still hold the tree its review accepted (forge's notes in .forge/verify/*.md aside).
+  const tip = commitOf(target.git, `refs/heads/${t.branch}`);
+  if (tip && t.executor !== 'manual') {
+    const receipt = taskReceipt(readEvents(io.cwd), e, task, [io.cwd, t.worktree], target.git);
+    if (receipt !== 'none') {
+      const now = treeOf(target.git, tip);
+      if (receipt === 'unknown' || now === null) return reviewAgain(io, e, task, t, TASK_NO_RECEIPT, [], at);
+      const same = sameReviewedTree(target.git, receipt.tree, now);
+      if (!same.ok) return reviewAgain(io, e, task, t, TASK_TREE_CHANGED, same.changed, at);
+    }
   }
   // I-03: swarm.setup and the validators run only with the person's trust (exit 2 without it, before any merge).
   const config = loadTrustedConfig(io.cwd);
