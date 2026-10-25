@@ -26862,6 +26862,9 @@ function routeOptions(i) {
   } else if (i.path === "large" && i.prefs.autonomy === "auto") recommended = { option: "forge", why: "large, in auto mode: forge designs, critiques and approves it without asking" };
   else if (i.path === "large") recommended = { option: "forge", why: "large: forge designs it with waypoint, critiques, plans and builds" };
   else recommended = { option: "forge", why: "forge triages, implements and reviews it" };
+  if (recommended.option === "forge" && i.runPlan && !plan && untraced?.length) {
+    recommended = { ...recommended, why: `${recommended.why}; ${untraced[0].path} has no task marked done (superpowers' own executors never mark one): name it to carry it out` };
+  }
   return { ...base, options: ["forge", "superpowers", "superpowers-design", "superpowers-plan"], recommended };
 }
 var OPTION_LABELS = {
@@ -29330,11 +29333,12 @@ function fresh(r2, now) {
 }
 function routeReminder(r2, now) {
   if (!r2 || r2.stage !== "designing" && r2.stage !== "planning" || !fresh(r2, now)) return null;
+  const close = `FORGE route stage --stage handed-off${r2.session ? ` --session ${r2.session}` : ""}`;
   if (r2.chosen === "superpowers-design") {
-    return `forge: the user routed task ${r2.task} as "${r2.chosen}". When the spec is written and approved, hand off with forge:run --from-spec ${r2.spec ?? "<the spec path>"} instead of writing-plans. If brainstorming ends without a spec (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r2.task}/task.txt and invoke forge:run`;
+    return `forge: the user routed task ${r2.task} as "${r2.chosen}". When the spec is written and approved, hand off with forge:run --from-spec ${r2.spec ?? "<the spec path>"} instead of writing-plans. If brainstorming ends without a spec (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r2.task}/task.txt, run ${close} and invoke forge:run`;
   }
   if (r2.chosen === "superpowers-plan") {
-    return `forge: the user routed task ${r2.task} as "${r2.chosen}". When the plan is written, hand off with forge:run --superpowers-plan ${r2.plan ?? "<the plan path>"} instead of subagent-driven-development or executing-plans. If brainstorming ends without a spec or a plan (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r2.task}/task.txt and invoke forge:run`;
+    return `forge: the user routed task ${r2.task} as "${r2.chosen}". When the plan is written, hand off with forge:run --superpowers-plan ${r2.plan ?? "<the plan path>"} instead of subagent-driven-development or executing-plans. If brainstorming ends without a spec or a plan (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r2.task}/task.txt, run ${close} and invoke forge:run`;
   }
   return null;
 }
