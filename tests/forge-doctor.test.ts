@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { doctorExit, doctorSay, runChecks, satisfiesRange, type CheckResult, type DoctorCheck, type DoctorCtx } from '../src/forge/doctor.js';
 import { run, type Io } from '../src/forge/cli/run.js';
+import { assumeTrustedForTests } from '../src/forge/trust-flag.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
 
@@ -79,5 +80,63 @@ describe('forge doctor (the command)', () => {
   it('--locale es gives the say in Spanish, and a bad locale exits 2', () => {
     expect(JSON.parse(run(['doctor', '--locale', 'es'], io()).stdout).say).toContain('correcta');
     expect(run(['doctor', '--locale', 'fr'], io()).code).toBe(2);
+  });
+  const check = (id: string) => checks(doctor()).find(x => x.id === id)!;
+  const put = (rel: string, text: string) => { const f = path.join(root, '.forge', rel); mkdirSync(path.dirname(f), { recursive: true }); writeFileSync(f, text); };
+  const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid!;
+  const marker = (pid: number, staleAt: string) => JSON.stringify({ task: 'T2', pre: 'abcdef1', ref: 'task/T2', pid, startedAt: '2026-10-24T09:00:00.000Z', staleAt, dir: root, phase: 'merge' });
+  it('a live merge attempt warns with a manual fix', () => {
+    put('execution/merging.json', marker(process.ppid, '2026-10-24T11:00:00.000Z'));
+    expect(check('merging')).toMatchObject({ status: 'warn', fix: { kind: 'manual' } });
+  });
+  it('a stale execution lock warns, and the lock stays', () => {
+    put('execution.lock', JSON.stringify({ pid: deadPid(), at: '2026-10-24T09:00:00.000Z' }));
+    expect(check('execution-lock')).toMatchObject({ status: 'warn', fix: { kind: 'manual' } });
+    expect(existsSync(path.join(root, '.forge', 'execution.lock'))).toBe(true);
+  });
+  it('untrusted config commands warn; a config that does not parse fails, and verify-env is unverified (Review Focus 5)', () => {
+    put('config.yaml', 'validators:\n  - name: t\n    cmd: npm test\n    kind: test\n');
+    assumeTrustedForTests(false);
+    try { expect(check('trust')).toMatchObject({ status: 'warn', fix: { kind: 'manual' } }); } finally { assumeTrustedForTests(true); }
+    put('config.yaml', 'validators: [oops\n');
+    const r = doctor();
+    expect(checks(r).find(x => x.id === 'trust')?.status).toBe('fail');
+    expect(checks(r).find(x => x.id === 'verify-env')?.status).toBe('unverified');
+    expect(r.code).toBe(2);
+  });
+  it('a verify-env reservation past its minutes with no live process warns with a confirm fix', () => {
+    // 15 min old: past verify.limits.minutes (10), still standing (under 2 × 10)
+    const evidence = path.join(root, '.forge', 'work', 'shop', 'T1', 'reviews-1-1');
+    put('verify-env/reviews-1-1.json', JSON.stringify({ key: 'reviews-1-1', task: 'T1', port: 41000, profileDir: '', evidence, dir: root, startedAt: '2026-10-24T09:45:00.000Z' }));
+    expect(check('verify-env')).toMatchObject({ status: 'warn', fix: { kind: 'confirm' } });
+  });
+  it('git tracking .forge/local.yaml warns (a repository could ship it)', () => {
+    put('local.yaml', 'surfaces: {}\n');
+    git(root, 'add', '-f', '.forge/local.yaml'); git(root, 'commit', '-q', '-m', 'x');
+    expect(check('tracked-state')).toMatchObject({ status: 'warn', fix: { kind: 'manual' } });
+  });
+  it('a merged task branch: the dry run of swarm cleanup warns with a confirm fix, and the branch stays', () => {
+    git(root, 'commit', '--allow-empty', '-q', '-m', 'init');
+    git(root, 'branch', 'task/T1');
+    expect(check('worktrees')).toMatchObject({ status: 'warn', fix: { kind: 'confirm' } });
+    expect(git(root, 'branch', '--list', 'task/T1')).not.toBe('');
+  });
+  it('reads and never writes: a dead job, step.lock, execution.lock and merging.json and a legacy swarm.json stay byte for byte (Review Focus 4)', () => {
+    const dead = deadPid(), at = '2026-10-24T09:00:00.000Z';
+    const seed: Record<string, string> = {
+      'jobs/integrate-T2-1.json': JSON.stringify({ name: 'integrate-T2-1', cmd: 'integrate', task: 'T2', pid: dead, startedAt: at, out: 'o.json', session: null }),
+      'jobs/step.lock': JSON.stringify({ pid: dead, startedAt: at }),
+      'execution.lock': JSON.stringify({ pid: dead, at }),
+      'execution/merging.json': marker(dead, at),
+      'swarm.json': JSON.stringify({ active: true, project: 'shop', fronts: {} }),
+    };
+    for (const [rel, text] of Object.entries(seed)) put(rel, text);
+    const r = doctor();
+    expect(r.code).toBe(doctorExit(checks(r)));
+    expect(checks(r).find(x => x.id === 'worktrees')?.status).toBe('ok'); // skipped: the legacy swarm.json is not migrated
+    const dir = path.join(root, '.forge');
+    const files = (readdirSync(dir, { recursive: true }) as string[]).filter(f => statSync(path.join(dir, f)).isFile()).map(f => f.split(path.sep).join('/'));
+    expect(files.sort()).toEqual(Object.keys(seed).sort());
+    for (const [rel, text] of Object.entries(seed)) expect(readFileSync(path.join(dir, rel), 'utf8'), rel).toBe(text);
   });
 });
