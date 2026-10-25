@@ -50,7 +50,7 @@ In both: no `@Service`, `@Transactional` or Jackson annotation in the core; the 
 - An external model gets an anti-corruption adapter in `infrastructure.out.<system>`: it translates, and the third-party types never cross it.
 - Interfaces only where there is a boundary: a domain service or a mapper is a class.
 
-## The composition root
+## All wiring goes in the composition root
 
 All wiring is in `infrastructure.config`, in `@Configuration(proxyBeanMethods = false)` classes. The core is built with `new` or registered by the cqrs scan; Spring is welcome only in the adapters, which carry `@Component`, `@Repository` or `@RestController`.
 
@@ -78,9 +78,8 @@ PlaceOrderUseCase placeOrder(OrderRepository orders, Clock clock, PlatformTransa
 - `spring.jpa.open-in-view=false`, so a session never leaves the use case.
 - Constructor injection only; no `@Autowired`, `@Value` or `@Resource` fields.
 
-## Adapters
+## When you add an inbound adapter
 
 - Inbound REST: contract first. The OpenAPI file generates `rest.v<N>.api` and `.model`; the controller implements the generated interface and only maps HTTP to a message and the answer back. The URL carries the major version.
 - Inbound messaging: a listener translates a contract message into a command and sends it; it holds no rule.
 - A scheduled job or a listener reaches the same inbound port as the controller. The business rule lives once, in the root, and protects every path.
-- Inbound and outbound adapters meet only through the core; no adapter uses another.

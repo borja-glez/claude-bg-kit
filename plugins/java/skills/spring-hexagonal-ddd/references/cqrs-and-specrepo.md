@@ -52,7 +52,7 @@ The client sends text: `filter=field:op:value`, `orFilter=a:op:v;b:op:v`, `sort=
 - **Share a whitelist** between endpoints with one composed `@FilterableQuery` annotation (for example `@ProductFilter`), so the search and its facets accept exactly the same requests. The OpenAPI contract lists the same fields; a test compares the two.
 - **Case and accents:** declare the text fields matched ignoring them.
 - Cap the page size (`spring.data.web.pageable.max-page-size`), tighten `specrepository.http.*`, and index the columns the screens filter and sort by.
-- Every handler or adapter method that runs a client plan has a short read-only timeout (`@Transactional(readOnly = true, timeout = 5)`).
+- Every read-model adapter method that runs a client plan has a short read-only timeout (`@Transactional(readOnly = true, timeout = 5)`).
 
 ## Conditions the server adds
 
@@ -82,8 +82,8 @@ return views.query(plan)
 - The client decides which rows (its whitelisted filters); the server decides what is grouped and summed. A client `filter=quantity:gte:10` on a field that is not whitelisted stays a 400.
 - A report's timeout is a little longer than a search's.
 
-## Facets
+## When a facet drops the client's own filter
 
-- A disjunctive facet drops the client's own filter on its field, so a shopper can pick several values: `QueryPlans.without(plan, field)`, a helper for facets only. It cannot be used to widen anything else.
+- A disjunctive facet drops the client's own filter on its field, so a shopper can pick several values. Use a helper of the project's own, such as `QueryPlans.without(plan, field)`, that rebuilds the client plan without the conditions on that field; it is for facets only and cannot widen anything else.
 - Count with `countDistinctAs` per value, and `minAs` / `maxAs` with `findRow()` for a range.
 - Facets share the search's whitelist, with no sort.

@@ -1,6 +1,6 @@
 Read this when writing tests or ArchUnit rules, or choosing which suite to run.
 
-## The pyramid
+## Test a rule at the lowest layer that can show it
 
 Each layer is cheaper and faster than the next. Test a rule at the lowest layer that can show it.
 
@@ -27,7 +27,7 @@ Each layer is cheaper and faster than the next. Test a rule at the lowest layer 
 - A business refusal from a gateway is a returned value; test that the use case leaves the aggregate unchanged.
 - Test files for a handler are named `<Handler>Test`, one per use case.
 
-## Slices and integration
+## When a test needs Spring or real SQL
 
 - A controller slice runs the controller alone with mocked buses and checks which message each request dispatches. If the contract is OpenAPI, check the controller against it.
 - A test compares the filter whitelist with the one the contract lists.
@@ -35,7 +35,7 @@ Each layer is cheaper and faster than the next. Test a rule at the lowest layer 
 - A messaging test redelivers an event twice and out of order and checks the projection converged and the idempotency marker held.
 - A remote query/command test checks the short timeout, the business "no" as a value, and the idempotent repeat.
 
-## Architecture tests
+## When you guard the layout with ArchUnit
 
 Two classes, because production and test classes are imported separately.
 
@@ -72,9 +72,8 @@ Add the cqrs rules of the library for a service (handlers do not depend on Sprin
 - Every rule `allowEmptyShould(true)` only where the layer may be absent; otherwise an empty import must fail, so a mistyped package cannot pass.
 - A rule is shown to fail once: plant a violation, see the red, remove it.
 - ArchUnit covers what the compiler does not: package against package inside a module. Where the project has Gradle modules per ring, the compiler already refuses a Spring import in `domain`.
-- A new context, package or module adds its rules in the same change.
 
-## Coverage and mutation gates
+## When the project gates coverage or mutation
 
 Where the project turns them on, they are part of `build`:
 

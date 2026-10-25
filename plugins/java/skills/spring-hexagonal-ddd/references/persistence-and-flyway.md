@@ -7,10 +7,9 @@ Read this when writing an entity, a mapper, a repository adapter or a migration.
 - The cost is a mapper of a few dozen lines, written once: `ProductMapper.toState(entity)` and `toEntity(state, seller, categories)`. It maps a state snapshot, not the root, so the domain needs no getter per column. Instants are stored in UTC.
 - The persistence model does not copy the domain's shape. A line that is an entity in the domain can be an `@ElementCollection` of values in the table.
 - Another aggregate is a reference: store its id and use `getReferenceById`, never load it to write a foreign key.
-- Pragmatic alternative (annotate the root with JPA) is acceptable only for a context at level 0 or 1 of `hexagonal-layout`. Never for a core with rules.
 - A supporting CRUD context may use its entity directly, and then it has no `domain` rules to protect either.
 
-## The repository adapter
+## When you write the repository adapter
 
 ```java
 public class JpaProductRepository implements ProductRepository {
@@ -46,11 +45,11 @@ public class JpaProductRepository implements ProductRepository {
 - Reads are specification-repository (`cqrs-and-specrepo`). `query().where("sku", EQUALS, v).count() > 0` is the `existsBySku`.
 - `spring.jpa.open-in-view=false`, and a batch fetch size for collections.
 
-## A fake for the unit tests
+## When the unit tests need a repository
 
 Write `InMemoryProductRepository` implementing the same port: it keeps copies of the state and hands out new roots (a change a use case forgot to save is lost, and the test notices), bumps a version on each save, and keeps the events saved. Details in `testing`.
 
-## Migrations
+## When you change the schema
 
 - **Never edit an applied migration.** Flyway checksums fail. A change is a new `V<n>`, even for a typo in a seed row.
 - One schema history per service. Name `V<n>__what_it_does.sql`, with the next number above the highest applied.

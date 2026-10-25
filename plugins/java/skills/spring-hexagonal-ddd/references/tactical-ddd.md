@@ -59,7 +59,7 @@ public static Product reconstitute(ProductState state) { return new Product(stat
 - A factory that needs several sources or numbering rules becomes a class (`OrderFactory`); until then it is a static method of the root.
 - Creation input as the user typed it (raw strings) goes in a record such as `ProductDraft`, which the factory validates.
 
-## Domain events
+## When the root records an event
 
 ```java
 public sealed interface ProductEvent extends DomainEvent
@@ -86,7 +86,7 @@ public record ProductPublished(ProductId id, Sku sku, String name, Money price, 
 - Orchestration (load, ask the root, save, ask a port for outside data) with no business `if`: the use case in `application.service`.
 - When you write an `if` about the business in a use case, it belongs in the root or in a domain service.
 
-## Exceptions
+## When a rule is broken and you raise a failure
 
 `DomainException` is framework-free, carries a kebab-case `code` and knows no HTTP. The family:
 
@@ -100,6 +100,6 @@ public record ProductPublished(ProductId id, Sku sku, String name, Money price, 
 - Failures raised by the domain live in `domain.exception`; those the use cases raise (not found, duplicate) in `application.exception`. Both extend `DomainException`.
 - Which status each subtype gets is decided by the web adapter, not the domain.
 
-## The state machine
+## When the lifecycle has many transitions
 
 The lifecycle (`DRAFT -> ACTIVE -> DISCONTINUED`) lives in the root. When transitions are many, put `canTransitionTo` on the status enum as an exhaustive `switch` with no `default`, so a new status forces a decision.
