@@ -11,6 +11,7 @@ import { claudeSessionId } from '../../../lib/claude-session.js';
 // auth's isForgeBranch (any forge/… branch: merging into it needs no answer) is not cleanup's (task/* and forge/run-*).
 import { checkMergeAuth, isForgeBranch as isForgeTarget, mergeAsk, pendingAuth, readAuths, useAuth, writeAuth, type AuthRecord } from '../../auth.js';
 import { loadTrustedConfig } from '../../trust.js';
+import { OBJECT_ID } from '../../local.js';
 import { commitOf, treeOf, sameReviewedTree, FINAL_TREE_CHANGED, FINAL_NO_RECEIPT } from '../../receipts.js';
 import { predictMerge, gitRun } from '../../merge-predict.js';
 import { publishFor, type StateWrite } from '../../roadmap-sources.js';
@@ -93,7 +94,8 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   const receipt = ((): FinalReceipt | null => {
     const v = finalVerdictOf(events, e);
     if (v?.action !== 'accept') return null;
-    if (typeof v.tree !== 'string') return { ok: false, reason: FINAL_NO_RECEIPT, changed: [] };
+    // A tree that is no object id (one logged by hand, or a `-s` git would read as an option) is no receipt.
+    if (typeof v.tree !== 'string' || !OBJECT_ID.test(v.tree)) return { ok: false, reason: FINAL_NO_RECEIPT, changed: [] };
     const now = tip ? treeOf(deps.git, tip) : null;
     if (now === null) return { ok: false, reason: FINAL_TREE_CHANGED, changed: [] };
     const same = sameReviewedTree(deps.git, v.tree, now, [`docs/forge/decisions/${e.runId}.md`]);

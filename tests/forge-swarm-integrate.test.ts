@@ -1252,6 +1252,14 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     expect(merge([])).toMatchObject({ result: 'needs-authorization', reason: 'no receipt from the final review: its run worktree had uncommitted changes' });
     expect(mergeCommits()).toBe(0);
   });
+  it('a final accept whose tree is no object id, as one logged by hand can carry, is no receipt: the merge on finish asks (A3)', () => {
+    finished();
+    onFinish();
+    run(['log', '--kind', 'verdict', '--task', 'shop-final', '--data', '{"action":"accept","tree":"-s"}'], io);
+    expect(merge([])).toMatchObject({ result: 'needs-authorization', reason: 'no receipt from the final review: its run worktree had uncommitted changes' });
+    expect(readExecution(root)!.mergeOnFinish).toBe(true);
+    expect(mergeCommits()).toBe(0);
+  });
   it('a merge that would conflict says so with its paths before asking and spends nothing; one that would not asks as before (A3)', () => {
     finished();
     expect(merge([])).toMatchObject({ result: 'needs-authorization' });

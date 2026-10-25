@@ -30,8 +30,10 @@ export function commitOf(git: Git, rev: string): string | null {
 
 export type TreeMatch = { ok: true } | { ok: false; changed: string[] };
 
-/** Whether tree `now` is the reviewed tree, a change only in .forge/verify/*.md aside (and in the exact paths of `extraPassive`); `changed`: the other paths. */
+/** Whether tree `now` is the reviewed tree, a change only in .forge/verify/*.md aside (and in the exact paths of `extraPassive`); `changed`: the other paths.
+ * Both must be object ids, else no match: git diff would read a `-s` as an option, print nothing and say no change. */
 export function sameReviewedTree(git: Git, reviewed: string, now: string, extraPassive: readonly string[] = []): TreeMatch {
+  if (!OBJECT_ID.test(reviewed) || !OBJECT_ID.test(now)) return { ok: false, changed: [] };
   if (reviewed === now) return { ok: true };
   const out = git(['diff', '--name-only', '-z', '--no-renames', reviewed, now]);
   if (out === null) return { ok: false, changed: [] };

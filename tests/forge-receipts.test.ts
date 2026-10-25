@@ -44,6 +44,13 @@ describe('the reviewed tree (A3)', () => {
     }
     expect(sameReviewedTree(git, reviewed, from({ '.forge/verify/web.md': '# Web\n- a note\n', 'a.txt': 'b\n' }))).toEqual({ ok: false, changed: ['a.txt'] });
   });
+  it('a tree that is no object id is never the reviewed one: git would read `-s` as an option and see no change', () => {
+    const git = defaultGit(root);
+    const tree = g('rev-parse', 'HEAD^{tree}');
+    expect(sameReviewedTree(git, '-s', tree)).toEqual({ ok: false, changed: [] });
+    expect(sameReviewedTree(git, tree, '-s')).toEqual({ ok: false, changed: [] });
+    expect(sameReviewedTree(git, '-s', '-s')).toEqual({ ok: false, changed: [] });
+  });
   it('a task\'s receipt is its accept\'s tree, else its round\'s head.txt in the main checkout or its worktree; none without an accept in this run', () => {
     const git = defaultGit(root);
     const head = g('rev-parse', 'HEAD'), tree = g('rev-parse', 'HEAD^{tree}');
