@@ -22,6 +22,11 @@
       "name": "java",
       "source": "./plugins/java",
       "description": "Java and Spring Boot: the DDD and hexagonal rules of a service, the upkeep of Java libraries and an on-demand architecture reviewer."
+    },
+    {
+      "name": "web",
+      "source": "./plugins/web",
+      "description": "Astro sites with Preact islands shipped on Dokploy: the build, CSP hashes, Lighthouse and Playwright under Claude Code, Vite workers, MDX, nginx and the Dokploy fields."
     }
   ]
 }

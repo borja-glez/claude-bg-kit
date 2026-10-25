@@ -13,7 +13,7 @@ import { parse } from 'yaml';
 
 export const ENGINE_TYPES = 'types/claude-code/index.d.ts';
 export const SKIP_MOD_TYPES = 'typecheck:mod skipped: engine types missing (not versioned)';
-export const PLUGINS = ['waypoint', 'lens', 'forge', 'java'];
+export const PLUGINS = ['waypoint', 'lens', 'forge', 'java', 'web'];
 
 export const isCi = env => env.CI === 'true' || env.CI === '1';
 

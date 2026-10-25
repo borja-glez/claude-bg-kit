@@ -71,12 +71,16 @@ describe('plugin layout', () => {
   it('marketplace bg-kit lists waypoint, lens, forge and java', () => {
     const m = JSON.parse(read('.claude-plugin/marketplace.json'));
     expect(m.name).toBe('bg-kit');
-    expect(m.plugins).toEqual([
+    expect(m.plugins.slice(0, 4)).toEqual([
       expect.objectContaining({ name: 'waypoint', source: './plugins/waypoint' }),
       expect.objectContaining({ name: 'lens', source: './plugins/lens' }),
       expect.objectContaining({ name: 'forge', source: './plugins/forge' }),
       expect.objectContaining({ name: 'java', source: './plugins/java' }),
     ]);
+    for (const p of m.plugins) {
+      expect(p.source, p.name).toBe(`./plugins/${p.name}`);
+      expect(existsSync(new URL(`../plugins/${p.name}/.claude-plugin/plugin.json`, import.meta.url)), p.name).toBe(true);
+    }
   });
   it('lens manifest, module and contract exist', () => {
     const p = JSON.parse(read('plugins/lens/.claude-plugin/plugin.json'));

@@ -10,6 +10,7 @@ Design them, plan them, build them with independent review, run them in parallel
 ![waypoint 0.35.1](https://img.shields.io/badge/waypoint-0.35.1-cba6f7?style=flat-square)
 ![forge 0.30.1](https://img.shields.io/badge/forge-0.30.1-fab387?style=flat-square)
 ![lens 0.13.11](https://img.shields.io/badge/lens-0.13.11-b4befe?style=flat-square)
+![web 0.1.0](https://img.shields.io/badge/web-0.1.0-94e2d5?style=flat-square)
 ![Claude Code plugin marketplace](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -39,6 +40,7 @@ Design them, plan them, build them with independent review, run them in parallel
 | 🔨 | **forge** | An adaptive way of working: **triage by size**, the right model for each role, your own validators first, **independent weighted review**, an **execution** of parallel tasks (subagents or sessions) and an unattended **infinite mode**. | [plugins/forge](plugins/forge/README.md) |
 | 🔍 | **lens** | A **live progress panel** inside Claude Code: **model and effort in use**, roadmap, forge stages and executions, superpowers runs, todos, subagents, Claude Code tasks, and **token and dollar usage** compared with working without forge. | [plugins/lens](plugins/lens/README.md) |
 | ☕ | **java** | For Java and Spring Boot: the **DDD and hexagonal rules** of a service (aggregates, ports, events and the outbox, RFC 9457 errors, ArchUnit), the **upkeep of Java libraries** (build-logic, two Boot starters, Maven Central) and an on-demand **architecture reviewer**. It needs none of the other plugins. | [plugins/java](plugins/java/README.md) |
+| 🌐 | **web** | Domain skills for web projects. **astro-dokploy-site** holds what every Astro site with Preact islands on Dokploy otherwise rediscovers: CSP hashes, Lighthouse and Playwright under Claude Code, Vite workers, MDX, nginx and the Dokploy fields. | [plugins/web](plugins/web/README.md) |
 
 ## Mix and match
 
@@ -82,6 +84,7 @@ claude plugin install waypoint@bg-kit
 claude plugin install forge@bg-kit     # pulls in waypoint ^0.35.0 as a dependency
 claude plugin install lens@bg-kit
 claude plugin install java@bg-kit      # Java and Spring Boot: two skills and the architecture reviewer
+claude plugin install web@bg-kit
 ```
 
 Inside a session, `/plugin marketplace add borja-glez/claude-bg-kit` does the same. To get new versions later, run `claude plugin marketplace update bg-kit`.
@@ -221,6 +224,7 @@ plugins/
   forge/      skills, implementer, reviewer, planner and scout agents, hooks, built CLI
   lens/       the panel mod (hooks/register.js) and its engine tests
   java/       skills for Spring Boot services and Java libraries, the architecture-reviewer agent
+  web/        the astro-dokploy-site skill and its references (text only)
 src/          TypeScript sources: lib/ (shared), page/ (roadmap), mod/ (waypoint band), lens/, forge/
 tests/        vitest suites
 docs/
