@@ -2427,4 +2427,11 @@ describe('verified TDD in the texts (A9)', () => {
       'FORGE tdd check --task <id>-1 --base <BASE> --dir .forge/work/<id> --locale <es|en>']) expect(ref, w).toContain(w);
     for (const w of ['${CLAUDE_', 'SKILL.md']) expect(ref, w).not.toContain(w);
   });
+  it('the forge READMEs document tdd: verified, the bug route and tdd check, in English and in Spanish', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const w of ['tdd: verified', '`kind: "bug"`', '`passedOnBase`', '`tdd-<n>.json`', 'Root cause:',
+        '`tdd check --task id-n --base sha --dir d [--baseline f] [--locale es|en]`', '# off | superpowers | verified']) expect(md, `${f}: ${w}`).toContain(w);
+    }
+  });
 });
