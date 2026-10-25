@@ -53,10 +53,10 @@ describe('crew plugin (w7 D4)', () => {
     const { md, head, body } = agent('playtest-qa');
     expect(field(head, 'name')).toBe('playtest-qa');
     expect(field(head, 'description')).toContain('at most two at a time');
-    expect([field(head, 'model'), field(head, 'effort'), field(head, 'maxTurns')]).toEqual(['opus', 'medium', '150']);
+    expect([field(head, 'model'), field(head, 'effort'), field(head, 'maxTurns')]).toEqual(['opus', 'medium', '300']);
     expect(toolsOf(head)).toEqual(['Read', 'Write', 'Grep', 'Glob', 'Bash']);
     for (const w of ['--enable-gpu --use-angle=d3d11 --enable-unsafe-webgpu', 'window.game', 'Input.dispatchKeyEvent', 'Input.dispatchMouseEvent',
-      'playtest-qa-slots', 'owner.json', 'text/javascript', 'SwiftShader', 'by PID', 'log/segment-',
+      'playtest-qa-slots', 'owner.json', 'text/javascript', 'SwiftShader', 'by PID', 'log/segment-', 'log/port.txt',
       '## Environment', '## Tutorial', '## Per minute', '## Theme', '## Findings', '## Not checked']) expect(body, w).toContain(w);
     expect(Buffer.byteLength(md)).toBeLessThan(12000);
   });

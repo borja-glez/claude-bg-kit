@@ -70,7 +70,7 @@ The default scope is the tutorial and the first half hour of play; you can narro
 How it plays:
 
 - Real input only: key and mouse events sent through the browser (`Input.dispatchKeyEvent`, `Input.dispatchMouseEvent`, or the same through Playwright or Puppeteer), never `window.game` or any game function.
-- In segments of at most five minutes, each one a new Chrome on the same profile, so the game's own save carries over.
+- In segments of at most five minutes, each one a new Chrome on the same profile and the same server port, so the game's own save carries over. If that port is taken, the report says the save was lost.
 - Chrome headless with `--enable-gpu --use-angle=d3d11 --enable-unsafe-webgpu` (without the ANGLE flag off Windows), so the frame rates are real. It checks which renderer it got and says so.
 
 Browsers are queued: each takes a slot in `playtest-qa-slots`, in the system temp folder, and there are two slots, so at most two browsers run on the machine. When both are busy it waits, and it recovers a slot whose owner is dead. Whoever launches it should not run more than two at a time.

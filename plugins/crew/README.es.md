@@ -70,7 +70,7 @@ El alcance de defecto es el tutorial y la primera media hora de juego; puedes ac
 Cómo juega:
 
 - Solo entrada real: eventos de teclado y ratón enviados por el navegador (`Input.dispatchKeyEvent`, `Input.dispatchMouseEvent`, o lo mismo con Playwright o Puppeteer), nunca `window.game` ni ninguna función del juego.
-- Por tramos de cinco minutos como mucho, cada uno con un Chrome nuevo sobre el mismo perfil, así que el guardado propio del juego se conserva.
+- Por tramos de cinco minutos como mucho, cada uno con un Chrome nuevo sobre el mismo perfil y el mismo puerto del servidor, así que el guardado propio del juego se conserva. Si ese puerto está ocupado, el informe dice que el guardado se perdió.
 - Chrome headless con `--enable-gpu --use-angle=d3d11 --enable-unsafe-webgpu` (sin el flag de ANGLE fuera de Windows), para que los fotogramas por segundo sean reales. Comprueba qué renderizador le ha tocado y lo dice.
 
 Los navegadores hacen cola: cada uno toma un hueco en `playtest-qa-slots`, en la carpeta temporal del sistema, y hay dos huecos, así que como mucho corren dos navegadores en la máquina. Cuando están los dos ocupados espera, y recupera un hueco cuyo dueño ha muerto. Quien lo lanza no debe poner más de dos a la vez.

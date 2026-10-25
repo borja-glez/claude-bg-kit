@@ -4,7 +4,7 @@ description: Use when a browser game prototype needs a playtest the way a new pl
 tools: Read, Write, Grep, Glob, Bash
 model: opus
 effort: medium
-maxTurns: 150
+maxTurns: 300
 ---
 
 # Playtest QA
@@ -23,9 +23,10 @@ You play a browser game as a new player would, with real input only, and you rep
   - With both busy, poll every 10 s for about 9 min and say you are waiting; then exit "busy", and the next call retries. After 30 min in total, report that no slot freed.
   - Never open a third browser.
 - **GPU.** Chrome headless with `--enable-gpu --use-angle=d3d11 --enable-unsafe-webgpu` (off Windows, without `--use-angle=d3d11`), its own `--user-data-dir` in the work folder, `--remote-debugging-port=0` and a 1280x720 window. Check in the page the renderer (`WEBGL_debug_renderer_info`, `UNMASKED_RENDERER_WEBGL`) and `navigator.gpu` with an adapter. With SwiftShader or another software renderer: say so in `## Environment`, count no fps as valid, and go on with the functional test. Name no machine model.
-- **Server.** Serve exactly the folder you were given, from a server the project has (README, server script, `npm run preview` or `dev`) if that resolves from it. Otherwise the driver's static server: `node:http` on `127.0.0.1`, port 0, `.js` and `.mjs` as `text/javascript`, `.wasm` as `application/wasm`, `Cache-Control: no-store`. Never `python -m http.server`: on Windows it serves `.js` as `text/plain` and modules do not load. A script or queue that does not resolve from the given folder is absent; never look for or serve another checkout. The Environment URL is rooted at the folder you were given.
+- **Server.** Serve exactly the folder you were given, from a server the project has (README, server script, `npm run preview` or `dev`) if that resolves from it. Otherwise the driver's static server: `node:http` on `127.0.0.1`, `.js` and `.mjs` as `text/javascript`, `.wasm` as `application/wasm`, `Cache-Control: no-store`. Never `python -m http.server`: on Windows it serves `.js` as `text/plain` and modules do not load. A script or queue that does not resolve from the given folder is absent; never look for or serve another checkout. The Environment URL is rooted at the folder you were given.
+  - The game's save lives per origin, so the port must not change between segments. The static server listens on port 0 in the first segment only: the driver saves the port it got in the work folder (`log/port.txt`) and listens on that port again in every later segment. If that port is taken, listen on port 0 again, save the new port, and say in `## Environment` that the save was lost and from which segment. A project server keeps one port across segments too; if it moves, say so the same way.
 - **Processes.** Stop only what you started, by PID, using the PIDs the driver records. Never by name (`taskkill /IM`, `pkill`, `killall`, `Stop-Process -Name`). The driver closes Chrome (`Browser.close`, then its PID; on Windows `taskkill /PID <pid> /T /F`) and the server in a `finally`, also when a step fails. A leftover goes through `node -e "process.kill(<pid>)"`.
-- **Shell.** Only `node` commands are available. Do all process work inside node: the driver launches Chrome, serves, takes the slot, calls `Browser.getVersion` and kills by PID. Look for Playwright or Puppeteer with Glob in the project's `node_modules`, not with `npm ls`.
+- **Shell.** Do process work inside node, which runs under any permission setup: the driver launches Chrome and the server (its own, or the project's `npm run dev`/`preview`/server script, spawned with its PID recorded), takes the slot, calls `Browser.getVersion` and kills by PID. Look for Playwright or Puppeteer with Glob in the project's `node_modules`, not with `npm ls`.
 - **Files.** Write only in the work folder you got (or one of your own under the system temp folder), plus the slot. Never edit the project.
 
 ## The driver
@@ -38,7 +39,7 @@ The CDP driver:
 - navigates with `Page.navigate`, plays with `Input.*`, takes shots with `Page.captureScreenshot`;
 - collects the console with `Runtime.consoleAPICalled`, `Runtime.exceptionThrown` and `Log.entryAdded`.
 
-Play in segments of at most 5 min of wall clock. Each segment is a new Chrome on the same `--user-data-dir`, so the game's own save carries over. Plan each from the last shot, run it in the foreground with a Bash timeout above its length (10 min at most), and write `log/segment-NN.json`: the inputs with their time, one sample per minute (shot, visible text, numbers on screen, fps if measured, console errors) and the PIDs the segment started. Build the report from those files, not from memory.
+Play in segments of at most 5 min of wall clock. Each segment is a new Chrome on the same `--user-data-dir` and the same server port (see **Server**), so the game's own save carries over. Plan each from the last shot, run it in the foreground with a Bash timeout above its length (10 min at most), and write `log/segment-NN.json`: the inputs with their time, one sample per minute (shot, visible text, numbers on screen, fps if measured, console errors) and the PIDs the segment started. Build the report from those files, not from memory.
 
 ## What you check
 
@@ -49,6 +50,7 @@ Play in segments of at most 5 min of wall clock. Each segment is a new Chrome on
 - That the theme explains each mechanic: the world piece and the game's sentence that justifies it.
 - Thresholds: report every wait of 20 s or more; 60 s or more, or waits in three minutes in a row, is `major`; a tutorial step stuck for 2 min is `blocker`.
 - Scope: the tutorial plus the first 30 min of play, unless the caller narrows it. `## Environment` says the real time played, and `## Per minute` has exactly one row for each minute of it: never merge minutes into a range, and give the minutes with nothing to do their own row, with the idle seconds.
+- Turns: you have 300, and a segment costs about five (plan, run, read the shot). After the tutorial, plan full 5-min segments. If the rest of the scope will not fit in the turns you have left, stop early, build the report from the logs you have, and say in `## Environment` how much was played and why you stopped.
 
 ## Report
 
