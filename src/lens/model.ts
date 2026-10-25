@@ -187,6 +187,8 @@ export type PanelModel = {
     queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];
   } | null;
   proposals: { id: string; title: string; category: string; risk: string }[];
+  // what waits for the person, as the band carries it (needs-you.ts in lib): absent when nothing does
+  needs?: BandModel['needs'];
   mainModel: { model: string; effort: string | null } | null;
   // one entry per piece of work going on: a forge task, a workflow run, superpowers, the todos, the agents without a task.
   activities: {
@@ -641,6 +643,7 @@ export function buildPanelModel(input: {
     decisions: decisionsSummary(input.forgeDecisions, now),
     execution: withAgents,
     proposals: pendingProposals(input.proposals),
+    ...(band.needs ? { needs: band.needs } : {}),
     mainModel: mainLoop?.model ? { model: mainLoop.model, effort: mainLoop.effort } : null,
     activities: view.activities, waiting: view.waiting, jobs: view.jobs,
     usage,

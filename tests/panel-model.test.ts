@@ -865,3 +865,11 @@ describe('the Todos and Claude Code tasks cards come only from their own events 
       .toEqual({ open: 1, done: 0, recent: ['Write the spec'] });
   });
 });
+
+describe('buildPanelModel · what waits for the person (w7 A5)', () => {
+  it('takes what the band carries, as it is; nothing when the band carries nothing', () => {
+    const needs = { total: 1, items: [{ kind: 'proposal' as const, id: 'p1', what: 'Cache', task: null, runId: null, file: '.forge/proposals/p1.json', since: null, command: '/forge:decide p1', place: null }] };
+    expect(buildPanelModel({ band: { ...NONE_BAND, needs }, activity: act(), now: 0 }).needs).toEqual(needs);
+    expect(buildPanelModel({ band: NONE_BAND, activity: act(), now: 0 })).not.toHaveProperty('needs');
+  });
+});

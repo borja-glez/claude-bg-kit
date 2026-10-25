@@ -3,6 +3,7 @@ import { fmtTokens, fmtUsd, usageBandText, barParts, briefCells, forgePhase, hea
 import { buildCards, cardAlt, type CardTexts } from '../src/lens/cards.js';
 import { bandSvg, cardSvg, fit, xml, type Block, type Card } from '../src/lens/svg.js';
 import { executionFromFiles, forgeFromStatus, type PanelModel } from '../src/lens/model.js';
+import { CARD_PRIORITY } from '../src/lens/layout.js';
 
 const T: CardTexts = {
   sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Now', sTodos: 'Todos', sSubagents: 'Subagents', sTasks: 'Tasks', sForge: 'forge',
@@ -22,6 +23,9 @@ const T: CardTexts = {
   sTasksInProgress: 'Tasks in progress', otherSession: 'other session', validating: 'validating', integrating: 'integrating', skipped: 'skipped',
   noResult: 'no result', accepted: 'accepted', acceptedInRound: n => `accepted in round ${n}`,
   waitingOn: (n, wake) => `waiting on ${n} subagent${n === 1 ? '' : 's'}${wake ? ` · wakes in ${wake}` : ''}`, waitingLbl: 'waiting', cached: 'cached', reviewersLbl: 'reviewers',
+  sNeeds: 'Waiting for you',
+  needKind: { 'review-question': 'review question', authorization: 'merge to authorize', 'untrusted-commands': 'trust in the commands', run: 'stopped execution', question: 'question', proposal: 'proposal', 'design-approval': 'design to approve', surface: 'surface permission' },
+  needCoordinator: "your turn in the coordinator's conversation", needConversation: 'in the conversation that asked', needRoadmap: 'on the roadmap', needUnverified: 'could not be read',
 };
 const FORGE: NonNullable<PanelModel['forge']> = {
   task: 'orders', path: 'large', phase: 'implement', agent: 'forge-impl-heavy', validators: [{ name: 'test', ok: true }],
@@ -675,5 +679,31 @@ describe('card ids and the execution count (F-01, F-10)', () => {
     const card = buildCards({ ...EMPTY, execution: EXEC }, T, 0).find(c => c.id === 'execution')!;
     expect(card.blocks[0]).toMatchObject({ kind: 'bar', right: '3/12 integrated' });
     expect(cardAlt(card)).toContain('to integrate: T003');
+  });
+});
+
+describe('the «Waiting for you» card (w7 A5)', () => {
+  type Need = NonNullable<PanelModel['needs']>['items'][number];
+  const NOW = 10_000_000;
+  const item = (o: Partial<Need>): Need => ({ kind: 'question', id: 'n1', what: '¿Postgres?', task: 'T002', runId: null, file: null, since: new Date(NOW - 300_000).toISOString(), command: null, place: 'roadmap', ...o });
+  it('lists what waits, oldest first, with its kind, what, how and age, counts the rest, and goes right after Now when rows run out', () => {
+    const items = [item({}), item({ kind: 'run', id: 'r1', what: 'stalled: x', task: null, runId: 'r1', file: '.forge/execution.json', place: 'coordinator' }), item({ kind: 'proposal', id: 'p1', what: 'Cache', task: null, command: '/forge:decide p1', place: null, since: null })];
+    const card = buildCards({ ...EMPTY, needs: { total: 9, items } }, T, NOW).find(c => c.id === 'needs')!;
+    expect(card).toMatchObject({ title: 'Waiting for you', chip: { text: '9' } });
+    expect(card.blocks.map(b => (b.kind === 'row' ? [b.tag?.text, b.text, b.right] : b.kind === 'text' ? b.text : b.kind))).toEqual([
+      ['question', '[T002] ¿Postgres?', 'on the roadmap · 5m'],
+      ['stopped execution', 'stalled: x', "your turn in the coordinator's conversation · 5m"],
+      ['proposal', 'Cache', '/forge:decide p1'],
+      '+6',
+    ]);
+    expect(CARD_PRIORITY.indexOf('needs')).toBe(1);
+  });
+  it('a source that could not be read says so, dimmed; a date ahead of the clock shows no age; no card when nothing waits (Review Focus 5)', () => {
+    const bad = item({ kind: 'authorization', id: '', what: '', task: null, file: '.forge/execution/auth/x.json', since: null, place: null, unverified: true });
+    const ahead = item({ since: new Date(NOW + 600_000).toISOString() });
+    const card = buildCards({ ...EMPTY, needs: { total: 2, items: [ahead, bad] } }, T, NOW).find(c => c.id === 'needs')!;
+    expect(card.blocks[0]).toMatchObject({ kind: 'row', right: 'on the roadmap' });
+    expect(card.blocks[1]).toMatchObject({ kind: 'row', tag: { text: 'merge to authorize' }, text: 'could not be read: .forge/execution/auth/x.json', dim: true });
+    expect(buildCards(EMPTY, T, 0).some(c => c.id === 'needs')).toBe(false);
   });
 });

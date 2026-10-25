@@ -12,9 +12,15 @@ const ACT = (over: Partial<Row> = {}): Row => ({
   key: 'T001', kind: 'forge', owner: 'own', dim: false, done: false, slot: false, expanded: false, stopped: false, task: 'T001', project: null, title: null,
   path: 'medium', stage: 'implement', round: null, cap: null, verdict: null, job: null, seconds: 60, agents: [], ...over,
 });
-const T = { sSubagents: 'Subagents', sNow: 'Now' };
+const T = { sSubagents: 'Subagents', sNow: 'Now', needsN: (n: number) => `waiting for you ${n}` };
 
 describe("lens's band (F-09)", () => {
+  it('what waits for the person is a part of its own after the headline (w7 A5)', () => {
+    const band = lensBand({ ...EMPTY, needs: { total: 2, items: [] }, subagents: [{ id: 'x', type: 'Explore', seconds: 5 }] }, T, 0);
+    expect(band.parts.find(p => p.key === 'needs')).toEqual({ key: 'needs', text: '» waiting for you 2', short: '» 2', prio: 3, hue: 'accent' });
+    expect(band.parts.map(p => p.key).indexOf('needs')).toBeLessThan(band.parts.map(p => p.key).indexOf('agents'));
+    expect(lensBand(EMPTY, T, 1).parts.some(p => p.key === 'needs')).toBe(false);
+  });
   it('two or more tasks of this session in progress: one short part each, «T001 impl · T002 rev r2 · T003 val»', () => {
     const m = { ...EMPTY, activities: [
       ACT(), ACT({ key: 'T002', task: 'T002', stage: 'review', round: 2 }), ACT({ key: 'T003', task: 'T003', stage: 'implement', job: { name: 'review-prep', seconds: 30 } }),
