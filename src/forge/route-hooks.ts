@@ -1,13 +1,17 @@
 // forge's routing hooks. SessionStart (`hook route-session`) puts the routing rule in the session's context;
 // UserPromptSubmit (`hook route-prompt`) reminds a route half done, else hints at forge:route for coding work. Both fail
 // open (any error prints nothing), stay silent where forge already drives the session or the user chose superpowers
-// (or off) in local.yaml, and run no git beyond mainCheckout.
+// (or off) in local.yaml, and run no git beyond mainCheckout. After a compaction (`source: compact`), route-session tells
+// a session the forge task or the infinite run it has in progress.
 import path from 'node:path';
 import { loadConfig, type ForgeConfig } from './config.js';
 import { readExecution } from './execution.js';
 import { readStatuses } from './ledger.js';
 import { mainCheckout, readLocal } from './local.js';
 import { memberForHook } from './members.js';
+import { isSafeId } from '../lib/execution-state.js';
+import type { ForgeStatus } from '../lib/forge-status.js';
+import { planLocale, sessionReply } from '../lib/locale.js';
 import { resolvePrefs } from './prefs.js';
 import { listRoutes, readRoute, ROUTE_REMINDER_MS, type RouteDoc } from './route.js';
 import { parseRun, readRunText } from './run.js';
@@ -132,13 +136,54 @@ function forgeDrives(io: Io, main: string, sid: string | null): boolean {
   if (exec?.active && (exec.hookSession === sid || memberForHook(main, sid, exec.runId))) return true;
   const run = parseRun(readRunText(main)) ?? parseRun(readRunText(io.cwd));
   if (run?.active && run.sessionId === sid) return true;
-  // K1-12 with C5: the alias is the task that changed last, of any session, so every status of the folder is read; M6:
-  // but not a file untouched for longer than an open task lasts, which is skipped by its mtime unread.
+  return openTasks(io, main, sid).length > 0;
+}
+
+/**
+ * K1-12's rule: this session's forge tasks not done and moved in the last OPEN_TASK_MS, read in io.cwd and the main
+ * checkout, newest first (lastAt, else ts). K1-12 with C5: the alias is the task that changed last, of any session, so
+ * every status of the folder is read; M6: but not a file untouched for longer than an open task lasts, which is skipped
+ * by its mtime unread.
+ */
+export function openTasks(io: Io, main: string, sid: string): ForgeStatus[] {
   const now = io.now().getTime();
-  return [...new Set([io.cwd, main])].some(dir => Object.values(readStatuses(dir, { maxAgeMs: OPEN_TASK_MS, now })).some(st => {
-    const last = Date.parse(st.lastAt ?? st.ts);
-    return st.session === sid && st.doneAt === null && Number.isFinite(last) && now - last < OPEN_TASK_MS;
-  }));
+  const at = (st: ForgeStatus) => Date.parse(st.lastAt ?? st.ts);
+  return [...new Set([io.cwd, main])]
+    .flatMap(dir => Object.values(readStatuses(dir, { maxAgeMs: OPEN_TASK_MS, now })))
+    .filter(st => st.session === sid && st.doneAt === null && Number.isFinite(at(st)) && now - at(st) < OPEN_TASK_MS)
+    .sort((a, b) => at(b) - at(a));
+}
+
+export const COMPACT_RUN = 'invoke forge:run again before the next step';
+export const COMPACT_INFINITE = 'invoke forge:infinite again before the next step';
+
+/**
+ * w7 A2: what a session that just compacted has in progress (English: the model reads it), or null. The infinite run
+ * of the session first (the main checkout's, else the one an older forge left where the session runs); the coordinator
+ * or member of an active execution without it gets null, hook live answers it. Else its newest open forge task. Every
+ * value a crafted status could carry is checked before it reaches the model's context.
+ */
+export function compactText(io: Io, main: string, sid: string): string | null {
+  const found = parseRun(readRunText(main)) ?? parseRun(readRunText(io.cwd));
+  const infinite = found?.active && found.sessionId === sid ? found : null;
+  if (!infinite) {
+    const exec = readExecution(main);
+    if (exec?.active && (exec.hookSession === sid || memberForHook(main, sid, exec.runId))) return null;
+  }
+  const st = openTasks(io, main, sid).find(s => isSafeId(s.task) && ['trivial', 'small', 'medium', 'large'].includes(s.path)) ?? null;
+  if (!infinite && !st) return null;
+  let parts = '';
+  if (st) {
+    const list = [`path ${st.path}`];
+    if (/^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(st.phase)) list.push(`phase ${st.phase}`);
+    if (st.brief !== null) list.push(`brief ${st.brief}`);
+    if (st.round !== null) list.push(st.cap !== null ? `round ${st.round} of ${st.cap}` : `round ${st.round}`);
+    parts = list.join(', ');
+  }
+  const text = infinite
+    ? `forge: this session runs the forge infinite mode (cycle ${infinite.cycle})${st ? `, on the forge task ${st.task} (${parts})` : ''}. After the compaction, ${COMPACT_INFINITE}, and go on from where the cycle is.`
+    : `forge: this session has the forge task ${st!.task} open (${parts}). After the compaction, ${COMPACT_RUN}, and go on from where the task is.`;
+  return text + (sessionReply(infinite, null, () => planLocale(main, st?.project ?? null)) ?? '');
 }
 
 export function hookRoute(io: Io, which: 'session' | 'prompt'): string {
@@ -150,6 +195,12 @@ export function hookRoute(io: Io, which: 'session' | 'prompt'): string {
     // K1-09: in a task or run worktree of forge, forge drives whatever happens: no rule and no hint.
     if (inForgeWorktree(io.cwd)) return '';
     const main = mainCheckout(io.cwd);
+    // w7 A2: after a compaction the session is told the forge task or infinite run it has in progress; neither the
+    // workflow nor a broken config below silences it.
+    if (which === 'session' && o.source === 'compact' && sid) {
+      const recall = compactText(io, main, sid);
+      if (recall) return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: recall } });
+    }
     // With workflow: superpowers forge is optional again, as before routing existed; with off it stays out. The config is
     // read once, here, for the workflow and the hint; an invalid one throws, and the hook says nothing (fail open).
     const config = loadConfig(io.cwd);
