@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
 import { KIND_ORDER, sortTimeline, type Entry, type Finding, type StepRow } from '../src/forge/diagnose-rules.js';
+import { projectSlug } from '../src/forge/diagnose-sources.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import { DIAG_NOW, DIAG_SUBAGENT, writeDiagnoseFixture } from './fixtures/diagnose.js';
 import { walk } from './helpers/files.js';
@@ -177,6 +178,144 @@ describe('forge diagnose (A6)', () => {
       'src/forge/diagnose-rules.ts', 'src/forge/cli/commands/diagnose.ts']) {
       expect(readFileSync(new URL(`../${f}`, import.meta.url), 'utf8'), f).not.toMatch(WRITERS);
     }
+  });
+});
+
+describe('forge diagnose: the call that wrote an out file, the failed jobs of a run and the path of a task of a run (A6)', () => {
+  const F = 'node /p/forge.cjs';
+  const launched = (agentId: string) => ({ text: 'Async agent launched successfully.', toolUseResult: { isAsync: true, status: 'async_launched', agentId } });
+  const bg = (id: string) => ({ text: `Command running in background with ID: ${id}`, toolUseResult: { backgroundTaskId: id } });
+  const taskOf = (r: string): ExecutionState['tasks'][string] => ({ status: 'running', stage: 'implement', round: 1, worktree: path.join(r, '.claude', 'worktrees', 'task-T001'),
+    branch: 'task/T001', executor: 'subagents', attempts: 0, agent: 'forge-impl', startedAt: at(1), stageSince: at(1), updatedAt: at(5), detail: null });
+  const execOf = (runId: string, r: string, over: Partial<ExecutionState> = {}): ExecutionState => ({
+    runId, kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false, coordinator: 'main',
+    hookSession: 'h9', active: true, stopReason: null, stallReason: null, startedAt: at(0), lastStepAt: null, lastBlockStep: null, sleepUntil: null,
+    closedAt: null, closedBy: null, tasks: { T001: taskOf(r) }, ...over,
+  });
+  /** A checkout with its ledger and its out files (each with its mtime), and the transcript of `session` where CLAUDE_CONFIG_DIR keeps it. */
+  const scenario = (events: Record<string, unknown>[], transcript: string[], outs: [string, string, string][] = [], session = 's1') => {
+    const r = tmp('diag-sc-');
+    const c = tmp('diag-sc-cfg-');
+    put(path.join(r, '.forge', 'ledger.jsonl'), jsonl(events.map(e => JSON.stringify(e))));
+    for (const [rel, text, mtime] of outs) utimesSync(put(path.join(r, rel), text), new Date(mtime), new Date(mtime));
+    const t = put(path.join(c, 'projects', projectSlug(r), `${session}.jsonl`), jsonl(transcript));
+    const diag = (args: string[], cfg = c) => {
+      const res = run(['diagnose', ...args], { cwd: r, now: () => new Date(DIAG_NOW), env: { CLAUDE_CONFIG_DIR: cfg } });
+      expect(res.code, res.stderr).toBe(0);
+      return JSON.parse(res.stdout);
+    };
+    return { r, t, diag };
+  };
+
+  it("a fix round writes the brief's review-prep out file again: the file is the last round's, so round 1 ends when its phase was logged and its reviewers are in order", () => {
+    const OUT = '.forge/work/fix/review-prep-1.json';
+    const rp = { command: `${F} review-prep --task fix-1 --path medium --dir .forge/work/fix --out ${OUT}`, run_in_background: true };
+    const rc = { command: `${F} review-close --task fix-1 --dir .forge/work/fix --path medium` };
+    const agent = (description: string, type = 'forge-impl') => ({ subagent_type: `forge:${type}`, description, prompt: 'forge-task: fix-1\nGo.' });
+    const s = scenario([
+      /* 1 */ { ts: at(1), kind: 'triage', task: 'fix', path: 'medium', session: 's1' },
+      /* 2 */ { ts: at(3), kind: 'phase', task: 'fix-1', phase: 'implement', brief: 1, base: 'abc', session: 's1' },
+      /* 3 */ { ts: at(20), kind: 'phase', task: 'fix-1', phase: 'review', brief: 1, round: 1, session: 's1' },
+      /* 4 */ { ts: at(25), kind: 'verdict', task: 'fix-1', action: 'fix', session: 's1' },
+      /* 5 */ { ts: at(50), kind: 'phase', task: 'fix-1', phase: 'review', brief: 1, round: 2, session: 's1' },
+      /* 6 */ { ts: at(55), kind: 'verdict', task: 'fix-1', action: 'accept', session: 's1' },
+      /* 7 */ { ts: at(56), kind: 'phase', task: 'fix', phase: 'done', session: 's1' },
+    ], [
+      /* 1 */ toolUse(at(0.5), 'b1', 'Bash', { command: `${F} begin --task fix` }),
+      /* 2 */ toolResult(at(0.6), 'b1', { text: '{}' }),
+      /* 3 */ toolUse(at(0.9), 'b2', 'Bash', { command: `${F} triage --task fix` }),
+      /* 4 */ toolResult(at(1), 'b2', { text: '{"path":"medium"}' }),
+      /* 5 */ toolUse(at(2), 'b3', 'Bash', { command: `${F} prep --task fix-1 --path medium` }),
+      /* 6 */ toolResult(at(3), 'b3', { text: '{"base":"abc"}' }),
+      /* 7 */ toolUse(at(4), 'g1', 'Agent', agent('Implement brief 1')),
+      /* 8 */ toolResult(at(4), 'g1', launched('a1')),
+      /* 9 */ toolUse(at(11), 'b4', 'Bash', rp),
+      /* 10 */ toolResult(at(11), 'b4', bg('x1')),
+      /* 11 */ toolUse(at(21), 'g2', 'Agent', agent('Review brief 1 correctness', 'forge-review-correctness')),
+      /* 12 */ toolResult(at(21), 'g2', launched('a2')),
+      /* 13 */ toolUse(at(24), 'b5', 'Bash', rc),
+      /* 14 */ toolResult(at(25), 'b5', { text: '{"action":"fix"}' }),
+      /* 15 */ toolUse(at(30), 'g3', 'Agent', agent('Fix brief 1')),
+      /* 16 */ toolResult(at(30), 'g3', launched('a3')),
+      /* 17 */ toolUse(at(41), 'b6', 'Bash', rp),
+      /* 18 */ toolResult(at(41), 'b6', bg('x2')),
+      /* 19 */ toolUse(at(51), 'g4', 'Agent', agent('Review brief 1 correctness', 'forge-review-correctness')),
+      /* 20 */ toolResult(at(51), 'g4', launched('a4')),
+      /* 21 */ toolUse(at(54), 'b7', 'Bash', rc),
+      /* 22 */ toolResult(at(55), 'b7', { text: '{"action":"accept"}' }),
+    ], [[OUT, '{"round":2}\n', at(50)]]);
+    const out = s.diag(['--task', 'fix']);
+    expect(out.findings).toEqual([]);
+    expect(steps(out.tasks[0].steps)).toEqual({ begin: 'ok', triage: 'ok', 'prep#1': 'ok', 'impl#1': 'ok', 'review-prep#1': 'ok', 'reviewers#1': 'ok',
+      'review-close#1': 'ok', done: 'ok' });
+    expect(out.tasks[0].steps.find((r: StepRow) => r.step === 'review-prep')).toMatchObject({ start: at(11), end: at(20), at: [`${s.t}:9`, '.forge/ledger.jsonl:3'] });
+  });
+  it('a prep retried with the same --out: only the call that wrote the file takes it, so a failed first try is no success to repeat, and a later failure is not the first try\'s', () => {
+    const OUT = '.forge/work/fix/prep-1.json';
+    const prep = { command: `${F} prep --task fix-1 --path small --out ${OUT}`, run_in_background: true };
+    const tx = [
+      /* 1 */ toolUse(at(0.5), 'b1', 'Bash', { command: `${F} begin --task fix` }),
+      /* 2 */ toolResult(at(0.6), 'b1', { text: '{}' }),
+      /* 3 */ toolUse(at(0.9), 'b2', 'Bash', { command: `${F} triage --task fix` }),
+      /* 4 */ toolResult(at(1), 'b2', { text: '{"path":"small"}' }),
+      /* 5 */ toolUse(at(2), 'b3', 'Bash', prep),
+      /* 6 */ toolResult(at(2), 'b3', bg('x1')),
+      /* 7 */ toolUse(at(5), 'b4', 'Bash', prep),
+      /* 8 */ toolResult(at(5), 'b4', bg('x2')),
+    ];
+    const triage = { ts: at(1), kind: 'triage', task: 'fix', path: 'small', session: 's1' };
+    const implement = (min: number) => ({ ts: at(min), kind: 'phase', task: 'fix-1', phase: 'implement', brief: 1, base: 'abc', session: 's1' });
+    // The first try failed and the retry wrote the file.
+    const retried = scenario([triage, implement(6)], tx, [[OUT, '{"base":"abc"}\n', at(6)]]);
+    expect(retried.diag(['--task', 'fix']).findings).toEqual([]);
+    // The first try succeeded (its phase is logged) and the retry wrote {error, code}.
+    const failed = scenario([triage, implement(3)], tx, [[OUT, '{"error":"forge: boom","code":1}\n', at(6)]]);
+    expect(seen(failed.diag(['--task', 'fix']).findings)).toEqual([['failed', 'prep', 1, at(5), [`${failed.t}:7`, OUT]]]);
+  });
+  it("--execution with the coordinator's transcript: a swarm step or swarm integrate whose out file holds {error, code} failed, as without the transcript, and an earlier step is not that failure", () => {
+    const R = 'shop-20261024T100000000Z';
+    const STEP = '.forge/work/run/step.json', INTEGRATE = '.forge/work/run/integrate-T001.json';
+    const step = { command: `rm -f ${STEP} && ${F} swarm step --plan p --db DB --out ${STEP}`, run_in_background: true };
+    const s = scenario([
+      { ts: at(1), kind: 'triage', task: 'T001', project: 'shop', path: 'large', runId: R, session: 'h9' },
+      { ts: at(3), kind: 'phase', task: 'T001-1', project: 'shop', phase: 'implement', brief: 1, base: 'abc', runId: R, session: 'h9' },
+    ], [
+      /* 1 */ toolUse(at(10), 'b1', 'Bash', step),
+      /* 2 */ toolResult(at(10), 'b1', bg('x1')),
+      /* 3 */ toolUse(at(20), 'b2', 'Bash', step),
+      /* 4 */ toolResult(at(20), 'b2', bg('x2')),
+      /* 5 */ toolUse(at(30), 'b3', 'Bash', { command: `${F} swarm integrate T001 --plan p --db DB --out ${INTEGRATE}`, run_in_background: true }),
+      /* 6 */ toolResult(at(30), 'b3', bg('x3')),
+      /* 7 */ toolUse(at(35), 'b4', 'Bash', step),
+      /* 8 */ toolResult(at(35), 'b4', bg('x4')),
+    ], [[STEP, '{"error":"forge: step failed","code":1}\n', at(36)], [INTEGRATE, '{"error":"conflict","code":2}\n', at(32)]], 'h9');
+    put(path.join(s.r, '.forge', 'execution.json'), JSON.stringify(execOf(R, s.r, { lastStepAt: at(40) })));
+    const failed = (out: { findings: Finding[] }) => out.findings.map(f => [f.kind, f.task, f.ts, f.at]);
+    expect(failed(s.diag(['--execution', R]))).toEqual([['failed', 'T001', at(32), [`${s.t}:5`, INTEGRATE]], ['failed', null, at(36), [`${s.t}:7`, STEP]]]);
+    expect(failed(s.diag(['--execution', R], tmp('diag-none-')))).toEqual([['failed', null, at(32), [INTEGRATE]], ['failed', null, at(36), [STEP]]]);
+  });
+  it("--task T of a run keeps the large path when execution.json holds another run, or none: its events carry the run's id, so begin is no missing step", () => {
+    const R = 'shop-20261024T100000000Z';
+    const s = scenario([
+      { ts: at(1), kind: 'triage', task: 'T001', project: 'shop', path: 'large', runId: R, session: 's1' },
+      { ts: at(3), kind: 'phase', task: 'T001-1', project: 'shop', phase: 'implement', brief: 1, base: 'abc', runId: R, session: 's1' },
+      { ts: at(30), kind: 'triage', task: 'T001', project: 'shop', path: 'medium', runId: R, session: 's1' },
+    ], [
+      /* 1 */ toolUse(at(0.9), 'b1', 'Bash', { command: `${F} triage --plan p --task T001` }),
+      /* 2 */ toolResult(at(1), 'b1', { text: '{"path":"large"}' }),
+      /* 3 */ toolUse(at(2), 'b2', 'Bash', { command: `${F} prep --task T001-1 --path large` }),
+      /* 4 */ toolResult(at(3), 'b2', { text: '{"base":"abc"}' }),
+      /* 5 */ toolUse(at(29), 'b3', 'Bash', { command: `${F} triage --plan p --task T001 --base abc` }),
+      /* 6 */ toolResult(at(30), 'b3', { text: '{"path":"medium"}' }),
+    ]);
+    const check = (when: string) => {
+      const out = s.diag(['--task', 'T001', '--project', 'shop']);
+      expect(out.tasks.map((x: { task: string; project: string | null; path: string }) => [x.task, x.project, x.path]), when).toEqual([['T001', 'shop', 'large']]);
+      expect(out.findings, when).toEqual([]);
+    };
+    check('no execution.json');
+    put(path.join(s.r, '.forge', 'execution.json'), JSON.stringify(execOf('shop-20261025T100000000Z', s.r, { tasks: { T002: taskOf(s.r) } })));
+    check('execution.json of another run');
   });
 });
 

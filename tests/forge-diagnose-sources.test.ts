@@ -97,6 +97,23 @@ describe("forge's files of a scope (A6)", () => {
     expect(jobs('garden')).toEqual(['.forge/jobs/prep-garden.json']);
     expect(jobs(null)).toEqual(['.forge/jobs/prep-loose.json']);
   });
+  it("in an execution, a job joins by the run's (project, task) pairs, and one that writes to the run folder joins by its task (D-08)", () => {
+    const root = tmp('diag-src-');
+    ledger(root, [{ ts: at(1), kind: 'triage', task: 'T001', project: 'shop', runId: 'r1' }, { ts: at(2), kind: 'triage', task: 'T001', project: 'garden' }]);
+    put(path.join(root, '.forge', 'execution.json'), JSON.stringify(EXEC));
+    const job = (name: string, cmd: string, task: string | null, out: string) => put(path.join(root, '.forge', 'jobs', `${name}.json`),
+      JSON.stringify({ name, cmd, task, pid: 999999, startedAt: at(4), out, session: null }));
+    job('prep-T001-1-1', 'prep', 'T001-1', '.forge/work/shop/T001/prep-1.json');
+    job('prep-T001-1-2', 'prep', 'T001-1', '.forge/work/garden/T001/prep-1.json');
+    job('prep-T001-1-3', 'prep', 'T001-1', '.forge/work/T001/prep-1.json');
+    job('integrate-T001-4', 'integrate', 'T001', '.forge/work/run/integrate-T001.json');
+    job('integrate-T002-5', 'integrate', 'T002', '.forge/work/run/integrate-T002.json');
+    job('step-run-6', 'step', null, '.forge/work/run/step.json');
+    const s = forgeSources(root, { kind: 'execution', runId: 'r1' });
+    expect(s.tasks).toEqual([{ task: 'T001', project: 'shop', inExecution: true }]);
+    expect(s.docs.filter(d => d.kind === 'job').map(d => [d.file, d.task])).toEqual([
+      ['.forge/jobs/integrate-T001-4.json', 'T001'], ['.forge/jobs/prep-T001-1-1.json', 'T001'], ['.forge/jobs/step-run-6.json', null]]);
+  });
   it("an execution comes only from execution.json of that runId: its tasks, their public files and the run folder's outs", () => {
     const root = tmp('diag-src-');
     ledger(root, [{ ts: at(1), kind: 'triage', task: 'T001', project: 'shop', runId: 'r1', session: 's9' }]);

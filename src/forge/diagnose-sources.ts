@@ -93,7 +93,9 @@ export function forgeSources(main: string, scope: Scope): ForgeSources {
   if (exec && scope.kind === 'task' && !runHoldsTask(exec, scope.task, scope.project)) exec = null;
 
   let tasks: ScopeTask[];
-  if (scope.kind === 'task') tasks = [{ task: scope.task, project: scope.project, inExecution: exec !== null }];
+  // A task ran in an execution when one holds it now, or when its events carry a run's id: each event of a task is stamped
+  // with it while its run is active, so the task keeps the large path after execution.json holds another run, or none.
+  if (scope.kind === 'task') tasks = [{ task: scope.task, project: scope.project, inExecution: exec !== null || scoped.some(l => isSafeId(l.event.runId)) }];
   else if (exec) tasks = Object.keys(exec.tasks).map(task => ({ task, project: exec.kind === 'plan' ? exec.project : null, inExecution: true }));
   else {
     const owner = attribute(events);
@@ -146,7 +148,13 @@ export function forgeSources(main: string, scope: Scope): ForgeSources {
 
   // Jobs: read without checking their pid and without deleting any.
   // A job joins a scope by the pair (project, task): the project is the one its out folder names, none for a loose task.
+  // In an execution, a job that writes to the run folder (swarm integrate <T> --out .forge/work/run/integrate-<T>.json)
+  // names no project: it joins by its task, which is one of the run's.
   const inScope = new Set(tasks.map(t => JSON.stringify([t.project, t.task])));
+  const inRunFolder = (out: string): boolean => {
+    const p = out.split(/[\\/]+/);
+    return p.length >= 4 && p[p.length - 2] === 'run' && p[p.length - 3] === 'work' && p[p.length - 4] === '.forge';
+  };
   for (const f of names(jobsDir(main)).filter(n => n.endsWith('.json')).slice(0, JOB_FILES_MAX)) {
     const abs = path.join(jobsDir(main), f);
     let raw: unknown;
@@ -159,7 +167,11 @@ export function forgeSources(main: string, scope: Scope): ForgeSources {
     if (!job) continue;
     const owner = job.task === null ? (scope.kind === 'execution' ? '' : null) : baseOf(job.task);
     if (owner === null) continue;
-    if (owner !== '' && !inScope.has(JSON.stringify([projectOfDir(job.out, job.task as string), owner]))) continue;
+    if (owner !== '') {
+      const project = projectOfDir(job.out, job.task as string);
+      const ofRun = scope.kind === 'execution' && project === null && inRunFolder(job.out) && tasks.some(t => t.task === owner);
+      if (!ofRun && !inScope.has(JSON.stringify([project, owner]))) continue;
+    }
     addDoc(abs, 'job', owner === '' ? null : owner, () => job.startedAt);
   }
 

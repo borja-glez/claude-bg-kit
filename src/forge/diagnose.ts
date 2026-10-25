@@ -170,16 +170,38 @@ export function diagnose(main: string, scope: Scope, opts: DiagnoseOpts): Diagno
   const outDocs = new Map<string, Doc>(src.docs.filter(d => d.kind === 'out').map(d => [d.abs, d]));
   const outOf = (inv: ForgeInvocation): Doc | undefined => (inv.out === null ? undefined : outDocs.get(path.resolve(main, inv.out)));
   const hasError = (d: Doc): boolean => isRecord(d.doc) && d.doc.error !== undefined && d.doc.error !== null;
-  /** Whether a call to forge went well: null while unknown (no result, or launched in the background). */
+  // The skills reuse fixed --out names (every fix round of a brief, a retry, each swarm step), so an out file holds what
+  // its last writer wrote: of the calls that name it, the last one (by ts, then by citation) that started at or before the
+  // file's time. Only that call takes the file; the others keep what their own result says.
+  const writerOf = new Map<string, { inv: ForgeInvocation; start: number; at: string }>();
+  for (const m of mains) {
+    for (const c of m.calls) {
+      for (const inv of c.forge) {
+        const doc = outOf(inv);
+        const start = time(c.ts);
+        if (!doc || Number.isNaN(start) || start > time(doc.ts)) continue;
+        const at = cite(m.file, c.line);
+        const before = writerOf.get(doc.abs);
+        if (!before || start > before.start || (start === before.start && compareCites(at, before.at) >= 0)) writerOf.set(doc.abs, { inv, start, at });
+      }
+    }
+  }
+  /** The out file an invocation wrote: only when it is that file's last writer. */
+  const wroteOf = (inv: ForgeInvocation): Doc | undefined => {
+    const d = outOf(inv);
+    return d && writerOf.get(d.abs)?.inv === inv ? d : undefined;
+  };
+  /** Whether a call to forge went well: its own failure first, then the out file it wrote; null while unknown (no result, or launched in the background). */
   const okOfCall = (sc: ScopedCall, inv: ForgeInvocation): boolean | null => {
-    const doc = outOf(inv);
+    if (sc.res?.error) return false;
+    const doc = wroteOf(inv);
     if (doc) return !hasError(doc);
     if (!sc.res) return null;
-    if (sc.res.error) return false;
     return sc.call.background || sc.res.launched ? null : true;
   };
-  const named = new Set<string>();
-  for (const m of mains) for (const c of m.calls) for (const inv of c.forge) if (inv.out !== null) named.add(path.resolve(main, inv.out));
+  // An out file whose writer is no call of the scope (none was read, or it is out of the scope) speaks for itself.
+  const scopedInvs = new Set(mainCalls.flatMap(sc => sc.hits.map(h => h.inv)));
+  const writtenInScope = (d: Doc): boolean => { const w = writerOf.get(d.abs); return w !== undefined && scopedInvs.has(w.inv); };
 
   const instancesOf = new Map<string, Instance[]>();
   const extra: Finding[] = [];
@@ -196,10 +218,10 @@ export function diagnose(main: string, scope: Scope, opts: DiagnoseOpts): Diagno
         if (!hit) continue;
         const launched = sc.call.background || sc.res?.launched === true;
         const inst: Instance = { task: T.task, step: hit.step, brief: hit.brief, start: sc.call.ts, end: sc.res && !launched ? sc.res.ts : null, ok: okOfCall(sc, h.inv), at: [sc.at] };
-        const doc = outOf(h.inv);
+        const doc = wroteOf(h.inv);
         if (doc) {
           if (hasError(doc)) inst.at.push(doc.file);
-          else inst.end = doc.ts;
+          else if (!sc.res?.error) inst.end = doc.ts;
         }
         calls.push(inst);
       }
@@ -211,9 +233,9 @@ export function diagnose(main: string, scope: Scope, opts: DiagnoseOpts): Diagno
         }
       }
     }
-    // An out file with an error that no call names.
+    // An out file with an error that no call of the scope wrote.
     for (const d of src.docs) {
-      if (d.kind !== 'out' || d.task !== T.task || !hasError(d) || named.has(d.abs)) continue;
+      if (d.kind !== 'out' || d.task !== T.task || !hasError(d) || writtenInScope(d)) continue;
       const m = /^(prep|review-prep)-(\d+)\.json$/.exec(path.basename(d.abs));
       if (m) calls.push({ task: T.task, step: m[1] as 'prep' | 'review-prep', brief: Number(m[2]), start: d.ts, end: d.ts, ok: false, at: [d.file] });
       else extra.push({ kind: 'failed', task: T.task, text: `${d.file} holds an error`, at: [d.file], ts: d.ts });
@@ -222,7 +244,7 @@ export function diagnose(main: string, scope: Scope, opts: DiagnoseOpts): Diagno
   }
   // The same for the out files of a run that belong to no task.
   for (const d of src.docs) {
-    if (d.kind === 'out' && d.task === null && hasError(d) && !named.has(d.abs)) extra.push({ kind: 'failed', task: null, text: `${d.file} holds an error`, at: [d.file], ts: d.ts });
+    if (d.kind === 'out' && d.task === null && hasError(d) && !writtenInScope(d)) extra.push({ kind: 'failed', task: null, text: `${d.file} holds an error`, at: [d.file], ts: d.ts });
   }
 
   // 7. the steps of each task
@@ -261,13 +283,19 @@ export function diagnose(main: string, scope: Scope, opts: DiagnoseOpts): Diagno
   }
   const repeatFindings = repeats(refs, compactions);
 
-  // 9. other failures
+  // 9. other failures: a call of the scope that is no step of a task and failed, by its own result or by the out file it
+  // wrote (a swarm step or swarm integrate launched in the background, whose result only says it was launched).
   const failures: Finding[] = [];
   for (const sc of mainCalls) {
-    if (!sc.res?.error) continue;
     for (const h of sc.hits) {
+      if (okOfCall(sc, h.inv) !== false) continue;
       if (tasks.some(T => stepOfForge(h.inv, T.task) !== null)) continue;
-      failures.push({ kind: 'failed', task: h.t?.task ?? null, text: `${h.inv.name} failed`, at: [sc.at], ts: sc.call.ts });
+      const doc = wroteOf(h.inv);
+      const bad = doc && hasError(doc) ? doc : undefined;
+      failures.push({
+        kind: 'failed', task: h.t?.task ?? null, text: `${h.inv.name} failed`, at: [sc.at, ...(bad ? [bad.file] : [])],
+        ts: bad && !sc.res?.error ? bad.ts : sc.call.ts,
+      });
     }
   }
 
