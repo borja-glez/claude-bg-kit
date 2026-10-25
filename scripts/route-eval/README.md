@@ -18,12 +18,15 @@ El resumen dice en su columna `plugins` si los plugins del mensaje `init` cuadra
 
 ## Prompts
 
-`prompts.json` lleva 16, la mitad en español y la otra mitad en inglés, y cada uno dice lo que se espera (`expected`):
+`prompts.json` lleva 20, la mitad en español y la otra mitad en inglés, y cada uno dice lo que se espera (`expected`):
 - 4 Medium y 4 Large: `route`, `forge:route` primero;
 - 2 Small: `either`, cualquiera de las dos cosas está bien;
-- 2 Trivial, 2 preguntas sobre el código y 2 mensajes de otro agente (`<teammate-message …>`): `none`.
+- 2 Trivial, 2 preguntas sobre el código y 2 mensajes de otro agente (`<teammate-message …>`): `none`;
+- 4 que empujan en contra (`competing`), 2 Medium y 2 Large: `route`. Dos piden hacerlo «directamente, sin planes» (`direct`) y dos piden «usa superpowers:brainstorming» (`brainstorming`), la ruta mixta que el informe de superpowers y gentle-ai vio rota (§3.1).
 
 Los Small van aparte porque las reglas de forge piden cargar `forge:route` para todo lo que pase de una edición trivial (la regla de `SessionStart`, la pista de `UserPromptSubmit` y la descripción de la skill), y `forge:route` se aparta entonces con `stepAside: true`. Una sesión que cumple esas reglas carga `forge:route` en un Small, y una que no la carga tampoco se equivoca. La tabla los cuenta en su propia columna, «Small (either)», que no suma falsos positivos ni cuenta para `PASS`.
+
+Los `competing` también van aparte, en su columna «competing»: no suman a la tasa de `forge:route` ni cuentan para `PASS`, así que el objetivo del 90 % sigue midiendo lo mismo que en octubre. Lo que miden es si `forge:route` sigue saliendo primero cuando la petición o otra skill empujan a saltárselo.
 
 Los Medium nombran a propósito los ficheros que tocan: el triaje de la CLI de forge mide una petición por los ficheros que nombra, y el último test de `tests/route-eval.test.ts` comprueba que da Medium o Large justo a los que esperan `route`. Ese triaje solo corre cuando `forge:route` ya se cargó, así que nombrarlos no ayuda a la medida de la primera skill, pero sí cambia el estímulo respecto a la pasada de octubre.
 
@@ -45,12 +48,13 @@ Imprime una línea por sesión con su coste, la tabla y `PASS` o `FAIL`, y termi
 
 ## Coste
 
-Cada pasada llama al modelo y cuesta dinero: lánzala solo cuando quien paga esté de acuerdo. Una completa son 48 sesiones de 2 turnos (16 prompts por 3 configuraciones). La de octubre, de 20 sesiones, costó unos pocos dólares sin que se midiera: calcula entre 2,5 y 3 veces eso. Una sola configuración es un tercio. Desde esta versión cada sesión guarda su `total_cost_usd`, y la tabla suma lo que costó cada configuración: la estimación de la pasada siguiente sale de `results/`.
+Cada pasada llama al modelo y cuesta dinero: lánzala solo cuando quien paga esté de acuerdo. Una completa son 60 sesiones de 2 turnos (20 prompts por 3 configuraciones). La de octubre, de 20 sesiones, costó unos pocos dólares sin que se midiera: calcula entre 2,5 y 3 veces eso. Una sola configuración es un tercio. Desde esta versión cada sesión guarda su `total_cost_usd`, y la tabla suma lo que costó cada configuración: la estimación de la pasada siguiente sale de `results/`.
 
 ## Qué hacer con el resultado
 
 - Apunta la tabla y el resumen en `## Resultados`, con la fecha.
 - Si `no-hint` sale igual o mejor que `with-superpowers` (los mismos aciertos o más y los mismos falsos positivos o menos), propón a la persona poner `route.hint: off` por defecto o retirar la pista. Mientras no se decida, `route.hint` sigue en `on`. La columna de los Small no entra en esa comparación: la pista salta en `s-es` («cambia») y no en `s-en`, y en los dos casos la sesión hace bien.
+- La columna `competing` se apunta aparte. Si con `with-superpowers` `forge:route` no sale primero en al menos 3 de los 4, dilo en el resumen: la pista o la regla de `SessionStart` no bastan contra un texto que empuja en contra.
 
 ## Resultados
 

@@ -119,6 +119,7 @@ export function projectSettingsFor(withSuperpowers, installedKeys) {
 /** Per configuration: forge:route first in how many of the prompts that expect it (Medium and Large), the false
  *  negatives, the false positives among those that expect none (Trivial, questions and agent messages), the Small ones
  *  apart (`either`: forge's rules load forge:route for them and it steps aside, so loading it or not are both right; I1),
+ *  the competing ones apart (A7: their text pushes against forge:route; they count for neither the rate nor PASS),
  *  whether the init plugins agree with the configuration (`plugins`, M3: `contradicts` when a session lists superpowers
  *  where it is off, or lacks it where it is on; null when no session listed them or the configuration is not one of
  *  `configs`) and the cost. */
@@ -126,7 +127,8 @@ export function summarize(results, configs = CONFIGS) {
   return [...new Set(results.map(r => r.config))].map(config => {
     const mine = results.filter(r => r.config === config);
     const fired = r => r.firstSkill === 'forge:route';
-    const routable = mine.filter(r => r.expected === 'route');
+    const routable = mine.filter(r => r.expected === 'route' && !r.competing);
+    const competing = mine.filter(r => r.expected === 'route' && r.competing);
     const others = mine.filter(r => r.expected === 'none');
     const either = mine.filter(r => r.expected === 'either');
     const routed = routable.filter(fired).length;
@@ -138,6 +140,7 @@ export function summarize(results, configs = CONFIGS) {
       config, routed, routable: routable.length, rate: routable.length ? routed / routable.length : 0,
       falseNegatives: routable.length - routed, falsePositives: others.filter(fired).length, others: others.length,
       either: either.length, eitherRouted: either.filter(fired).length,
+      competing: competing.length, competingRouted: competing.filter(fired).length,
       plugins: want === undefined || !listed.length ? null : listed.some(r => hasSuperpowers(r) !== want) ? 'contradicts' : 'ok',
       cost: costs.length ? Math.round(costs.reduce((a, b) => a + b, 0) * 10000) / 10000 : null,
     };
@@ -150,14 +153,14 @@ export const passes = summary => summary.length > 0 && summary.every(s => s.rout
 
 export function table(results, summary) {
   const usd = (n, digits) => (n === null ? '—' : `$${n.toFixed(digits)}`);
-  const lines = ['| prompt | size | lang | expected | config | first skill | cost | error |', '|---|---|---|---|---|---|---|---|'];
+  const lines = ['| prompt | size | lang | expected | competing | config | first skill | cost | error |', '|---|---|---|---|---|---|---|---|---|'];
   for (const r of results) {
-    lines.push(`| ${r.id} | ${r.size} | ${r.lang} | ${r.expected} | ${r.config} | ${r.firstSkill ?? '—'} | ${usd(r.cost, 4)} | ${r.error ?? ''} |`);
+    lines.push(`| ${r.id} | ${r.size} | ${r.lang} | ${r.expected} | ${r.competing ?? ''} | ${r.config} | ${r.firstSkill ?? '—'} | ${usd(r.cost, 4)} | ${r.error ?? ''} |`);
   }
-  lines.push('', '| config | forge:route first | false negatives | false positives | Small (either) | plugins | cost |', '|---|---|---|---|---|---|---|');
+  lines.push('', '| config | forge:route first | false negatives | false positives | Small (either) | competing | plugins | cost |', '|---|---|---|---|---|---|---|---|');
   for (const s of summary) {
     lines.push(`| ${s.config} | ${s.routed}/${s.routable} (${Math.round(s.rate * 100)} %) | ${s.falseNegatives} | ${s.falsePositives}/${s.others} | `
-      + `${s.eitherRouted}/${s.either} | ${s.plugins ?? '—'} | ${usd(s.cost, 2)} |`);
+      + `${s.eitherRouted}/${s.either} | ${s.competingRouted}/${s.competing} | ${s.plugins ?? '—'} | ${usd(s.cost, 2)} |`);
   }
   return lines.join('\n');
 }

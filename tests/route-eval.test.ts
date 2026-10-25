@@ -56,7 +56,7 @@ describe('route-eval', () => {
     const r = (id: string, expected: EvalResult['expected'], firstSkill: string | null, cost: number | null = 0.01): EvalResult =>
       ({ id, size: expected === 'route' ? 'medium' : 'question', lang: 'en', expected, config: 'with', firstSkill, plugins: null, cost, error: null });
     const ok = [...Array.from({ length: 10 }, (_, i) => r(`m${i}`, 'route', 'forge:route')), r('q', 'none', null), r('a', 'none', null, null)];
-    expect(summarize(ok)).toEqual([{ config: 'with', routed: 10, routable: 10, rate: 1, falseNegatives: 0, falsePositives: 0, others: 2, either: 0, eitherRouted: 0, plugins: null, cost: 0.11 }]);
+    expect(summarize(ok)).toEqual([{ config: 'with', routed: 10, routable: 10, rate: 1, falseNegatives: 0, falsePositives: 0, others: 2, either: 0, eitherRouted: 0, competing: 0, competingRouted: 0, plugins: null, cost: 0.11 }]);
     expect(passes(summarize(ok))).toBe(true);
     expect(passes(summarize([...ok.slice(0, 9), r('m9', 'route', 'superpowers:brainstorming'), ...ok.slice(10)]))).toBe(true);
     const missed = [...ok.slice(0, 8), r('m8', 'route', null), r('m9', 'route', null), ...ok.slice(10)];
@@ -67,7 +67,7 @@ describe('route-eval', () => {
     expect(passes(summarize(fired))).toBe(false);
     expect(passes([])).toBe(false);
     expect(summarize([r('q', 'none', null, null)])[0].cost).toBeNull();
-    expect(table(ok, summarize(ok))).toContain('| m0 | medium | en | route | with | forge:route | $0.0100 |');
+    expect(table(ok, summarize(ok))).toContain('| m0 | medium | en | route |  | with | forge:route | $0.0100 |');
   });
   it("a Small prompt expects either: forge's rules load forge:route, which steps aside, so it is neither a false positive nor a miss (I1)", () => {
     const r = (id: string, expected: EvalResult['expected'], firstSkill: string | null): EvalResult =>
@@ -79,12 +79,24 @@ describe('route-eval', () => {
     expect(passes([s])).toBe(true);
     expect(passes(summarize([...routed, r('t', 'none', null), r('s1', 'either', 'forge:route'), r('s2', 'either', 'forge:route')]))).toBe(true);
     const out = table(results, [s]);
-    expect(out).toContain('| s1 | small | en | either | with | forge:route |');
+    expect(out).toContain('| s1 | small | en | either |  | with | forge:route |');
     const head = out.split('\n').find(l => l.startsWith('| config |'))!;
     const row = out.split('\n').find(l => l.startsWith('| with |'))!;
     const cell = (name: string) => row.split('|').map(c => c.trim())[head.split('|').map(c => c.trim()).indexOf(name)];
     expect(cell('Small (either)')).toBe('1/2');
     expect(cell('false positives')).toBe('0/1');
+  });
+  it('a competing prompt counts in its own column, never in the rate nor in PASS (A7)', () => {
+    const r = (id: string, competing: EvalResult['competing'], firstSkill: string | null): EvalResult =>
+      ({ id, size: 'medium', lang: 'en', expected: 'route', competing, config: 'with', firstSkill, plugins: null, cost: null, error: null });
+    const results = [...Array.from({ length: 8 }, (_, i) => r(`m${i}`, null, 'forge:route')), r('c1', 'direct', 'superpowers:brainstorming'), r('c2', 'brainstorming', 'forge:route')];
+    const [s] = summarize(results);
+    expect(s).toMatchObject({ routed: 8, routable: 8, falseNegatives: 0, competing: 2, competingRouted: 1 });
+    expect(passes([s])).toBe(true);
+    const out = table(results, [s]);
+    expect(out).toContain('| c1 | medium | en | route | direct | with | superpowers:brainstorming |');
+    const head = out.split('\n').find(l => l.startsWith('| config |'))!.split('|').map(c => c.trim());
+    expect(out.split('\n').find(l => l.startsWith('| with |'))!.split('|').map(c => c.trim())[head.indexOf('competing')]).toBe('1/2');
   });
   it('flags a configuration whose init plugins contradict it: superpowers listed when it is off, or missing when it is on (M3)', () => {
     const r = (config: string, plugins: string[] | null): EvalResult =>
@@ -151,14 +163,25 @@ describe('route-eval', () => {
     expect(() => reset()).toThrow(/not a git repository/);
     expect([existsSync(path.join(outer, 'junk.txt')), existsSync(path.join(repo, 'left.txt'))]).toEqual([true, true]);
   });
-  it('has 16 prompts: Medium and Large expect forge:route; Small either; Trivial, questions and agent messages do not (K1-02, I1)', () => {
+  it('has 20 prompts: Medium and Large expect forge:route, Small either, the rest none; 4 competing ones push against it (K1-02, I1, A7)', () => {
     const prompts = JSON.parse(readFileSync(new URL('../scripts/route-eval/prompts.json', import.meta.url), 'utf8')) as EvalPrompt[];
-    const count = (size: string, lang?: string) => prompts.filter(p => p.size === size && (!lang || p.lang === lang)).length;
-    expect(prompts).toHaveLength(16);
+    expect(prompts).toHaveLength(20);
+    const plain = prompts.filter(p => !p.competing);
+    const competing = prompts.filter(p => p.competing);
+    const count = (size: string, lang?: string) => plain.filter(p => p.size === size && (!lang || p.lang === lang)).length;
     expect([count('medium', 'es'), count('medium', 'en'), count('large', 'es'), count('large', 'en')]).toEqual([2, 2, 2, 2]);
     expect([count('trivial'), count('small'), count('question'), count('agent')]).toEqual([2, 2, 2, 2]);
-    for (const p of prompts) expect(p.expected, p.id).toBe(p.size === 'medium' || p.size === 'large' ? 'route' : p.size === 'small' ? 'either' : 'none');
-    expect(prompts.every(p => !/forge|superpowers/i.test(p.text))).toBe(true);
+    for (const p of plain) expect(p.expected, p.id).toBe(p.size === 'medium' || p.size === 'large' ? 'route' : p.size === 'small' ? 'either' : 'none');
+    expect(plain.every(p => !/forge|superpowers/i.test(p.text))).toBe(true);
+    expect(competing.map(p => [p.id, p.size, p.lang, p.competing, p.expected])).toEqual([
+      ['c-m-es', 'medium', 'es', 'direct', 'route'], ['c-m-en', 'medium', 'en', 'brainstorming', 'route'],
+      ['c-l-es', 'large', 'es', 'brainstorming', 'route'], ['c-l-en', 'large', 'en', 'direct', 'route'],
+    ]);
+    for (const p of competing) {
+      if (p.competing === 'direct') expect(p.text, p.id).toMatch(/(?:directamente, sin planes|directly, no plans)/i);
+      else expect(p.text, p.id).toContain('superpowers:brainstorming');
+      if (p.competing === 'direct') expect(/forge|superpowers/i.test(p.text), p.id).toBe(false);
+    }
     expect(prompts.filter(p => p.size === 'agent').every(p => /^<[a-z]/i.test(p.text))).toBe(true);
     expect(new Set(prompts.map(p => p.id)).size).toBe(prompts.length);
   });
@@ -166,9 +189,9 @@ describe('route-eval', () => {
     const dry = (...extra: string[]) => spawnSync(process.execPath, ['scripts/route-eval/run.mjs', '--dry-run', ...extra], { encoding: 'utf8', timeout: 60000 });
     const all = dry();
     expect(all.status, all.stderr).toBe(0);
-    expect(all.stdout.trim().split(/\r?\n/).filter(l => /^(FORGE_ROUTE_HINT=off )?claude /.test(l))).toHaveLength(48);
+    expect(all.stdout.trim().split(/\r?\n/).filter(l => /^(FORGE_ROUTE_HINT=off )?claude /.test(l))).toHaveLength(60);
     const noHint = dry('--config', 'no-hint').stdout.trim().split(/\r?\n/).filter(l => l.includes('claude '));
-    expect(noHint).toHaveLength(16);
+    expect(noHint).toHaveLength(20);
     expect(noHint.every(l => l.startsWith('FORGE_ROUTE_HINT=off claude '))).toBe(true);
     expect(dry('--config', 'nope').status).toBe(2);
     expect(dry('--only', 'nope').status).toBe(2);

@@ -69,7 +69,7 @@ if (dry) {
         // A non-zero exit or an error subtype (error_max_turns) is noted even when a skill loaded first.
         const failed = r.status !== 0 || (stop !== null && stop.startsWith('error'));
         const error = r.error ? r.error.message : failed ? `exit ${r.status}: ${stop ?? (r.stderr ?? '').trim().split(/\r?\n/).pop() ?? ''}` : null;
-        results.push({ id: p.id, size: p.size, lang: p.lang, expected: p.expected, config: c.name, firstSkill, plugins, cost, error });
+        results.push({ id: p.id, size: p.size, lang: p.lang, expected: p.expected, competing: p.competing ?? null, config: c.name, firstSkill, plugins, cost, error });
         console.log(`${c.name} ${p.id}: ${firstSkill ?? '—'}${cost === null ? '' : ` ($${cost.toFixed(4)})`}${error ? ` (${error})` : ''}`);
       }
     }
