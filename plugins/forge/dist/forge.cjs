@@ -35712,7 +35712,8 @@ function reviewPrep(args, deps) {
   const redo = round >= 2 && counted.filter((e) => e.kind === "verdict" && isTask(e, task)).at(-1)?.action === "redo";
   const lastRedo = counted.filter((e) => e.kind === "verdict" && isTask(e, task) && e.action === "redo").at(-1);
   const redoRound = Number(/reviews-\d+-(\d+)/.exec(String(lastRedo?.dir ?? ""))?.[1] ?? 0);
-  const forced = args.includes("--sensitive") || round >= 2 && !redo && hadSecurity(dir, n, redoRound + 1, round);
+  const sinks = diffSinks(zoneDiff);
+  const forced = args.includes("--sensitive") || sinks.length > 0 || round >= 2 && !redo && hadSecurity(dir, n, redoRound + 1, round);
   const review = withSecurity(triaged, diffZones(touched, zoneDiff), forced, config2.profile);
   const lastVerdict = counted.filter((e) => e.kind === "verdict" && isTask(e, task)).at(-1);
   const prevSent = readJson4(import_node_path69.default.join(dir, `findings-${n}-${round - 1}.json`));
