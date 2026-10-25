@@ -11,21 +11,36 @@ FROM node:<major>-alpine AS build
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@<version from packageManager> --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-# Monorepo: copy each workspace package.json by hand, and add a line for every new package.
+# Monorepo: copy each workspace package.json by hand, the app's too, and add a line for every new package.
+COPY apps/<app>/package.json apps/<app>/
 COPY packages/<name>/package.json packages/<name>/
 # one COPY per workspace package.json; a new package needs its own line
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build
+# Monorepo, instead: RUN pnpm --filter <app's package name> build
 
 FROM nginx:<version>-alpine
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY nginx/security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=build /app/dist /usr/share/nginx/html
+# Monorepo, instead: COPY --from=build /app/apps/<app>/dist /usr/share/nginx/html
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1
 ```
 
-A single-package site drops the workspace lines. In a monorepo, the Dockerfile still lives at the root of the repo, not in the app folder.
+A single-package site drops the workspace lines and the `# Monorepo` comments. A monorepo swaps in the two `# Monorepo, instead:` lines, because the site builds into `apps/<app>/dist`, not into a root `dist`, and a root `pnpm build` is not the app's build. Either way, the Dockerfile lives at the root of the repo, not in the app folder.
+
+`.dockerignore`, next to the Dockerfile:
+
+```text
+**/node_modules
+**/dist
+**/.astro
+.git
+.env*
+```
+
+Without it, `COPY . .` copies the host's `node_modules` over the ones `pnpm install --frozen-lockfile` just installed (on Windows, pnpm's links and win32 binaries such as esbuild's then break `pnpm build`), and it sends `.git` and `.env*` into the build context; the `**/` patterns also reach a monorepo's `apps/` and `packages/`.
 
 ## Dokploy
 
