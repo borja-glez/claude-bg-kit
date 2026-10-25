@@ -84,6 +84,13 @@ describe('brief', () => {
     expect(md.indexOf('## Threat model')).toBeLessThan(md.indexOf('TDD: required.'));
     expect(renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null })).not.toContain('Threat model');
   });
+  it('carries the review focus of the plan task to the implementer and the reviewers, before the plan line (A7)', () => {
+    const md = renderBrief(PLAN, { ...PLAN.tasks[1], review_focus: ['an order list of 10 000 rows', 'a GET while T001 migrates'] }, { planPath: 'p.yaml', designPath: null });
+    expect(md).toContain('Review focus (the failure modes no test covers: the implementer guards against each one, and the reviewers check each one):\n'
+      + '- an order list of 10 000 rows\n- a GET while T001 migrates\n');
+    expect(md.indexOf('Review focus')).toBeLessThan(md.indexOf('Plan: p.yaml'));
+    expect(renderBrief(PLAN, PLAN.tasks[1], { planPath: 'p.yaml', designPath: null })).not.toContain('Review focus');
+  });
 });
 
 describe('the previous attempt of a resumed task (D-02)', () => {

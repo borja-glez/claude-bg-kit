@@ -49,6 +49,7 @@ export function planLite(text: string): Plan | null {
     ...(typeof t.estimate_min === 'number' && t.estimate_min > 0 ? { estimate_min: t.estimate_min } : {}),
     ...(typeof t.delicate === 'boolean' ? { delicate: t.delicate } : {}),
     ...(isStr(t.design_ref) ? { design_ref: t.design_ref } : {}),
+    ...(strs(t.review_focus).length ? { review_focus: strs(t.review_focus).map(s => s.trim()) } : {}),
   }));
   if (!tracks.length || !phases.length || !tasks.length) return null;
   const a = isObj(raw.artifacts) ? raw.artifacts : {};

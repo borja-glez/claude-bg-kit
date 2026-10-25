@@ -68,6 +68,9 @@ export function renderBrief(plan: Plan, task: PlanTask, opts: { planPath: string
     ...(task.depends_on.length ? [`Depends on: ${task.depends_on.join(', ')}`] : []),
     ...(task.estimate_min ? [`Estimate: ${task.estimate_min} min`] : []),
     ...(task.delicate ? ['Delicate: yes'] : []),
+    ...(task.review_focus?.length
+      ? ['Review focus (the failure modes no test covers: the implementer guards against each one, and the reviewers check each one):', ...task.review_focus.map(f => `- ${f}`)]
+      : []),
     '',
     `Plan: ${opts.planPath}`,
     ...(opts.designPath ? [`Design: ${opts.designPath}`] : []),

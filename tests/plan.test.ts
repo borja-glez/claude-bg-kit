@@ -107,3 +107,23 @@ describe('plan schema: the links to the design (G-25, K3-08)', () => {
     expect(planHash(parsePlan(base.replace('version: "0.1"\n', 'version: "0.1"\ndesign_version: 7\n')))).not.toBe(planHash(parsePlan(base)));
   });
 });
+
+describe('plan schema: review_focus (A7)', () => {
+  const base = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8');
+  const withFocus = (yaml: string) => base.replace('    title: Esquema de pedidos\n', `    title: Esquema de pedidos\n${yaml}`);
+  it('reads one to six one-line failure modes', () => {
+    const p = parsePlan(withFocus('    review_focus:\n      - "a cart with a negative quantity"\n      - "two sessions placing the same order"\n'));
+    expect(p.tasks[0].review_focus).toEqual(['a cart with a negative quantity', 'two sessions placing the same order']);
+  });
+  it('refuses an empty list, an empty or multi-line entry, more than six or one over 300 characters, naming review_focus', () => {
+    for (const bad of ['    review_focus: []\n', '    review_focus: [""]\n', '    review_focus: ["a\nb"]\n',
+      `    review_focus: [${Array(7).fill('"x"').join(', ')}]\n`, `    review_focus: ["${'x'.repeat(301)}"]\n`]) {
+      expect(() => parsePlan(withFocus(bad)), bad).toThrow(PlanError);
+      expect(() => parsePlan(withFocus(bad)), bad).toThrow(/review_focus/);
+    }
+  });
+  it('a plan without it parses and hashes as before', () => {
+    expect(parsePlan(base).tasks[0]).not.toHaveProperty('review_focus');
+    expect(JSON.stringify(parsePlan(base))).not.toContain('review_focus');
+  });
+});

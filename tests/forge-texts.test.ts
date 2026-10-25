@@ -19,4 +19,9 @@ describe("forge's texts (A7)", () => {
     expect(read('plugins/forge/skills/member/SKILL.md')).toContain(shape);
     expect(read('plugins/forge/skills/decisions/SKILL.md')).toContain('`ifWrong`');
   });
+  it('forge-planner writes review_focus, which the brief carries to the reviewers (A7)', () => {
+    const md = read('plugins/forge/agents/forge-planner.md');
+    expect(md).toContain('design_ref?, review_focus?}]');
+    expect(md.split('\n').find(l => l.trimStart().startsWith('- `review_focus`'))).toMatch(/at most 6/);
+  });
 });
