@@ -10,6 +10,7 @@ Design them, plan them, build them with independent review, run them in parallel
 ![waypoint 0.35.1](https://img.shields.io/badge/waypoint-0.35.1-cba6f7?style=flat-square)
 ![forge 0.30.1](https://img.shields.io/badge/forge-0.30.1-fab387?style=flat-square)
 ![lens 0.13.11](https://img.shields.io/badge/lens-0.13.11-b4befe?style=flat-square)
+![web 0.1.0](https://img.shields.io/badge/web-0.1.0-94e2d5?style=flat-square)
 ![Claude Code plugin marketplace](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -31,13 +32,14 @@ Design them, plan them, build them with independent review, run them in parallel
 
 ## What's inside
 
-`bg-kit` is a Claude Code plugin marketplace with three plugins. Each one is useful on its own, and they work best together.
+`bg-kit` is a Claude Code plugin marketplace with these plugins. Each one is useful on its own, and they work best together.
 
 | | Plugin | What it gives you | Read more |
 | --- | --- | --- | --- |
 | 🧭 | **waypoint** | Design docs refined in critic rounds, a `plan.yaml` of tracks, phases and tasks, a **live roadmap** published as a claude.ai artifact, and parallel sessions coordinated across git worktrees. | [plugins/waypoint](plugins/waypoint/README.md) |
 | 🔨 | **forge** | An adaptive way of working: **triage by size**, the right model for each role, your own validators first, **independent weighted review**, an **execution** of parallel tasks (subagents or sessions) and an unattended **infinite mode**. | [plugins/forge](plugins/forge/README.md) |
 | 🔍 | **lens** | A **live progress panel** inside Claude Code: **model and effort in use**, roadmap, forge stages and executions, superpowers runs, todos, subagents, Claude Code tasks, and **token and dollar usage** compared with working without forge. | [plugins/lens](plugins/lens/README.md) |
+| 🌐 | **web** | Domain skills for web projects. **astro-dokploy-site** holds what every Astro site with Preact islands on Dokploy otherwise rediscovers: CSP hashes, Lighthouse and Playwright under Claude Code, Vite workers, MDX, nginx and the Dokploy fields. | [plugins/web](plugins/web/README.md) |
 
 ## Mix and match
 
@@ -80,6 +82,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install waypoint@bg-kit
 claude plugin install forge@bg-kit     # pulls in waypoint ^0.35.0 as a dependency
 claude plugin install lens@bg-kit
+claude plugin install web@bg-kit
 ```
 
 Inside a session, `/plugin marketplace add borja-glez/claude-bg-kit` does the same. To get new versions later, run `claude plugin marketplace update bg-kit`.
@@ -218,6 +221,7 @@ plugins/
   waypoint/   skills, design-critic agent, hooks, roadmap and design page templates, built CLI
   forge/      skills, implementer, reviewer, planner and scout agents, hooks, built CLI
   lens/       the panel mod (hooks/register.js) and its engine tests
+  web/        the astro-dokploy-site skill and its references (text only)
 src/          TypeScript sources: lib/ (shared), page/ (roadmap), mod/ (waypoint band), lens/, forge/
 tests/        vitest suites
 docs/

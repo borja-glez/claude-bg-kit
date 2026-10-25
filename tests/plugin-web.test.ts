@@ -34,6 +34,16 @@ describe('plugin web (w7 D2)', () => {
       expect(text.includes('\r'), rel).toBe(false);
     }
   });
+  it('READMEs: the plugin pair with its badge, install line, skill and the other language; the root READMEs list it', () => {
+    const v = manifest().version as string;
+    for (const [lang, other] of [['', 'README.es.md'], ['.es', 'README.md']] as const) {
+      const md = read(`plugins/web/README${lang}.md`);
+      expect(md).toMatch(new RegExp(`badge/versi(on|%C3%B3n)-${v.replace(/\./g, '\\.')}-`));
+      for (const s of ['claude plugin install web@bg-kit', 'astro-dokploy-site', `(${other})`, 'claude plugin disable web@bg-kit --scope local']) expect(md, s).toContain(s);
+      const root = read(`README${lang}.md`);
+      for (const s of [`badge/web-${v}-`, 'claude plugin install web@bg-kit', `(plugins/web/README${lang}.md)`, '  web/  ']) expect(root, s).toContain(s);
+    }
+  });
 });
 
 const SKILL_DIR = 'plugins/web/skills/astro-dokploy-site';
