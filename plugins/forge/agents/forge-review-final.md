@@ -22,7 +22,7 @@ What to judge:
 - regressions: behaviour that worked on the base and the branch breaks, including what the validators file shows failing.
 
 Write exactly one JSON object to the output path:
-{"verdict": "pass" | "fail" | "abstain", "confidence": 0..1, "approach": "ok" | "wrong", "findings": [{"severity": "critical" | "important" | "minor", "file": "path", "line": 12, "problem": "...", "fix": "..."}], "complete": true | false}
+{"verdict": "pass" | "fail" | "abstain", "confidence": 0..1, "approach": "ok" | "wrong", "findings": [{"severity": "critical" | "important" | "minor", "file": "path", "line": 12, "problem": "...", "fix": "..."}], "declined": [{"what": "...", "why": "..."}], "complete": true | false}
 
 - critical: wrong behaviour, data loss, security hole - always with file and line.
 - important: a missed requirement (a plan task or `done_when` condition not met, a contradiction with the design) or a bug a user will hit.
@@ -30,6 +30,7 @@ Write exactly one JSON object to the output path:
 - abstain only when you cannot judge at all. An abstaining reviewer's findings do not count.
 - approach: set "wrong" when the branch should be redone with another approach rather than patched; otherwise "ok" (or omit it).
 - No `origin` on the findings: the final review and its re-review always judge the whole branch.
+- **Declined to judge** (`declined`): every part of the run you considered and chose not to judge, each with why, one line each: it needs a service, a device or a platform you cannot run here, it is outside the design and the plan, or you ran out of turns for it. Write `[]` when you judged everything; your final write always has the list. forge hands each one to the user as deferred, so a part you leave out of it reads as judged. A problem you saw is a finding, never a declined part.
 - You must write the file even when you pass or abstain; the caller will not run the verdict without it.
 
 Verdict rule: "fail" if and only if you report at least one critical or important finding; otherwise "pass" (minor findings never make a fail). Judge "important" against the brief and its Done when: a requirement of the brief that is not met, or a bug a user of this change will hit. "abstain" only when you cannot judge the change at all.

@@ -187,20 +187,23 @@ export function isPerfTask(text: string): boolean {
 export type ReviewRole = 'review-correctness' | 'review-security' | 'review-perf';
 export type ReviewEffort = 'medium' | 'high' | 'xhigh';
 export interface ReviewPlan { light: boolean; reviewers: { role: ReviewRole; model: 'sonnet' | null; effort: ReviewEffort }[]; flags: ('--sensitive' | '--perf')[] }
-/** `delicate`: the task was marked delicate; `final`: Large's final review; `profile`: the configured one (quality lifts every reviewer). */
-export interface ReviewOptions { delicate?: boolean; final?: boolean; profile?: 'balanced' | 'economy' | 'quality' }
+/** `delicate`: the task was marked delicate; `final`: Large's final review; `profile`: the configured one (quality lifts every reviewer);
+ *  `sinks`: the real diff adds a strict sink (src/forge/sinks.ts). */
+export interface ReviewOptions { delicate?: boolean; final?: boolean; profile?: 'balanced' | 'economy' | 'quality'; sinks?: boolean }
 /**
  * Who reviews a task of this size: below Medium one light correctness review (sonnet, medium), else correctness plus
  * security and perf as they apply, each on the agent's own model with its effort by risk. The table is provisional
  * until the shadow test: correctness high (xhigh when sensitive, delicate or Large's final review), security high
  * (xhigh on auth), perf medium; the quality profile puts them all on xhigh.
+ * A strict sink of the real diff (opts.sinks) adds security as a sensitive zone does.
  */
 export function reviewFor(path: PathName, sensitive: Zone[], perf: boolean, opts: ReviewOptions = {}): ReviewPlan {
   // Below Medium: the light correctness review, plus review-perf when performance was asked for.
   if (path === 'trivial' || path === 'small') return { light: true,
     reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }, ...(perf ? [{ role: 'review-perf' as const, model: null, effort: 'medium' as const }] : [])],
     flags: perf ? ['--perf'] : [] };
-  const roles: ReviewRole[] = ['review-correctness', ...(sensitive.length ? ['review-security' as const] : []), ...(perf ? ['review-perf' as const] : [])];
+  const risky = sensitive.length > 0 || opts.sinks === true;
+  const roles: ReviewRole[] = ['review-correctness', ...(risky ? ['review-security' as const] : []), ...(perf ? ['review-perf' as const] : [])];
   const effort = (role: ReviewRole): ReviewEffort => {
     if (opts.profile === 'quality') return 'xhigh';
     if (role === 'review-perf') return 'medium';
@@ -208,7 +211,7 @@ export function reviewFor(path: PathName, sensitive: Zone[], perf: boolean, opts
     return sensitive.length || opts.delicate || (opts.final && path === 'large') ? 'xhigh' : 'high';
   };
   return { light: false, reviewers: roles.map(role => ({ role, model: null, effort: effort(role) })),
-    flags: [...(sensitive.length ? ['--sensitive' as const] : []), ...(perf ? ['--perf' as const] : [])] };
+    flags: [...(risky ? ['--sensitive' as const] : []), ...(perf ? ['--perf' as const] : [])] };
 }
 
 export type AnnounceLocale = 'es' | 'en';
@@ -230,6 +233,7 @@ const REASONS_ES: [RegExp, string][] = [
   [/^ratchet: kept (\w+) from an earlier triage of this task$/, 'se mantiene $1 de un triage anterior de esta tarea'],
   [/^diff: (\d+) file\(s\), (\d+) line\(s\)$/, 'diff: $1 fichero(s), $2 línea(s)'],
   [/^diff touches a sensitive zone: (.+)$/, 'el diff toca una zona sensible: $1'],
+  [/^diff adds a strict sink: (.+)$/, 'el diff añade un sink estricto: $1'],
 ];
 const reasonEs = (r: string) => {
   const hit = REASONS_ES.find(([re]) => re.test(r));

@@ -13344,7 +13344,7 @@ var DECISION_POINTS = [
   "vision",
   "other"
 ];
-var LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300, whyNot: 300, tradeoffs: 300 };
+var LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300, whyNot: 300, tradeoffs: 300, ifWrong: 200 };
 var DECISIONS_MAX = 16 * 1024;
 var DECISIONS_WINDOW_MS = 24 * 36e5;
 var FUTURE_SKEW_MS = 5 * 6e4;
@@ -13411,7 +13411,9 @@ function planSchemas() {
     estimate_min: number2().positive().optional(),
     delicate: boolean2().optional(),
     // G-25, K3-08: the section of the design the task comes from (a heading's slug, or _intro).
-    design_ref: string2().regex(/^[a-z0-9-]{1,80}$|^_intro$/, "design_ref must be a section slug of the design").optional()
+    design_ref: string2().regex(/^[a-z0-9-]{1,80}$|^_intro$/, "design_ref must be a section slug of the design").optional(),
+    // A7: the failure modes no test covers, one line each, which the brief hands to the implementer and the reviewers.
+    review_focus: array(string2().trim().min(1).max(300).regex(/^[^\r\n]*$/, "one line each")).min(1).max(6).optional()
   });
   const PlanSchema = object({
     project: id,

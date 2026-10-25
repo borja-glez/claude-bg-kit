@@ -19,7 +19,7 @@ const REVIEWERS: readonly ReviewerName[] = ['correctness', 'security', 'perf', '
 const STATUSES: readonly IndexStatus[] = ['open', 'closed', 'residual', 'minor'];
 const SEVERITIES: readonly Finding['severity'][] = ['critical', 'important', 'minor'];
 const ORIGINS: readonly Origin[] = ['previous', 'fix', 'untouched'];
-const RESIDUALS: readonly Residual[] = ['untouched', 'hardening', 'late-round', 'cap', 'docs', 'out-of-model', 'architecture', 'env-unverified'];
+const RESIDUALS: readonly Residual[] = ['untouched', 'hardening', 'late-round', 'cap', 'docs', 'out-of-model', 'architecture', 'env-unverified', 'declined'];
 /** The residuals that go to the implementer with the blocking findings, and so to the next delta reviewer. */
 const SENT: readonly Residual[] = ['untouched', 'docs', 'late-round'];
 

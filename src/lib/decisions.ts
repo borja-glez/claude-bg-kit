@@ -12,11 +12,15 @@ export type DecisionPoint = (typeof DECISION_POINTS)[number];
 export const DECISION_BY = ['auto', 'unattended', 'user'] as const;
 export type DecisionBy = (typeof DECISION_BY)[number];
 export type DecisionWeight = 'major' | 'minor';
+export const IF_WRONG_COSTS = ['low', 'medium', 'high'] as const;
+export type IfWrongCost = (typeof IF_WRONG_COSTS)[number];
+/** A7: what an automatic decision costs if it turns out wrong, and one line on what goes wrong. */
+export interface IfWrong { cost: IfWrongCost; note: string }
 /** Points that change the scope of the work or skip a person's gate: lens and the band name the last one. L-12: an
  *  autonomous approval (`approve`) adds work no person approved; a person's idea parked or decided (`idea`) stays minor.
  *  6b-3: a re-plan (`replan`) and a vision change (`vision`) change what the product is and in what order it is built. */
 export const MAJOR_POINTS: readonly DecisionPoint[] = ['route', 'design-approve', 'plan-confirm', 'mode', 'approve', 'replan', 'vision'];
-export const LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300, whyNot: 300, tradeoffs: 300 } as const;
+export const LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300, whyNot: 300, tradeoffs: 300, ifWrong: 200 } as const;
 /** lens and the band read no decisions.json above this, and show none older than the window. */
 export const DECISIONS_MAX = 16 * 1024;
 export const DECISIONS_WINDOW_MS = 24 * 3600_000;
@@ -48,6 +52,7 @@ export interface Decision {
   ts: string; point: DecisionPoint; what: string; chosen: string; alternatives: Alternative[]; tradeoffs: string | null; why: string;
   by: DecisionBy; weight: DecisionWeight; revert: string | null; undo: DecisionUndo | null;
   task: string | null; runId: string | null; safePath: string | null; revertOf: number | null;
+  ifWrong?: IfWrong;
 }
 
 type Obj = Record<string, unknown>;
@@ -71,6 +76,14 @@ const text = (x: unknown, max: number): string | null => (str(x) ? clean(x, max)
 const ident = (x: unknown, re: RegExp): string | null => (str(x) && re.test(x) && notDots(x) ? x : null);
 
 export const weightOf = (point: DecisionPoint): DecisionWeight => (MAJOR_POINTS.includes(point) ? 'major' : 'minor');
+
+/** From untrusted JSON: null unless cost is one of IF_WRONG_COSTS and note cleans to a non-empty line (clipped to LIMITS.ifWrong). */
+export function normalizeIfWrong(x: unknown): IfWrong | null {
+  if (!isObj(x)) return null;
+  const cost = oneOf(IF_WRONG_COSTS, x.cost);
+  const note = text(x.note, LIMITS.ifWrong);
+  return cost && note ? { cost, note } : null;
+}
 
 /** An alternative from untrusted JSON, plain text or an object: null when it has no usable option. Shared by the ledger reader and the note normalizer. */
 export function normalizeAlternative(x: unknown): Alternative | null {
@@ -138,6 +151,7 @@ export function normalizeDecision(x: unknown): Decision | null {
   const alternatives = Array.isArray(x.alternatives)
     ? x.alternatives.map(normalizeAlternative).filter((a): a is Alternative => a !== null).slice(0, LIMITS.alternatives)
     : [];
+  const ifWrong = normalizeIfWrong(x.ifWrong);
   return {
     ts, point, what,
     chosen: text(x.chosen, LIMITS.chosen) ?? safePath ?? what,
@@ -153,6 +167,7 @@ export function normalizeDecision(x: unknown): Decision | null {
     runId: ident(x.runId, RUN_ID),
     safePath,
     revertOf: typeof x.revertOf === 'number' && Number.isInteger(x.revertOf) && x.revertOf > 0 ? x.revertOf : null,
+    ...(ifWrong ? { ifWrong } : {}),
   };
 }
 

@@ -11,6 +11,7 @@ import {
   triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor,
   PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult,
 } from '../triage.js';
+import { diffSinks, sinkReason, type Sink } from '../sinks.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { taskText, tddLine } from '../brief.js';
 import { loadConfig, agentFor } from '../config.js';
@@ -364,6 +365,8 @@ export interface TriageCore {
   auto: { autonomy?: 'auto' }; review: Record<string, unknown>; output: Record<string, unknown>;
   /** The language of the announcement: --locale, else the plan's. */
   locale: AnnounceLocale;
+  /** A7: the strict sinks the real diff adds (--base); empty without it. */
+  sinks: Sink[];
 }
 
 /**
@@ -444,6 +447,7 @@ export function triageCore(io: Io, args: string[]): TriageCore {
   // The real diff alone sizes an implemented task: the text's estimate sets no floor, only a sensitive zone
   // (its text, its plan zones or its diff) keeps it at Medium.
   let diff: TriageCore['diff'] = null;
+  let sinks: Sink[] = [];
   if (base !== null) {
     const out = git(['-c', 'core.quotePath=false', 'diff', '--numstat', '--no-renames', `${base}..HEAD`]);
     if (out === null) throw new UsageError(`triage: cannot diff ${base}..HEAD`);
@@ -455,6 +459,13 @@ export function triageCore(io: Io, args: string[]): TriageCore {
     if (result.sensitive.length && PATH_ORDER.indexOf(result.path) < PATH_ORDER.indexOf('medium')) {
       result.path = 'medium';
       result.reasons.push(`sensitive zone: ${result.sensitive.join(', ')}`);
+    }
+    // A7: a strict sink on an added line (src/forge/sinks.ts) lifts the task to Medium and adds the security review.
+    const patch = git(['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-renames', '-U0', `${base}..HEAD`]);
+    sinks = patch === null ? [] : diffSinks(patch);
+    if (sinks.length) {
+      result.reasons.push(sinkReason(sinks));
+      if (PATH_ORDER.indexOf(result.path) < PATH_ORDER.indexOf('medium')) result.path = 'medium';
     }
     diff = { base, stat, path: d.path };
   }
@@ -488,7 +499,7 @@ export function triageCore(io: Io, args: string[]): TriageCore {
   const known = readLocal(io.cwd).known;
   const fresh = names.filter(n => !known.includes(n));
   // Who reviews, by the size reached and the configured profile: printed always and logged for review-prep.
-  const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(wordText), { delicate, profile });
+  const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(wordText), { delicate, profile, sinks: sinks.length > 0 });
   const review = { ...reviewPlan, reviewers: reviewPlan.reviewers.map(r => ({ ...r, agent: agentFor(r.role, profile) })) };
   // Output only, like `implementer`: the exact line the session prints, and whether a short plan comes first.
   // The locale: the flag, else the plan passed with --plan, else the plan under docs/waypoint, else English.
@@ -507,8 +518,8 @@ export function triageCore(io: Io, args: string[]): TriageCore {
   }
   return {
     task: flag('task'), project, result, names, fresh, diff, auto, review,
-    output: { ...result, catalog, new: fresh, implementer, announce: line, gate, ...auto, ...reviewed, review },
-    locale: locale as AnnounceLocale,
+    output: { ...result, catalog, new: fresh, implementer, announce: line, gate, ...auto, ...reviewed, ...(sinks.length ? { sinks } : {}), review },
+    locale: locale as AnnounceLocale, sinks,
   };
 }
 

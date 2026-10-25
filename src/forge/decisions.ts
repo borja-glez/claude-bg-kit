@@ -10,7 +10,7 @@ import { sha256Hex } from '../lib/sha256.js';
 import type { Write } from '../lib/sync.js';
 import { attribute, baseOf, projectOf } from './task-ref.js';
 import {
-  BRANCH, DECISION_BY, DECISION_POINTS, LIMITS, PROJECT_ID, RUN_ID, SHA, TASK_ID, UNDO_SHAS_MAX, clean, decisionScope, nextDecisionsDoc,
+  BRANCH, DECISION_BY, DECISION_POINTS, IF_WRONG_COSTS, LIMITS, PROJECT_ID, RUN_ID, SHA, TASK_ID, UNDO_SHAS_MAX, clean, decisionScope, nextDecisionsDoc,
   normalizeDecision, normalizeDecisionsDoc, weightOf, type Decision, type DecisionsDoc,
 } from '../lib/decisions.js';
 
@@ -44,6 +44,7 @@ const Input = z.object({
   why: line(LIMITS.why),
   by: z.enum(DECISION_BY),
   weight: z.enum(['major', 'minor']).optional(),
+  ifWrong: z.object({ cost: z.enum(IF_WRONG_COSTS), note: line(LIMITS.ifWrong) }).strict().optional(),
   revert: line(LIMITS.revert).optional(),
   undo: Undo.optional(),
   safePath: line(LIMITS.safePath).optional(),
@@ -177,10 +178,12 @@ const MD = {
   es: {
     title: 'Decisiones automáticas', intro: 'forge tomó estas decisiones sin preguntar. Para deshacer una: `/forge:decisions revert <n>`.',
     chosen: 'Elegido', alternatives: 'Alternativas', whyNot: 'Por qué no', tradeoffs: 'Qué se gana y qué se pierde', why: 'Por qué', revert: 'Cómo revertir', when: 'Cuándo', noRevert: 'no se puede revertir de forma automática',
+    ifWrong: 'Coste si es erróneo', costs: { low: 'bajo', medium: 'medio', high: 'alto' },
   },
   en: {
     title: 'Automatic decisions', intro: 'forge took these decisions without asking. To undo one: `/forge:decisions revert <n>`.',
     chosen: 'Chosen', alternatives: 'Alternatives', whyNot: 'Why not', tradeoffs: 'Trade-offs', why: 'Why', revert: 'How to undo', when: 'When', noRevert: 'cannot be undone automatically',
+    ifWrong: 'Cost if wrong', costs: { low: 'low', medium: 'medium', high: 'high' },
   },
 } as const;
 
@@ -198,7 +201,9 @@ export function renderDecisionsMd(list: Numbered[], scope: string, locale: strin
       }
     } else if (d.alternatives.length) out.push(`- **${t.alternatives}:** ${d.alternatives.map(a => a.option).join(', ')}`);
     const howTo = d.revert ?? (d.undo?.type === 'none' ? `${t.noRevert}: ${d.undo.reason}` : t.noRevert);
-    out.push(`- **${t.why}:** ${d.why || '—'}`, `- **${t.revert}:** ${howTo}`, `- **${t.when}:** ${d.ts} · ${d.by} · ${d.weight}`, '');
+    out.push(`- **${t.why}:** ${d.why || '—'}`);
+    if (d.ifWrong) out.push(`- **${t.ifWrong}:** ${t.costs[d.ifWrong.cost]} · ${d.ifWrong.note}`);
+    out.push(`- **${t.revert}:** ${howTo}`, `- **${t.when}:** ${d.ts} · ${d.by} · ${d.weight}`, '');
   }
   return out.join('\n');
 }

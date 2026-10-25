@@ -35,6 +35,7 @@ tasks:
     estimate_min: 30
     delicate: true
     design_ref: alcance
+    review_focus: ["dos pedidos a la vez"]
   - { id: T2, title: Dos, track: core, phase: p2, done_when: hecho, depends_on: [T1] }
 retired: [T0]
 history:

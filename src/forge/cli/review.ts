@@ -10,6 +10,7 @@ import {
   type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult,
 } from '../validators.js';
 import { PATH_ORDER, diffZones, type PathName, type ReviewRole, type Zone } from '../triage.js';
+import { diffSinks } from '../sinks.js';
 import {
   parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative,
   type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding,
@@ -210,7 +211,8 @@ function writeThreatModel(dir: string, config: ForgeConfig): string | null {
  * It prints reviews {n, max}, the review of the brief as the person counts it (C-13), which its say begins with.
  * An express review (measure 7) does not validate: it prints validators {pending, cmd}, the validation to run in the
  * background, one correctness reviewer on Sonnet and delegated.
- * --sensitive (K4-06): security reviews whatever the diff touches; without it, only when the diff touches a sensitive zone.
+ * --sensitive (K4-06): security reviews whatever the diff touches; without it, only when the diff touches a sensitive zone
+ * or adds a strict sink (A7), which brings the verdict flag --sensitive with it.
  * --report (K2-17): a review that fixes nothing; red validators never hold the reviewers back.
  */
 export function reviewPrep(args: string[], deps: ReviewDeps): Result {
@@ -320,12 +322,14 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   // After a redo the work was started again: every reviewer reviews it in full, nothing is carried.
   const redo = round >= 2 && counted.filter(e => e.kind === 'verdict' && isTask(e, task)).at(-1)?.action === 'redo';
   // K4-06: security follows the zones the real diff touches (its paths and the zone words of its added and removed lines),
-  // whatever the task's words were. It is forced by --sensitive (the person's word) and, from round 2 and not after a redo,
-  // by an earlier round of this brief having had it: a fix that rewrites the zone word away does not silence a reviewer.
+  // whatever the task's words were. It is forced by --sensitive (the person's word), by a strict sink the diff adds (A7,
+  // src/forge/sinks.ts: the one triage --base sent to security, also outside every zone) and, from round 2 and not after a
+  // redo, by an earlier round of this brief having had it: a fix that rewrites the zone word away does not silence a reviewer.
   // The reverted attempt's rounds (up to the last redo verdict) do not count.
   const lastRedo = counted.filter(e => e.kind === 'verdict' && isTask(e, task) && e.action === 'redo').at(-1);
   const redoRound = Number(/reviews-\d+-(\d+)/.exec(String(lastRedo?.dir ?? ''))?.[1] ?? 0);
-  const forced = args.includes('--sensitive') || (round >= 2 && !redo && hadSecurity(dir, n, redoRound + 1, round));
+  const sinks = diffSinks(zoneDiff);
+  const forced = args.includes('--sensitive') || sinks.length > 0 || (round >= 2 && !redo && hadSecurity(dir, n, redoRound + 1, round));
   const review = withSecurity(triaged, diffZones(touched, zoneDiff), forced, config.profile);
 
   // Measure 7 (§4.9): an express review when the previous review asked for a fix with green validators and left one or

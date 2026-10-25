@@ -29,6 +29,8 @@ function planSchemas() {
     delicate: z.boolean().optional(),
     // G-25, K3-08: the section of the design the task comes from (a heading's slug, or _intro).
     design_ref: z.string().regex(/^[a-z0-9-]{1,80}$|^_intro$/, 'design_ref must be a section slug of the design').optional(),
+    // A7: the failure modes no test covers, one line each, which the brief hands to the implementer and the reviewers.
+    review_focus: z.array(z.string().trim().min(1).max(300).regex(/^[^\r\n]*$/, 'one line each')).min(1).max(6).optional(),
   });
 
   const PlanSchema = z.object({

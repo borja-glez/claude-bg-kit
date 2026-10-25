@@ -585,3 +585,37 @@ describe('what blocks in each review (C-04, C-06, J-05, J-06, K4-02, K4-09)', ()
     expect(sig(['a.test.ts > adds'])).not.toBe(sig(['b.test.ts > subtracts']));
   });
 });
+
+describe('declined to judge (A7)', () => {
+  const final = (o: Record<string, unknown>) => JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [], complete: true, ...o });
+  const imp = { severity: 'important' as const, file: 'a.ts', line: 1, problem: 'p' };
+  it('parseReview reads the declined list leniently and never invalidates the review for it', () => {
+    expect(parseReview(final({ declined: [{ what: 'the Windows installer', why: 'needs Windows' }, 'the e2e on Safari', { why: 'no what' }, 7] })).declined)
+      .toEqual([{ what: 'the Windows installer', why: 'needs Windows' }, { what: 'the e2e on Safari', why: '' }]);
+    for (const odd of ['none', 3, null, {}, []]) {
+      const r = parseReview(final({ declined: odd }));
+      expect(r.invalid, JSON.stringify(odd)).toBeUndefined();
+      expect(r, JSON.stringify(odd)).not.toHaveProperty('declined');
+    }
+    const many = parseReview(final({ declined: Array.from({ length: 30 }, (_, i) => ({ what: `part ${i}\nsecond line\u0007`, why: 'w'.repeat(400) })) }));
+    expect(many.declined).toHaveLength(20);
+    expect(many.declined![0]).toEqual({ what: 'part 0 second line', why: 'w'.repeat(300) });
+    expect(parseReview(final({}))).not.toHaveProperty('declined');
+  });
+  it('each declined part goes to deferred as a minor with residual declined, on an accept and on a fix, never to the implementer nor the signature', () => {
+    const declined = [{ what: 'the Windows installer', why: 'needs Windows' }, { what: 'the Safari e2e', why: '' }];
+    const ok = synthesize({ correctness: { ...pass(0.9), declined } }, W, true);
+    expect(ok.action).toBe('accept');
+    expect(ok.deferred).toEqual([
+      { severity: 'minor', problem: 'declined to judge: the Windows installer (needs Windows)', reviewer: 'correctness', residual: 'declined' },
+      { severity: 'minor', problem: 'declined to judge: the Safari e2e', reviewer: 'correctness', residual: 'declined' },
+    ]);
+    expect(ok.reasons).toContain('2 part(s) declined to judge, listed in deferred');
+    const bad = synthesize({ correctness: { ...fail(0.9, [imp]), declined } }, W, true);
+    expect(bad.action).toBe('fix');
+    expect(bad.important.map(f => f.problem)).toEqual(['p']);
+    expect(bad.deferred.map(f => f.residual)).toEqual(['declined', 'declined']);
+    expect(bad.signature).toBe(synthesize({ correctness: fail(0.9, [imp]) }, W, true).signature);
+    expect(synthesize({ correctness: { verdict: 'abstain', confidence: 0, findings: [], declined } }, W, true).deferred).toEqual([]);
+  });
+});

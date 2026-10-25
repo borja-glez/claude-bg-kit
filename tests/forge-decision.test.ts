@@ -117,6 +117,25 @@ describe('forge decision CLI', () => {
     expect(run(['decision', 'show', '2'], io).code).toBe(2);
     expect(run(['decision', 'show', 'x'], io).code).toBe(2);
   });
+  it('add records the cost if wrong; a cost outside low, medium and high, or one without a note, is exit 2 and writes nothing (A7)', () => {
+    const ifWrong = { cost: 'high', note: 'a wrong design costs the whole run' };
+    const quiet: Io = { ...io, env: {} };
+    const r = run(['decision', 'add', '--data-file', write('d.json', { ...INPUT, ifWrong }), '--task', 'reparto'], quiet);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ n: 1, ifWrong });
+    expect(JSON.parse(run(['decision', 'show', '1'], quiet).stdout).ifWrong).toEqual(ifWrong);
+    for (const bad of [{ cost: 'huge', note: 'x' }, { cost: 'low' }, { cost: 'low', note: 'x', extra: 1 }]) {
+      const b = run(['decision', 'add', '--data-file', write('b.json', { ...INPUT, what: 'other', ifWrong: bad })], quiet);
+      expect(b.code, JSON.stringify(bad)).toBe(2);
+      expect(b.stderr).toContain('ifWrong');
+    }
+    expect(readEvents(root)).toHaveLength(1);
+    const [d] = allDecisions(root);
+    expect(renderDecisionsMd([d], 'reparto', 'es')).toContain('- **Coste si es erróneo:** alto · a wrong design costs the whole run');
+    expect(renderDecisionsMd([d], 'reparto', 'en')).toContain('- **Cost if wrong:** high · a wrong design costs the whole run');
+    const { ifWrong: _gone, ...without } = d;
+    expect(renderDecisionsMd([without], 'reparto', 'es')).not.toContain('Coste si es erróneo');
+  });
   it('add takes the run of the active execution', () => {
     seedExecution(root, {
       runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,

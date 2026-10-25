@@ -24,6 +24,8 @@ export interface PlanTask {
    *  code reads): forge gives it impl-high and correctness at xhigh. */
   delicate?: boolean;
   design_ref?: string;
+  /** A7: the failure modes no test covers, one line each, which the brief hands to the implementer and the reviewers. */
+  review_focus?: string[];
 }
 export interface PlanPhase { id: string; name: string; plan_status: PlanStatus; goal?: string }
 export interface PlanTrack { id: string; name: string; color: TrackColor }

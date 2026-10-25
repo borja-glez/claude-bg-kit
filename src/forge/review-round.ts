@@ -133,8 +133,8 @@ export function reviewRound(input: RoundInput): RoundPlan {
 
 /**
  * K4-06: who reviews, with security decided by the real diff: it reviews when the diff touches a sensitive zone (high;
- * xhigh on auth or with the quality profile) or when it is `forced` (the person said the task is sensitive, or an earlier
- * round of the brief had security), and not otherwise, whatever the task's words were. The verdict flag --sensitive goes
+ * xhigh on auth or with the quality profile) or when it is `forced` (the person said the task is sensitive, the diff adds a
+ * strict sink, or an earlier round of the brief had security), and not otherwise, whatever the task's words were. The verdict flag --sensitive goes
  * with it. A light review gets it by the same rules (SEC-LIGHT); a triaged security keeps the higher of its effort and the
  * diff's. No other reviewer, nor its effort, changes.
  */

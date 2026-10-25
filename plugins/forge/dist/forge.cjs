@@ -97,7 +97,7 @@ var require_visit = __commonJS({
     "use strict";
     var identity = require_identity();
     var BREAK = /* @__PURE__ */ Symbol("break visit");
-    var SKIP = /* @__PURE__ */ Symbol("skip children");
+    var SKIP2 = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove node");
     function visit2(node2, visitor) {
       const visitor_ = initVisitor(visitor);
@@ -109,7 +109,7 @@ var require_visit = __commonJS({
         visit_(null, node2, visitor_, Object.freeze([]));
     }
     visit2.BREAK = BREAK;
-    visit2.SKIP = SKIP;
+    visit2.SKIP = SKIP2;
     visit2.REMOVE = REMOVE;
     function visit_(key, node2, visitor, path94) {
       const ctrl = callVisitor(key, node2, visitor, path94);
@@ -157,7 +157,7 @@ var require_visit = __commonJS({
         await visitAsync_(null, node2, visitor_, Object.freeze([]));
     }
     visitAsync.BREAK = BREAK;
-    visitAsync.SKIP = SKIP;
+    visitAsync.SKIP = SKIP2;
     visitAsync.REMOVE = REMOVE;
     async function visitAsync_(key, node2, visitor, path94) {
       const ctrl = await callVisitor(key, node2, visitor, path94);
@@ -5562,7 +5562,7 @@ var require_cst_visit = __commonJS({
   "node_modules/yaml/dist/parse/cst-visit.js"(exports2) {
     "use strict";
     var BREAK = /* @__PURE__ */ Symbol("break visit");
-    var SKIP = /* @__PURE__ */ Symbol("skip children");
+    var SKIP2 = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove item");
     function visit2(cst, visitor) {
       if ("type" in cst && cst.type === "document")
@@ -5570,7 +5570,7 @@ var require_cst_visit = __commonJS({
       _visit(Object.freeze([]), cst, visitor);
     }
     visit2.BREAK = BREAK;
-    visit2.SKIP = SKIP;
+    visit2.SKIP = SKIP2;
     visit2.REMOVE = REMOVE;
     visit2.itemAtPath = (cst, path94) => {
       let item = cst;
@@ -13447,8 +13447,9 @@ var DECISION_POINTS = [
   "other"
 ];
 var DECISION_BY = ["auto", "unattended", "user"];
+var IF_WRONG_COSTS = ["low", "medium", "high"];
 var MAJOR_POINTS = ["route", "design-approve", "plan-confirm", "mode", "approve", "replan", "vision"];
-var LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300, whyNot: 300, tradeoffs: 300 };
+var LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300, whyNot: 300, tradeoffs: 300, ifWrong: 200 };
 var DECISIONS_MAX = 16 * 1024;
 var DECISIONS_WINDOW_MS = 24 * 36e5;
 var LAST_MAX = 5;
@@ -13473,6 +13474,12 @@ var clean = (s2, max) => {
 var text = (x, max) => str(x) ? clean(x, max) || null : null;
 var ident = (x, re) => str(x) && re.test(x) && notDots(x) ? x : null;
 var weightOf = (point) => MAJOR_POINTS.includes(point) ? "major" : "minor";
+function normalizeIfWrong(x) {
+  if (!isObj(x)) return null;
+  const cost = oneOf(IF_WRONG_COSTS, x.cost);
+  const note = text(x.note, LIMITS.ifWrong);
+  return cost && note ? { cost, note } : null;
+}
 function normalizeAlternative(x) {
   if (str(x)) {
     const option2 = clean(x, LIMITS.alternative);
@@ -13525,6 +13532,7 @@ function normalizeDecision(x) {
   const safePath = text(x.safePath, LIMITS.safePath);
   const point = oneOf(DECISION_POINTS, x.point) ?? (safePath ? "safe-path" : what === "takeover" ? "takeover" : "other");
   const alternatives = Array.isArray(x.alternatives) ? x.alternatives.map(normalizeAlternative).filter((a) => a !== null).slice(0, LIMITS.alternatives) : [];
+  const ifWrong = normalizeIfWrong(x.ifWrong);
   return {
     ts,
     point,
@@ -13541,7 +13549,8 @@ function normalizeDecision(x) {
     task: ident(x.task, TASK_ID),
     runId: ident(x.runId, RUN_ID),
     safePath,
-    revertOf: typeof x.revertOf === "number" && Number.isInteger(x.revertOf) && x.revertOf > 0 ? x.revertOf : null
+    revertOf: typeof x.revertOf === "number" && Number.isInteger(x.revertOf) && x.revertOf > 0 ? x.revertOf : null,
+    ...ifWrong ? { ifWrong } : {}
   };
 }
 function decisionScope(d) {
@@ -13632,7 +13641,9 @@ function planSchemas() {
     estimate_min: number2().positive().optional(),
     delicate: boolean2().optional(),
     // G-25, K3-08: the section of the design the task comes from (a heading's slug, or _intro).
-    design_ref: string2().regex(/^[a-z0-9-]{1,80}$|^_intro$/, "design_ref must be a section slug of the design").optional()
+    design_ref: string2().regex(/^[a-z0-9-]{1,80}$|^_intro$/, "design_ref must be a section slug of the design").optional(),
+    // A7: the failure modes no test covers, one line each, which the brief hands to the implementer and the reviewers.
+    review_focus: array(string2().trim().min(1).max(300).regex(/^[^\r\n]*$/, "one line each")).min(1).max(6).optional()
   });
   const PlanSchema = object({
     project: id,
@@ -22707,6 +22718,7 @@ var Input = object({
   why: line(LIMITS.why),
   by: _enum(DECISION_BY),
   weight: _enum(["major", "minor"]).optional(),
+  ifWrong: object({ cost: _enum(IF_WRONG_COSTS), note: line(LIMITS.ifWrong) }).strict().optional(),
   revert: line(LIMITS.revert).optional(),
   undo: Undo.optional(),
   safePath: line(LIMITS.safePath).optional(),
@@ -22829,7 +22841,9 @@ var MD = {
     why: "Por qu\xE9",
     revert: "C\xF3mo revertir",
     when: "Cu\xE1ndo",
-    noRevert: "no se puede revertir de forma autom\xE1tica"
+    noRevert: "no se puede revertir de forma autom\xE1tica",
+    ifWrong: "Coste si es err\xF3neo",
+    costs: { low: "bajo", medium: "medio", high: "alto" }
   },
   en: {
     title: "Automatic decisions",
@@ -22841,7 +22855,9 @@ var MD = {
     why: "Why",
     revert: "How to undo",
     when: "When",
-    noRevert: "cannot be undone automatically"
+    noRevert: "cannot be undone automatically",
+    ifWrong: "Cost if wrong",
+    costs: { low: "low", medium: "medium", high: "high" }
   }
 };
 function renderDecisionsMd(list, scope, locale) {
@@ -22857,7 +22873,9 @@ function renderDecisionsMd(list, scope, locale) {
       }
     } else if (d.alternatives.length) out.push(`- **${t.alternatives}:** ${d.alternatives.map((a) => a.option).join(", ")}`);
     const howTo = d.revert ?? (d.undo?.type === "none" ? `${t.noRevert}: ${d.undo.reason}` : t.noRevert);
-    out.push(`- **${t.why}:** ${d.why || "\u2014"}`, `- **${t.revert}:** ${howTo}`, `- **${t.when}:** ${d.ts} \xB7 ${d.by} \xB7 ${d.weight}`, "");
+    out.push(`- **${t.why}:** ${d.why || "\u2014"}`);
+    if (d.ifWrong) out.push(`- **${t.ifWrong}:** ${t.costs[d.ifWrong.cost]} \xB7 ${d.ifWrong.note}`);
+    out.push(`- **${t.revert}:** ${howTo}`, `- **${t.when}:** ${d.ts} \xB7 ${d.by} \xB7 ${d.weight}`, "");
   }
   return out.join("\n");
 }
@@ -24396,7 +24414,8 @@ function reviewFor(path94, sensitive, perf, opts = {}) {
     reviewers: [{ role: "review-correctness", model: "sonnet", effort: "medium" }, ...perf ? [{ role: "review-perf", model: null, effort: "medium" }] : []],
     flags: perf ? ["--perf"] : []
   };
-  const roles = ["review-correctness", ...sensitive.length ? ["review-security"] : [], ...perf ? ["review-perf"] : []];
+  const risky = sensitive.length > 0 || opts.sinks === true;
+  const roles = ["review-correctness", ...risky ? ["review-security"] : [], ...perf ? ["review-perf"] : []];
   const effort = (role) => {
     if (opts.profile === "quality") return "xhigh";
     if (role === "review-perf") return "medium";
@@ -24406,7 +24425,7 @@ function reviewFor(path94, sensitive, perf, opts = {}) {
   return {
     light: false,
     reviewers: roles.map((role) => ({ role, model: null, effort: effort(role) })),
-    flags: [...sensitive.length ? ["--sensitive"] : [], ...perf ? ["--perf"] : []]
+    flags: [...risky ? ["--sensitive"] : [], ...perf ? ["--perf"] : []]
   };
 }
 var REASONS_ES = [
@@ -24425,7 +24444,8 @@ var REASONS_ES = [
   [/^superpowers plan: the Medium path, its tasks in order$/, "plan de superpowers: camino Medium, sus tareas en orden"],
   [/^ratchet: kept (\w+) from an earlier triage of this task$/, "se mantiene $1 de un triage anterior de esta tarea"],
   [/^diff: (\d+) file\(s\), (\d+) line\(s\)$/, "diff: $1 fichero(s), $2 l\xEDnea(s)"],
-  [/^diff touches a sensitive zone: (.+)$/, "el diff toca una zona sensible: $1"]
+  [/^diff touches a sensitive zone: (.+)$/, "el diff toca una zona sensible: $1"],
+  [/^diff adds a strict sink: (.+)$/, "el diff a\xF1ade un sink estricto: $1"]
 ];
 var reasonEs = (r2) => {
   const hit = REASONS_ES.find(([re]) => re.test(r2));
@@ -24787,6 +24807,7 @@ function renderBrief(plan, task, opts) {
     ...task.depends_on.length ? [`Depends on: ${task.depends_on.join(", ")}`] : [],
     ...task.estimate_min ? [`Estimate: ${task.estimate_min} min`] : [],
     ...task.delicate ? ["Delicate: yes"] : [],
+    ...task.review_focus?.length ? ["Review focus (the failure modes no test covers: the implementer guards against each one, and the reviewers check each one):", ...task.review_focus.map((f) => `- ${f}`)] : [],
     "",
     `Plan: ${opts.planPath}`,
     ...opts.designPath ? [`Design: ${opts.designPath}`] : [],
@@ -25047,6 +25068,80 @@ function planLocale(root, project) {
   } catch {
   }
   return null;
+}
+
+// src/forge/sinks.ts
+var SINKS_MAX = 20;
+var JS = /\.[cm]?[jt]sx?$/i;
+var PY = /\.py$/i;
+var JVM = /\.(?:java|kt|kts|scala|groovy)$/i;
+var CODE = /\.(?:[cm]?[jt]sx?|py|java|kt|kts|scala|groovy|rb|php|go|cs)$/i;
+var PATTERNS = [
+  { kind: "eval", files: CODE, re: /(?<![\w$.])eval\s*\(/ },
+  { kind: "new-function", files: JS, re: /\bnew\s+Function\s*\(/ },
+  { kind: "tls-off", files: CODE, re: /\brejectUnauthorized\s*:\s*false\b|\bNODE_TLS_REJECT_UNAUTHORIZED\b['"]?\s*[:=]\s*['"]?0\b|\bstrictSSL\s*:\s*false\b|\bverify\s*=\s*False\b|\bcheck_hostname\s*=\s*False\b|\b_create_unverified_context\b|\bCERT_NONE\b|\bInsecureSkipVerify\s*:\s*true\b|\bNoopHostnameVerifier\b|\bALLOW_ALL_HOSTNAME_VERIFIER\b/ },
+  { kind: "pickle", files: PY, re: /\bc?[Pp]ickle\.(?:loads?|Unpickler)\s*\(/ },
+  { kind: "yaml-load", files: PY, re: /\byaml\.(?:load|load_all|full_load|unsafe_load)\s*\(/, unless: /\bLoader\s*=\s*(?:yaml\.)?C?SafeLoader\b/ },
+  { kind: "object-input-stream", files: JVM, re: /\bObjectInputStream\s*\(/ }
+];
+var SKIP = [
+  /(^|\/)(?:dist|build|vendor|node_modules|third_party)\//,
+  /\.min\.js$/i,
+  /(^|\/)(?:tests?|__tests__|__mocks__|spec|fixtures)\//i,
+  /[._-](?:test|spec)\.[a-z]+$/i,
+  /(^|\/)test_[^/]*\.py$/i,
+  /_test\.(?:go|py)$/i
+];
+var COMMENT = /^\s*(?:\/\/|#|\*|\/\*|<!--)/;
+var readable = (file) => CODE.test(file) && !SKIP.some((re) => re.test(file)) && !isBookkeeping(file);
+function diffSinks(patch) {
+  const out = [];
+  let file = null;
+  let prev = "";
+  let oldLeft = 0, newLeft = 0, next = 0;
+  for (const raw of patch.split("\n")) {
+    const line3 = raw.replace(/\r$/, "");
+    if ((oldLeft > 0 || newLeft > 0) && (line3.startsWith("@@ ") || line3.startsWith("diff "))) oldLeft = newLeft = 0;
+    if (oldLeft > 0 || newLeft > 0) {
+      if (line3.startsWith("\\")) continue;
+      if (line3.startsWith("-")) oldLeft--;
+      else if (line3.startsWith("+")) {
+        newLeft--;
+        const at2 = next++;
+        if (file && !COMMENT.test(line3.slice(1))) {
+          const text4 = line3.slice(1, 2001);
+          for (const p of PATTERNS) {
+            if (out.length >= SINKS_MAX) return out;
+            if (p.files.test(file) && p.re.test(text4) && !(p.unless && p.unless.test(text4))) out.push({ kind: p.kind, file, line: at2 });
+          }
+        }
+      } else {
+        oldLeft--;
+        newLeft--;
+        next++;
+      }
+      prev = "";
+      continue;
+    }
+    if (line3.startsWith("+++ ") && prev.startsWith("--- ")) {
+      const p = line3.slice(4).split("	")[0];
+      const f = p === "/dev/null" ? null : p.startsWith("b/") ? p.slice(2) : p;
+      file = f !== null && readable(f) ? f : null;
+    } else {
+      const m = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line3);
+      if (m) {
+        oldLeft = m[1] === void 0 ? 1 : Number(m[1]);
+        newLeft = m[3] === void 0 ? 1 : Number(m[3]);
+        next = Number(m[2]);
+      }
+    }
+    prev = line3;
+  }
+  return out;
+}
+function sinkReason(sinks) {
+  const shown3 = sinks.slice(0, 3).map((s2) => `${s2.kind} (${s2.file}:${s2.line})`).join(", ");
+  return `diff adds a strict sink: ${shown3}${sinks.length > 3 ? `, +${sinks.length - 3}` : ""}`;
 }
 
 // src/forge/proposals.ts
@@ -27566,6 +27661,7 @@ function triageCore(io, args) {
     result.reasons.push("superpowers plan: the Medium path, its tasks in order");
   }
   let diff2 = null;
+  let sinks = [];
   if (base !== null) {
     const out = git2(["-c", "core.quotePath=false", "diff", "--numstat", "--no-renames", `${base}..HEAD`]);
     if (out === null) throw new UsageError(`triage: cannot diff ${base}..HEAD`);
@@ -27577,6 +27673,12 @@ function triageCore(io, args) {
     if (result.sensitive.length && PATH_ORDER.indexOf(result.path) < PATH_ORDER.indexOf("medium")) {
       result.path = "medium";
       result.reasons.push(`sensitive zone: ${result.sensitive.join(", ")}`);
+    }
+    const patch = git2(["-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--no-renames", "-U0", `${base}..HEAD`]);
+    sinks = patch === null ? [] : diffSinks(patch);
+    if (sinks.length) {
+      result.reasons.push(sinkReason(sinks));
+      if (PATH_ORDER.indexOf(result.path) < PATH_ORDER.indexOf("medium")) result.path = "medium";
     }
     diff2 = { base, stat, path: d.path };
   }
@@ -27602,7 +27704,7 @@ function triageCore(io, args) {
   const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
   const known = readLocal(io.cwd).known;
   const fresh2 = names3.filter((n) => !known.includes(n));
-  const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(wordText), { delicate, profile });
+  const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(wordText), { delicate, profile, sinks: sinks.length > 0 });
   const review = { ...reviewPlan, reviewers: reviewPlan.reviewers.map((r2) => ({ ...r2, agent: agentFor(r2.role, profile) })) };
   const locale = localeArg2 ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === "es" ? "es" : "en");
   let line3 = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: fresh2, catalog }, locale);
@@ -27623,8 +27725,9 @@ function triageCore(io, args) {
     diff: diff2,
     auto,
     review,
-    output: { ...result, catalog, new: fresh2, implementer, announce: line3, gate, ...auto, ...reviewed, review },
-    locale
+    output: { ...result, catalog, new: fresh2, implementer, announce: line3, gate, ...auto, ...reviewed, ...sinks.length ? { sinks } : {}, review },
+    locale,
+    sinks
   };
 }
 var routedSpecs = (io) => listRoutes(mainCheckout(io.cwd)).flatMap((r2) => r2.spec && (r2.stage === "handed-off" || r2.stage === "done") ? [r2.spec] : []);
@@ -30352,6 +30455,7 @@ function pairFindings(a, b) {
 
 // src/forge/verdict.ts
 var ORIGINS = ["previous", "fix", "untouched"];
+var DECLINED_MAX = 20;
 var invalidReview = () => ({ verdict: "abstain", confidence: 0, findings: [], invalid: true });
 var SEVERITIES = ["critical", "important", "minor"];
 function num2(v) {
@@ -30464,7 +30568,29 @@ function parseReview(text4) {
     review.invalid = true;
   }
   if (r2.complete === false || typeof r2.complete === "string" && r2.complete.trim().toLowerCase() === "false") review.incomplete = true;
+  const declined = declinedOf(r2.declined);
+  if (declined.length) review.declined = declined;
   return review;
+}
+function declinedOf(raw) {
+  if (!Array.isArray(raw)) return [];
+  const cut4 = (s2, n) => Array.from(oneLine3(s2)).slice(0, n).join("");
+  const out = [];
+  for (const e of raw) {
+    let what;
+    let why = "";
+    if (typeof e === "string") what = e;
+    else if (e && typeof e === "object" && !Array.isArray(e)) {
+      what = e.what;
+      why = e.why;
+    }
+    if (typeof what !== "string") continue;
+    const w = cut4(what, 200);
+    if (!w) continue;
+    out.push({ what: w, why: typeof why === "string" ? cut4(why, 300) : "" });
+    if (out.length >= DECLINED_MAX) break;
+  }
+  return out;
 }
 function weightsFor(opts) {
   if (opts.sensitive && opts.perf) return { correctness: 0.2, security: 0.4, perf: 0.4, verify: 0.2 };
@@ -30672,11 +30798,21 @@ function synthesize(reviews, weights, validatorsOk, failingValidators = [], opts
   const blockingImportant = important;
   let deferred;
   if (action === "accept") {
-    deferred = residual;
+    deferred = [...residual];
     if (residual.length) reasons.push(`${residual.length} finding(s) left open as residual (${[...new Set(residual.map((f) => f.residual))].join(", ")})`);
   } else {
     important = [...important, ...residual.filter((f) => RIDES_ALONG.includes(f.residual))];
     deferred = residual.filter((f) => !RIDES_ALONG.includes(f.residual));
+  }
+  const declined = answered.flatMap((n) => (rv[n].declined ?? []).map((d) => ({
+    severity: "minor",
+    problem: `declined to judge: ${d.what}${d.why ? ` (${d.why})` : ""}`,
+    reviewer: n,
+    residual: "declined"
+  })));
+  if (declined.length) {
+    deferred.push(...declined);
+    reasons.push(`${declined.length} part(s) declined to judge, listed in deferred`);
   }
   const key = (f) => `${f.severity}|${f.id ?? (f.check !== void 0 ? `${f.file ?? ""}|check:${f.check}` : `${f.file ?? ""}|${f.problem.trim().toLowerCase()}`)}`;
   const blocking2 = [
@@ -35801,7 +35937,7 @@ var REVIEWERS = ["correctness", "security", "perf", "verify"];
 var STATUSES = ["open", "closed", "residual", "minor"];
 var SEVERITIES2 = ["critical", "important", "minor"];
 var ORIGINS2 = ["previous", "fix", "untouched"];
-var RESIDUALS = ["untouched", "hardening", "late-round", "cap", "docs", "out-of-model", "architecture", "env-unverified"];
+var RESIDUALS = ["untouched", "hardening", "late-round", "cap", "docs", "out-of-model", "architecture", "env-unverified", "declined"];
 var SENT = ["untouched", "docs", "late-round"];
 var isOpen = (f) => f.status === "open" || f.status === "residual";
 var unsent = (f) => f.status === "residual" && !(f.residual && SENT.includes(f.residual));
@@ -36685,7 +36821,8 @@ function reviewPrep(args, deps) {
   const redo = round >= 2 && counted.filter((e) => e.kind === "verdict" && isTask(e, task)).at(-1)?.action === "redo";
   const lastRedo = counted.filter((e) => e.kind === "verdict" && isTask(e, task) && e.action === "redo").at(-1);
   const redoRound = Number(/reviews-\d+-(\d+)/.exec(String(lastRedo?.dir ?? ""))?.[1] ?? 0);
-  const forced = args.includes("--sensitive") || round >= 2 && !redo && hadSecurity(dir, n, redoRound + 1, round);
+  const sinks = diffSinks(zoneDiff);
+  const forced = args.includes("--sensitive") || sinks.length > 0 || round >= 2 && !redo && hadSecurity(dir, n, redoRound + 1, round);
   const review = withSecurity(triaged, diffZones(touched, zoneDiff), forced, config2.profile);
   const lastVerdict = counted.filter((e) => e.kind === "verdict" && isTask(e, task)).at(-1);
   const prevSent = readJson5(import_node_path75.default.join(dir, `findings-${n}-${round - 1}.json`));

@@ -35,7 +35,7 @@ Una tarea de decenas de pasos y varias sesiones pierde el hilo: qué se decidió
 
 ## Características
 
-- **Diseño por rondas.** Un agente `design-critic` revisa el documento de diseño y devuelve propuestas numeradas con sus puntos críticos. Aplicas todas o algunas, pides otra ronda, haces que Claude te entreviste o lo reescribes, hasta que lo apruebas.
+- **Diseño por rondas.** Un agente `design-critic` (Opus, esfuerzo alto) revisa el documento de diseño y devuelve propuestas numeradas con sus puntos críticos. Aplicas todas o algunas, pides otra ronda, haces que Claude te entreviste o lo reescribes, hasta que lo apruebas.
 - **El plan en el repo.** `docs/waypoint/<proyecto>/plan.yaml` contiene frentes, fases y tareas, cada una con sus zonas (los ficheros que toca), `done_when` y una estimación. El diseño aprobado le da forma. Una tarea que forge debe tratar con cuidado lleva `delicate: true` (el roadmap lo ignora). `waypoint replan` añade, edita y ordena las fases, y mueve, ordena, edita y retira las tareas, sin renumerar nunca, y guarda el porqué en el `history` del plan.
 - **Un roadmap vivo.** El plan se publica como artifact de claude.ai y se actualiza mientras Claude trabaja. Sus vistas son Resumen, Plan, Cronograma, Ejecuciones, Sesiones y Conversación, bajo una franja de estado, con «Te necesita», un detalle de tarea en cuatro pestañas, filtros, línea temporal con zoom, dependencias, minimapa, exportación y diseño para móvil.
 - **Sesiones en paralelo.** `/waypoint:launch <frente>` arranca una sesión en segundo plano en su propio worktree de git. Las sesiones aparecen en el roadmap y se coordinan con mensajes: avisos de solapamiento, traspasos y delegación.
