@@ -21,4 +21,4 @@ Read it from `HF_TOKEN` or from the login (`hf auth login`). It never appears in
 
 ## Upload
 
-Create the repo, then upload the folder with `HfApi.upload_folder` (or `hf upload` in the terminal); the token is picked up from the environment, so `HfApi()` takes no `token=`. A single file, such as the card, goes with `upload_file` and `path_in_repo="README.md"`. Pass `repo_type="dataset"` for a dataset. An interrupted upload resumes by repeating the same call. Check the signatures against the installed `huggingface_hub`.
+Create the repo, then upload the folder with `HfApi.upload_folder` (or `hf upload` in the terminal); the token is picked up from `HF_TOKEN` or the stored login (`hf auth login`), so `HfApi()` takes no `token=`. A single file, such as the card, goes with `upload_file` and `path_in_repo="README.md"`. Pass `repo_type="dataset"` for a dataset. An interrupted upload resumes by repeating the same call. Check the signatures against the installed `huggingface_hub`.

@@ -35,6 +35,9 @@ describe('plugin ml (w7 D3)', () => {
     const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(md)?.[1] ?? '';
     expect(fm).toMatch(/^name: ml-local-gpu$/m);
     expect(fm).toMatch(/^description: Use when \S/m);
+    const desc = /^description: (.*)$/m.exec(fm)?.[1] ?? '';
+    expect(desc).not.toContain(': ');
+    expect(fm.split(/\r?\n/)).toHaveLength(2);
     expect(fm.length).toBeLessThanOrEqual(1024);
     expect(Buffer.byteLength(md, 'utf8')).toBeLessThanOrEqual(16000);
   });

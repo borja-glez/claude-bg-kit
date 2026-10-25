@@ -9,6 +9,8 @@ The asyncify/JSEP build of ORT does not support concurrent async calls. Create s
 Downloads go through the same chain, so the browser never has a download racing a session in flight:
 
 ```ts
+import * as ort from 'onnxruntime-web/webgpu';
+
 function createSerial() {
   let tail: Promise<unknown> = Promise.resolve();
   return <T>(job: () => Promise<T>): Promise<T> => {
@@ -18,6 +20,8 @@ function createSerial() {
   };
 }
 const serial = createSerial();
+const bytesA = await serial(() => fetchBytes(urlA));
+const bytesB = await serial(() => fetchBytes(urlB));
 const sessionA = await serial(() => ort.InferenceSession.create(bytesA, opts));
 const sessionB = await serial(() => ort.InferenceSession.create(bytesB, opts));
 const out = await serial(() => sessionA.run(feeds));

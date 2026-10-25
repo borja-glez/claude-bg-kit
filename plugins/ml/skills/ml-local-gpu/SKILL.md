@@ -1,6 +1,6 @@
 ---
 name: ml-local-gpu
-description: Use when training, fine-tuning, evaluating or exporting models on a local NVIDIA GPU with PyTorch, transformers, trl or peft, running notebooks that use the GPU, publishing models or datasets to Hugging Face, or running ONNX models in the browser with onnxruntime-web, writing a Python script that rewrites many text files or committing Python in a repo whose CI runs ruff format --check; also when torch.cuda.is_available() is False, CUDA runs out of memory, "no kernel image is available" or an sm_120 warning appears, a trl or transformers call rejects a keyword, or a WebGPU session hangs.
+description: Use when training, fine-tuning, evaluating or exporting models on a local NVIDIA GPU with PyTorch, transformers, trl or peft, running notebooks that use the GPU, publishing models or datasets to Hugging Face, or running ONNX models in the browser with onnxruntime-web, writing a Python script that rewrites many text files in a machine-learning repository, or committing Python in a machine-learning repository whose CI runs ruff format --check; also when torch.cuda.is_available() is False, CUDA runs out of memory, "no kernel image is available" or an sm_120 warning appears, a trl or transformers call rejects a keyword, or a WebGPU session hangs.
 ---
 
 # ML on a local GPU
@@ -49,7 +49,7 @@ Read `pyproject.toml`, the lock, the CI config and the README before anything el
 | Before a GPU job | `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader` (or `torch.cuda.mem_get_info()`); peaks from `torch.cuda.max_memory_reserved()` plus context; peaks plus memory in use under total minus 10 % |
 | Job of 30 minutes or more | alone; 15-20 minutes of rest after; temperature at start and end, or "GPU temperature unavailable" |
 | trl, transformers, peft call | Context7 plus `inspect.signature` on the installed package |
-| Hugging Face card | English; criterion written before training; verdict published; token from `HF_TOKEN` |
+| Hugging Face card | English; criterion written before training; verdict published; token from `HF_TOKEN` or the login |
 | Notebook commit | `uv run jupyter nbconvert --to notebook --execute --inplace`, then check the text |
 | Writing text files | `newline='\n'` and `encoding='utf-8'` |
 | CI has `ruff format --check` | `uv run ruff format .` then `uv run ruff check .` before the commit |
