@@ -238,4 +238,10 @@ describe('the runner agent and the coordinator text (A10)', () => {
     expect(lines.find(l => l.trimStart().startsWith('- `handback` ('))).toBeDefined();
     expect(lines.find(l => l.startsWith('1. **Run it.**'))).toContain('`spawnRunner`');
   });
+  it('the forge READMEs document swarm.nested, the runner\'s actions and --lease-minutes', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = doc(f);
+      for (const w of ['swarm.nested', '`forge-runner`', '`spawnRunner`', '`handback`', '[--lease-minutes N]', '  nested: false ', '<WORK>/runner.json']) expect(md, `${f}: ${w}`).toContain(w);
+    }
+  });
 });
