@@ -13,18 +13,15 @@ import { bashSegments, segmentPath } from './autonomy-shared.js';
 import { writeInfo } from './autonomy-parse.js';
 import { commandName, type Segment, type Word } from './shell-words.js';
 import { confinedIn, FILE_TOOLS, guardPath, isInside, SHELL_TOOLS, targetPaths, type GuardCtx, type GuardInput, type GuardRule, type GuardVerdict } from './guard.js';
+import { READ_TOOLS, isForgeAgent } from './guard-fast.js';
 
 export const SECRETS_RULE_ID = 'secrets';
 /** Relative to the home folder; compared with isInside. */
 export const SECRET_PATHS: readonly string[] = ['.ssh', '.aws', '.config/gh', '.netrc', '.git-credentials', '.kube'];
 export const DOTENV_TEMPLATES: readonly string[] = ['.env.example', '.env.sample', '.env.template', '.env.dist'];
 export const VERIFY_AGENTS: readonly string[] = ['forge-verify', 'forge-verify-heavy'];
-export const READ_TOOLS: readonly string[] = ['Read', 'Grep', 'Glob'];
-
-/** A forge agent: agent_type is a string that starts with 'forge' (forge:forge-impl, or forge-impl loaded without its prefix). */
-export function isForgeAgent(agentType: unknown): agentType is string {
-  return typeof agentType === 'string' && agentType.startsWith('forge');
-}
+// READ_TOOLS and isForgeAgent live in guard-fast.ts, which the Read/Grep/Glob fast path bundles without the rest.
+export { READ_TOOLS, isForgeAgent };
 
 /** A VERIFY_AGENTS name, bare or after 'forge:'. */
 export function isVerifyAgent(agentType: unknown): boolean {

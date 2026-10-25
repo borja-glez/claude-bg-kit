@@ -27,6 +27,18 @@ await build({
   banner: { js: '#!/usr/bin/env node' },
 });
 
+// The PreToolUse hook of Read, Grep and Glob (w7 A4 R16): its own small bundle, so that a call outside a forge agent
+// does not load forge.cjs (tests/forge-guard-read.test.ts caps its size).
+await build({
+  entryPoints: ['src/forge/cli/guard-read.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: 'node20',
+  outfile: 'plugins/forge/dist/guard-read.cjs',
+  banner: { js: '#!/usr/bin/env node' },
+});
+
 const page = await build({
   entryPoints: ['src/page/main.ts'],
   define,
@@ -54,7 +66,7 @@ const html = (await readFile('src/page/template.html', 'utf8'))
   .replace('/*__JS__*/', () => js);
 await mkdir('plugins/waypoint/assets', { recursive: true });
 await writeFile('plugins/waypoint/assets/roadmap.template.html', html);
-console.log('built dist/waypoint.cjs, forge dist/forge.cjs and assets/roadmap.template.html');
+console.log('built dist/waypoint.cjs, forge dist/forge.cjs and dist/guard-read.cjs, and assets/roadmap.template.html');
 
 const designPage = await build({
   entryPoints: ['src/design-page/client.ts'],
