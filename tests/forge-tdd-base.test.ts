@@ -28,9 +28,9 @@ const MATH_BASE = "import * as m from '../src/math.mjs';\ntest('add sums', () =>
  * root (forge's state) with wt (the code, its own git) inside. BASE: add, its test and, with `broken`, a test that already
  * fails (the baseline says so). HEAD: mul with a test that fails on BASE, a test that passes on BASE (unless `passing` is
  * false), a new test file whose module BASE lacks, and `broken` edited, so its title line is added again. node_modules
- * and .venv hold an untracked sentinel; with `parentModules`, node_modules is only in wt's parent.
+ * and .venv hold an untracked sentinel.
  */
-function fixture(o: { broken?: boolean; passing?: boolean; config?: string; parentModules?: boolean } = {}) {
+function fixture(o: { broken?: boolean; passing?: boolean; config?: string } = {}) {
   const root = tmp('tdd-base-');
   const wt = path.join(root, 'wt');
   const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: wt, encoding: 'utf8' }).trim();
@@ -40,8 +40,7 @@ function fixture(o: { broken?: boolean; passing?: boolean; config?: string; pare
   put('run-tests.mjs', RUNNER);
   put('src/math.mjs', 'export const add = (a, b) => a + b;\n');
   put('tests/math.test.mjs', MATH_BASE + (o.broken ? "test('broken', () => { throw new Error('was broken'); });\n" : ''));
-  if (o.parentModules) { mkdirSync(path.join(root, 'node_modules')); writeFileSync(path.join(root, 'node_modules', 'sentinel.txt'), 'keep me\n'); }
-  else put('node_modules/sentinel.txt', 'keep me\n');
+  put('node_modules/sentinel.txt', 'keep me\n');
   put('.venv/sentinel.txt', 'keep me\n');
   git('init', '-q'); git('add', '-A'); git('commit', '-q', '-m', 'base');
   const base = git('rev-parse', 'HEAD');
@@ -88,17 +87,6 @@ describe('the TDD check on BASE (A9)', () => {
       expect(left(x.tmpRoot)).toEqual([]);
       expect(worktrees(x.wt)).toHaveLength(1);
     }
-  });
-  it('links the nearest ancestor node_modules when the task folder has none, and leaves it alone', () => {
-    const sees = 'affected_cmd: node -e "process.exit(+!require(\'fs\').existsSync(\'node_modules/sentinel.txt\'))" {tests}';
-    const f = fixture({ parentModules: true, config: CONFIG.replace('affected_cmd: node run-tests.mjs {tests}', sees) });
-    const { check } = tddForBrief(f.ctx());
-    // Exit 0 with no failing line: the tests pass on BASE, which only happens when the command ran with node_modules linked.
-    expect(check.skipped).toBeNull();
-    expect(check.passedOnBase.length).toBeGreaterThan(0);
-    expect(readFileSync(path.join(f.root, 'node_modules', 'sentinel.txt'), 'utf8')).toBe('keep me\n');
-    expect(left(f.tmpRoot)).toEqual([]);
-    expect(worktrees(f.wt)).toHaveLength(1);
   });
   it('another worktree of the clone whose folder is gone keeps its entry: the check removes only its own', () => {
     const f = fixture();

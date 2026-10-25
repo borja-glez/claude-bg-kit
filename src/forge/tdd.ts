@@ -318,16 +318,10 @@ const isDir = (p: string): boolean => { try { return statSync(p).isDirectory(); 
 const isLink = (p: string): boolean => { try { return lstatSync(p).isSymbolicLink(); } catch { return false; } };
 const lexists = (p: string): boolean => { try { lstatSync(p); return true; } catch { return false; } };
 
-/** The folder to link as `name`: repoDir's own; for node_modules, else the nearest ancestor's (the task may sit in a workspace). */
+/** The folder to link as `name`: only repoDir's own, never an ancestor's (its workspace links would point at HEAD code). */
 function linkSource(repoDir: string, name: string): string | null {
   const own = path.join(repoDir, name);
-  if (isDir(own)) return own;
-  if (name !== 'node_modules') return null;
-  for (let dir = path.dirname(path.resolve(repoDir)); ; dir = path.dirname(dir)) {
-    const up = path.join(dir, name);
-    if (isDir(up)) return up;
-    if (path.dirname(dir) === dir) return null;
-  }
+  return isDir(own) ? own : null;
 }
 
 /** The git dir a linked checkout names in its `.git` file, or null. */
