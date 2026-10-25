@@ -30148,7 +30148,7 @@ function forgeSources(main, scope) {
   if (exec && scope.kind === "execution" && exec.runId !== scope.runId) exec = null;
   if (exec && scope.kind === "task" && !runHoldsTask(exec, scope.task, scope.project)) exec = null;
   let tasks;
-  if (scope.kind === "task") tasks = [{ task: scope.task, project: scope.project, inExecution: exec !== null }];
+  if (scope.kind === "task") tasks = [{ task: scope.task, project: scope.project, inExecution: exec !== null || scoped.some((l) => isSafeId(l.event.runId)) }];
   else if (exec) tasks = Object.keys(exec.tasks).map((task) => ({ task, project: exec.kind === "plan" ? exec.project : null, inExecution: true }));
   else {
     const owner = attribute(events);
@@ -30221,6 +30221,10 @@ function forgeSources(main, scope) {
     }
   }
   const inScope = new Set(tasks.map((t) => JSON.stringify([t.project, t.task])));
+  const inRunFolder = (out) => {
+    const p = out.split(/[\\/]+/);
+    return p.length >= 4 && p[p.length - 2] === "run" && p[p.length - 3] === "work" && p[p.length - 4] === ".forge";
+  };
   for (const f of names3(jobsDir(main)).filter((n) => n.endsWith(".json")).slice(0, JOB_FILES_MAX)) {
     const abs = import_node_path47.default.join(jobsDir(main), f);
     let raw;
@@ -30235,7 +30239,11 @@ function forgeSources(main, scope) {
     if (!job) continue;
     const owner = job.task === null ? scope.kind === "execution" ? "" : null : baseOf(job.task);
     if (owner === null) continue;
-    if (owner !== "" && !inScope.has(JSON.stringify([projectOfDir(job.out, job.task), owner]))) continue;
+    if (owner !== "") {
+      const project = projectOfDir(job.out, job.task);
+      const ofRun = scope.kind === "execution" && project === null && inRunFolder(job.out) && tasks.some((t) => t.task === owner);
+      if (!ofRun && !inScope.has(JSON.stringify([project, owner]))) continue;
+    }
     addDoc(abs, "job", owner === "" ? null : owner, () => job.startedAt);
   }
   if (scope.kind === "execution" && exec) {
@@ -30609,15 +30617,35 @@ function diagnose(main, scope, opts) {
   const outDocs = new Map(src.docs.filter((d) => d.kind === "out").map((d) => [d.abs, d]));
   const outOf = (inv) => inv.out === null ? void 0 : outDocs.get(import_node_path48.default.resolve(main, inv.out));
   const hasError = (d) => isRecord3(d.doc) && d.doc.error !== void 0 && d.doc.error !== null;
+  const writerOf = /* @__PURE__ */ new Map();
+  for (const m of mains) {
+    for (const c of m.calls) {
+      for (const inv of c.forge) {
+        const doc = outOf(inv);
+        const start = time4(c.ts);
+        if (!doc || Number.isNaN(start) || start > time4(doc.ts)) continue;
+        const at2 = cite(m.file, c.line);
+        const before3 = writerOf.get(doc.abs);
+        if (!before3 || start > before3.start || start === before3.start && compareCites(at2, before3.at) >= 0) writerOf.set(doc.abs, { inv, start, at: at2 });
+      }
+    }
+  }
+  const wroteOf = (inv) => {
+    const d = outOf(inv);
+    return d && writerOf.get(d.abs)?.inv === inv ? d : void 0;
+  };
   const okOfCall = (sc, inv) => {
-    const doc = outOf(inv);
+    if (sc.res?.error) return false;
+    const doc = wroteOf(inv);
     if (doc) return !hasError(doc);
     if (!sc.res) return null;
-    if (sc.res.error) return false;
     return sc.call.background || sc.res.launched ? null : true;
   };
-  const named = /* @__PURE__ */ new Set();
-  for (const m of mains) for (const c of m.calls) for (const inv of c.forge) if (inv.out !== null) named.add(import_node_path48.default.resolve(main, inv.out));
+  const scopedInvs = new Set(mainCalls.flatMap((sc) => sc.hits.map((h) => h.inv)));
+  const writtenInScope = (d) => {
+    const w = writerOf.get(d.abs);
+    return w !== void 0 && scopedInvs.has(w.inv);
+  };
   const instancesOf = /* @__PURE__ */ new Map();
   const extra = [];
   for (const T2 of tasks) {
@@ -30633,10 +30661,10 @@ function diagnose(main, scope, opts) {
         if (!hit) continue;
         const launched = sc.call.background || sc.res?.launched === true;
         const inst = { task: T2.task, step: hit.step, brief: hit.brief, start: sc.call.ts, end: sc.res && !launched ? sc.res.ts : null, ok: okOfCall(sc, h.inv), at: [sc.at] };
-        const doc = outOf(h.inv);
+        const doc = wroteOf(h.inv);
         if (doc) {
           if (hasError(doc)) inst.at.push(doc.file);
-          else inst.end = doc.ts;
+          else if (!sc.res?.error) inst.end = doc.ts;
         }
         calls.push(inst);
       }
@@ -30649,7 +30677,7 @@ function diagnose(main, scope, opts) {
       }
     }
     for (const d of src.docs) {
-      if (d.kind !== "out" || d.task !== T2.task || !hasError(d) || named.has(d.abs)) continue;
+      if (d.kind !== "out" || d.task !== T2.task || !hasError(d) || writtenInScope(d)) continue;
       const m = /^(prep|review-prep)-(\d+)\.json$/.exec(import_node_path48.default.basename(d.abs));
       if (m) calls.push({ task: T2.task, step: m[1], brief: Number(m[2]), start: d.ts, end: d.ts, ok: false, at: [d.file] });
       else extra.push({ kind: "failed", task: T2.task, text: `${d.file} holds an error`, at: [d.file], ts: d.ts });
@@ -30657,7 +30685,7 @@ function diagnose(main, scope, opts) {
     instancesOf.set(T2.task, pairInstances(ledger, calls));
   }
   for (const d of src.docs) {
-    if (d.kind === "out" && d.task === null && hasError(d) && !named.has(d.abs)) extra.push({ kind: "failed", task: null, text: `${d.file} holds an error`, at: [d.file], ts: d.ts });
+    if (d.kind === "out" && d.task === null && hasError(d) && !writtenInScope(d)) extra.push({ kind: "failed", task: null, text: `${d.file} holds an error`, at: [d.file], ts: d.ts });
   }
   const compactions = mains.flatMap((m) => m.compactions.filter((c) => inWindow(c.ts)).map((c) => ({ at: cite(m.file, c.line), ts: c.ts })));
   const taskSteps = [];
@@ -30696,10 +30724,18 @@ function diagnose(main, scope, opts) {
   const repeatFindings = repeats(refs, compactions);
   const failures = [];
   for (const sc of mainCalls) {
-    if (!sc.res?.error) continue;
     for (const h of sc.hits) {
+      if (okOfCall(sc, h.inv) !== false) continue;
       if (tasks.some((T2) => stepOfForge(h.inv, T2.task) !== null)) continue;
-      failures.push({ kind: "failed", task: h.t?.task ?? null, text: `${h.inv.name} failed`, at: [sc.at], ts: sc.call.ts });
+      const doc = wroteOf(h.inv);
+      const bad = doc && hasError(doc) ? doc : void 0;
+      failures.push({
+        kind: "failed",
+        task: h.t?.task ?? null,
+        text: `${h.inv.name} failed`,
+        at: [sc.at, ...bad ? [bad.file] : []],
+        ts: bad && !sc.res?.error ? bad.ts : sc.call.ts
+      });
     }
   }
   const findings = sortFindings(cited([...stepFindings, ...repeatFindings, ...failures, ...extra]));
