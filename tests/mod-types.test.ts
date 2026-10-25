@@ -32,3 +32,17 @@ describe('published lens state contract', () => {
     expect(contract()).toContain('lens: { panel: LensPanel | null; hidden: boolean };');
   });
 });
+
+// build.mjs's modelType guard, read from what it published: outside a one-line quote, a capitalized word in a contract
+// is a type the file does not declare (it would not compile, or read as any under skipLibCheck).
+describe('published contracts are self-contained', () => {
+  const names = (file: string, name: string) => {
+    const b = new RegExp(String.raw`^export type ${name} =([\s\S]*?);\r?\n(?![ \t}])`, 'm').exec(readFileSync(file, 'utf8'))?.[1];
+    expect(b).toBeDefined();
+    return b!.replace(/'[^'\n]*'/g, '').match(/\b[A-Z]\w*/g) ?? [];
+  };
+  it('WaypointBand and LensPanel name no other type', () => {
+    expect(names('plugins/waypoint/types/index.d.ts', 'WaypointBand')).toEqual([]);
+    expect(names('plugins/lens/types/index.d.ts', 'LensPanel')).toEqual([]);
+  });
+});

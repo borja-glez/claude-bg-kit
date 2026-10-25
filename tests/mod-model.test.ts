@@ -731,6 +731,12 @@ describe('buildBandModel · what waits for the person (w7 A5)', () => {
     expect(buildBandModel('demo-shop', { ...f, local: 'surfaces:\n  web: { state: allowed, hash: h }\n' }).needs?.items.map(n => n.id)).toEqual(['db']);
     expect(buildBandModel('demo-shop', { ...f, local: '{nope' }).needs?.items.map(n => n.id)).toEqual(['web', 'db']);
   });
+  it("a surface declined for this run («No, esta vez»: the run's verifySkip, not local.yaml) is asked no more either", () => {
+    const web = j({ task: 'T002', at: at(3) });
+    const f = { ...empty, execution: EXEC({ verifySkip: ['web'] }), now: T0 };
+    expect(buildBandModel('demo-shop', { ...f, surfacesAsked: { web } })).not.toHaveProperty('needs');
+    expect(buildBandModel('demo-shop', { ...f, surfacesAsked: { web, db: j({ task: 'T002', at: at(2) }) } }).needs?.items.map(n => n.id)).toEqual(['db']);
+  });
   it("an execution.json that does not read is one unverified item; another project's run says nothing here", () => {
     expect(buildBandModel('demo-shop', { ...empty, execution: '{nope', now: T0 }).needs?.items).toMatchObject([{ kind: 'run', unverified: true, file: '.forge/execution.json' }]);
     expect(buildBandModel('demo-shop', { ...empty, execution: EXEC({ project: 'other', active: false, stopReason: 'stalled', stallReason: 'x' }), now: T0 })).not.toHaveProperty('needs');

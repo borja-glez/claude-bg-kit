@@ -74,8 +74,9 @@ export function bandNeeds(project: string | null, f: BandFiles, now0?: number): 
   const now = now0 ?? f.now ?? Date.now();
   const input: NeedsInput = { now };
   let run: NeedsRun | null | undefined;
+  let e: ExecutionState | null = null;
   if (f.execution !== undefined) {
-    const e = parseExecution(f.execution, now);
+    e = parseExecution(f.execution, now);
     if (!e) run = null;
     else if (project === null || e.kind === 'ephemeral' || e.project === project) {
       const { signal, bindings } = coordinatorSignals(f, now);
@@ -88,7 +89,9 @@ export function bandNeeds(project: string | null, f: BandFiles, now0?: number): 
   if (run !== undefined) input.run = run;
   if (f.asked) input.asked = Object.fromEntries(Object.entries(f.asked).map(([task, a]) => [task, { file: a.file, doc: a.text }]));
   if (f.auth) input.auth = f.auth;
-  if (run && f.surfacesAsked) input.surfaces = { docs: f.surfacesAsked, decided: decidedSurfaces(f.local) };
+  // Decided: allowed or denied in local.yaml, or declined for this run («No, esta vez», which forge records in the
+  // run's verifySkip); the asked note itself stays until another run starts.
+  if (run && f.surfacesAsked) input.surfaces = { docs: f.surfacesAsked, decided: [...decidedSurfaces(f.local), ...(e?.verifySkip ?? [])] };
   if (f.notes) input.notes = f.notes;
   if (f.proposals) input.proposals = f.proposals;
   if (project !== null && f.design !== undefined) {

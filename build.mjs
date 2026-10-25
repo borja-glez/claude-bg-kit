@@ -79,7 +79,8 @@ async function modelType(file, name) {
   const text = await readFile(file, 'utf8');
   const body = new RegExp(String.raw`^export type ${name} =([\s\S]*?);\r?\n(?![ \t}])`, 'm').exec(text)?.[1];
   if (!body) throw new Error(`${file}: export type ${name} not found`);
-  const names = body.replace(/'[^']*'/g, '').match(/\b[A-Z]\w*/g);
+  // Quotes are stripped line by line: an apostrophe in a comment («the plan's») must not pair with a quote lines below.
+  const names = body.replace(/'[^'\n]*'/g, '').match(/\b[A-Z]\w*/g);
   if (names) throw new Error(`${file}: ${name} must not reference other types (${names.join(', ')})`);
   return body;
 }
