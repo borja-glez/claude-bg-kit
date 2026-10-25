@@ -45,9 +45,10 @@ function invocation(args: string): ForgeInvocation | null {
   if (first === undefined || !/^[a-z][a-z0-9-]*$/.test(first)) return null;
   const second = words[1];
   const sub = DISPATCHERS.has(first) && second !== undefined && /^[a-z][a-z-]*$/.test(second) ? second : null;
+  // A flag's value is the next word, unless that word is another flag.
   const valueOf = (flag: string): string | null => {
     const i = words.indexOf(flag);
-    return i >= 0 && i + 1 < words.length ? words[i + 1] : null;
+    return i >= 0 && i + 1 < words.length && !words[i + 1].startsWith('-') ? words[i + 1] : null;
   };
   let task = valueOf('--task');
   if (task === null && first === 'swarm' && sub !== null && SWARM_TASK_SUBS.has(sub)) {
@@ -71,8 +72,9 @@ export function forgeInvocations(command: string): ForgeInvocation[] {
     found.push({ at: at < 0 ? from : at, args });
     if (at >= 0) from = at + args.length;
   }
-  for (const m of command.matchAll(ALIAS_ASSIGN)) {
-    const use = new RegExp(`\\$(?:${m[1]}|\\{${m[1]}\\})(?=[\\s;|&]|$)([^\\n;|&]*)`, 'g');
+  // Each alias once, however many times the command assigns it.
+  for (const name of new Set(Array.from(command.matchAll(ALIAS_ASSIGN), m => m[1]))) {
+    const use = new RegExp(`\\$(?:${name}|\\{${name}\\})(?=[\\s;|&]|$)([^\\n;|&]*)`, 'g');
     for (const u of command.matchAll(use)) found.push({ at: u.index ?? 0, args: u[1].trim() });
   }
   found.sort((a, b) => a.at - b.at);

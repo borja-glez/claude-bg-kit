@@ -21,6 +21,11 @@ describe('the forge calls of a shell command (A6, Review Focus 2)', () => {
     ['node /p/forge.cjs swarm worktree T001 --member s2', [['swarm worktree', 'T001', null]]],
     ['node /p/forge.cjs swarm sleep 300 --mark', [['swarm sleep', null, null]]],
     ['grep -n "forge.cjs prep" README.md', []],
+    // An alias assigned twice is still one alias: each use is one call.
+    ["FORGE='node /p/forge.cjs'; FORGE='node /p/forge.cjs'; $FORGE prep --task fix-1", [['prep', 'fix-1', null]]],
+    // A flag with no value: the next word is another flag, not its value.
+    ['node /p/forge.cjs prep --task --out x', [['prep', null, 'x']]],
+    ['node /p/forge.cjs review-prep --out --task fix-1', [['review-prep', 'fix-1', null]]],
   ])('%s', (command, want) => {
     expect(forgeInvocations(command).map(i => [i.name, i.task, i.out])).toEqual(want);
   });
