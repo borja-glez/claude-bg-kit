@@ -275,6 +275,13 @@ describe('implementerFor', () => {
 });
 
 describe('real diff sizing', () => {
+  it('reviewFor: a strict sink adds the security review at high and --sensitive, and lifts no correctness effort (A7)', () => {
+    const full = (role: string, effort: string) => ({ role, model: null, effort });
+    expect(reviewFor('medium', [], false, { sinks: true }))
+      .toEqual({ light: false, reviewers: [full('review-correctness', 'high'), full('review-security', 'high')], flags: ['--sensitive'] });
+    expect(reviewFor('medium', ['auth'], false, { sinks: true }).reviewers.map(r => r.effort)).toEqual(['xhigh', 'xhigh']);
+    expect(reviewFor('medium', [], false, { sinks: false })).toEqual(reviewFor('medium', [], false));
+  });
   it('parseNumstat reads text and binary lines, leaves bookkeeping out and skips malformed lines', () => {
     const out = '10\t2\tsrc/a.ts\n-\t-\tassets/logo.png\n5\t5\t.forge/work/x/brief.md\n3\t0\tdocs/waypoint/p/plan.yaml\ngarbage\n\n1\t1\tsrc/b.ts\n';
     expect(parseNumstat(out)).toEqual({ files: ['src/a.ts', 'assets/logo.png', 'src/b.ts'], lines: 14 });
