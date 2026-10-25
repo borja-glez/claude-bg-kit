@@ -41,6 +41,7 @@ const checkSkill = (dir: string, name: string) => {
   expect(raw.length).toBeLessThanOrEqual(1024);
   expect(bytes(read(`${dir}/SKILL.md`))).toBeLessThanOrEqual(SKILL_CAP);
 };
+const AGENT = 'plugins/java/agents/architecture-reviewer.md';
 
 describe('the java plugin (w7 D1)', () => {
   it('the marketplace lists java, and its manifest names it at 0.1.0 with the same description', () => {
@@ -83,5 +84,12 @@ describe('the java plugin (w7 D1)', () => {
       expect(md, r).toContain(pointer(r));
       expect(bytes(read(`${DDD}/references/${r}.md`)), r).toBeLessThanOrEqual(REF_CAP);
     }
+  });
+  it('architecture-reviewer: read-only tools, opus at high effort, the skill preloaded, and its report contract', () => {
+    const { data } = front(AGENT);
+    expect(data).toEqual({ name: 'architecture-reviewer', description: expect.stringContaining('on demand'), tools: 'Read, Grep, Glob, Bash', model: 'opus', effort: 'high', maxTurns: 40, skills: ['java:spring-hexagonal-ddd'] });
+    const body = read(AGENT).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+    for (const w of ['rules not loaded', 'rules: spring-hexagonal-ddd', 'tests: ', 'not run: ', 'findings:', '- [<critical|important|minor>] <file>:<line> `<rule id>`',
+      'pre-existing (outside the diff, at most 5):', 'not applicable:', 'verdict: ', '*ArchitectureTest*', './gradlew quality', '600000']) expect(body, w).toContain(w);
   });
 });
