@@ -11,6 +11,7 @@ import { claudeSessionId } from '../../../lib/claude-session.js';
 // auth's isForgeBranch (any forge/… branch: merging into it needs no answer) is not cleanup's (task/* and forge/run-*).
 import { checkMergeAuth, isForgeBranch as isForgeTarget, mergeAsk, pendingAuth, readAuths, useAuth, writeAuth, type AuthRecord } from '../../auth.js';
 import { loadTrustedConfig } from '../../trust.js';
+import { commitOf } from '../../receipts.js';
 import { publishFor, type StateWrite } from '../../roadmap-sources.js';
 import { finalVerdictOf } from '../../roadmap-run.js';
 import type { Result } from '../context.js';
@@ -46,6 +47,8 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     const m = inFlight.doc;
     return out({ result: 'busy', detail: `${m ? `an integration (${m.task ?? m.ref}, pid ${m.pid}) is merging in ${m.dir}` : 'an integration is starting'}; run swarm merge again once it ends` });
   }
+  // A3: the commit the run branch has now is the one merged, whatever lands on it while the validators run.
+  const tip = commitOf(deps.git, `refs/heads/${e.branch}`);
   // I-03: a merge into a branch that is not forge's needs a permission of the person's, recorded by the hook `answer` from
   // their AskUserQuestion answer (--yes alone is none), and each permission allows one merge:
   // - their yes to the start question (mergeOnFinish) allows the one final merge of this run once it finished (inactive,
@@ -96,12 +99,14 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   if (branch !== e.base) return out({ result: 'main-dirty', detail: `the main checkout is on ${branch ?? '?'}, not ${e.base}` });
   // I-03: before any permission is spent: without the person's trust in the commands, exit 2 with nothing merged.
   const config = loadTrustedConfig(io.cwd);
+  const runAt = cleanRunWorktree(deps, runWorktree(io.cwd), e.branch);
   const opts: MergeOpts = {
     message: `forge: merge ${e.branch}`, scope: 'final', timeoutSec: config.validatorTimeoutSec, configRoot: io.cwd,
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'main', setup: config.swarm.setup,
-    runAt: cleanRunWorktree(deps, runWorktree(io.cwd), e.branch), personal: true, retryDeps: rest.includes('--retry-deps'),
+    runAt: runAt && tip && runAt.git(['rev-parse', 'HEAD'])?.trim() === tip ? runAt : null,
+    personal: true, retryDeps: rest.includes('--retry-deps'),
     run: runOptions(config, events, io.now()),
-    main: io.cwd, cache: { read: false, write: config.validate.cache }, now: io.now, slot: io.slot, branch: e.base,
+    main: io.cwd, cache: { read: false, write: config.validate.cache }, now: io.now, slot: io.slot, branch: e.base, ...(tip ? { commit: tip } : {}),
   };
   // I-03: the permission is spent before the merge, the one step that cannot be undone, so none ever allows two merges.
   // Each is checked again and spent while this process holds the execution's lock, which another merge of the run takes

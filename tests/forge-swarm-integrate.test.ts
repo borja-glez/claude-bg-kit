@@ -1397,4 +1397,15 @@ describe('a task is integrated only with the tree its review accepted (A3)', () 
     expect(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T2', 'baseline-1.json'), 'utf8')).toBe('[]\n');
     expect(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T2', 'brief-1.md'), 'utf8')).toBe('# T2\n');
   });
+  it('the merge takes the commit whose tree was checked, never a later tip of the task branch (Review Focus 3)', () => {
+    const w = accept('T1', 'a.txt', 'a\n');
+    const reviewed = g(w, 'rev-parse', 'HEAD');
+    accepted('T1', w);
+    // A commit lands on task/T1 while the integration runs its validators in the run worktree.
+    mkdirSync(path.join(runWt(), '.forge'), { recursive: true });
+    writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), 'validators:\n  - name: late\n    cmd: git -C ../task-T1 commit --allow-empty -qm late\n');
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated' });
+    expect(g(w, 'log', '-1', '--format=%s')).toBe('late');
+    expect(g(runWt(), 'rev-parse', 'HEAD^2')).toBe(reviewed);
+  });
 });

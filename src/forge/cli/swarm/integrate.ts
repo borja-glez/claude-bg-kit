@@ -97,7 +97,7 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps, planArg?: string, db
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'run', setup: config.swarm.setup, personal,
     retryDeps: rest.includes('--retry-deps'),
     run: runOptions(config, readEvents(io.cwd), io.now()),
-    main: io.cwd, cache: { read: cache, write: cache }, now: io.now, slot: io.slot, branch: e.branch,
+    main: io.cwd, cache: { read: cache, write: cache }, now: io.now, slot: io.slot, branch: e.branch, ...(tip ? { commit: tip } : {}),
   });
   // C4: the events of a plan run's task carry the run's project.
   logValidations(io, task, r.validations, e.kind === 'plan' && isSafeId(e.project) ? e.project : null);
