@@ -1,9 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseGuardInput, type GuardCtx, type GuardInput, type GuardVerdict } from '../src/forge/guard.js';
+import { run } from '../src/forge/cli/run.js';
+import { guardRulesFor } from '../src/forge/autonomous.js';
+import { AUTONOMY_RULES } from '../src/forge/autonomy-rules.js';
+import { parseGuardInput, TRUST_RULES, type GuardCtx, type GuardInput, type GuardVerdict } from '../src/forge/guard.js';
+import { CTX as AUTO_CTX } from './helpers/autonomy.js';
+import { useTempDirs } from './helpers/tmp.js';
 import { homeSpelled, isDotenvName, isForgeAgent, isVerifyAgent, secretOf, secretsRule } from '../src/forge/guard-secrets.js';
 
+const tmp = useTempDirs();
 const WIN = process.platform === 'win32';
 const HOME = path.resolve(os.tmpdir(), 'guard-home');
 const MAIN = path.join(HOME, 'work', 'shop');   // the repository under the home folder, as on the person's machine
@@ -141,5 +149,57 @@ describe('secretsRule in Bash and PowerShell (w7 A4, guard B)', () => {
     for (const t of ['~', '~/.ssh', '$HOME/.aws', '${HOME}/x', '$env:USERPROFILE\\.ssh', '${env:USERPROFILE}\\x', '%USERPROFILE%\\.ssh', '%HOMEDRIVE%%HOMEPATH%\\x'])
       expect(homeSpelled(t, HOME).startsWith(HOME), t).toBe(true);
     for (const t of ['~user/x', '$HOMEDIR/x', 'a/~/x', 'x$HOME']) expect(homeSpelled(t, HOME), t).toBe(t);
+  });
+});
+
+describe('forge hook guard: the secrets of the machine (w7 A4, guard B)', () => {
+  const SILENT = { code: 0, stdout: '', stderr: '' };
+  const NOW = () => new Date('2026-10-24T10:00:00.000Z');
+  const SSH = path.join(os.homedir(), '.ssh', 'id_rsa');
+  const git = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
+  let root: string;
+  beforeEach(() => { root = tmp('guard-b-'); git(root, 'init', '-q', '-b', 'main'); });
+  const guard = (input: Record<string, unknown>, cwd = root) => run(['hook', 'guard'], {
+    cwd: root, now: NOW, env: {},
+    stdin: JSON.stringify({ session_id: 's1', transcript_path: 't.jsonl', cwd, permission_mode: 'default', hook_event_name: 'PreToolUse', tool_use_id: 'toolu_1', ...input }),
+  });
+  const reason = (r: { code: number; stdout: string; stderr: string }) => {
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe('');
+    return JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason as string;
+  };
+  const sub = (agent_type: string) => ({ agent_id: 'a1', agent_type });
+  it('denies a forge subagent a Read, Grep, Glob, Edit or Bash of the credentials, and says why', () => {
+    const calls: [string, Record<string, unknown>][] = [['Read', { file_path: SSH }], ['Grep', { pattern: 'x', path: path.dirname(SSH) }], ['Glob', { pattern: '*', path: path.dirname(SSH) }],
+      ['Edit', { file_path: SSH, old_string: 'a', new_string: 'b' }], ['Bash', { command: 'cat ~/.aws/credentials' }]];
+    for (const [tool_name, tool_input] of calls) expect(reason(guard({ tool_name, tool_input, ...sub('forge:forge-impl') })), tool_name).toMatch(/^forge guard · secrets:/);
+  });
+  it('verify reads the repository\x27s .env and no other; an implementer reads none', () => {
+    const env = path.join(root, '.env');
+    expect(guard({ tool_name: 'Read', tool_input: { file_path: env }, ...sub('forge:forge-verify') })).toEqual(SILENT);
+    expect(reason(guard({ tool_name: 'Read', tool_input: { file_path: env }, ...sub('forge:forge-impl') }))).toContain('forge-verify');
+    expect(reason(guard({ tool_name: 'Write', tool_input: { file_path: env, content: '' }, ...sub('forge:forge-verify') }))).toMatch(/^forge guard · secrets:/);
+    expect(reason(guard({ tool_name: 'Read', tool_input: { file_path: path.join(tmp('guard-b-other-'), '.env') }, ...sub('forge:forge-verify-heavy') }))).toMatch(/^forge guard · secrets:/);
+  });
+  it('prints nothing for the person\x27s session and for other agents (Review Focus 2)', () => {
+    expect(guard({ tool_name: 'Read', tool_input: { file_path: SSH } })).toEqual(SILENT);
+    expect(guard({ tool_name: 'Read', tool_input: { file_path: SSH }, ...sub('general-purpose') })).toEqual(SILENT);
+    expect(guard({ tool_name: 'Bash', tool_input: { command: 'cat ~/.ssh/id_rsa' }, ...sub('Explore') })).toEqual(SILENT);
+    expect(guard({ tool_name: 'Grep', tool_input: { pattern: 'x', path: os.homedir() } })).toEqual(SILENT);
+  });
+  it('a Read never fails closed: where an unreadable run.json denies a Bash, a Read passes (Review Focus 2)', () => {
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'run.json'), '{"autonomous": ');
+    const wt = path.join(root, '.claude', 'worktrees', 'x');
+    mkdirSync(wt, { recursive: true });
+    const file = path.join(root, 'a.ts');
+    expect(guard({ tool_name: 'Read', tool_input: { file_path: file } }, wt)).toEqual(SILENT);
+    expect(guard({ tool_name: 'Read', tool_input: { file_path: file }, ...sub('forge:forge-impl') }, wt)).toEqual(SILENT);
+    expect(reason(guard({ tool_name: 'Bash', tool_input: { command: 'ls' } }, wt))).toContain('guard-error');
+  });
+  it('guardRulesFor runs the secrets rule after the trust rules for every session, and before the autonomy rules', () => {
+    const ids = (ctx: GuardCtx) => guardRulesFor(ctx).map(r => r.id);
+    expect(ids({ ...AUTO_CTX, autonomous: null })).toEqual([...TRUST_RULES.map(r => r.id), 'secrets']);
+    expect(ids(AUTO_CTX)).toEqual([...TRUST_RULES.map(r => r.id), 'secrets', ...AUTONOMY_RULES.map(r => r.id)]);
   });
 });

@@ -5,7 +5,7 @@
       { "matcher": "startup|clear|compact|fork", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook route-session" }] }
     ],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook route-prompt" }] }],
-    "PreToolUse": [{ "matcher": "^(Bash|PowerShell|Edit|Write|NotebookEdit)$|^mcp__", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook guard" }] }],
+    "PreToolUse": [{ "matcher": "^(Bash|PowerShell|Edit|Write|NotebookEdit|Read|Grep|Glob)$|^mcp__", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook guard" }] }],
     "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook answer" }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook live" }] }],
     "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook live" }] }],

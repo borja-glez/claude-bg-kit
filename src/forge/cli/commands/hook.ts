@@ -13,10 +13,11 @@ import { memberForHook } from '../../members.js';
 import { hookLive } from '../../live.js';
 import { hookRoute } from '../../route-hooks.js';
 import { hookAnswer } from '../../auth.js';
-import { guardOutput, parseGuardInput, shellCommand, targetPath, type GuardCtx, type GuardInput, type GuardVerdict } from '../../guard.js';
+import { evaluateGuard, guardOutput, parseGuardInput, shellCommand, targetPath, type GuardCtx, type GuardInput, type GuardVerdict } from '../../guard.js';
 import {
   INVALID_RUN, appendBlocked, autonomousFor, guardError, guardRulesFor, judgeGuard, redactSecrets, runMainsOf, type AutonomousCtx,
 } from '../../autonomous.js';
+import { READ_TOOLS, isForgeAgent, secretsRule } from '../../guard-secrets.js';
 import { trustPlace } from '../../trust.js';
 import { liveJobs } from '../../jobs.js';
 import type { Io } from '../run.js';
@@ -160,6 +161,15 @@ function hookGuard(io: Io): { stdout: string; stderr: string } {
   try {
     input = parseGuardInput(JSON.parse(io.stdin ?? ''));
     if (!input) return { stdout: '', stderr: '' };
+    if (READ_TOOLS.includes(input.tool_name)) {
+      // Read, Grep and Glob never build guardCtx and never fail closed: outside a forge agent they pass at once, and for
+      // one only the secrets rule judges them (judgeGuard would deny every call on an unreadable run.json: UNREADABLE_RUN).
+      if (!isForgeAgent(input.agent_type)) return { stdout: '', stderr: '' };
+      try {
+        const rctx = guardCtx(io, input);
+        return deliver(evaluateGuard(input, rctx, [secretsRule]), input, rctx.autonomous, io);
+      } catch { return { stdout: '', stderr: '' }; }
+    }
     const ctx = guardCtx(io, input);
     auto = ctx.autonomous;
     return deliver(judgeGuard(input, ctx, guardRulesFor(ctx)), input, auto, io);

@@ -12,6 +12,7 @@ import { listMembers } from './members.js';
 import { autonomousDir, autonomousRoot, readResources, runTmp, type Resource } from './resources.js';
 import { isInside, evaluateGuard, forgeCalls, shellCommand, CWD_FLAG, TRUST_RULES, type GuardCtx, type GuardInput, type GuardRule, type GuardVerdict } from './guard.js';
 import { AUTONOMY_RULES } from './autonomy-rules.js';
+import { secretsRule } from './guard-secrets.js';
 import { parseExecution, type ExecutionState } from '../lib/execution-state.js';
 import { samePath } from '../lib/worktree.js';
 
@@ -262,9 +263,9 @@ export function judgeGuard(input: GuardInput, ctx: GuardCtx, rules: readonly Gua
   }
 }
 
-/** The rules for a context: the trust rules of 6a, and the autonomy rules only for an autonomous run. Reads only ctx.autonomous. */
+/** The rules for a context: the trust rules of 6a, the secrets rule for every session (it acts only on a forge agent), and the autonomy rules only for an autonomous run. Reads only ctx.autonomous. */
 export function guardRulesFor(ctx: GuardCtx): readonly GuardRule[] {
-  return ctx.autonomous ? [...TRUST_RULES, ...AUTONOMY_RULES] : TRUST_RULES;
+  return [...TRUST_RULES, secretsRule, ...(ctx.autonomous ? AUTONOMY_RULES : [])];
 }
 
 const VALUE = String.raw`(?:"[^"\n]*"|'[^'\n]*'|[^\s;|&"']+)`;
