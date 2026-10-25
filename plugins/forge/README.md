@@ -30,6 +30,7 @@ Triage by size, the right model for each role, your own tools first, independent
 - [Verification](#verification)
 - [Validation](#validation)
 - [Configuration](#configuration)
+- [Doctor](#doctor)
 - [Security](#security)
 - [CLI reference](#cli-reference)
 
@@ -474,6 +475,10 @@ Pair from Settings > Devices and weigh: the weight must show on the main screen.
 - A validator with `affects` runs on `validate --affected` only when one of the changed paths matches. Without `affects`, it always runs.
 - Which validators run depends on the kind and the moment: `test`, `lint`, `typecheck` and `other` always run; `build` is skipped with `--affected`; `e2e` runs only on Medium and Large tasks when its `affects` match the diff (or it has none), and at the final review; `bench` runs only at the final review. A kind forge does not know runs on Medium and Large tasks and at the final review. A validator's `when` overrides all of this. `--all` therefore does not run every validator.
 
+## Doctor
+
+`forge doctor` reads your working state and your install and says why forge might not move, without changing anything. Each check is isolated and reports `ok`, `warn` (something to look at), `fail` (forge cannot run as installed) or `unverified` (it could not read what it needed). It exits 2 when there is a `warn` or a `fail`, else 1 when something could not be read, else 0. It never repairs: every `warn` and `fail` names its remedy and whether you run it or it needs your confirmation (`swarm cleanup`, `verify-cleanup`, `waypoint doctor --fix`, a settings edit). It checks the step lock and background jobs, a merge in flight, a stale `execution.lock`, your trust in the commands of `.forge/config.yaml`, whether git tracks `.forge/local.yaml` or `learned.jsonl`, verify-env reservations with no live process, the merged worktrees `swarm cleanup` would remove, the installed waypoint against forge's range, which copy of forge and waypoint runs, superpowers against the range `forge:route` follows, the recommended permissions, and `waypoint doctor` (without `--fix`). It also reports, as data, a subagent whose tool call has been waiting a while. Run it as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" doctor [--locale es|en]`.
+
 ## Security
 
 forge keeps what only you may decide out of Claude's hands. A `PreToolUse` hook, `hook guard`, denies Edit, Write and NotebookEdit on the files that record your answers (in an autonomous run it also judges Bash, PowerShell and the MCP tools with the rules of [Autonomous runs: what the guard blocks](#autonomous-runs-what-the-guard-blocks)), and tells Claude why:
@@ -536,6 +541,7 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `decision md --scope s [--out f] [--locale es|en]` - write the automatic decisions of a scope to `docs/forge/decisions/<scope>.md` (or `--out`); writes nothing when there are none.
 - `last --task id` - the path, last phase event, last verdict and last round of a task.
 - `stats [--days N | --since iso] [--json] [--locale es|en]` - the clock of the accepted briefs from the main checkout's ledger: per brief and per path, the time in `implement`, `validate`, `review`, `verdict` and `fix`, the validators' share and the cache hits, the fixed cost of a brief accepted at once (`overheadMin`) and, with 5 plan tasks or more, real over estimated time (`estimate`).
+- `doctor [--locale es|en]` - a read-only health report: `{checks: [{id, status, detail, fix?, data?}], say}`, with `status` one of `ok|warn|fail|unverified`; it exits 2 (a warn or a fail), else 1 (something unreadable), else 0, and changes nothing.
 - `agents` - agent names for the active profile.
 - `surfaces [learn --name N --notes-file F [--heading H] [--task id] [--cwd wt] | proposed --name N | digest --run <runId> [--locale es|en]]` - list the surfaces and detected drafts (each with the `header` to write); append the general notes (one line of at most 240 characters, naming neither the task nor a `.forge/work/` path, not repeated, not reading as an instruction or holding a secret) to the `Learned` section of the surface in `--cwd`, and say which it dropped and why; mark a draft as proposed; `digest` shows what a run's verifications learned, by surface, and the proposals they left.
 - `tools [--surface N]` - check the tools a surface lists: `found` (on the PATH or among the MCP servers configured for Claude Code: plugins, `.claude.json`, `.mcp.json`), `missing` (a known program that is not installed) or `unknown`.

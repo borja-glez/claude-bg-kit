@@ -1921,6 +1921,16 @@ describe('plugin layout', () => {
       expect(md.split('\n').find(l => l.startsWith('- `hook guard`')), f).toMatch(/Read, Grep/);
     }
   });
+  it('the forge READMEs document forge doctor: its section, its statuses and its CLI line (w7 A4)', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      const lines = md.split('\n');
+      expect(lines, f).toContain('## Doctor');
+      expect(lines, f).toContain('- [Doctor](#doctor)');
+      for (const w of ['`forge doctor`', '`ok`', '`warn`', '`fail`', '`unverified`', '`waypoint doctor --fix`']) expect(md, `${f}: ${w}`).toContain(w);
+      expect(lines.find(l => l.startsWith('- `doctor [--locale es|en]`')), f).toContain('ok|warn|fail|unverified');
+    }
+  });
   it('the final merge goes through a recorded answer: authorize merge-on-finish with the run id, and each ask as printed (I-03)', () => {
     const large = runRef('large');
     for (const w of ['FORGE authorize merge-on-finish --run <runId>', '"runId"']) expect(large, w).toContain(w);

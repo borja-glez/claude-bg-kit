@@ -30,6 +30,7 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 - [Verificación](#verificación)
 - [Validación](#validación)
 - [Configuración](#configuración)
+- [Doctor](#doctor)
 - [Seguridad](#seguridad)
 - [Referencia de la CLI](#referencia-de-la-cli)
 
@@ -474,6 +475,10 @@ Empareja desde Ajustes > Dispositivos y pesa: debe salir el peso en la pantalla 
 - Un validador con `affects` solo se ejecuta en `validate --affected` si casa alguna de las rutas cambiadas. Sin `affects`, se ejecuta siempre.
 - Qué validadores se ejecutan depende del tipo y del momento: `test`, `lint`, `typecheck` y `other` se ejecutan siempre; `build` se salta con `--affected`; `e2e` solo se ejecuta en tareas Medium y Large cuando sus `affects` casan con el diff (o no tiene), y en la revisión final; `bench` solo en la revisión final. Un tipo que forge no conoce se ejecuta en tareas Medium y Large y en la revisión final. El `when` de un validador manda sobre todo esto. Por eso `--all` no ejecuta todos los validadores.
 
+## Doctor
+
+`forge doctor` lee tu estado de trabajo y tu instalación y dice por qué forge puede no avanzar, sin cambiar nada. Cada comprobación está aislada y da `ok`, `warn` (algo que mirar), `fail` (forge no puede ejecutarse tal como está instalado) o `unverified` (no pudo leer lo que necesitaba). Sale con 2 si hay algún `warn` o `fail`, si no con 1 cuando algo no se pudo leer, y si no con 0. Nunca repara: cada `warn` y `fail` nombra su remedio y si lo ejecutas tú o necesita tu confirmación (`swarm cleanup`, `verify-cleanup`, `waypoint doctor --fix`, un cambio en los ajustes). Comprueba el cerrojo de paso y los trabajos en segundo plano, una fusión en curso, un `execution.lock` rancio, tu confianza en los comandos de `.forge/config.yaml`, si git rastrea `.forge/local.yaml` o `learned.jsonl`, las reservas del entorno de verify sin proceso vivo, los worktrees ya fusionados que `swarm cleanup` quitaría, el waypoint instalado frente al rango de forge, qué copia de forge y de waypoint se ejecuta, superpowers frente al rango que sigue `forge:route`, los permisos recomendados y `waypoint doctor` (sin `--fix`). También informa, como dato, de un subagente cuya llamada a una herramienta lleva un rato esperando. Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" doctor [--locale es|en]`.
+
 ## Seguridad
 
 forge deja fuera del alcance de Claude lo que solo decides tú. Un hook `PreToolUse`, `hook guard`, deniega Edit, Write y NotebookEdit sobre los ficheros que guardan tus respuestas (en una ejecución autónoma juzga también Bash, PowerShell y las herramientas MCP con las reglas de [Ejecuciones autónomas: lo que bloquea el guard](#ejecuciones-autónomas-lo-que-bloquea-el-guard)), y le dice a Claude por qué:
@@ -536,6 +541,7 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `decision md --scope s [--out f] [--locale es|en]` - escribe las decisiones automáticas de un ámbito en `docs/forge/decisions/<ámbito>.md` (o en `--out`); no escribe nada si no hay ninguna.
 - `last --task id` - el camino, el último evento de fase, el último veredicto y la última ronda de una tarea.
 - `stats [--days N | --since iso] [--json] [--locale es|en]` - el reloj de los briefs aceptados según el ledger del checkout principal: por brief y por camino, el tiempo en `implement`, `validate`, `review`, `verdict` y `fix`, la parte de los validadores y los aciertos de caché, el coste fijo de un brief aceptado a la primera (`overheadMin`) y, con 5 tareas de plan o más, el tiempo real entre el estimado (`estimate`).
+- `doctor [--locale es|en]` - un informe de salud de solo lectura: `{checks: [{id, status, detail, fix?, data?}], say}`, con `status` uno de `ok|warn|fail|unverified`; sale con 2 (un warn o un fail), si no con 1 (algo ilegible), si no con 0, y no cambia nada.
 - `agents` - los nombres de los agentes del perfil activo.
 - `surfaces [learn --name N --notes-file F [--heading H] [--task id] [--cwd wt] | proposed --name N | digest --run <runId> [--locale es|en]]` - lista las superficies y los borradores detectados (cada uno con la `header` que hay que escribir); añade las notas generales (una línea de 240 caracteres como mucho, que no nombre la tarea ni una ruta de `.forge/work/`, no repetida, y que no parezca una instrucción ni contenga un secreto) a la sección `Aprendido` de la superficie de `--cwd`, y dice cuáles descartó y por qué; marca un borrador como propuesto; `digest` enseña lo que aprendieron las verificaciones de una ejecución, por superficie, y las propuestas que dejaron.
 - `tools [--surface N]` - comprueba las herramientas que lista una superficie: `found` (en el PATH o entre los servidores MCP configurados para Claude Code: plugins, `.claude.json`, `.mcp.json`), `missing` (un programa conocido que no está instalado) o `unknown`.
