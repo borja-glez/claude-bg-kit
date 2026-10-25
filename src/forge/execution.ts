@@ -118,6 +118,18 @@ function lockHolder(file: string): Holder | null {
   } catch { return null; }
 }
 
+export type LockState = { held: false } | { held: true; pid: number | null; stale: boolean; startedAt: string | null };
+/** .forge/execution.lock as it is now, without taking or removing it: whether a live process holds it, and whether it is past LOCK_STALE_MS. */
+export function executionLockState(root: string, now: Date, alive: (pid: number) => boolean = pidAlive): LockState {
+  const file = executionLock(root);
+  if (!existsSync(file)) return { held: false };
+  const h = lockHolder(file);
+  if (h) return { held: true, pid: h.pid, startedAt: h.at, stale: !alive(h.pid) || !(now.getTime() - Date.parse(h.at) < LOCK_STALE_MS) };
+  let stale = false;
+  try { stale = now.getTime() - statSync(file).mtimeMs >= LOCK_STALE_MS; } catch { stale = false; }
+  return { held: true, pid: null, startedAt: null, stale };
+}
+
 /**
  * The takeover of a stale lock, one process at a time: .forge/execution.lock.takeover, created with 'wx' and held only
  * while the lock is compared and removed. Without it two processes could both find the same stale lock, and the second
@@ -230,6 +242,13 @@ export function readExecution(root: string): ExecutionState | null {
   if (!createIfAbsent(file, JSON.stringify(migrated, null, 2) + '\n')) return read();
   try { renameSync(swarmFile(root), `${swarmFile(root)}.migrated`); } catch { /* another reader moved it first */ }
   return migrated;
+}
+
+/** The execution as the file says, never migrating swarm.json (readExecution writes on migration): { migratable: true } when only a legacy swarm.json is there. */
+export function peekExecution(root: string): { exec: ExecutionState | null; migratable: boolean } {
+  const file = executionFile(root);
+  if (existsSync(file)) { try { return { exec: parseExecution(readFileSync(file, 'utf8')) ?? null, migratable: false }; } catch { return { exec: null, migratable: false }; } }
+  return { exec: null, migratable: existsSync(swarmFile(root)) };
 }
 
 export function writePublicTask(root: string, p: PublicTask): void {

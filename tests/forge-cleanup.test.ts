@@ -218,6 +218,16 @@ describe('swarm cleanup leaves what is still in use, or not yet kept anywhere el
     expect(r.stderr).toContain('swarm cleanup: a swarm step is running');
     nothingMoved();
   });
+  it('--dry-run keeps the file of a job whose process died, and a cleanup still removes it (w7 A4: doctor runs the dry run)', () => {
+    mkdirSync(forge('jobs'), { recursive: true });
+    const file = forge('jobs', 'integrate-T2-1.json');
+    writeFileSync(file, JSON.stringify({ name: 'integrate-T2-1', cmd: 'integrate', task: 'T2', pid: spawnSync(process.execPath, ['-e', '']).pid!, startedAt: at, out: 'o.json', session: null }));
+    const dry = run(['swarm', 'cleanup', '--dry-run'], io);
+    expect(dry.code, dry.stderr).toBe(0);
+    expect(existsSync(file)).toBe(true);
+    expect(run(['swarm', 'cleanup'], io).code).toBe(0);
+    expect(existsSync(file)).toBe(false);
+  });
   it('a marker, a job or a step.lock whose process died does not stop it', () => {
     const dead = spawnSync(process.execPath, ['-e', '']).pid!;
     const staleAt = new Date(NOW.getTime() + 3600_000).toISOString();

@@ -12,7 +12,9 @@ const waypoint = JSON.parse(readFileSync('plugins/waypoint/.claude-plugin/plugin
 // and forge-blocked, whose M8 test records 1,005 decisions (about 9 s);
 // since 6b-2, forge-profile, whose tests prepare and start profiles on a real repository and its worktrees (about 9 s),
 // and forge-trust-delegated, which does the same before each delegated-trust test (about 5 s alone).
+// since w7 A4, forge-doctor, which starts git and reads real state.
 export const SLOW = [
+  'tests/forge-doctor.test.ts',
   'tests/forge-blocked.test.ts',
   'tests/forge-swarm-integrate.test.ts',
   'tests/forge-execution-lock.test.ts',

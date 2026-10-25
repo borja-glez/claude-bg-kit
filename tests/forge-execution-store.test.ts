@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   readExecution, executionFile, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, updateExecution, executionLock, LOCK_STALE_MS, createIfAbsent,
-  writeAtomic,
+  writeAtomic, executionLockState, peekExecution,
 } from '../src/forge/execution.js';
 import { run } from '../src/forge/cli/run.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
@@ -91,6 +91,20 @@ describe('updateExecution and execution.lock (I-15)', () => {
   const lock = (o: unknown) => writeFileSync(executionLock(root), typeof o === 'string' ? o : JSON.stringify(o));
   // A pid that existed and is gone: its process already exited.
   const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid!;
+
+  it('executionLockState reads the lock without taking it; peekExecution never migrates swarm.json', () => {
+    expect(executionLockState(root, new Date())).toEqual({ held: false });
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    const lockFile = path.join(root, '.forge', 'execution.lock');
+    writeFileSync(lockFile, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+    expect(executionLockState(root, new Date())).toMatchObject({ held: true, pid: process.pid, stale: false });
+    writeFileSync(lockFile, JSON.stringify({ pid: deadPid(), at: new Date(Date.now() - 60_000).toISOString() }));
+    expect(executionLockState(root, new Date())).toMatchObject({ held: true, stale: true });
+    expect(readFileSync(lockFile, 'utf8')).toContain('"pid"'); // still there: nothing was taken
+    writeFileSync(path.join(root, '.forge', 'swarm.json'), JSON.stringify({ project: 'shop', tasks: {}, active: false }));
+    expect(peekExecution(root)).toMatchObject({ exec: null, migratable: true });
+    expect(existsSync(path.join(root, '.forge', 'execution.json'))).toBe(false);
+  });
 
   it('reads the execution as it is now, writes what fn returns and releases the lock', () => {
     seedExecution(root, e());

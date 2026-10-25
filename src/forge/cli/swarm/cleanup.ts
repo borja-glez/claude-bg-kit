@@ -4,7 +4,7 @@ import path from 'node:path';
 import { UsageError } from '../errors.js';
 import { unmergedEvents } from '../../ledger.js';
 import { readExecution } from '../../execution.js';
-import { liveJobs, stepLockHeld } from '../../jobs.js';
+import { liveJobs, scanJobs, stepLockHeld } from '../../jobs.js';
 import { mergeInFlight } from '../../merging.js';
 import { isPlanId } from '../../../lib/plan.js';
 import { forgeBranches, forgeWorktrees, isForgeBranch, pruneRunState, pruneWork } from '../../cleanup.js';
@@ -25,7 +25,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     const m = inFlight.doc;
     throw new UsageError(`swarm cleanup: an integration is merging (.forge/execution/merging.json${m ? `, pid ${m.pid}${m.task ? `, ${m.task}` : ''}` : ''}); run it again once it ends`);
   }
-  const job = liveJobs(io.cwd, now)[0];
+  const job = (dryRun ? scanJobs(io.cwd, now).live : liveJobs(io.cwd, now))[0];
   if (job) throw new UsageError(`swarm cleanup: a background forge command is running (${job.cmd}${job.task ? ` ${job.task}` : ''}, .forge/jobs/${job.name}.json); run it again once it ends`);
   const step = stepLockHeld(io.cwd, now);
   if (step) throw new UsageError(`swarm cleanup: a swarm step is running (.forge/jobs/step.lock${step.pid ? `, pid ${step.pid}` : ''}); run it again once it ends`);

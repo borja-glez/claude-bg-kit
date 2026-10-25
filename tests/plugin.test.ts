@@ -1928,12 +1928,29 @@ describe('plugin layout', () => {
       .toEqual([{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" hook answer' }] }]);
     expect(read('plugins/forge/hooks/hooks.json').split('hook answer')).toHaveLength(2);
   });
-  it('forge hooks: guard on PreToolUse for Bash, PowerShell, Edit, Write, NotebookEdit and the MCP tools (D9, 6b-1)', () => {
+  it('forge hooks: guard on PreToolUse for Bash, PowerShell, Edit, Write, NotebookEdit, Read, Grep, Glob and the MCP tools (D9, 6b-1, w7 A4)', () => {
     const pre = JSON.parse(read('plugins/forge/hooks/hooks.json')).hooks.PreToolUse;
-    expect(pre).toEqual([{ matcher: '^(Bash|PowerShell|Edit|Write|NotebookEdit)$|^mcp__', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" hook guard' }] }]);
+    expect(pre).toEqual([{ matcher: '^(Bash|PowerShell|Edit|Write|NotebookEdit|Read|Grep|Glob)$|^mcp__', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" hook guard' }] }]);
     const re = new RegExp(pre[0].matcher);
-    for (const t of ['Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell', 'mcp__github__create_issue']) expect(re.test(t), t).toBe(true);
-    for (const t of ['Read', 'Grep', 'Glob', 'WebFetch', 'BashOutput', 'Agent']) expect(re.test(t), t).toBe(false);
+    for (const t of ['Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell', 'Read', 'Grep', 'Glob', 'mcp__github__create_issue']) expect(re.test(t), t).toBe(true);
+    for (const t of ['WebFetch', 'BashOutput', 'Agent', 'ReadMcpResourceTool', 'Globber']) expect(re.test(t), t).toBe(false);
+  });
+  it('the forge READMEs say what guard B covers, for whom, and that it is a pattern guard (w7 A4)', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const w of ['`~/.ssh`', '`~/.git-credentials`', '`~/.kube`', '`forge-verify-heavy`', '`.env.example`', '`agent_type`']) expect(md, `${f}: ${w}`).toContain(w);
+      expect(md.split('\n').find(l => l.startsWith('- `hook guard`')), f).toMatch(/Read, Grep/);
+    }
+  });
+  it('the forge READMEs document forge doctor: its section, its statuses and its CLI line (w7 A4)', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      const lines = md.split('\n');
+      expect(lines, f).toContain('## Doctor');
+      expect(lines, f).toContain('- [Doctor](#doctor)');
+      for (const w of ['`forge doctor`', '`ok`', '`warn`', '`fail`', '`unverified`', '`waypoint doctor --fix`']) expect(md, `${f}: ${w}`).toContain(w);
+      expect(lines.find(l => l.startsWith('- `doctor [--locale es|en]`')), f).toContain('ok|warn|fail|unverified');
+    }
   });
   it('the final merge goes through a recorded answer: authorize merge-on-finish with the run id, and each ask as printed (I-03)', () => {
     const large = runRef('large');
