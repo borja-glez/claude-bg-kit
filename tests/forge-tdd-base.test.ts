@@ -8,6 +8,7 @@ import { detectValidators } from '../src/forge/validators.js';
 import { parseConfig } from '../src/forge/config.js';
 import { defaultExec, defaultGit, repoReader } from '../src/forge/cli/exec.js';
 import { useTempDirs } from './helpers/tmp.js';
+import { run, type Io } from '../src/forge/cli/run.js';
 const tmp = useTempDirs();
 
 const RUNNER = [
@@ -143,5 +144,32 @@ describe('the TDD check on BASE (A9)', () => {
     expect(tddForBrief(f.ctx()).row.tdd.bug).toEqual({ rootCause: null });
     writeFileSync(path.join(f.work, 'brief-1.md'), '# T1\n');
     expect(tddForBrief(f.ctx()).row.tdd).not.toHaveProperty('bug');
+  });
+});
+
+describe('forge tdd check (A9)', () => {
+  const io = (f: { root: string }): Io => ({ cwd: f.root, now: () => new Date('2026-10-24T10:00:00.000Z'), env: { CLAUDE_CONFIG_DIR: tmp('cfg-') } });
+  const args = (f: { base: string; wt: string }) => ['tdd', 'check', '--task', 'T1-1', '--base', f.base, '--dir', '.forge/work/T1', '--cwd', f.wt];
+  it('runs the check of a brief, writes tdd-<n>.json and prints it, with its say only under --locale', () => {
+    const f = fixture();
+    const r = run([...args(f), '--locale', 'en'], io(f));
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out).toMatchObject({ file: '.forge/work/T1/tdd-1.json', reused: false, passedOnBase: ['tests/math.test.mjs > add still sums'] });
+    expect(typeof out.say).toBe('string');
+    expect(readTdd(path.join(f.work, 'tdd-1.json'))).toMatchObject({ passedOnBase: out.passedOnBase });
+    const again = JSON.parse(run(args(f), io(f)).stdout);
+    expect(again).toMatchObject({ reused: true });
+    expect(again).not.toHaveProperty('say');
+  });
+  it('refuses without tdd: verified, without its flags, or with a base that is not HEAD or below it, and writes nothing', () => {
+    const off = fixture({ config: CONFIG.replace('tdd: verified', 'tdd: off') });
+    expect(run(args(off), io(off)).code).toBe(2);
+    const f = fixture();
+    expect(run(['tdd', 'check', '--task', 'T1-1', '--cwd', f.wt], io(f)).code).toBe(2);
+    expect(run(['tdd', 'check', '--task', 'T1', '--base', f.base, '--dir', '.forge/work/T1', '--cwd', f.wt], io(f)).code).toBe(2);
+    const loose = f.git('commit-tree', `${f.base}^{tree}`, '-m', 'not below HEAD');
+    expect(run(['tdd', 'check', '--task', 'T1-1', '--base', loose, '--dir', '.forge/work/T1', '--cwd', f.wt], io(f)).code).toBe(2);
+    for (const x of [off, f]) expect(existsSync(path.join(x.work, 'tdd-1.json'))).toBe(false);
   });
 });

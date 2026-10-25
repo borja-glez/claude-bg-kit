@@ -45,7 +45,7 @@ const ROLES: readonly ReviewRole[] = ['review-correctness', 'review-security', '
 const EFFORTS = ['medium', 'high', 'xhigh'] as const;
 // C-08: red validators go back to the implementer without reviewers at most this many times per review.
 const MAX_VALIDATOR_ROUNDS = 2;
-const TASK_N = /^([A-Za-z0-9_.~:@+]+(?:-[A-Za-z0-9_.~:@+]+)*)-(\d{1,4})$/;
+export const TASK_N = /^([A-Za-z0-9_.~:@+]+(?:-[A-Za-z0-9_.~:@+]+)*)-(\d{1,4})$/;
 
 const json = (v: unknown, code = 0): Result => ({ code, stdout: JSON.stringify(v, null, 2) + '\n', stderr: '' });
 const rel = (cwd: string, p: string) => path.relative(cwd, p).split(path.sep).join('/') || '.';
