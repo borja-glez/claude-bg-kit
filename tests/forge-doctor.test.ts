@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { doctorExit, doctorSay, runChecks, satisfiesRange, type CheckResult, type DoctorCheck, type DoctorCtx } from '../src/forge/doctor.js';
 import { run, type Io } from '../src/forge/cli/run.js';
@@ -138,5 +138,94 @@ describe('forge doctor (the command)', () => {
     const files = (readdirSync(dir, { recursive: true }) as string[]).filter(f => statSync(path.join(dir, f)).isFile()).map(f => f.split(path.sep).join('/'));
     expect(files.sort()).toEqual(Object.keys(seed).sort());
     for (const [rel, text] of Object.entries(seed)) expect(readFileSync(path.join(dir, rel), 'utf8'), rel).toBe(text);
+  });
+});
+
+describe('forge doctor · install', () => {
+  let root: string, cfg: string;
+  const git = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
+  const forgeRoot = () => path.join(root, 'plugins', 'forge');
+  const io = (): Io => ({ cwd: root, now: () => new Date('2026-10-24T10:00:00.000Z'), env: { CLAUDE_CONFIG_DIR: cfg }, scriptPath: path.join(forgeRoot(), 'dist', 'forge.cjs') });
+  const check = (id: string) => (JSON.parse(run(['doctor'], io()).stdout).checks as CheckResult[]).find(c => c.id === id)!;
+  // An install as Claude Code keeps it: <cfg>/plugins/cache/<marketplace>/<name>/<version>, listed in installed_plugins.json.
+  const plugin = (name: string, version: string) => {
+    const p = path.join(cfg, 'plugins', 'cache', 'm', name, version);
+    mkdirSync(path.join(p, '.claude-plugin'), { recursive: true });
+    writeFileSync(path.join(p, '.claude-plugin', 'plugin.json'), JSON.stringify({ name, version }));
+    return { scope: 'user', installPath: p, version };
+  };
+  const installed = (plugins: Record<string, unknown[]> | string) => {
+    mkdirSync(path.join(cfg, 'plugins'), { recursive: true });
+    writeFileSync(path.join(cfg, 'plugins', 'installed_plugins.json'), typeof plugins === 'string' ? plugins : JSON.stringify({ version: 2, plugins }));
+  };
+  beforeEach(() => {
+    root = tmp('doctor-install-');
+    cfg = path.join(root, 'cfg');
+    git(root, 'init', '-q', '-b', 'main');
+    mkdirSync(path.join(forgeRoot(), '.claude-plugin'), { recursive: true });
+    writeFileSync(path.join(forgeRoot(), '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'forge', version: '0.30.1', dependencies: [{ name: 'waypoint', version: '^0.35.0' }] }));
+  });
+  it('waypoint: absent or outside forge\'s range fails, inside it is ok', () => {
+    expect(check('waypoint-version')).toMatchObject({ status: 'fail', fix: { kind: 'manual' } });
+    installed({ 'waypoint@m': [plugin('waypoint', '0.9.0')] });
+    expect(check('waypoint-version')).toMatchObject({ status: 'fail', fix: { kind: 'manual' } });
+    installed({ 'waypoint@m': [plugin('waypoint', '0.35.1')] });
+    expect(check('waypoint-version').status).toBe('ok');
+  });
+  it('a version that does not parse is read from the plugin.json, and unverified when that fails too (R12)', () => {
+    const hashed = plugin('waypoint', '0.35.1');
+    installed({ 'waypoint@m': [{ ...hashed, version: 'unknown' }] });
+    expect(check('waypoint-version').status).toBe('ok');
+    writeFileSync(path.join(hashed.installPath, '.claude-plugin', 'plugin.json'), '{oops');
+    expect(check('waypoint-version').status).toBe('unverified');
+    const sp = plugin('superpowers', '7.0.1');
+    installed({ 'superpowers@o': [{ ...sp, version: 'abc123' }] });
+    expect(check('superpowers-version').status).toBe('ok');
+    writeFileSync(path.join(sp.installPath, '.claude-plugin', 'plugin.json'), '{oops');
+    expect(check('superpowers-version').status).toBe('unverified');
+  });
+  it('the running copy: installPath when it is the installed one; another copy with forge installed elsewhere warns', () => {
+    installed({ 'forge@m': [{ scope: 'user', installPath: forgeRoot(), version: '0.30.1' }] });
+    expect(check('running-copy')).toMatchObject({ status: 'ok', data: { forge: { kind: 'installPath', version: '0.30.1' } } });
+    installed({ 'forge@m': [plugin('forge', '0.30.1')] });
+    expect(check('running-copy')).toMatchObject({ status: 'warn', data: { forge: { kind: 'other' } }, fix: { kind: 'manual' } });
+  });
+  it('superpowers: absent is ok, 6.x warns against the route range, 7.x is ok', () => {
+    expect(check('superpowers-version').status).toBe('ok');
+    installed({ 'superpowers@o': [plugin('superpowers', '6.4.1')] });
+    expect(check('superpowers-version')).toMatchObject({ status: 'warn', fix: { kind: 'manual' } });
+    installed({ 'superpowers@o': [plugin('superpowers', '7.0.1')] });
+    expect(check('superpowers-version').status).toBe('ok');
+  });
+  it('an installed_plugins.json that does not read leaves the install checks unverified, never fail nor ok (Review Focus 5)', () => {
+    installed('garbage');
+    for (const id of ['waypoint-version', 'running-copy', 'superpowers-version']) expect(check(id).status, id).toBe('unverified');
+  });
+  it('permissions: none or only the user\'s warns and recommends, a settings.local.json that does not read is unverified, the project\'s entry is ok (Review Focus 5)', () => {
+    const allow = JSON.stringify({ permissions: { allow: ['Bash(node *forge.cjs*)'] } });
+    expect(check('permissions')).toMatchObject({ status: 'warn', fix: { kind: 'manual' }, data: { recommend: { allow: ['Bash(node *forge.cjs*)'] } } });
+    mkdirSync(cfg, { recursive: true });
+    writeFileSync(path.join(cfg, 'settings.json'), allow);
+    expect(check('permissions').status).toBe('warn');
+    mkdirSync(path.join(root, '.claude'), { recursive: true });
+    writeFileSync(path.join(root, '.claude', 'settings.local.json'), '{oops');
+    expect(check('permissions').status).toBe('unverified');
+    writeFileSync(path.join(root, '.claude', 'settings.local.json'), allow);
+    expect(check('permissions').status).toBe('ok');
+  });
+  it('waypoint doctor runs without --fix: no waypoint is unverified, its leftovers warn with a confirm fix and stay (Review Focus 4)', () => {
+    expect(check('waypoint-doctor').status).toBe('unverified');
+    // the dev layout: <root>/plugins/waypoint/dist/waypoint.cjs next to <root>/plugins/forge, a copy of the repository's own bundle
+    const wp = path.join(root, 'plugins', 'waypoint', 'dist', 'waypoint.cjs');
+    mkdirSync(path.dirname(wp), { recursive: true });
+    copyFileSync(new URL('../plugins/waypoint/dist/waypoint.cjs', import.meta.url), wp);
+    expect(check('waypoint-doctor').status).toBe('ok');
+    mkdirSync(path.join(root, 'docs', 'waypoint', 'demo-shop'), { recursive: true });
+    copyFileSync(new URL('./fixtures/plan.yaml', import.meta.url), path.join(root, 'docs', 'waypoint', 'demo-shop', 'plan.yaml'));
+    const left = path.join(root, '.waypoint', 'demo-shop', 'last-head');
+    mkdirSync(path.dirname(left), { recursive: true });
+    writeFileSync(left, 'abc\n');
+    expect(check('waypoint-doctor')).toMatchObject({ status: 'warn', fix: { kind: 'confirm' }, data: { leftovers: ['.waypoint/demo-shop/last-head'] } });
+    expect(readFileSync(left, 'utf8')).toBe('abc\n');
   });
 });
