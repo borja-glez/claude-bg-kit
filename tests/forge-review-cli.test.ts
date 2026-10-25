@@ -1797,6 +1797,16 @@ describe('security by the zones of the real diff (K4-06)', () => {
     commit('src/ui/Button.tsx', 'export const Button = () => null;\n');
     expect(roles(prepOnly('--sensitive'))).toContain('review-security');
   });
+  it('a strict sink outside every zone keeps the security review triage --base gave it, with --sensitive, without the flag (A7)', () => {
+    commit('src/ui/footer.ts', 'export const show = (el: HTMLElement, params: URLSearchParams) => { el.innerHTML = eval(params.get("x") ?? ""); };\n');
+    const triaged = run(['triage', 'add a footer link', '--task', 'T1', '--base', base, '--cwd', wt], io);
+    expect(triaged.code, triaged.stderr).toBe(0);
+    expect(JSON.parse(triaged.stdout)).toMatchObject({ path: 'medium', sensitive: [], sinks: [{ kind: 'eval', file: 'src/ui/footer.ts', line: 1 }],
+      review: { flags: ['--sensitive'] } });
+    const out = prepOnly();
+    expect(roles(out)).toEqual(['review-correctness', 'review-security']);
+    expect(JSON.parse(readFileSync(path.join(work(), 'reviews-1-1', 'review-plan.json'), 'utf8')).flags).toEqual(['--sensitive']);
+  });
   it('deleting a file under auth/ touches the zone (Review Focus 5)', () => {
     commit('src/auth/token.ts', 'export const ttl = 60;\n');
     base = git('rev-parse', 'HEAD');

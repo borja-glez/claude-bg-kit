@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import {
-  CONFIGS, DEMO_SHOP, appendTrial, claudeArgs, demoRepo, parseArgs, passes, pending, projectSettingsFor, providerError, readStream, readTrials, sessionEnv, settingsFor,
-  stopReason, summarize, table, trialKey, wilson, type EvalPrompt, type EvalResult,
+  CONFIGS, DEMO_SHOP, appendTrial, claudeArgs, demoRepo, foreignPromptHooks, forgeHookRan, parseArgs, passes, pending, projectSettingsFor, providerError, readStream,
+  readTrials, sessionEnv, settingsFor, stopReason, summarize, table, trialKey, wilson, type EvalPrompt, type EvalResult,
 } from '../scripts/route-eval/lib.mjs';
 import { locateSuperpowers } from '../src/forge/superpowers.js';
 import { run, type Io } from '../src/forge/cli/run.js';
@@ -24,15 +24,16 @@ describe('route-eval', () => {
       line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'forge:route' } }] } }),
       line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'superpowers:brainstorming' } }] } }),
     ].join('\n');
-    expect(readStream(stream)).toEqual({ firstSkill: 'forge:route', plugins: ['forge', 'waypoint'], stop: null, cost: null, isError: null, apiStatus: null, hooks: [] });
-    expect(readStream('')).toEqual({ firstSkill: null, plugins: null, stop: null, cost: null, isError: null, apiStatus: null, hooks: [] });
+    expect(readStream(stream)).toEqual({ firstSkill: 'forge:route', plugins: ['forge', 'waypoint'], stop: null, cost: null, isError: null, apiStatus: null, hooks: [],
+      promptHooks: 0 });
+    expect(readStream('')).toEqual({ firstSkill: null, plugins: null, stop: null, cost: null, isError: null, apiStatus: null, hooks: [], promptHooks: 0 });
   });
   it('reads why the session stopped and what it cost from its result message (K1-02)', () => {
     const stream = [
       line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: 'a' } }] } }),
       line({ type: 'result', subtype: 'error_max_turns', is_error: true, total_cost_usd: 0.0123 }),
     ].join('\n');
-    expect(readStream(stream)).toEqual({ firstSkill: null, plugins: null, stop: 'error_max_turns', cost: 0.0123, isError: true, apiStatus: null, hooks: [] });
+    expect(readStream(stream)).toEqual({ firstSkill: null, plugins: null, stop: 'error_max_turns', cost: 0.0123, isError: true, apiStatus: null, hooks: [], promptHooks: 0 });
   });
   it('builds the claude arguments, the --settings of every configuration and the repository settings of each (K1-02)', () => {
     expect(claudeArgs('Add X', { settings: 's.json', pluginDirs: ['/p/forge', '/p/waypoint'] })).toEqual(
@@ -138,7 +139,50 @@ describe('route-eval', () => {
       line({ type: 'system', subtype: 'hook_response', hook_event: 'SessionStart' }),
       line({ type: 'result', subtype: 'success', is_error: true, api_error_status: 529, total_cost_usd: 0 }),
     ].join('\n');
-    expect(readStream(stream)).toMatchObject({ hooks: ['UserPromptSubmit', 'SessionStart'], isError: true, apiStatus: 529, stop: 'success' });
+    expect(readStream(stream)).toMatchObject({ hooks: ['UserPromptSubmit', 'SessionStart'], promptHooks: 1, isError: true, apiStatus: 529, stop: 'success' });
+  });
+  it("a UserPromptSubmit hook outside forge alone does not read as forge's: hookRan needs more of them than run outside forge (A7)", () => {
+    // claude names every one of them UserPromptSubmit; only hook_id tells them apart.
+    const started = (id?: string) => line({ type: 'system', subtype: 'hook_started', ...(id ? { hook_id: id } : {}), hook_name: 'UserPromptSubmit', hook_event: 'UserPromptSubmit' });
+    const answered = (id: string) => line({ type: 'system', subtype: 'hook_response', hook_id: id, hook_name: 'UserPromptSubmit', hook_event: 'UserPromptSubmit', exit_code: 0, stdout: '{}' });
+    const result = line({ type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0.01 });
+    const foreignOnly = readStream([started('orca'), answered('orca'), result].join('\n'));
+    expect(foreignOnly).toMatchObject({ hooks: ['UserPromptSubmit'], promptHooks: 1 });
+    expect(forgeHookRan(foreignOnly.promptHooks, 1)).toBe(false);
+    const both = readStream([started('orca'), started('forge'), answered('forge'), answered('orca'), result].join('\n'));
+    expect(both.promptHooks).toBe(2);
+    expect(forgeHookRan(both.promptHooks, 1)).toBe(true);
+    expect(forgeHookRan(foreignOnly.promptHooks, 0)).toBe(true);
+    expect(readStream([started(), started(), result].join('\n')).promptHooks).toBe(2);
+    expect(forgeHookRan(readStream(result).promptHooks, 0)).toBe(false);
+  });
+  it('counts the UserPromptSubmit hooks outside forge of each configuration: the settings, the enabled installed plugins and the other plugin dirs (A7)', () => {
+    const cfg = tmp('route-eval-hooks-');
+    const prompt = (command: string) => ({ UserPromptSubmit: [{ hooks: [{ type: 'command', command }] }] });
+    const plugin = (dir: string, hooks: object | null, manifest?: object) => {
+      mkdirSync(path.join(dir, 'hooks'), { recursive: true });
+      mkdirSync(path.join(dir, '.claude-plugin'), { recursive: true });
+      if (hooks) writeFileSync(path.join(dir, 'hooks', 'hooks.json'), JSON.stringify({ hooks }));
+      if (manifest) writeFileSync(path.join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify(manifest));
+      return dir;
+    };
+    const at = (name: string) => path.join(cfg, 'plugins', 'cache', 'm', name);
+    plugin(at('forge'), prompt('forge route-prompt'));
+    plugin(at('superpowers'), prompt('superpowers prompt'));
+    plugin(at('notes'), { SessionStart: [{ hooks: [{ type: 'command', command: 'start' }] }] }, { name: 'notes', hooks: ['./extra.json'] });
+    writeFileSync(path.join(at('notes'), 'extra.json'), JSON.stringify({ hooks: prompt('notes prompt') }));
+    plugin(at('off'), prompt('off prompt'));
+    const installed = (name: string) => [{ scope: 'project', projectPath: '/x', installPath: path.join(cfg, 'nowhere') }, { scope: 'user', installPath: at(name) }];
+    writeFileSync(path.join(cfg, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+      'forge@bg-kit': installed('forge'), 'superpowers@m': installed('superpowers'), 'notes@m': installed('notes'), 'off@m': installed('off') } }));
+    writeFileSync(path.join(cfg, 'settings.json'), JSON.stringify({
+      hooks: { ...prompt('orca-hook || echo {}'), SessionStart: [{ hooks: [{ type: 'command', command: 'orca-hook' }] }] },
+      enabledPlugins: { 'forge@bg-kit': true, 'superpowers@m': true, 'notes@m': true, 'off@m': false, 'builtin@builtin': true },
+    }));
+    const waypoint = plugin(path.join(cfg, 'checkout', 'waypoint'), null, { name: 'waypoint', hooks: { hooks: prompt('waypoint prompt') } });
+    expect(foreignPromptHooks({ configDir: cfg, superpowers: true })).toEqual(['settings.json', 'superpowers@m', 'notes@m']);
+    expect(foreignPromptHooks({ configDir: cfg, superpowers: false, pluginDirs: [waypoint] })).toEqual(['settings.json', 'notes@m', 'waypoint']);
+    expect(foreignPromptHooks({ configDir: path.join(cfg, 'missing'), superpowers: true })).toEqual([]);
   });
   it('takes --reps <1..10> and --resume <file>, and refuses any other value (A7)', () => {
     expect(parseArgs(['--reps', '3', '--resume', 'r.jsonl'])).toEqual({ dry: false, keep: false, only: null, config: null, reps: 3, resume: 'r.jsonl' });

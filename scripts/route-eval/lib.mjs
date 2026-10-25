@@ -75,8 +75,9 @@ export function sessionEnv(config, env) {
 
 /** The first skill a Skill tool_use loads, the plugins the init message lists, why the session stopped (the result
  *  message's subtype, e.g. `error_max_turns`), what it cost (its `total_cost_usd`), whether the result is an error
- *  (`isError`, null without a result) with its `apiStatus`, and the events of the hooks that ran (`hooks`, in order,
- *  without repeats), from `claude -p` stream-json. */
+ *  (`isError`, null without a result) with its `apiStatus`, the events of the hooks that ran (`hooks`, in order,
+ *  without repeats) and how many UserPromptSubmit hooks started (`promptHooks`: their distinct `hook_id`s, a start
+ *  without one counting on its own), from `claude -p` stream-json. */
 export function readStream(text) {
   let firstSkill = null;
   let plugins = null;
@@ -85,6 +86,8 @@ export function readStream(text) {
   let isError = null;
   let apiStatus = null;
   const hooks = [];
+  const promptIds = new Set();
+  let promptNoId = 0;
   for (const line of String(text).split(/\r?\n/)) {
     if (!line.trim()) continue;
     let ev;
@@ -100,6 +103,10 @@ export function readStream(text) {
     if (ev.type === 'system' && (ev.subtype === 'hook_started' || ev.subtype === 'hook_response') && typeof ev.hook_event === 'string' && !hooks.includes(ev.hook_event)) {
       hooks.push(ev.hook_event);
     }
+    if (ev.type === 'system' && ev.subtype === 'hook_started' && ev.hook_event === 'UserPromptSubmit') {
+      if (typeof ev.hook_id === 'string' && ev.hook_id) promptIds.add(ev.hook_id);
+      else promptNoId++;
+    }
     if (ev.type === 'result') {
       if (typeof ev.subtype === 'string') stop = ev.subtype;
       if (typeof ev.total_cost_usd === 'number' && Number.isFinite(ev.total_cost_usd)) cost = ev.total_cost_usd;
@@ -107,7 +114,62 @@ export function readStream(text) {
       apiStatus = typeof ev.api_error_status === 'number' && Number.isFinite(ev.api_error_status) ? ev.api_error_status : null;
     }
   }
-  return { firstSkill, plugins, stop, cost, isError, apiStatus, hooks };
+  return { firstSkill, plugins, stop, cost, isError, apiStatus, hooks, promptHooks: promptIds.size + promptNoId };
+}
+
+/** A7: whether forge's UserPromptSubmit hook ran. The stream names a hook only by its event (`hook_name` is
+ *  `UserPromptSubmit` for all of them), so a hook of the person's settings or of another plugin looks like forge's:
+ *  forge's ran only when more of them started (`promptHooks`, readStream) than there are outside forge (`foreign`). */
+export const forgeHookRan = (promptHooks, foreign) => promptHooks > foreign;
+
+const readJson = file => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; } };
+
+/** The handlers of the UserPromptSubmit groups of a `hooks` object (a settings file's, or a plugin's hooks.json's). */
+const promptHandlers = hooks => (hooks && typeof hooks === 'object' && Array.isArray(hooks.UserPromptSubmit) ? hooks.UserPromptSubmit : [])
+  .flatMap(g => (g && typeof g === 'object' && Array.isArray(g.hooks) ? g.hooks.filter(h => h && typeof h === 'object') : []));
+
+/** A plugin's UserPromptSubmit handlers: those of its hooks/hooks.json and of the hooks its plugin.json declares (a path,
+ *  a list of paths, or the hooks themselves). */
+function pluginPromptHandlers(root) {
+  const files = new Set([path.resolve(root, 'hooks', 'hooks.json')]);
+  const out = [];
+  const declared = readJson(path.join(root, '.claude-plugin', 'plugin.json'))?.hooks;
+  for (const d of Array.isArray(declared) ? declared : [declared]) {
+    if (typeof d === 'string') files.add(path.resolve(root, d));
+    else if (d && typeof d === 'object') out.push(...promptHandlers(d.hooks && typeof d.hooks === 'object' ? d.hooks : d));
+  }
+  for (const f of files) out.push(...promptHandlers(readJson(f)?.hooks));
+  return out;
+}
+
+/** A7: the UserPromptSubmit hooks a session of a configuration runs besides forge's, one entry per hook naming where it
+ *  comes from: the person's settings.json in `configDir`, the installed plugins it enables (forge, waypoint and lens are
+ *  off through --settings, and superpowers through the repository's settings when `superpowers` is false) and the
+ *  --plugin-dir plugins other than forge (`pluginDirs`). The same command twice in one place counts once. Managed
+ *  settings and a plugin without an install folder (a built-in one) are not read. */
+export function foreignPromptHooks({ configDir, superpowers, pluginDirs = [] }) {
+  const settings = readJson(path.join(configDir, 'settings.json')) ?? {};
+  const installed = readJson(path.join(configDir, 'plugins', 'installed_plugins.json'))?.plugins ?? {};
+  const keys = Object.keys(installed);
+  const off = { ...settingsFor(keys).enabledPlugins, ...projectSettingsFor(superpowers, keys).enabledPlugins };
+  const seen = new Set();
+  const out = [];
+  const add = (source, handlers) => {
+    for (const h of handlers) {
+      const key = JSON.stringify([source, h.type ?? null, h.command ?? h.url ?? h.prompt ?? JSON.stringify(h)]);
+      if (!seen.has(key)) { seen.add(key); out.push(source); }
+    }
+  };
+  add('settings.json', promptHandlers(settings.hooks));
+  const enabled = settings.enabledPlugins && typeof settings.enabledPlugins === 'object' ? settings.enabledPlugins : {};
+  for (const [key, on] of Object.entries(enabled)) {
+    if (on !== true || off[key] === false) continue;
+    const entries = [installed[key]].flat().filter(e => e && typeof e.installPath === 'string');
+    const entry = entries.find(e => e.scope === 'user') ?? entries[0];
+    if (entry) add(key, pluginPromptHandlers(entry.installPath));
+  }
+  for (const dir of pluginDirs) add(path.basename(dir), pluginPromptHandlers(dir));
+  return out;
 }
 
 /** A7: why a session is a provider error and not a trial, or null when it is a valid one. A `claude` that did not start

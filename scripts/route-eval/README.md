@@ -42,6 +42,13 @@ Un ensayo es una sesión de un prompt, en una configuración y una repetición: 
   No suman a los aciertos, salen en su columna «provider errors» y se repiten al reanudar. Un error de autenticación para la pasada enseguida, y tres seguidos también. `error_max_turns` sí es un ensayo válido: es lo que hace un Trivial que se pone a editar.
 - **El hook.** Cada sesión lleva `--include-hook-events`. En `with-superpowers` y `without-superpowers`, una sesión en la que no corrió el hook `UserPromptSubmit` de forge no es válida («no hook») y para la pasada, porque esa configuración no mediría la pista. En `no-hint` el hook corre igual, pero no se exige.
 
+  El stream nombra cada hook solo por su evento: todos los de `UserPromptSubmit` se llaman así, y solo su `hook_id` los distingue. Un hook `UserPromptSubmit` de tus ajustes o de otro plugin parece, pues, el de forge. Las sesiones no se aíslan de esos hooks: quitar los ajustes de usuario quitaría también superpowers, que se activa ahí. En su lugar, `run.mjs` cuenta en cada configuración los hooks `UserPromptSubmit` de fuera de forge:
+  - los del `settings.json` de tu carpeta de configuración (`CLAUDE_CONFIG_DIR` o `~/.claude`);
+  - los de los plugins instalados que esa configuración deja activos, salvo forge, waypoint y lens, que `--settings` apaga (superpowers no cuenta en `without-superpowers`);
+  - los del waypoint de este checkout, que carga `--plugin-dir`.
+
+  Da por ejecutado el de forge solo cuando arrancan más hooks `UserPromptSubmit` distintos (por `hook_id`) que esos. Antes de las sesiones de cada configuración, y también con `--dry-run`, escribe en stderr cuántos cuenta y de dónde salen: compruébalo antes de pagar. No lee los ajustes gestionados (managed settings) ni los plugins integrados (`@builtin`), que no tienen carpeta. Si uno de ellos añade un hook `UserPromptSubmit`, la cuenta se queda corta, y una sesión sin el hook de forge pasaría por válida.
+
 ## Uso
 
 ```bash

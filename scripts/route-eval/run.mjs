@@ -9,8 +9,8 @@ import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  CONFIGS, appendTrial, claudeArgs, demoRepo, isValidTrial, parseArgs, passes, pending, projectSettingsFor, providerError, readStream, readTrials, sessionEnv, settingsFor,
-  stopReason, summarize, table,
+  CONFIGS, appendTrial, claudeArgs, demoRepo, foreignPromptHooks, forgeHookRan, isValidTrial, parseArgs, passes, pending, projectSettingsFor, providerError, readStream,
+  readTrials, sessionEnv, settingsFor, stopReason, summarize, table,
 } from './lib.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +42,16 @@ const configDir = process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(homedir(), 
 let installed = [];
 try { installed = Object.keys(JSON.parse(readFileSync(path.join(configDir, 'plugins', 'installed_plugins.json'), 'utf8')).plugins ?? {}); } catch { /* none */ }
 
-const pluginDirs = [path.join(root, 'plugins', 'forge'), path.join(root, 'plugins', 'waypoint')];
+const forgeDir = path.join(root, 'plugins', 'forge');
+const pluginDirs = [forgeDir, path.join(root, 'plugins', 'waypoint')];
+// A7: the UserPromptSubmit hooks outside forge of a configuration, which the stream cannot tell from forge's: forge's
+// hook ran only when more of them started. Said on stderr before the configuration's sessions, and by --dry-run.
+const foreignOf = c => {
+  const foreign = foreignPromptHooks({ configDir, superpowers: c.superpowers, pluginDirs: pluginDirs.filter(d => d !== forgeDir) });
+  console.error(`route-eval: ${c.name}: ${foreign.length} UserPromptSubmit hook(s) outside forge${foreign.length ? ` (${foreign.join(', ')})` : ''}; `
+    + `forge's counts as run only when more than ${foreign.length} start`);
+  return foreign.length;
+};
 const out = path.join(here, 'results');
 const jsonl = args.resume !== null ? path.resolve(args.resume) : path.join(out, `${new Date().toISOString().replace(/[:.]/g, '')}.jsonl`);
 const earlier = args.resume !== null ? readTrials(readFileSync(jsonl, 'utf8')) : [];
@@ -52,6 +61,7 @@ let stopped = null;
 
 if (dry) {
   // A dry run creates nothing on disk: the commands carry a placeholder for the work folder.
+  for (const c of configs) if (todo.some(t => t.config.name === c.name)) foreignOf(c);
   for (const { config: c, prompt: p } of todo) {
     const a = claudeArgs(p.text, { settings: `<work>/${c.name}.json`, pluginDirs });
     console.log(`${c.hint ? '' : 'FORGE_ROUTE_HINT=off '}claude ${a.map(x => JSON.stringify(x)).join(' ')}`);
@@ -74,18 +84,19 @@ if (dry) {
       writeFileSync(path.join(repo, '.claude', 'settings.local.json'), JSON.stringify(projectSettingsFor(c.superpowers, installed), null, 2) + '\n');
       // K1-03, M3: the hint off through the environment, which the hooks of the session inherit; on, whatever was exported.
       const env = sessionEnv(c, process.env);
+      const foreign = foreignOf(c);
       for (const { prompt: p, rep } of entries) {
         // M2: every session starts from the same tree, whatever the one before it edited or committed.
         reset();
         const a = claudeArgs(p.text, { settings, pluginDirs });
         const r = spawnSync('claude', a, { cwd: repo, env, encoding: 'utf8', timeout: 240_000, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-        const { firstSkill, plugins, stop, cost, isError, apiStatus, hooks } = readStream(r.stdout ?? '');
+        const { firstSkill, plugins, stop, cost, isError, apiStatus, promptHooks } = readStream(r.stdout ?? '');
         const provider = providerError({ spawnError: r.error?.message ?? null, stop, isError, apiStatus });
         // A non-zero exit or an error subtype (error_max_turns) is noted even when a skill loaded first.
         const failed = r.status !== 0 || (stop !== null && stop.startsWith('error'));
         const error = r.error ? r.error.message : failed ? `exit ${r.status}: ${stop ?? (r.stderr ?? '').trim().split(/\r?\n/).pop() ?? ''}` : null;
         const row = { id: p.id, size: p.size, lang: p.lang, expected: p.expected, competing: p.competing ?? null, config: c.name, rep, firstSkill, plugins, cost, error,
-          provider, hookRan: hooks.includes('UserPromptSubmit') };
+          provider, hookRan: forgeHookRan(promptHooks, foreign) };
         appendTrial(jsonl, row);
         mine.push(row);
         const invalid = provider ?? (isValidTrial(row) ? null : 'no hook');
