@@ -49,6 +49,10 @@ describe('routingRule and routeReminder', () => {
       expect(text, doc.chosen).toContain('.forge/work/t1/task.txt');
       expect(text, doc.chosen).toMatch(/invoke forge:run$/);
       expect(text, doc.chosen).not.toMatch(/Bounded|continue/);
+      // forge:run never closes a route: the reminder names the command that does, with the route's session.
+      expect(text, doc.chosen).toContain('FORGE route stage --stage handed-off');
+      expect(text, doc.chosen).not.toContain('undefined');
+      expect(routeReminder({ ...doc, session: 'S1' }, NOW.getTime()), doc.chosen).toContain('FORGE route stage --stage handed-off --session S1');
     }
   });
 });
@@ -305,8 +309,19 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
   it('the carried line keeps the hand-over without a file, then the command that closes the route (A1)', () => {
     writeRoute(root, { task: 't1', chosen: 'superpowers-plan', by: 'user', stage: 'planning', ts: NOW.toISOString(), session: 'OLD' });
     const fork = ctx(run(['hook', 'route-session'], io({ session_id: 'FORK', source: 'fork' })));
-    expect(fork).toContain('.forge/work/t1/task.txt and invoke forge:run. Once handed off, close that route with FORGE route stage --stage handed-off --session OLD');
+    expect(fork).toContain('FORGE route stage --stage handed-off --session OLD and invoke forge:run. Once handed off, close that route with FORGE route stage --stage handed-off --session OLD');
     expect(fork).not.toContain('continue');
+  });
+  it('a route forge:run left open is reminded with the command that closes it; once run, the reminder stops (A1)', () => {
+    writeRoute(root, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'S1' });
+    const s1 = { cwd: root, now: () => NOW, env: { CLAUDE_CONFIG_DIR: cfg, CLAUDE_CODE_SESSION_ID: 'S1' } };
+    // forge:run with the decisions as the task text: the hook is quiet while the task is open, and forge:run moves no route.
+    expect(run(['triage', '--task', 't1', 'Add coupon support to the cart with validation'], s1).code).toBe(0);
+    expect(run(['hook', 'route-prompt'], io(PROMPT)).stdout).toBe('');
+    expect(run(['log', '--kind', 'phase', '--task', 't1', '--data', '{"phase":"done"}'], s1).code).toBe(0);
+    expect(ctx(run(['hook', 'route-prompt'], io(PROMPT)))).toContain('FORGE route stage --stage handed-off --session S1');
+    expect(JSON.parse(run(['route', 'stage', '--stage', 'handed-off', '--session', 'S1'], s1).stdout)).toMatchObject({ updated: true, stage: 'handed-off' });
+    expect(run(['hook', 'route-prompt'], io(PROMPT)).stdout).toBe('');
   });
 });
 
