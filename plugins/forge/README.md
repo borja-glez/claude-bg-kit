@@ -69,6 +69,7 @@ forge depends on [waypoint](../waypoint/README.md) ^0.35.0, which is installed w
 | `/forge:decisions [revert <n>]` | List what forge decided without asking, and undo one after your confirmation. |
 | `/forge:verify [surface]` | Check the work by using it (web, emulator, CLI...), or create and edit verification surfaces. |
 | `/forge:stop` | Stop the infinite run or an active execution, and close an ended one that is not closed yet. |
+| `/forge:diagnose <task> \| --execution <runId>` | Explain what happened in a task or an execution from forge's records, each claim cited by file and line. |
 
 ```text
 /forge:run Fix the off-by-one in pagination            → Trivial or Small
@@ -540,6 +541,7 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `decision show <n>` - one decision, with its `undo`.
 - `decision md --scope s [--out f] [--locale es|en]` - write the automatic decisions of a scope to `docs/forge/decisions/<scope>.md` (or `--out`); writes nothing when there are none.
 - `last --task id` - the path, last phase event, last verdict and last round of a task.
+- `diagnose (--task id [--project p] | --execution runId) [--transcript f]` - read only: the timeline of a task (its briefs too) or of an execution, from the ledger, forge's files (`execution.json` and `execution/<T>.json`, the `--out` files of its jobs, `findings-*`, `asked.json`, `overrides.json`, `decisions.json`) and the transcripts of the sessions its events name (only the calls to `forge.cjs` and to Agent, the compactions and the usage, `subagents/` included), each measured before it is read. It prints `findings` (`missing-step`, `out-of-order`, `degraded`, `failed`, `repeat`, `compact-drift`; each cites `file:line` or an event's `ts`), `waiting` (calls with no result for 10 minutes or more, as data), `tasks` (the state of each step), `usage` (tokens counted once per `message.id`), `coverage`, `sources` and `timeline`. The transcripts are looked up under `CLAUDE_CONFIG_DIR` (else `~/.claude`); `--transcript f` reads that one instead. Exit 2 when forge has no record of the task or the execution.
 - `stats [--days N | --since iso] [--json] [--locale es|en]` - the clock of the accepted briefs from the main checkout's ledger: per brief and per path, the time in `implement`, `validate`, `review`, `verdict` and `fix`, the validators' share and the cache hits, the fixed cost of a brief accepted at once (`overheadMin`) and, with 5 plan tasks or more, real over estimated time (`estimate`).
 - `doctor [--locale es|en]` - a read-only health report: `{checks: [{id, status, detail, fix?, data?}], say}`, with `status` one of `ok|warn|fail|unverified`; it exits 2 (a warn or a fail), else 1 (something unreadable), else 0, and changes nothing.
 - `agents` - agent names for the active profile.

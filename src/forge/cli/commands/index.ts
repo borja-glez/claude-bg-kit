@@ -9,6 +9,7 @@ import { command as doctor } from './doctor.js';
 import { command as hook } from './hook.js';
 import { command as infinite } from './infinite.js';
 import { command as last } from './last.js';
+import { command as diagnose } from './diagnose.js';
 import { command as local } from './local.js';
 import { command as log } from './log.js';
 import { command as market } from './market.js';
@@ -49,7 +50,7 @@ import { command as waypointCli } from './waypoint-cli.js';
 export const COMMANDS: Readonly<Record<string, Command>> = {
   triage, doctor, brief, validate, stats, verdict, round,
   'review-prep': review, 'review-close': review, prep: review, shadow: review,
-  log, decision, agents, last, proposals, surfaces, tools, local, prefs, begin, route,
+  log, decision, agents, last, diagnose, proposals, surfaces, tools, local, prefs, begin, route,
   'verify-env': verifyEnv, 'verify-plan': verifyPlan, 'verify-preflight': verifyPreflight,
   'verify-result': verifyResult, 'verify-cleanup': verifyCleanup, 'verify-close': verifyClose, 'verify-spawn': verifySpawn,
   'waypoint-cli': waypointCli, 'sp-path': spPath, 'sp-specs': spSpecs, 'sp-plans': spPlans, 'sp-plan': spPlan,

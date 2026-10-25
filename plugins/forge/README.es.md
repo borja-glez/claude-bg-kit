@@ -69,6 +69,7 @@ forge depende de [waypoint](../waypoint/README.es.md) ^0.35.0, que se instala co
 | `/forge:decisions [revert <n>]` | Lista lo que forge decidió sin preguntar y deshace una decisión tras tu confirmación. |
 | `/forge:verify [superficie]` | Comprueba el trabajo usándolo (web, emulador, CLI...), o crea y edita superficies de verificación. |
 | `/forge:stop` | Para la ejecución infinita o una ejecución activa, y cierra una terminada que aún no esté cerrada. |
+| `/forge:diagnose <task> \| --execution <runId>` | Explica qué pasó en una tarea o una ejecución a partir de los registros de forge, con cada afirmación citada por fichero y línea. |
 
 ```text
 /forge:run Corrige el error por uno en la paginación      → Trivial o Small
@@ -540,6 +541,7 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `decision show <n>` - una decisión, con su `undo`.
 - `decision md --scope s [--out f] [--locale es|en]` - escribe las decisiones automáticas de un ámbito en `docs/forge/decisions/<ámbito>.md` (o en `--out`); no escribe nada si no hay ninguna.
 - `last --task id` - el camino, el último evento de fase, el último veredicto y la última ronda de una tarea.
+- `diagnose (--task id [--project p] | --execution runId) [--transcript f]` - solo lee: la línea de tiempo de una tarea (también de sus briefs) o de una ejecución, a partir del ledger, los ficheros de forge (`execution.json` y `execution/<T>.json`, los ficheros `--out` de sus jobs, `findings-*`, `asked.json`, `overrides.json`, `decisions.json`) y los transcripts de las sesiones que nombran sus eventos (solo las llamadas a `forge.cjs` y a Agent, las compactaciones y el uso, `subagents/` incluido), cada uno medido antes de leerlo. Imprime `findings` (`missing-step`, `out-of-order`, `degraded`, `failed`, `repeat`, `compact-drift`; cada uno cita `fichero:línea` o el `ts` de un evento), `waiting` (las llamadas sin resultado desde hace 10 minutos o más, como dato), `tasks` (el estado de cada paso), `usage` (los tokens contados una vez por `message.id`), `coverage`, `sources` y `timeline`. Los transcripts se buscan en `CLAUDE_CONFIG_DIR` (si no, en `~/.claude`); `--transcript f` lee ese en su lugar. Sale con 2 cuando forge no tiene registro de la tarea o de la ejecución.
 - `stats [--days N | --since iso] [--json] [--locale es|en]` - el reloj de los briefs aceptados según el ledger del checkout principal: por brief y por camino, el tiempo en `implement`, `validate`, `review`, `verdict` y `fix`, la parte de los validadores y los aciertos de caché, el coste fijo de un brief aceptado a la primera (`overheadMin`) y, con 5 tareas de plan o más, el tiempo real entre el estimado (`estimate`).
 - `doctor [--locale es|en]` - un informe de salud de solo lectura: `{checks: [{id, status, detail, fix?, data?}], say}`, con `status` uno de `ok|warn|fail|unverified`; sale con 2 (un warn o un fail), si no con 1 (algo ilegible), si no con 0, y no cambia nada.
 - `agents` - los nombres de los agentes del perfil activo.
