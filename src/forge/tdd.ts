@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { LOCKFILES } from './validate-cache.js';
-import { isBookkeeping } from './triage.js';
 import {
   failingTests, isPytestModule, isTestFile, NO_TESTS, resolveAffected, runsPytest,
   type RepoReader, type Validator, type ValidatorResult,
@@ -184,7 +183,7 @@ function linkedCode(at: PlanAt): boolean {
  * BASE, the command, the content of the overlay and the lockfiles, so a result is reused only for the same question.
  */
 export function tddPlan(validators: Validator[], touched: string[], base: string, at: PlanAt): TddPlan {
-  const live = [...new Set(touched.map(f => slash(f).replace(/^\.\//, '')))].filter(f => f && !isBookkeeping(f));
+  const live = touched;
   const overlay = live.filter(f => at.repo.exists(f) && (isTestFile(f) || CONFTEST.test(f)));
   const modules = overlay.filter(f => TEST_MODULE.test(f) || isPytestModule(f));
   const lockBase = at.git(['ls-tree', base, '--', ...LOCKFILES]) ?? '';
