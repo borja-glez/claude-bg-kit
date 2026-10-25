@@ -596,6 +596,13 @@ describe('loadBandFiles · what waits for the person (w7 A5)', () => {
     expect(files.auth).toEqual({ 'merge-r1-ab12': 'A', 'merge-r1-zz99': null });
     for (const k of ['asked', 'surfacesAsked', 'local', 'proposals', 'notes']) expect(files, k).not.toHaveProperty(k);
   });
+  it("an asked.json over the cap is still reported, with no text, so the inbox names the file (A5.m6)", async () => {
+    const root = main;
+    const asked = `${main}/.forge/work/T002/reviews-1-1/asked.json`;
+    const f: Record<string, string> = { ...base(root), [`${root}/.forge/execution.json`]: stalled(), [asked]: "Q" };
+    const files = (await loadBandFiles(fake(root, f, { over: { [asked]: { size: 65 * 1024 } } }).$))!.files;
+    expect(files.asked).toEqual({ T002: { file: ".forge/work/T002/reviews-1-1/asked.json", text: null } });
+  });
   it("2c: a stopped run's coordinator bindings are read until it is closed, so an open conversation keeps [Resume] away past 12 minutes (Review Focus 2)", async () => {
     const root = main;
     const seat = `${root}/.waypoint/other/seats/main-2/bound.json`;

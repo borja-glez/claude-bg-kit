@@ -59,6 +59,7 @@ describe('needsYou (w7 A5)', () => {
     none({ auth: { a: AUTH({ createdAt: ago(61) }) } });
     none({ auth: { a: AUTH({ authId: 'mof-r1-ab12', kind: 'merge-on-finish', createdAt: ago(24 * 60 + 1) }) } });
     none({ auth: { a: AUTH({ runId: 'r0' }) } });
+    none({ run: RUN({ closedAt: ago(1) }), auth: { a: AUTH() } });
     none({ run: undefined, auth: { a: AUTH() } });
     none({ notes: { n: { ts: ago(5), type: 'question', author: 'a', text: 't', answer: 'sí' } } });
     none({ notes: { n: { ts: ago(5), type: 'question', author: 'a', text: 't', answeredByNote: 'e1' } } });
@@ -104,6 +105,11 @@ describe('needsYou (w7 A5)', () => {
     const [p] = needsYou({ now: NOW, proposals: { 'p x': { ts: ago(1), status: 'proposed', title: 't' } } });
     expect(p.file).toBe('.forge/proposals/p x.json');
     expect(p.command).toBeNull();
+  });
+  it('an id cut at 120 never leaves half of a surrogate pair (A5.m8)', () => {
+    const [a] = needsYou({ now: NOW, auth: { [`merge-${"r".repeat(113)}😀`]: AUTH({ runId: null, kind: 'merge-on-finish' }) } });
+    expect(a.id).toBe(`merge-${"r".repeat(113)}😀`);
+    expect(a.id).not.toMatch(/[�-�](?![�-�])/);
   });
   it('a date ahead of the clock or unreadable counts as none, after the dated ones (Review Focus 5)', () => {
     const q = (ts: string, text: string) => ({ ts, type: 'question', author: 'x', text });

@@ -38,6 +38,11 @@ describe('needsOf (G-24)', () => {
     expect(shared.map(n => [n.kind, n.id])).toEqual([['question', 'n1'], ['proposal', 'p1'], ['proposal', 'p2'], ['untrusted-commands', 'r1']]);
     expect(HALTS).toBe(RUN_HALTS);
   });
+  it("the questions keep the page's order of m.notes, not needsYou's date order (A5.m9b)", () => {
+    const note = (id: string, ago: number) => ({ id, ts: iso(NOW - ago), type: "question" as const, author: "user:a", text: id });
+    const needs = needsOf(model({ notes: [note("newer", DAY), note("older", 2 * DAY)] }));
+    expect(needs.map(n => (n.kind === "question" ? n.note.id : n.kind))).toEqual(["newer", "older"]);
+  });
   it('the decisions that changed after the mark go apart by whose mark it was: the owner’s, or forge’s policy (carry 4b-3)', () => {
     const prop = (id: string, title: string) => ({ id, ts: '', category: 'perf' as const, risk: 'low' as const, title, rationale: 'r', evidence: 'e', pillar: 'x', status: 'approved' as const, source: 'scout' as const, author: 'session:main' });
     const mark = (pid: string, by: ApprovalDoc['by']): ApprovalDoc => ({ status: 'approved', decidedAt: iso(NOW), by, digest: proposalDigest(pid, prop(pid, 'antes')) });

@@ -56,7 +56,7 @@ const readDoc = (v: unknown): Obj | null => {
 };
 
 const text = (x: unknown): string => (typeof x === 'string' ? Array.from(oneLine(x)).slice(0, WHAT_MAX).join('') : '');
-const cleanId = (x: string): string => oneLine(x).slice(0, 120);
+const cleanId = (x: string): string => Array.from(oneLine(x)).slice(0, 120).join('');
 const sinceOf = (x: unknown, now: number): string | null => {
   if (typeof x !== 'string') return null;
   const t = Date.parse(x);
@@ -103,7 +103,7 @@ function authorizations(i: NeedsInput): NeedItem[] {
     if (!(created <= i.now + AUTH_SKEW_MS) || !(i.now - created < AUTH_PENDING_MS[kind])) continue;
     const forRun = d.runId === null || d.runId === undefined ? null : typeof d.runId === 'string' ? d.runId : undefined;
     if (forRun === undefined) continue;
-    if (forRun !== null && !(i.run && i.run.runId === forRun)) continue;
+    if (forRun !== null && !(i.run && i.run.runId === forRun && !i.run.closedAt)) continue;
     out.push({ kind: 'authorization', id: cleanId(key), what: text(d.target), task: null, runId: forRun === null ? null : safeId(forRun),
       file, since: sinceOf(d.createdAt, i.now), ...(forRun === null ? { command: null, place: 'conversation' as const } : answeredAt(i.run)) });
   }

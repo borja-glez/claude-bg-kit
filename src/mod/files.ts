@@ -279,8 +279,10 @@ async function readAsked($: Engine, main: string, folders: readonly string[]): P
     if (!rounds.length) continue;
     const round = join(folder, rounds[0].name);
     const asked = (await listOpt($, join(main, round))).find(f => f.kind === 'file' && f.name === 'asked.json');
-    if (!asked || asked.size > NEED_FILE_MAX) return undefined;
-    return { file: join(round, 'asked.json'), text: (await readOpt($, join(main, round, 'asked.json'))) ?? null };
+    if (!asked) return undefined;
+    const file = join(round, 'asked.json');
+    // Over the cap it is still listed, unread: forge writes it uncapped, and a question must not vanish (A5.m6).
+    return { file, text: asked.size > NEED_FILE_MAX ? null : (await readOpt($, join(main, file))) ?? null };
   }
   return undefined;
 }

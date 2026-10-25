@@ -698,6 +698,12 @@ describe('the «Waiting for you» card (w7 A5)', () => {
     ]);
     expect(CARD_PRIORITY.indexOf('needs')).toBe(1);
   });
+  it("shows at most 6 rows and counts the rest of the total (A5.m9a)", () => {
+    const items = Array.from({ length: 8 }, (_, i) => item({ id: `n${i}` }));
+    const card = buildCards({ ...EMPTY, needs: { total: 12, items } }, T, NOW).find(c => c.id === "needs")!;
+    expect(card.blocks.filter(b => b.kind === "row")).toHaveLength(6);
+    expect(card.blocks.at(-1)).toMatchObject({ kind: "text", text: "+6" });
+  });
   it('a source that could not be read says so, dimmed; a date ahead of the clock shows no age; no card when nothing waits (Review Focus 5)', () => {
     const bad = item({ kind: 'authorization', id: '', what: '', task: null, file: '.forge/execution/auth/x.json', since: null, place: null, unverified: true });
     const ahead = item({ since: new Date(NOW + 600_000).toISOString() });
