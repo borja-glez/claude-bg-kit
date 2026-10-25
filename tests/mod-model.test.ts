@@ -688,7 +688,7 @@ describe('buildBandModel · every slot of the run, at most 12, and those waiting
     expect(buildBandModel('demo-shop', coordinator(tasks))).toMatchObject({ mode: 'run', running: 2, queued: 2, integrated: 1, stalled: false });
     const stalled = buildBandModel('demo-shop', { ...coordinator(tasks), execution: EXEC({ parallel: 14, tasks, active: false, stopReason: 'stalled' }) });
     expect(stalled).toMatchObject({ mode: 'run', queued: 2, integrated: 1, stalled: true });
-    expect(bandLine(stalled, Date.now())).toBe('► EJECUCIÓN · ▲ parada · 1/5 integradas · por integrar 2');
+    expect(bandLine(stalled, Date.now())).toBe('► EJECUCIÓN · ▲ parada · 1/5 integradas · por integrar 2 · » te toca 1');
   });
 });
 
