@@ -61,7 +61,7 @@ Input from the coordinator:
 5. **review.**
    - Run `FORGE swarm task <T> --stage review --agent <the first entry that is not a twin> --round <review-prep's round> --lease-minutes 90`.
    - Spawn exactly the entries of review-prep's `spawn`, never a `carried` one, as task-steps step 4 says. Twins go too, each with its own `out`.
-   - With `express: true`: in the same message as its single reviewer, run its `validators.cmd` in the foreground.
+   - With `express: true`: in the same message as its single reviewer, run its `validators.cmd` in the foreground, exactly as printed, its own `--out` included; exit 1 means a validator is red, a result for review-close, not a failure.
 6. **verdict.** Run `FORGE review-close --task <T>-<n> --dir <WORK> --path large --cwd <worktree> --locale <locale>`.
    - **Exit 3 with `missing`:** respawn each listed reviewer once, with its `spawn` entry, and close again. Still missing: hand back.
    - **`invalid` or `incomplete`:** respawn once and close again, as `review-close.md` says.
