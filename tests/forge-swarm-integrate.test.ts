@@ -1200,6 +1200,16 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     writeFileSync(path.join(root, '.forge', 'work', 'shop', 'final-validators.json'), '[]');
     return out(run(['verdict', '--task', 'shop-final', '--dir', '.forge/work/shop/final', '--validators', '.forge/work/shop/final-validators.json'], at)).action;
   };
+  it('the final review run from the main checkout, as large.md runs it, records the tree of the run worktree; with something uncommitted there, none (A3, Review Focus 1)', () => {
+    finished();
+    expect(finalReview(true)).toBe('accept');
+    const last = () => readEvents(root).filter(e => e.kind === 'verdict' && e.task === 'shop-final').at(-1)!;
+    expect(last().tree).toBe(g(runWt(), 'rev-parse', 'HEAD^{tree}'));
+    expect(last().tree).not.toBe(git('rev-parse', 'HEAD^{tree}'));
+    writeFileSync(path.join(runWt(), 'stray.txt'), 'x\n');
+    expect(finalReview(true)).toBe('accept');
+    expect(last()).not.toHaveProperty('tree');
+  });
   it('a yes to the start question allows the one final merge of the finished run once its final review accepts: none before, none after', () => {
     finished();
     seedExecution(root, { ...readExecution(root)!, mergeOnFinish: true });
