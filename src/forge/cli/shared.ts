@@ -8,12 +8,12 @@ import { readExecution } from '../execution.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
 import { samePath } from '../../lib/worktree.js';
 import {
-  triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor,
+  triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, isBugTask, reviewFor,
   PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult,
 } from '../triage.js';
 import { diffSinks, sinkReason, type Sink } from '../sinks.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
-import { taskText, tddLine } from '../brief.js';
+import { taskText, tddLine, TDD_VERIFIED_LINE, BUG_LINE } from '../brief.js';
 import { loadConfig, agentFor } from '../config.js';
 import type { VerifyFile } from '../verdict.js';
 import { loadProposals, loadApprovals } from '../proposals.js';
@@ -151,12 +151,14 @@ export const committedAt = (io: Io, dir: string) => {
 export const declinedSpecs = (s: Record<string, unknown>): string[] =>
   Array.isArray(s.declinedSpecs) ? s.declinedSpecs.filter((x): x is string => typeof x === 'string').slice(0, 200) : [];
 
-// tdd: superpowers: the line implementer briefs carry, null when off or when superpowers or its TDD skill is missing.
+// The line implementer briefs carry: with tdd: verified, forge's own (no skill needed); with tdd: superpowers, the one
+// pointing at its TDD skill, null when superpowers or that skill is missing; null when off.
 export function tddFor(io: Io, dir: string) {
   const { tdd } = loadConfig(dir);
   const sp = superpowersOf(io, dir);
   const skill = spSkillPath(sp, 'test-driven-development');
-  return { tdd, installed: sp.installed, version: sp.version, skill, line: tdd === 'superpowers' && skill ? tddLine(skill) : null };
+  const line = tdd === 'verified' ? TDD_VERIFIED_LINE : tdd === 'superpowers' && skill ? tddLine(skill) : null;
+  return { tdd, installed: sp.installed, version: sp.version, skill, line };
 }
 
 const DECIDING = new Set(['decide', 'confirm', 'judge', 'unpark', 'retire']);
@@ -363,6 +365,8 @@ export interface TriageCore {
   task: string | undefined; project: string | null; result: TriageResult; names: string[]; fresh: string[];
   diff: { base: string; stat: { files: string[]; lines: number }; path: PathName } | null;
   auto: { autonomy?: 'auto' }; review: Record<string, unknown>; output: Record<string, unknown>;
+  /** A9: 'bug' for a bug task under tdd: verified (Small and up), else null. */
+  kind: 'bug' | null;
   /** The language of the announcement: --locale, else the plan's. */
   locale: AnnounceLocale;
   /** A7: the strict sinks the real diff adds (--base); empty without it. */
@@ -494,7 +498,10 @@ export function triageCore(io: Io, args: string[]): TriageCore {
   // J-14: the plan's `delicate`, or --delicate for a task the person calls delicate.
   const delicate = planned?.delicate === true || has('delicate');
   const impl = implementerFor(result, wordText, { batch: has('batch'), plan: planned !== null, delicate });
-  const profile = loadConfig(repoDir).profile;
+  const config = loadConfig(repoDir);
+  const profile = config.profile;
+  // A9: under tdd: verified a bug task from Small up reproduces the bug first; a Trivial one never gets the route.
+  const kind = config.tdd === 'verified' && result.path !== 'trivial' && isBugTask(wordText) ? 'bug' as const : null;
   const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
   const known = readLocal(io.cwd).known;
   const fresh = names.filter(n => !known.includes(n));
@@ -517,8 +524,8 @@ export function triageCore(io: Io, args: string[]): TriageCore {
     reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path } };
   }
   return {
-    task: flag('task'), project, result, names, fresh, diff, auto, review,
-    output: { ...result, catalog, new: fresh, implementer, announce: line, gate, ...auto, ...reviewed, ...(sinks.length ? { sinks } : {}), review },
+    task: flag('task'), project, result, names, fresh, diff, auto, review, kind,
+    output: { ...result, catalog, new: fresh, implementer, announce: line, gate, ...auto, ...reviewed, ...(sinks.length ? { sinks } : {}), review, ...(kind ? { kind, bugLine: BUG_LINE } : {}) },
     locale: locale as AnnounceLocale, sinks,
   };
 }

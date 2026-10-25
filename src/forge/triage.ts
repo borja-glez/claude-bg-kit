@@ -184,6 +184,19 @@ export function isPerfTask(text: string): boolean {
   return PERF.some(re => re.test(t));
 }
 
+// Bug wording (A9): a defect to reproduce first. Features that only mention failures («crash reporting», «Si falla la red»,
+// «error al» after «de») do not count.
+const BUG = [
+  /\b(?:bugs?|bugfix|crash(?:es|ed|ing)?(?!\s+report)|regressions?|broken|segfaults?|stack trace|(?:throws|raises|unhandled)(?:\s+\S+){0,2}?\s+(?:exception|error)|does not work|doesn't work|no longer works|stopped working|isn't working|is not working|fails\s+(?:on|when|with|for|if|after))\b/i,
+  es('crashe(?![sd])|lanza una excepci|salta una excepci',
+    'bugs?|fallos?|fallan?\\s+(?:al|con|cuando|en|tras|si)|no funciona|ya no funciona|no va(?!\\s+al?(?![\\p{L}\\p{N}_]))|regresi[oó]n|rot[oa]s?|se rompe|se cuelga|cuelgue|(?<!\\bde\\s)error(?:es)? al'),
+];
+/** Bug work: the head of the text, its mentions removed, reads as a defect and not as mechanical work. */
+export function isBugTask(text: string): boolean {
+  const t = head(stripMentions(String(text).slice(0, MAX_TEXT)));
+  return BUG.some(re => re.test(t)) && !isMechanical(text);
+}
+
 export type ReviewRole = 'review-correctness' | 'review-security' | 'review-perf';
 export type ReviewEffort = 'medium' | 'high' | 'xhigh';
 export interface ReviewPlan { light: boolean; reviewers: { role: ReviewRole; model: 'sonnet' | null; effort: ReviewEffort }[]; flags: ('--sensitive' | '--perf')[] }

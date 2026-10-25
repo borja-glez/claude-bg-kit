@@ -167,10 +167,10 @@ export function selectValidators(all: Validator[], scope: Scope): Validator[] {
 // starting with - (a runner would read it as an option).
 const SAFE_PATH = /^(?!-)[A-Za-z0-9_@+.,=/\\ ()-]{1,300}$/;
 export const MAX_AFFECTED = 100;
-const isPytestModule = (f: string) => /(^|\/)test_[^/]*\.py$/.test(f) || /_test\.py$/.test(f);
-const isTestFile = (f: string) => /(^|\/)tests?\//.test(f) || /\.(test|spec)\.[^/]+$/.test(f) || isPytestModule(f);
+export const isPytestModule = (f: string) => /(^|\/)test_[^/]*\.py$/.test(f) || /_test\.py$/.test(f);
+export const isTestFile = (f: string) => /(^|\/)tests?\//.test(f) || /\.(test|spec)\.[^/]+$/.test(f) || isPytestModule(f);
 // pytest given a file that is not a test module (a conftest, a helper, a fixture) collects nothing or fails (exit 4 or 5).
-const runsPytest = (cmd: string) => /\bpytest\b/.test(cmd);
+export const runsPytest = (cmd: string) => /\bpytest\b/.test(cmd);
 export type AffectedRun = { mode: 'cmd'; cmd: string } | { mode: 'skip'; why: string } | { mode: 'full'; why: string };
 
 /**
@@ -235,7 +235,10 @@ const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(`${ESC}\\[[0-9;]*[A-Za-z]`, 'g');
 const MAX_FAILING = 200;
 const DURATION = /\s+[([]?\d+(?:\.\d+)?\s?m?s[)\]]?$/;
-const tidy = (s: string) => s.replace(DURATION, '').replace(/\s+/g, ' ').trim().slice(0, 300);
+/** The length failingTests cuts a failing test's name to. */
+export const FAILING_NAME_MAX = 300;
+/** A failing test's name as failingTests keeps it: no trailing duration, one space between words, cut to FAILING_NAME_MAX. */
+export const tidy = (s: string) => s.replace(DURATION, '').replace(/\s+/g, ' ').trim().slice(0, FAILING_NAME_MAX);
 // One test per line: pytest (FAILED <id>, and ERROR <file>::<test> for a setup or fixture error), go (--- FAIL: <Test>),
 // cargo (test <x> ... FAILED), dotnet (Failed <x>).
 const TEST_LINE = [/^\s*FAILED\s+(\S+)/, /^\s*ERROR\s+(\S+::\S+)/, /^\s*--- FAIL:\s+(\S+)/, /^test\s+(\S+)\s+\.\.\.\s+FAILED/, /^\s*Failed\s+(\S+)\s+\[[^\]]+\]\s*$/];
@@ -316,7 +319,7 @@ export function validateEvent(ts: string, task: string | undefined, results: Val
 }
 
 // vitest, jest, mocha and Playwright when the project has no test files yet.
-const NO_TESTS = /\b(no test files found|no tests found)\b/i;
+export const NO_TESTS = /\b(no test files found|no tests found)\b/i;
 const RUNS_TESTS = new Set(['test', 'e2e']);
 
 // Without options: one at a time, every failure retried, as forge 0.16 ran them.
@@ -398,7 +401,8 @@ export function runOptions(config: Pick<ForgeConfig, 'validate'>, events: Ledger
  */
 const normLine = (l: string) => l.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
 const isTimeout = (r: ValidatorResult) => r.failures.some(f => /^timeout after \d+ s$/.test(f));
-export function markPreexisting(results: ValidatorResult[], baseline: unknown): ValidatorResult[] {
+// The validators a baseline had failing, by name, with what it recorded of each; read with one tolerance for both readers.
+function baselineFailures(baseline: unknown): Map<string, { failing: string[]; known: boolean; failures: string[] }> {
   const strs = (a: unknown) => (Array.isArray(a) ? a.filter((s): s is string => typeof s === 'string') : []);
   const before = new Map<string, { failing: string[]; known: boolean; failures: string[] }>();
   for (const b of Array.isArray(baseline) ? baseline : []) {
@@ -407,6 +411,15 @@ export function markPreexisting(results: ValidatorResult[], baseline: unknown): 
     if (typeof x.validator !== 'string' || x.ok !== false) continue;
     before.set(x.validator, { failing: strs(x.failing), known: x.failingKnown === true, failures: strs(x.failures) });
   }
+  return before;
+}
+/** The `failing` names the baseline gives `validator` when it failed there with every name read (failingKnown); [] otherwise. */
+export function baseFailingNames(baseline: unknown, validator: string): string[] {
+  const b = baselineFailures(baseline).get(validator);
+  return b && b.known ? b.failing : [];
+}
+export function markPreexisting(results: ValidatorResult[], baseline: unknown): ValidatorResult[] {
+  const before = baselineFailures(baseline);
   return results.map(r => {
     const b = r.ok ? undefined : before.get(r.validator);
     if (!b || isTimeout(r)) return r;

@@ -80,7 +80,9 @@ describe('work folders in the skills of forge (D-08)', () => {
       if (/\.forge\/work\/(?:T|<T>)(?=[/\s`])/.test(text)) out.push(rel(f));
       // A reference names a task's folder <WORK>. A loose task's .forge/work/<id> stays in forge:run's own body, in its
       // Medium path (references/medium.md, moved there whole in w7 A2) and in a superpowers plan, and task.txt is written before any triage.
-      if (rel(f).includes('/references/') && !rel(f).endsWith('superpowers-plan.md') && !rel(f).endsWith('/medium.md') && /\.forge\/work\/<id>(?!\/task\.txt)(?=[/\s`])/.test(text)) out.push(`${rel(f)} (<id>)`);
+      // tdd.md's Small step names the task's own .forge/work/<id>: an «aplícalo ya» Small of an execution runs it with --cwd
+      // in the run worktree (references/execution.md), and the literal still holds there, because it is relative to forge's own folder.
+      if (rel(f).includes('/references/') && !rel(f).endsWith('superpowers-plan.md') && !rel(f).endsWith('/medium.md') && !rel(f).endsWith('references/tdd.md') && /\.forge\/work\/<id>(?!\/task\.txt)(?=[/\s`])/.test(text)) out.push(`${rel(f)} (<id>)`);
       return out;
     });
     expect(hits).toEqual([]);

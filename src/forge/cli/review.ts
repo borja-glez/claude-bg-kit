@@ -31,6 +31,8 @@ import { verifyAwaited } from './shared.js';
 import { mainCheckout } from '../local.js';
 import { treeOf } from '../receipts.js';
 import { loadTrustedConfig } from '../trust.js';
+import { sayTdd, tddForBrief, tddPending } from '../tdd.js';
+import { defaultExec } from './exec.js';
 import { eventsSince, executionHolding } from '../execution.js';
 import { runWithCache, cacheGit, checkoutPrefix, cleanTree } from '../validate-cache.js';
 import { noSlot, type Slot } from '../jobs.js';
@@ -41,13 +43,15 @@ import { reviewRound, reviewerKey, withSecurity, type PreviousResult, type Revie
 type Result = { code: number; stdout: string; stderr: string };
 type Exec = Parameters<typeof runValidators>[1];
 /** What the review commands need from the caller: forge's own dir (`cwd`), the code's dir (`repoDir`) and its tools. */
-export interface ReviewDeps { cwd: string; repoDir: string; now: () => Date; git: (args: string[]) => string | null; exec: Exec; execMany?: ExecMany; repo: RepoReader; self?: string; slot?: Slot }
+export interface ReviewDeps { cwd: string; repoDir: string; now: () => Date; git: (args: string[]) => string | null; exec: Exec; execMany?: ExecMany; repo: RepoReader; self?: string; slot?: Slot;
+  /** A9: the command runner at another folder (the TDD check's checkout of BASE). Without it, defaultExec. */
+  execAt?: (cwd: string) => Exec }
 
 const ROLES: readonly ReviewRole[] = ['review-correctness', 'review-security', 'review-perf'];
 const EFFORTS = ['medium', 'high', 'xhigh'] as const;
 // C-08: red validators go back to the implementer without reviewers at most this many times per review.
 const MAX_VALIDATOR_ROUNDS = 2;
-const TASK_N = /^([A-Za-z0-9_.~:@+]+(?:-[A-Za-z0-9_.~:@+]+)*)-(\d{1,4})$/;
+export const TASK_N = /^([A-Za-z0-9_.~:@+]+(?:-[A-Za-z0-9_.~:@+]+)*)-(\d{1,4})$/;
 
 const json = (v: unknown, code = 0): Result => ({ code, stdout: JSON.stringify(v, null, 2) + '\n', stderr: '' });
 const rel = (cwd: string, p: string) => path.relative(cwd, p).split(path.sep).join('/') || '.';
@@ -235,6 +239,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
 
   // I-03: its validators run the config's commands: without the person's trust it exits 2 here, before it writes anything.
   const config = loadTrustedConfig(deps.repoDir);
+  const verified = config.tdd === 'verified';
   // D-08: only this task's events of its project (ids repeat between plans): --project, else the folder --dir names,
   // else the ledger's attribution.
   const all = readEvents(deps.cwd);
@@ -258,6 +263,11 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const touched = names.split('\n').map(s => s.trim()).filter(Boolean);
 
   const dir = path.resolve(deps.cwd, dirArg);
+  // A9: what the TDD check needs (under tdd: verified): BASE, the brief's folder and number, and the validators' reader.
+  const tddCtx = {
+    repoDir: deps.repoDir, git: deps.git, execAt: deps.execAt ?? defaultExec, timeoutSec: config.validatorTimeoutSec, baseline,
+    validators: detectValidators(deps.repo, config), repo: deps.repo, base: baseSha, dir, n,
+  };
   // Carry 3: in an execution, only its own verdicts count (the round, the redo, the express review, the validators rounds).
   const since = executionHolding(deps.cwd, { project, task: id })?.startedAt ?? null;
   const counted = eventsSince(events, since);
@@ -340,7 +350,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const prevSent = readJson(path.join(dir, `findings-${n}-${round - 1}.json`)) as { validators?: unknown } | undefined;
   if (round >= 2 && !redo && round < reviewsCount.max && (pathName === 'medium' || pathName === 'large') && config.review.express
     && lastVerdict?.action === 'fix' && Array.isArray(prevSent?.validators) && prevSent!.validators.length === 0 && expressCandidate(index, round)
-    && SHA.test(baseSha)) {
+    && SHA.test(baseSha) && !(verified && tddPending(tddCtx))) {
     const express = expressPrep({ deps, task, project, id, n, round, pathName, review, previous, prevReviews, fixFiles, fixZones, dir, roundDir, baseSha,
       baselineArg, diff, head, tmFile, index, reviewsCount, locale, noCache: args.includes('--no-cache') });
     if (express) return express;
@@ -390,6 +400,11 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     }
   }
 
+  // A9: the TDD check runs only when reviewers are planned (never in a validators round nor the express review). Its row
+  // goes last in validators-<n>.json; `results` (the ledger event, the verdict) does not hold it.
+  const t = verified ? tddForBrief(tddCtx) : null;
+  if (t) writeFileSync(validatorsFile, JSON.stringify([...results, t.row], null, 2) + '\n');
+
   // A brief spends one shadow brief on its first round only, and only when it gets twins (a reviewer at high):
   // preparing that round again reuses the first answer.
   const planFile = path.join(roundDir, 'review-plan.json');
@@ -400,7 +415,10 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const brief = path.join(dir, `brief-${n}.md`);
   const report = path.join(dir, `report-${n}.txt`);
   let tdd = false;
-  try { tdd = /^TDD: required/m.test(readFileSync(brief, 'utf8')); } catch { /* no brief file */ }
+  try {
+    const text = readFileSync(brief, 'utf8');
+    tdd = /^TDD: required/m.test(text) || (verified && /^Bug:/m.test(text));
+  } catch { /* no brief file */ }
   const plan: RoundPlan = reviewRound({
     review, round, path: pathName, previous, fixFiles, fixZones, shadowOpen, redo,
     files: {
@@ -441,8 +459,13 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     round, reviews: reviewsCount, validators: { ok, failing, preexisting, file: rel(deps.cwd, validatorsFile) }, spawn, cached: cachedNames(results), durationMs: validation.durationMs,
     ...(plan.carried.length ? { carried: plan.carried.map(c => c.name) } : {}),
     ...(restored.length ? { restored } : {}),
+    ...(t ? { tdd: { file: t.file === null ? null : rel(deps.cwd, t.file), red: t.check.red.length, passedOnBase: t.check.passedOnBase, alreadyFailing: t.check.alreadyFailing,
+      unjudged: t.check.unjudged, skipped: t.check.skipped, durationMs: t.check.durationMs, reused: t.reused } } : {}),
   };
-  if (locale === 'es' || locale === 'en') out.say = sayPrep(reviewsCount, ok, results.filter(blocking).map(r => failingLabel(r, locale)), plan, locale, cachedNames(results).length);
+  if (locale === 'es' || locale === 'en') {
+    out.say = sayPrep(reviewsCount, ok, results.filter(blocking).map(r => failingLabel(r, locale)), plan, locale, cachedNames(results).length)
+      + (t ? ' ' + sayTdd(t.check, locale) : '');
+  }
   return json(out);
 }
 
