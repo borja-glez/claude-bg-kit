@@ -5,6 +5,7 @@ import path from 'node:path';
 import { parseConfig, ConfigError } from '../src/forge/config.js';
 import { TDD_VERIFIED_LINE, BUG_LINE } from '../src/forge/brief.js';
 import { readEvents } from '../src/forge/ledger.js';
+import { isBugTask } from '../src/forge/triage.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
@@ -54,5 +55,45 @@ describe('tdd: verified, its brief line and the base failing by name (A9)', () =
     };
     expect(line('verified')).toBe('already failing on the base by name (not yours): unit: tests/a.test.ts > old');
     expect(line('off')).toBeUndefined();
+  });
+});
+
+describe('the bug route behind tdd: verified (A9)', () => {
+  it('isBugTask reads bug wording in English and Spanish, and not features that only mention failures', () => {
+    for (const t of ['Fix the crash when saving an empty cart', 'it crashes when the cart is empty', 'Login is broken after the upgrade', 'the export no longer works with CSV',
+      'Regression in the date parser', 'it throws an exception on empty input', 'Bug: totals round the wrong way', 'Saving fails with large files',
+      'Arregla el fallo al guardar pedidos vacíos', 'El login no funciona tras el cambio', 'error al exportar el CSV', 'regresión en el parser de fechas',
+      'la app se cuelga al abrir el carrito', 'lanza una excepción con la entrada vacía', 'El guardado falla con ficheros grandes']) expect(isBugTask(t), t).toBe(true);
+    for (const t of ['fix the typo in the README', 'Add a debug flag to the CLI', 'Handle errors in the parser', 'Add retry on network errors',
+      'Add crash reporting to the app', 'Show a message when login fails', 'Si falla la red, reintenta', 'Añade un fallback para el idioma',
+      'Document the `bug` label in CONTRIBUTING', 'Añade el botón de exportar',
+      'Añade un aviso que no va a salir en móvil', 'Muestra un mensaje de error al guardar']) expect(isBugTask(t), t).toBe(false);
+  });
+  it('triage gives kind bug and its line from Small up, and logs it, only with tdd: verified', () => {
+    const triage = (dir: string, io: Io, task: string, text: string) => {
+      writeFileSync(path.join(dir, 'task.txt'), text);
+      return JSON.parse(run(['triage', '--task', task, '--text-file', 'task.txt'], io).stdout);
+    };
+    const on = repo('tdd: verified\n');
+    const small = triage(on.dir, on.io, 'b1', 'the export no longer works with an empty cart');
+    expect(small).toMatchObject({ path: 'small', kind: 'bug', bugLine: BUG_LINE });
+    expect(readEvents(on.dir).filter(e => e.kind === 'triage').at(-1)).toMatchObject({ task: 'b1', bug: true });
+    const trivial = triage(on.dir, on.io, 'b2', 'fix the crash in a.ts');
+    expect(trivial.path).toBe('trivial');
+    expect(trivial).not.toHaveProperty('kind');
+    const off = repo('tdd: off\n');
+    const plain = triage(off.dir, off.io, 'b1', 'the export no longer works with an empty cart');
+    expect(plain).not.toHaveProperty('kind');
+    expect(plain).not.toHaveProperty('bugLine');
+    expect(readEvents(off.dir).filter(e => e.kind === 'triage').at(-1)).not.toHaveProperty('bug');
+  });
+  it('FORGE brief adds the bug line after the TDD line to a plan task whose title reads as a bug', () => {
+    const { dir, io } = repo('tdd: verified\n');
+    const plan = path.join(dir, 'plan.yaml');
+    writeFileSync(plan, readFileSync(plan, 'utf8').replace('title: Esquema de pedidos', 'title: Arregla el fallo al guardar pedidos vacíos'));
+    expect(run(['brief', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout).toContain(`\n${TDD_VERIFIED_LINE}\n\n${BUG_LINE}\n`);
+    expect(run(['brief', '--plan', 'plan.yaml', '--task', 'T002'], io).stdout).not.toContain('Bug:');
+    writeFileSync(path.join(dir, '.forge', 'config.yaml'), 'tdd: off\n');
+    expect(run(['brief', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout).not.toContain('Bug:');
   });
 });

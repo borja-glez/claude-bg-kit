@@ -8,11 +8,11 @@ import { readExecution } from '../execution.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
 import { samePath } from '../../lib/worktree.js';
 import {
-  triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor,
+  triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, isBugTask, reviewFor,
   PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult,
 } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
-import { taskText, tddLine, TDD_VERIFIED_LINE } from '../brief.js';
+import { taskText, tddLine, TDD_VERIFIED_LINE, BUG_LINE } from '../brief.js';
 import { loadConfig, agentFor } from '../config.js';
 import type { VerifyFile } from '../verdict.js';
 import { loadProposals, loadApprovals } from '../proposals.js';
@@ -364,6 +364,8 @@ export interface TriageCore {
   task: string | undefined; project: string | null; result: TriageResult; names: string[]; fresh: string[];
   diff: { base: string; stat: { files: string[]; lines: number }; path: PathName } | null;
   auto: { autonomy?: 'auto' }; review: Record<string, unknown>; output: Record<string, unknown>;
+  /** A9: 'bug' for a bug task under tdd: verified (Small and up), else null. */
+  kind: 'bug' | null;
   /** The language of the announcement: --locale, else the plan's. */
   locale: AnnounceLocale;
 }
@@ -485,8 +487,11 @@ export function triageCore(io: Io, args: string[]): TriageCore {
   // J-14: the plan's `delicate`, or --delicate for a task the person calls delicate.
   const delicate = planned?.delicate === true || has('delicate');
   const impl = implementerFor(result, wordText, { batch: has('batch'), plan: planned !== null, delicate });
-  const profile = loadConfig(repoDir).profile;
-  const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
+  const config = loadConfig(repoDir);
+  const profile = config.profile;
+  // A9: under tdd: verified a bug task from Small up reproduces the bug first; a Trivial one never gets the route.
+  const kind = config.tdd === 'verified' && result.path !== 'trivial' && isBugTask(wordText) ? 'bug' as const : null;
+  const implementer ={ ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
   const known = readLocal(io.cwd).known;
   const fresh = names.filter(n => !known.includes(n));
   // Who reviews, by the size reached and the configured profile: printed always and logged for review-prep.
@@ -508,8 +513,8 @@ export function triageCore(io: Io, args: string[]): TriageCore {
     reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path } };
   }
   return {
-    task: flag('task'), project, result, names, fresh, diff, auto, review,
-    output: { ...result, catalog, new: fresh, implementer, announce: line, gate, ...auto, ...reviewed, review },
+    task: flag('task'), project, result, names, fresh, diff, auto, review, kind,
+    output: { ...result, catalog, new: fresh, implementer, announce: line, gate, ...auto, ...reviewed, review, ...(kind ? { kind, bugLine: BUG_LINE } : {}) },
     locale: locale as AnnounceLocale,
   };
 }

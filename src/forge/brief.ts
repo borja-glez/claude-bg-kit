@@ -60,7 +60,7 @@ export function priorSection(task: string, prior: readonly PriorCommit[], total:
 }
 
 // The brief an implementer works from: the plan task's fields verbatim, plus where the plan and design live.
-export function renderBrief(plan: Plan, task: PlanTask, opts: { planPath: string; designPath: string | null; tdd?: string | null; threatModel?: string | null; prior?: readonly PriorCommit[] | null; priorTotal?: number | null }): string {
+export function renderBrief(plan: Plan, task: PlanTask, opts: { planPath: string; designPath: string | null; tdd?: string | null; bug?: string | null; threatModel?: string | null; prior?: readonly PriorCommit[] | null; priorTotal?: number | null }): string {
   const lines = [
     `# ${task.id}: ${task.title}`,
     '',
@@ -81,6 +81,7 @@ export function renderBrief(plan: Plan, task: PlanTask, opts: { planPath: string
     'Stay inside the zones where possible; the task is done only when "Done when" holds and the validators pass.',
     ...(opts.threatModel ? ['', opts.threatModel.trimEnd()] : []),
     ...(opts.tdd ? ['', opts.tdd] : []),
+    ...(opts.bug ? ['', opts.bug] : []),
     ...(opts.prior?.length ? ['', priorSection(task.id, opts.prior, opts.priorTotal ?? null).trimEnd()] : []),
   ];
   return lines.join('\n') + '\n';

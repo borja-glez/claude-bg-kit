@@ -2,7 +2,8 @@ import type { Command } from '../context.js';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { isPlanId } from '../../../lib/plan.js';
-import { renderBrief, parsePrior, priorSection, type PriorCommit } from '../../brief.js';
+import { isBugTask } from '../../triage.js';
+import { renderBrief, BUG_LINE, parsePrior, priorSection, type PriorCommit } from '../../brief.js';
 import { renderThreatModel } from '../../threat-model.js';
 import { loadConfig } from '../../config.js';
 import { UsageError } from '../errors.js';
@@ -14,6 +15,11 @@ import { planTask, spTaskNumber, tddFor } from '../shared.js';
 // nothing is looked for with tdd: off.
 function briefTdd(io: Io, dir: string): string | null {
   try { return loadConfig(dir).tdd !== 'off' ? tddFor(io, dir).line : null; } catch { return null; }
+}
+
+// A9: the bug line of a plan task's brief: under tdd: verified, when its title reads as a bug (none on any error).
+function briefBug(dir: string, title: string): string | null {
+  try { return loadConfig(dir).tdd === 'verified' && isBugTask(title) ? BUG_LINE : null; } catch { return null; }
 }
 
 // K4-02: the threat model section a plan task's brief carries, from the config of the code's checkout (none on any error).
@@ -62,5 +68,8 @@ export const command: Command = (args, ctx) => {
   const { plan, task } = planTask(io.cwd, flag('plan'), flag('task'));
   const design = flag('design') ?? path.join(path.dirname(flag('plan')!), 'design.md');
   const designPath = existsSync(path.resolve(io.cwd, design)) ? design.replace(/\\/g, '/') : null;
-  return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: briefTdd(io, repoDir), threatModel: briefThreatModel(repoDir), prior, priorTotal }));
+  return ok(renderBrief(plan, task, {
+    planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: briefTdd(io, repoDir), bug: briefBug(repoDir, task.title),
+    threatModel: briefThreatModel(repoDir), prior, priorTotal,
+  }));
 };

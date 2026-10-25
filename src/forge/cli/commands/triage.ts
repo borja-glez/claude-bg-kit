@@ -15,7 +15,8 @@ export const command: Command = (args, ctx) => {
   const known = readLocal(io.cwd).known;
   if (t.fresh.length || known.some(n => !t.names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: t.names }));
   appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(t.task ? { task: t.task } : {}), ...(t.project !== null ? { project: t.project } : {}), ...t.result, ...t.auto,
-    ...(t.diff ? { diff: { base: t.diff.base, files: t.diff.stat.files.length, lines: t.diff.stat.lines } } : {}), review: t.review });
+    ...(t.diff ? { diff: { base: t.diff.base, files: t.diff.stat.files.length, lines: t.diff.stat.lines } } : {}), review: t.review,
+    ...(t.kind === 'bug' ? { bug: true } : {}) });
   // forgeDir has just created .forge/.gitignore and no step commits it: say so while git lists it as untracked and
   // not ignored (a repository that ignores .forge/ has opted out). Asked after the writes, which may have made it.
   const git = io.git ?? defaultGit(io.cwd);
