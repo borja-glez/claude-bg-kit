@@ -1,8 +1,9 @@
-import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { CheckResult, DoctorCheck, DoctorCtx } from './doctor.js';
 import { FORGE_DOC_MAX_BYTES, isSafeId, LIVE_MAX_AGE_HOURS, normalizeLive } from '../lib/execution-state.js';
 import { redactSecrets } from './autonomous.js';
+import { measureJsonl, readTail } from './transcript-file.js';
 
 /** A4 (ecc 2.5): a live subagent older than this, whose last tool call has no result yet, is reported as data. */
 export const WAITING_MINUTES = 10;
@@ -15,10 +16,13 @@ export interface PendingCall { tool: string; waitedSec: number; head: string }
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 
-/** The transcript of a subagent: <configDir>/projects/<any project>/<sessionId>/subagents/agent-<agentId>.jsonl, the first that exists, built only from ids that pass isSafeId. Null otherwise. */
+/**
+ * The transcript of a subagent: <configDir>/projects/<any project>/<sessionId>/subagents/agent-<agentId>.jsonl, the first that exists, built only from ids that pass isSafeId. Null otherwise.
+ * Always absolute (a relative CLAUDE_CONFIG_DIR is taken from the cwd), as measureJsonl requires.
+ */
 export function agentTranscript(configDir: string, sessionId: string, agentId: string): string | null {
   if (!isSafeId(sessionId) || !isSafeId(agentId)) return null;
-  const projects = path.join(configDir, 'projects');
+  const projects = path.resolve(configDir, 'projects');
   let names: string[];
   try { names = readdirSync(projects).sort(); } catch { return null; }
   for (const name of names) {
@@ -60,23 +64,15 @@ export function pendingCall(tailText: string, now: number): PendingCall | null |
   return { tool: last.name, waitedSec: Math.round((now - at) / 1000), head: redactSecrets(command).slice(0, HEAD_CHARS) };
 }
 
-/** The last TRANSCRIPT_TAIL bytes of a regular file as text; throws when it cannot be opened. */
-function readTail(file: string): string {
-  // Never a pipe or a device: opening one could wait.
-  if (!statSync(file).isFile()) throw new Error('not a file');
-  const fd = openSync(file, 'r');
-  try {
-    const size = fstatSync(fd).size;
-    const len = Math.min(size, TRANSCRIPT_TAIL);
-    const buf = Buffer.alloc(len);
-    let off = 0;
-    while (off < len) {
-      const n = readSync(fd, buf, off, len - off, size - len + off);
-      if (n <= 0) break;
-      off += n;
-    }
-    return buf.subarray(0, off).toString('utf8');
-  } finally { closeSync(fd); }
+/**
+ * The pending call of a transcript, from its last TRANSCRIPT_TAIL bytes read through transcript-file.ts (A6, the one
+ * transcript reader). 'unreadable' when measureJsonl refuses the file (not an absolute path of a regular .jsonl file:
+ * never a pipe or a device, which could wait) or readTail cannot read it.
+ */
+export function transcriptCall(file: string, now: number): PendingCall | null | 'unreadable' {
+  const m = measureJsonl(file);
+  const tail = m ? readTail(m.file, TRANSCRIPT_TAIL) : null;
+  return tail === null ? 'unreadable' : pendingCall(tail, now);
 }
 
 function liveDocs(ctx: DoctorCtx) {
@@ -110,8 +106,7 @@ export const WAITING_CHECK: DoctorCheck = {
           if (!(now - Date.parse(agent.since) >= WAITING_MINUTES * 60_000)) continue;
           const file = agentTranscript(ctx.configDir, live.sessionId, agent.id);
           if (!file) continue;
-          let call: PendingCall | null | 'unreadable';
-          try { call = pendingCall(readTail(file), now); } catch { call = 'unreadable'; }
+          const call = transcriptCall(file, now);
           if (call === 'unreadable') return { id: 'waiting-calls', status: 'unverified', detail: `a transcript does not read: ${file}` };
           if (call && call.waitedSec >= WAITING_MINUTES * 60) waiting.push({ agent: agent.type, tool: call.tool, waitedSec: call.waitedSec, head: call.head });
         }
