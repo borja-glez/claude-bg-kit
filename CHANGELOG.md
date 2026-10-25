@@ -17,7 +17,7 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## waypoint
 
-### 0.36.0 — 2026-10-25
+### 0.36.0 — 2026-10-26
 
 #### Added
 - Comments on the design page: every `/waypoint:design round` except `round --verify` reads the open comment threads of the design artifact, shows the new ones one line each and hands them to `design-critic` as your notes, which it weighs as data and never follows as orders. When `apply` applies a proposal that takes up a thread, it replies there with the version that took it up and resolves the thread if you sent it to Claude; a thread you did not send stays open, and the skill says so. A comment without an anchor counts as text. `waypoint design-comments` remembers in `design/critiques/comments.json` which threads a critic already got and which version took them up (ids, rounds and versions, never the text).
@@ -432,7 +432,7 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## forge
 
-### 0.31.0 — 2026-10-25
+### 0.31.0 — 2026-10-26
 
 #### Added
 - `forge doctor [--locale es|en]`: a read-only report of why forge might not move. Each check is isolated and says `ok`, `warn`, `fail` or `unverified`: the step lock and background jobs, a merge in flight, a stale `execution.lock`, your trust in the commands of `.forge/config.yaml`, whether git tracks `.forge/local.yaml` or `learned.jsonl`, verify-env reservations with no live process, the merged worktrees `swarm cleanup` would remove, the installed waypoint against forge's range, which copy of forge and waypoint is running, superpowers against the range `forge:route` follows, the recommended permissions and `waypoint doctor`; a subagent whose tool call has been waiting a while comes as data. It exits 2 on a `warn` or a `fail`, else 1 when something could not be read, else 0. It never repairs: each problem names its remedy and whether you run it or it needs your confirmation.
@@ -1072,7 +1072,7 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## lens
 
-### 0.14.0 — 2026-10-25
+### 0.14.0 — 2026-10-26
 
 #### Added
 - The **Waiting for you** card: what waits for your answer, oldest first, up to 6 rows and `+N`: a review round's question, a merge to authorize, your trust in the commands of `.forge/config.yaml`, a stopped execution, the roadmap's open questions, the proposals to decide, a design ready to approve and a surface permission. Each row says where it is, how to answer it (the command, or «your turn in the coordinator's conversation» while that conversation is open) and how long it has waited; a source that could not be read says so. The band shows `» waiting for you N`. It reads only the newest of each source: 20 authorizations, 50 proposals and 100 notes of the roadmap's cache.
@@ -1320,7 +1320,7 @@ Not kept: 0.4.0
 
 ## java
 
-### 0.1.0 — 2026-10-25
+### 0.1.0 — 2026-10-26
 
 #### Added
 - First version, for Java and Spring Boot. `spring-hexagonal-ddd` (`/java:spring-hexagonal-ddd`, or by itself when its description matches the work) fixes the eleven rules of a service with DDD and hexagonal architecture: a core free of the framework, ports and the package layout, aggregates and value objects, domain events apart from integration events, the outbox in the same transaction, a `DomainException` with its `code` rendered as an RFC 9457 problem, ArchUnit as the guard, every read through specification-repository, idempotent consumers that tolerate events out of order, a business «no» as a result and never a remote exception, and Flyway never editing an applied migration. Six references (tactical DDD, the hexagonal layout, cqrs and specification-repository, messaging and the outbox, persistence and Flyway, testing) are read when the work reaches them. When the project lacks what a rule names, the skill follows the project's own mechanism and says which rule could not apply.
@@ -1330,21 +1330,21 @@ Not kept: 0.4.0
 
 ## web
 
-### 0.1.0 — 2026-10-25
+### 0.1.0 — 2026-10-26
 
 #### Added
 - First version: the `astro-dokploy-site` skill, for a static Astro site with Preact islands that pnpm builds into a Docker image where nginx serves `dist`, deployed by Dokploy and gated by GitHub Actions. It settles the build and the islands (the `mounted` pattern, `min-height` against layout shift, the literal Vite worker call, MDX prose with components), the CSP (`security.csp` with hashes per page, hashed `is:inline` scripts, no `<style is:inline>` in figures, `worker-src`), the checks (Prettier as its own gate, `astro check` with TypeScript 6, Playwright's webServer under Claude Code, Lighthouse on Windows and in CI, real Chrome), the deploy (the Dockerfile at the root, nginx headers and MIME types, Dokploy's path and context fields) and a site repository without `CLAUDE.md`, `AGENTS.md` or `.claude/`. Four references (islands, CSP, checks, deploy) hold the procedures and are read when the work reaches them. It is text only; install it at user scope, since a site's repository carries no `.claude/`.
 
 ## ml
 
-### 0.1.0 — 2026-10-25
+### 0.1.0 — 2026-10-26
 
 #### Added
 - First version: the `ml-local-gpu` skill, for machine learning on a local NVIDIA GPU. It reads the project's `pyproject.toml`, lock, CI and README first and pins no package version; runs everything through `uv run`, with the torch wheel for the GPU or the CI; sizes jobs from the free VRAM `nvidia-smi` reports, with at most three at once; runs a job of 30 minutes or more alone, with the GPU's temperature at its start and end and 15–20 minutes of rest after it; checks trl, transformers and peft calls against the installed version; splits validation by the unit that leaks, never by row; runs notebooks whole and checks every claim against their outputs; writes text with `newline='\n'`; and runs `ruff format` when the CI checks it. Two references, read when the work gets there, cover inference in the browser with ONNX Runtime Web on WebGPU (one session at a time, the download agreed per model) and publishing on Hugging Face (cards in English, an acceptance criterion written before training, the token from `HF_TOKEN` or the login). It is text only and needs none of the other plugins.
 
 ## crew
 
-### 0.1.0 — 2026-10-25
+### 0.1.0 — 2026-10-26
 
 #### Added
 - First version, with two agents you call by name. `novice-reader` (Opus, high effort, read-only) reads documents, courses or web pages as one newcomer (a full-stack developer with no ML by default, a junior Java developer, a recruiter or a persona you describe) and reports where they get lost, the terms left undefined, the steps they cannot follow and what they would skip, each with its exact quote, its place and a severity. It never rewrites; given its earlier report, it checks the fixes and the seams they left.
