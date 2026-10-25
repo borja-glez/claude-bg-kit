@@ -1210,6 +1210,63 @@ describe('the final merge needs the recorded yes of the person (I-03)', () => {
     expect(finalReview(true)).toBe('accept');
     expect(last()).not.toHaveProperty('tree');
   });
+  const onFinish = () => seedExecution(root, { ...readExecution(root)!, mergeOnFinish: true, active: false, stopReason: 'finished' });
+  it('the merge on finish needs the tree its final review accepted: a commit by hand asks again, with why; forge\'s notes alone do not (A3)', () => {
+    finished();
+    onFinish();
+    expect(finalReview(true)).toBe('accept');
+    commitIn(runWt(), 'late.txt', 'late\n', 'by hand');
+    expect(merge([])).toMatchObject({ result: 'needs-authorization', reason: 'tree changed since the final review', changed: ['late.txt'] });
+    expect(readExecution(root)!.mergeOnFinish).toBe(true);
+    expect(mergeCommits()).toBe(0);
+    expect(finalReview(true)).toBe('accept');
+    mkdirSync(path.join(runWt(), '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(runWt(), '.forge', 'verify', 'web.md'), '# Web\n- learned\n');
+    g(runWt(), 'add', '-f', '.forge/verify/web.md');
+    g(runWt(), 'commit', '-qm', 'notes of the flow pass');
+    expect(merge([])).toMatchObject({ result: 'merged', closed: true });
+  });
+  it('the decisions file of the run is set aside too, and only that exact path (A3)', () => {
+    finished();
+    onFinish();
+    expect(finalReview(true)).toBe('accept');
+    const decisions = `docs/forge/decisions/${readExecution(root)!.runId}.md`;
+    mkdirSync(path.join(runWt(), 'docs', 'forge', 'decisions'), { recursive: true });
+    writeFileSync(path.join(runWt(), 'late.txt'), 'late\n');
+    writeFileSync(path.join(runWt(), decisions), '# Decisions\n');
+    g(runWt(), 'add', 'late.txt', decisions);
+    g(runWt(), 'commit', '-qm', 'late and decisions');
+    expect(merge([])).toMatchObject({ result: 'needs-authorization', reason: 'tree changed since the final review', changed: ['late.txt'] });
+    expect(mergeCommits()).toBe(0);
+    expect(finalReview(true)).toBe('accept');
+    writeFileSync(path.join(runWt(), decisions), '# Decisions\n- one more\n');
+    g(runWt(), 'commit', '-qam', 'decisions grew');
+    expect(merge([])).toMatchObject({ result: 'merged', closed: true });
+  });
+  it('a final review with something uncommitted in the run worktree leaves no receipt: the merge on finish asks (A3)', () => {
+    finished();
+    onFinish();
+    writeFileSync(path.join(runWt(), 'stray.txt'), 'x\n');
+    expect(finalReview(true)).toBe('accept');
+    rmSync(path.join(runWt(), 'stray.txt'));
+    expect(merge([])).toMatchObject({ result: 'needs-authorization', reason: 'no receipt from the final review: its run worktree had uncommitted changes' });
+    expect(mergeCommits()).toBe(0);
+  });
+  it('a merge that would conflict says so with its paths before asking and spends nothing; one that would not asks as before (A3)', () => {
+    finished();
+    expect(merge([])).toMatchObject({ result: 'needs-authorization' });
+    expect(merge([])).not.toHaveProperty('predicted');
+    const auths = readAuths(root).length;
+    const head = commitIn(root, 'a.txt', 'main\n', 'main side');
+    onFinish();
+    expect(finalReview(true)).toBe('accept');
+    const r = merge([]);
+    expect(r).toMatchObject({ result: 'conflict', predicted: true, paths: ['a.txt'] });
+    expect(r).not.toHaveProperty('ask');
+    expect(readAuths(root)).toHaveLength(auths);
+    expect(readExecution(root)!.mergeOnFinish).toBe(true);
+    expect(git('rev-parse', 'HEAD')).toBe(head);
+  });
   it('a yes to the start question allows the one final merge of the finished run once its final review accepts: none before, none after', () => {
     finished();
     seedExecution(root, { ...readExecution(root)!, mergeOnFinish: true });

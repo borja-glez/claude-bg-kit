@@ -30,12 +30,12 @@ export function commitOf(git: Git, rev: string): string | null {
 
 export type TreeMatch = { ok: true } | { ok: false; changed: string[] };
 
-/** Whether tree `now` is the reviewed tree, a change only in .forge/verify/*.md aside; `changed`: the other paths. */
-export function sameReviewedTree(git: Git, reviewed: string, now: string): TreeMatch {
+/** Whether tree `now` is the reviewed tree, a change only in .forge/verify/*.md aside (and in the exact paths of `extraPassive`); `changed`: the other paths. */
+export function sameReviewedTree(git: Git, reviewed: string, now: string, extraPassive: readonly string[] = []): TreeMatch {
   if (reviewed === now) return { ok: true };
   const out = git(['diff', '--name-only', '-z', '--no-renames', reviewed, now]);
   if (out === null) return { ok: false, changed: [] };
-  const changed = out.split('\0').filter(p => p !== '' && !NOTES_PATH.test(p));
+  const changed = out.split('\0').filter(p => p !== '' && !NOTES_PATH.test(p) && !extraPassive.includes(p));
   return changed.length === 0 ? { ok: true } : { ok: false, changed };
 }
 
