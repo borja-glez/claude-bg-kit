@@ -14866,7 +14866,8 @@ var Schema = object({
       model: _enum(MODELS).optional()
     }).strict().default({ effort: "medium" }),
     setup: string2().min(1).max(500).transform(lf).optional(),
-    validateJobs: number2().int().min(1).max(8).default(2)
+    validateJobs: number2().int().min(1).max(8).default(2),
+    nested: boolean2().optional()
   }).strict().default({ parallel: 3, launcher: "bg", member: { effort: "medium" }, validateJobs: 2 })
 }).strict();
 var DEFAULTS = {
@@ -15731,6 +15732,11 @@ function startAnnounce(f) {
       f.mergeOnFinish ? `When it ends, if the final review passes, I merge ${f.branch} into ${f.base}.` : "When it ends I merge nothing without asking you.",
       "/forge:stop stops it."
     );
+  }
+  if (f.nested === "on") {
+    lines.push(f.es ? "Cada tarea la lleva un runner anidado (forge-runner, Opus a esfuerzo medio, swarm.nested); sus revisores siguen siendo agentes independientes." : "Each task is driven by a nested runner (forge-runner, Opus at medium effort, swarm.nested); its reviewers stay independent agents.");
+  } else if (f.nested === "ignored") {
+    lines.push(f.es ? "swarm.nested solo vale en la ejecuci\xF3n de un plan en modo subagentes: esta ejecuci\xF3n no lo usa." : "swarm.nested applies only to a plan run in subagents mode: this run does not use it.");
   }
   if (f.mergeRefused) {
     const note = f.mergeRefused === "answered no" && f.mergeNote ? oneLine(f.mergeNote) : "";
@@ -34971,7 +34977,8 @@ var subcommand12 = (rest, ctx) => {
     loose: loose.length,
     setup,
     mergeRefused,
-    mergeNote
+    mergeNote,
+    nested: config2.swarm.nested === true ? kind === "plan" && state.mode === "subagents" ? "on" : "ignored" : null
   });
   return json4({ ...state, setup, baseSync, ...looseOut, announce: announce2, ...attributes, ...replaced ? { replaced } : {}, ...mergeRefused ? { mergeRefused } : {} });
 };
@@ -35146,6 +35153,11 @@ var subcommand17 = (rest, ctx) => {
   }
   const roundArg = has("round") ? Number(flag("round")) : void 0;
   if (roundArg !== void 0 && (!Number.isInteger(roundArg) || roundArg < 0 || roundArg > 99)) throw new UsageError("swarm task: --round must be an integer from 0 to 99");
+  if (has("lease-minutes") && has("lease")) throw new UsageError("swarm task: use --lease or --lease-minutes, not both");
+  const leaseMinutes = has("lease-minutes") ? Number(flag("lease-minutes")) : void 0;
+  if (leaseMinutes !== void 0 && (!Number.isInteger(leaseMinutes) || leaseMinutes < 1 || leaseMinutes > LEASE_CAP_MINUTES)) {
+    throw new UsageError(`swarm task: --lease-minutes must be a whole number of minutes from 1 to ${LEASE_CAP_MINUTES}`);
+  }
   const agentArg = has("no-agent") ? null : flag("agent");
   const build2 = (base2) => {
     const stage = stageArg ?? base2.stage;
@@ -35175,7 +35187,7 @@ var subcommand17 = (rest, ctx) => {
     next = build2(base);
     return { ...cur, tasks: { ...cur.tasks, [task]: next } };
   });
-  const lease = flag("lease") && !Number.isNaN(Date.parse(flag("lease"))) ? flag("lease") : new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString();
+  const lease = leaseMinutes !== void 0 ? new Date(now.getTime() + leaseMinutes * 6e4).toISOString() : flag("lease") && !Number.isNaN(Date.parse(flag("lease"))) ? flag("lease") : new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString();
   writePublicTask(io.cwd, {
     task,
     runId: e.runId,
@@ -35317,7 +35329,7 @@ var SUBCOMMANDS = {
 };
 
 // src/forge/cli/swarm.ts
-var SWARM_USAGE = "usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--run-id R] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO] [--claim]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--hook-session ID] [--locale es|en] [--retry-deps]|retry <T> [--adopt] [--hook-session ID]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO] [--claim]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID>";
+var SWARM_USAGE = "usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--run-id R] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO] [--lease-minutes N] [--claim]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--hook-session ID] [--locale es|en] [--retry-deps]|retry <T> [--adopt] [--hook-session ID]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO] [--claim]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID>";
 function swarmCommand(args, io, deps, ext = {}) {
   const [sub, ...rest] = args;
   const ctx = swarmCtx(sub, rest, io, deps, ext);
@@ -37022,6 +37034,10 @@ var import_node_fs74 = require("node:fs");
 var import_node_path76 = __toESM(require("node:path"), 1);
 var AGENT_LEASE_MINUTES = 90;
 var ASK_AGAIN_MS = 24 * 36e5;
+var RUNNER_FILE = "runner.json";
+var RUNNER_AGENT = "forge-runner";
+var RUNNER_EFFORT = "medium";
+var RUNNER_SILENT_MINUTES = AGENT_LEASE_MINUTES + LEASE_MINUTES;
 var slash3 = (p) => p.split(import_node_path76.default.sep).join("/");
 var readText5 = (f) => {
   try {
@@ -37151,6 +37167,22 @@ function finished(file) {
     return true;
   }
 }
+function nestedOn(root) {
+  try {
+    return loadConfig(root).swarm.nested === true;
+  } catch {
+    return false;
+  }
+}
+function heldRunner(c, task, t) {
+  const file = import_node_path76.default.join(c.io.cwd, workOf(c, task, readEvents(c.io.cwd)), RUNNER_FILE);
+  const doc = readJson5(file);
+  if (!isObject3(doc) || doc.state !== "running" || doc.runId !== c.runId || doc.attempts !== t.attempts) return null;
+  return { file, doc };
+}
+function releaseRunner(c, held2, reason) {
+  writeJson(held2.file, { ...held2.doc, state: "back", backAt: c.iso(), reason });
+}
 function renewLease(io, e, task, t, now) {
   let prev = null;
   try {
@@ -37215,12 +37247,7 @@ Worktree: ${slash3(worktree)} (work only inside this directory).
   const agent = typeof impl.agent === "string" ? impl.agent : "forge-impl";
   logAgent(c, `${task}-1`, agent, typeof impl.role === "string" ? impl.role : "impl");
   if (!call(c, task, ["swarm", "task", task, "--stage", "implement", "--agent", agent, "--round", "0", "--lease", c.agentLease()])) return false;
-  c.actions.push({
-    type: "spawnImplementer",
-    task,
-    agent,
-    taskLine: taskLine(`${task}-1`, c.project),
-    role: impl.role ?? null,
+  const handout = {
     brief: slash3(brief),
     report: slash3(import_node_path76.default.join(work, "report-1.txt")),
     validate: pr.validate ?? null,
@@ -37228,7 +37255,26 @@ Worktree: ${slash3(worktree)} (work only inside this directory).
     base: pr.base ?? null,
     ...w.setup ? { setup: w.setup } : {},
     ...tri.announce ? { announce: tri.announce } : {}
-  });
+  };
+  if (c.nested && !resumedBase) {
+    const attempts = readExecution(c.io.cwd)?.tasks[task]?.attempts ?? 0;
+    c.after.push(() => writeJson(import_node_path76.default.join(c.io.cwd, work, RUNNER_FILE), { runId: c.runId, attempts, state: "running", at: c.iso() }));
+    c.actions.push({
+      type: "spawnRunner",
+      task,
+      agent: RUNNER_AGENT,
+      effort: RUNNER_EFFORT,
+      taskLine: taskLine(task, c.project),
+      plan: c.planArg,
+      project: c.project,
+      locale: c.locale,
+      work: slash3(work),
+      implementer: { agent, role: impl.role ?? null, taskLine: taskLine(`${task}-1`, c.project) },
+      ...handout
+    });
+    return true;
+  }
+  c.actions.push({ type: "spawnImplementer", task, agent, taskLine: taskLine(`${task}-1`, c.project), role: impl.role ?? null, ...handout });
   return true;
 }
 function reviewBase(c, task, t, n, base, rebaseline, work) {
@@ -37581,6 +37627,8 @@ function publishOf(io, e, started, versions, now, read = readEvents) {
 }
 var SAY = {
   spawnImplementer: ["{t} empieza con {x}", "{t} starts with {x}"],
+  spawnRunner: ["{t} empieza con su runner ({x})", "{t} starts with its runner ({x})"],
+  handback: ["{t}: su runner la devuelve; sigo yo", "{t}: its runner handed it back; I take it from here"],
   spawnReviewers: ["{t} a revisi\xF3n", "{t} to review"],
   express: ["{t} a revisi\xF3n expr\xE9s", "{t} to an express review"],
   validatorsRound: ["{t} vuelve a su implementador (validadores en rojo)", "{t} back to its implementer (red validators)"],
@@ -37615,7 +37663,8 @@ function stepSay(actions, wait, locale) {
   const parts = actions.flatMap((a) => {
     const s2 = SAY[a.type];
     if (!s2) return [];
-    const x = a.type === "spawnImplementer" ? a.agent : a.type === "error" ? a.command : a.type === "block" || a.type === "stalled" ? a.reason : "";
+    const runnerImpl = isObject3(a.implementer) && typeof a.implementer.agent === "string" ? a.implementer.agent : "";
+    const x = a.type === "spawnImplementer" ? a.agent : a.type === "spawnRunner" ? runnerImpl : a.type === "error" ? a.command : a.type === "block" || a.type === "stalled" ? a.reason : "";
     const env = a.type === "accepted" && Array.isArray(a.envUnverified) && a.envUnverified.length ? ` (${a.envUnverified.join(", ")} ${locale === "es" ? "sin volver a comprobar: entorno" : "not checked again: environment"})` : "";
     return [s2[i].replace("{t}", String(a.task ?? "swarm step")).replace("{x}", String(x ?? "")) + env];
   });
@@ -37665,6 +37714,7 @@ function swarmStep(rest, io, deps) {
       rulings,
       actions: [],
       after: [],
+      nested: e0.mode === "subagents" && nestedOn(io.cwd),
       iso: () => io.now().toISOString(),
       agentLease: () => new Date(io.now().getTime() + AGENT_LEASE_MINUTES * 6e4).toISOString()
     };
@@ -37678,8 +37728,22 @@ function stepOnce(c, e0, returned, versions, agents, now) {
   for (const [task, t] of Object.entries(e0.tasks)) if (t.status === "running" && t.executor === "subagents") renewLease(io, e0, task, t, now);
   const started = /* @__PURE__ */ new Set();
   const ruled = /* @__PURE__ */ new Set();
+  for (const task of returned) {
+    const t = e0.tasks[task];
+    const held2 = t && t.status !== "running" ? heldRunner(c, task, t) : null;
+    if (t && held2) releaseRunner(c, held2, "returned");
+  }
   for (const [task, t] of Object.entries(e0.tasks)) {
     if (t.status !== "running" || t.executor !== "subagents") continue;
+    const held2 = heldRunner(c, task, t);
+    if (held2) {
+      const last = Math.max(Date.parse(String(held2.doc.at)) || 0, Date.parse(t.updatedAt) || 0);
+      const silent = Date.parse(c.iso()) - last > RUNNER_SILENT_MINUTES * 6e4;
+      if (!returned.has(task) && !silent) continue;
+      const reason = returned.has(task) ? "returned" : "silent";
+      releaseRunner(c, held2, reason);
+      c.actions.push({ type: "handback", task, stage: t.stage, reason });
+    }
     if (t.stage === "brief") {
       if (startTask(c, task, true)) started.add(task);
     } else if (t.stage === "implement" || t.stage === "validate") {
