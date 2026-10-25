@@ -105,4 +105,19 @@ describe('the java plugin (w7 D1)', () => {
     // AGENTS.md stays the contract: the skill names it and never copies its steps.
     for (const w of ['Check the labels first', 'Regression test first', 'Stay in scope', 'When blocked']) expect(md + release, w).not.toContain(w);
   });
+  it('the java READMEs, in English and Spanish, show its version and name its skills, its agent, its install and the eleven rules; the bg-kit READMEs list it', () => {
+    const v = JSON.parse(read('plugins/java/.claude-plugin/plugin.json')).version as string;
+    for (const [f, badge] of [['plugins/java/README.md', `badge/version-${v}-`], ['plugins/java/README.es.md', `badge/versi%C3%B3n-${v}-`]]) {
+      const md = read(f);
+      expect(md, f).toContain(badge);
+      for (const w of ['/java:spring-hexagonal-ddd', '/java:java-oss-library', 'java:architecture-reviewer', 'claude plugin install java@bg-kit', '"java@bg-kit": false', ...RULE_IDS.map(id => `\`${id}\``)])
+        expect(md, `${f}: ${w}`).toContain(w);
+    }
+    for (const [f, link] of [['README.md', 'plugins/java/README.md'], ['README.es.md', 'plugins/java/README.es.md']]) {
+      const md = read(f);
+      for (const w of [`](${link})`, 'claude plugin install java@bg-kit']) expect(md, `${f}: ${w}`).toContain(w);
+      expect(md, f).toMatch(/^ {2}java\/ /m);
+      expect(md, f).not.toMatch(/three plugins|tres plugins/);
+    }
+  });
 });
