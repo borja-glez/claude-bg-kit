@@ -61,6 +61,7 @@ describe('secretsRule: the credentials of the machine and the .env files (w7 A4,
   it('reads a path as Claude Code or Windows spells it (Review Focus 3)', () => {
     expect(ruleOf(secretsRule.check(call('Read', { file_path: path.join('..', '..', '.ssh', 'id_rsa') }, IMPL), CTX))).toBe('secrets');
     expect(ruleOf(on('Read', sh(path.join(HOME, '.kube', 'config')), IMPL))).toBe('secrets');
+    expect(ruleOf(on('Read', '~/.ssh/id_rsa', IMPL))).toBe('secrets');
     if (WIN) {
       expect(ruleOf(on('Read', path.join(HOME.toUpperCase(), '.SSH', 'ID_RSA'), IMPL))).toBe('secrets');
       expect(ruleOf(on('Read', '\\\\?\\' + path.join(HOME, '.aws', 'credentials'), IMPL))).toBe('secrets');
@@ -92,6 +93,16 @@ describe('secretsRule: the credentials of the machine and the .env files (w7 A4,
     expect(ruleOf(glob(IMPL, { pattern: '**/.env*', path: MAIN }))).toBe('secrets');
     expect(glob(VERIFY, { pattern: '**/.env*', path: MAIN })).toBeNull();
     expect(ruleOf(glob(VERIFY, { pattern: '.env', path: OTHER }))).toBe('secrets');
+    // Claude Code's ~ and the Git Bash /x/ spelling: it rewrites only file_path before the hook, so a Grep/Glob path reaches it raw and the rule expands it itself.
+    for (const p of ['~', '~/.ssh']) expect(ruleOf(grep(IMPL, { path: p })), p).toBe('secrets');
+    expect(ruleOf(glob(IMPL, { path: '~/.ssh', pattern: '*' }))).toBe('secrets');
+    expect(ruleOf(glob(IMPL, { pattern: '~/.ssh/*' }))).toBe('secrets');
+    expect(grep(IMPL, { path: '~/work' })).toBeNull();
+    if (WIN) {
+      const gb = `/${HOME[0].toLowerCase()}${sh(HOME.slice(2))}/.ssh`;
+      expect(ruleOf(grep(IMPL, { path: gb })), gb).toBe('secrets');
+      expect(ruleOf(glob(IMPL, { path: gb, pattern: '*' })), gb).toBe('secrets');
+    }
     for (const a of [undefined, 'general-purpose']) expect(grep(a, { path: HOME }), String(a)).toBeNull();
   });
   it('reads nothing of ctx for a session that is not a forge agent, nor main for a credential; parseGuardInput keeps agent_type', () => {
@@ -120,15 +131,19 @@ describe('secretsRule in Bash and PowerShell (w7 A4, guard B)', () => {
     'ls -la ~/.ssh/', 'tar -czf /tmp/k.tgz ~/.kube', 'x=$(cat ~/.ssh/id_rsa)', 'bash -c "cat ~/.ssh/id_rsa"', 'grep -r BEGIN ~', 'rg password $HOME', 'find ~ -name id_rsa',
     'cat .env', 'source .env', 'node --env-file=.env app.js', 'cat apps/web/.env.local', `cat ${sh(OTHER)}/.env`, 'cat "$CFG/.env"',
     'cat .env*', 'cat "apps/*/.env"', 'rg --regexp=x ~/.ssh', 'grep -e x -r ~',
-    ...(WIN ? ['cmd /c "type %USERPROFILE%\\.ssh\\id_rsa"', `cat ${gitBash}/.ssh/id_rsa`, `cat "${HOME.toUpperCase()}\\.SSH\\ID_RSA"`] : []),
+    'grep -f ~/.ssh/id_rsa -r src',
+    ...(WIN ? ['cmd /c "type %USERPROFILE%\\.ssh\\id_rsa"', `cat ${gitBash}/.ssh/id_rsa`, `cat "${HOME.toUpperCase()}\\.SSH\\ID_RSA"`,
+      'cmd /c "findstr /r /c:. %USERPROFILE%\\.ssh\\id_rsa"'] : []),
   ])('denies a forge agent the Bash call %s (Review Focus 3)', command => expect(ruleOf(bash(command, IMPL))).toBe('secrets'));
   it.each([
     'Get-Content $env:USERPROFILE\\.ssh\\id_rsa', 'Get-Content ~\\.aws\\credentials', 'type $HOME\\.kube\\config', 'Copy-Item ${env:USERPROFILE}\\.netrc x', 'Get-Content .env',
+    'findstr /r /c:. $env:USERPROFILE\\.ssh\\id_rsa', 'findstr /c:BEGIN ~\\.ssh\\id_rsa',
   ])('denies a forge agent the PowerShell call %s', command => expect(ruleOf(pwsh(command, IMPL))).toBe('secrets'));
   it.each([
     'grep -rn ".env" src', 'rg -e .env src', 'rg --regexp=.env src', 'rg -e.env src', 'rg -n "process\\.env" src', 'echo .env >> .gitignore', "printf '%s\\n' .env >> .gitignore",
     'git add .env.example', 'cat .env.example', 'curl -s https://example.com/.env', 'git commit -m "document ~/.ssh setup"', 'cat ~/.gitconfig', 'ls ~/work', 'npm test',
     'grep -r x src', "find . -name '*.ts'",
+    'grep -m 1 .env src', 'rg -g "*.ts" .env src', 'rg -n -t ts .env src',
   ])('lets a forge agent run %s (Review Focus 1)', command => expect(bash(command, IMPL)).toBeNull());
   it('lets a forge agent search for the text .env with Select-String', () => {
     expect(pwsh('Select-String -Pattern .env -Path src\\a.ts', IMPL)).toBeNull();

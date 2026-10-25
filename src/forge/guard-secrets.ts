@@ -54,6 +54,24 @@ export function targetsDotenv(lastSegment: string): boolean {
   return literal === '.env' || literal.startsWith('.env.');
 }
 
+/**
+ * Claude Code's expandPath, which the hook must redo for a Grep/Glob `path`: Claude Code rewrites only file_path and
+ * notebook_path before the hook (backfillObservableInput), so a Grep/Glob `path` reaches the hook raw. Trim the text;
+ * `~` and `~/<x>` (also `~\<x>` on win32) become the home folder, and on win32 a Git Bash `/x/...` becomes `X:/...`.
+ * The text is returned unchanged when none of these applies, so a win32 `\\?\`/stream spelling is left for guardPath.
+ * `platform` is for tests.
+ */
+export function expandHome(p: string, home: string, platform: NodeJS.Platform = process.platform): string {
+  const t = p.trim();
+  if (t === '~') return home;
+  if (t.startsWith('~/') || t.startsWith('~\\')) return path.join(home, t.slice(2));
+  if (platform === 'win32') {
+    const m = /^\/([A-Za-z])\//.exec(t);
+    if (m) return `${m[1].toUpperCase()}:/${t.slice(3)}`;
+  }
+  return p;
+}
+
 /** '~/<entry>' (forward slashes on every platform) of the SECRET_PATHS entry p is in, else null. */
 export function secretOf(p: string, home: string): string | null {
   for (const entry of SECRET_PATHS) if (isInside(p, path.join(home, ...entry.split('/')))) return '~/' + entry;
@@ -94,9 +112,9 @@ const asString = (x: unknown): string | null => (typeof x === 'string' && x !== 
 // What a Grep or Glob call reaches: its root folder (the path of the call, or the cwd; in Glob joined to the literal
 // folder part of the pattern before the first wildcard) and the file pattern (Glob's pattern, Grep's glob; never Grep's
 // pattern, which is the text it looks for).
-function searchItems(input: GuardInput, ctx: GuardCtx): Item[] {
+function searchItems(input: GuardInput, ctx: GuardCtx, home: string): Item[] {
   const base = (input.cwd ?? ctx.main).replace(/\\/g, '/');
-  const given = asString(input.tool_input.path)?.replace(/\\/g, '/') ?? '.';
+  const given = expandHome(asString(input.tool_input.path) ?? '.', home).replace(/\\/g, '/');
   const isGlob = input.tool_name === 'Glob';
   const pattern = asString(isGlob ? input.tool_input.pattern : input.tool_input.glob)?.replace(/\\/g, '/') ?? null;
   let folder = '';
@@ -104,9 +122,9 @@ function searchItems(input: GuardInput, ctx: GuardCtx): Item[] {
     const wild = pattern.search(WILDCARD);
     folder = wild === -1 ? pattern : pattern.slice(0, pattern.slice(0, wild).lastIndexOf('/') + 1);
   }
-  const root = path.resolve(base, given, folder);
+  const root = path.resolve(base, given, expandHome(folder, home).replace(/\\/g, '/'));
   const last = pattern === null ? '' : pattern.slice(pattern.lastIndexOf('/') + 1);
-  return [{ p: root, search: true, dotenv: targetsDotenv(path.basename(root)) ||targetsDotenv(last) }];
+  return [{ p: root, search: true, dotenv: targetsDotenv(path.basename(root)) || targetsDotenv(last) }];
 }
 
 // ---- Bash and PowerShell ---------------------------------------------------------------------------------------------
@@ -121,6 +139,17 @@ const URL = /^[a-z][a-z0-9+.-]+:\/\//i;
 const PS_VALUE_OPTION = /^-(?:path|literalpath|include|exclude|encoding|context|culture)$/i;
 /** PowerShell's glued form -Name:value; group 1 is the value. */
 const PS_GLUED = /^-[a-z][a-z0-9-]*:(.+)$/i;
+/** Per-command options whose value is the next word; the value is judged as a path, never taken as the pattern. */
+const VALUE_OPTIONS: Record<string, readonly string[]> = {
+  grep: ['-m', '-A', '-B', '-C', '-d', '-D', '--max-count', '--context', '--include', '--exclude', '--exclude-dir', '--label'],
+  rg: ['-g', '--glob', '--iglob', '-t', '--type', '-T', '--type-not', '-m', '-A', '-B', '-C', '-M', '-j', '-E', '--encoding', '-d', '--max-depth', '-r', '--replace', '--sort'],
+};
+VALUE_OPTIONS.egrep = VALUE_OPTIONS.grep;
+VALUE_OPTIONS.fgrep = VALUE_OPTIONS.grep;
+VALUE_OPTIONS.ag = VALUE_OPTIONS.grep;
+VALUE_OPTIONS.ack = VALUE_OPTIONS.grep;
+/** Commands whose -f/--file reads the patterns from a file: no operand is the pattern, and the file stays judged as a path. */
+const FILE_PATTERN_COMMANDS: readonly string[] = ['grep', 'egrep', 'fgrep', 'rg'];
 
 /** text with its leading spelling of the home folder (~, $HOME, $env:USERPROFILE, %USERPROFILE%…) replaced by home; else text as it is. */
 export function homeSpelled(text: string, home: string): string {
@@ -128,32 +157,32 @@ export function homeSpelled(text: string, home: string): string {
   return m ? home + text.slice(m[0].length) : text;
 }
 
-/** The words of a grep-like segment that are the text it looks for: after -e/--regexp/-pattern, attached to them, or else the first operand. */
+/**
+ * The words of a grep-like segment that are the text it looks for (judged as text, not a path): the word after
+ * -e/--regexp/-pattern or attached to them, findstr's /c: glued search string, or else the first operand. A value-taking
+ * option (grep/rg/ag/ack's own list, or a PowerShell option) consumes its next word, and that word stays judged as a
+ * path; -f/--file and findstr /g: read the patterns from a file, so no operand is the pattern and the file stays a path.
+ */
 function patternWords(seg: Segment, name: string): Set<Word> {
   const out = new Set<Word>();
   if (!PATTERN_COMMANDS.includes(name)) return out;
   const args = seg.argv.slice(1);
+  const valueOpts = VALUE_OPTIONS[name] ?? [];
   let explicit = false;
-  args.forEach((a, i) => {
+  let firstOperand: Word | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
     const t = a.text;
-    if (t === '-e' || t === '--regexp' || /^-pattern$/i.test(t)) {
-      explicit = true;
-      if (args[i + 1]) out.add(args[i + 1]);
-    } else if (/^--regexp=/.test(t) || /^-e[^-]/.test(t) || /^-pattern:/i.test(t)) {
-      explicit = true;
-      out.add(a);
-    }
-  });
-  if (!explicit) {
-    // The first operand, not counting the value of a PowerShell option that takes a path or other non-pattern value (-Path x).
-    for (let i = 0; i < args.length; i++) {
-      const t = args[i].text;
-      if (PS_VALUE_OPTION.test(t)) { i++; continue; }
-      if (t.startsWith('-') || (name === 'findstr' && t.startsWith('/'))) continue;
-      out.add(args[i]);
-      break;
-    }
+    if (t === '-e' || t === '--regexp' || /^-pattern$/i.test(t)) { explicit = true; if (args[i + 1]) out.add(args[++i]); continue; }
+    if (/^--regexp=/.test(t) || /^-e[^-]/.test(t) || /^-pattern:/i.test(t)) { explicit = true; out.add(a); continue; }
+    if (name === 'findstr' && /^\/[cg]:/i.test(t)) { explicit = true; continue; }
+    if (FILE_PATTERN_COMMANDS.includes(name) && (t === '-f' || t === '--file')) { explicit = true; if (args[i + 1]) i++; continue; }
+    if (FILE_PATTERN_COMMANDS.includes(name) && /^--file=/.test(t)) { explicit = true; continue; }
+    if (valueOpts.includes(t) || PS_VALUE_OPTION.test(t)) { if (args[i + 1]) i++; continue; }
+    if (t.startsWith('-') || (name === 'findstr' && t.startsWith('/'))) continue;
+    if (firstOperand === null) firstOperand = a;
   }
+  if (!explicit && firstOperand !== null) out.add(firstOperand);
   return out;
 }
 
@@ -209,21 +238,26 @@ export const secretsRule: GuardRule = {
   id: SECRETS_RULE_ID,
   check(input, ctx) {
     if (!isForgeAgent(input.agent_type)) return null;
+    const home = ctx.home ?? os.homedir();
     const write = WRITE_TOOLS.includes(input.tool_name);
     let items: Item[];
     if (input.tool_name === 'Read' || write) {
-      items = targetPaths(input, ctx).map(p => ({ p, search: false, dotenv: isDotenvName(path.basename(guardPath(p))) }));
+      // Expand ~ and the Git Bash /x/ spelling here too, so the rule does not rely on Claude Code rewriting file_path first.
+      const tool_input = { ...input.tool_input };
+      for (const f of ['file_path', 'notebook_path']) {
+        const v = tool_input[f];
+        if (typeof v === 'string' && v !== '') tool_input[f] = expandHome(v, home);
+      }
+      items = targetPaths({ ...input, tool_input }, ctx).map(p => ({ p, search: false, dotenv: isDotenvName(path.basename(guardPath(p))) }));
     } else if (input.tool_name === 'Grep' || input.tool_name === 'Glob') {
-      items = searchItems(input, ctx);
+      items = searchItems(input, ctx, home);
     } else if (SHELL_TOOLS.includes(input.tool_name)) {
-      const home = ctx.home ?? os.homedir();
       for (const seg of bashSegments(input, ctx) ?? []) {
         const v = segmentVerdict(seg, input, ctx, home);
         if (v !== null) return v;
       }
       return null;
     } else return null;
-    const home = ctx.home ?? os.homedir();
     for (const { p, search, dotenv } of items) {
       const secret = secretOf(p, home);
       if (secret !== null) return deny(CREDS(secret));
