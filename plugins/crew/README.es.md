@@ -2,7 +2,7 @@
 
 # 👥 crew
 
-**Dos agentes bajo demanda para las comprobaciones que si no haría una persona a mano.**
+**Dos agentes bajo demanda para las comprobaciones que, si no, haría una persona a mano.**
 Uno lee como una persona novata y dice dónde se pierde; el otro juega un prototipo de navegador como un jugador nuevo.
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
@@ -73,7 +73,7 @@ Cómo juega:
 - Por tramos de cinco minutos como mucho, cada uno con un Chrome nuevo sobre el mismo perfil y el mismo puerto del servidor, así que el guardado propio del juego se conserva. Si ese puerto está ocupado, el informe dice que el guardado se perdió.
 - Chrome headless con `--enable-gpu --use-angle=d3d11 --enable-unsafe-webgpu` (sin el flag de ANGLE fuera de Windows), para que los fotogramas por segundo sean reales. Comprueba qué renderizador le ha tocado y lo dice.
 
-Los navegadores hacen cola: cada uno toma un hueco en `playtest-qa-slots`, en la carpeta temporal del sistema, y hay dos huecos, así que como mucho corren dos navegadores en la máquina. Cuando están los dos ocupados espera, y recupera un hueco cuyo dueño ha muerto. Quien lo lanza no debe poner más de dos a la vez.
+Los navegadores hacen cola: cada uno toma un hueco en `playtest-qa-slots`, en la carpeta temporal del sistema, y hay dos huecos, así que como mucho corren dos navegadores de `playtest-qa` en la máquina. Cuando están los dos ocupados espera, y recupera un hueco cuyo dueño ha muerto. Quien lo lanza no debe poner más de dos a la vez.
 
 Como servidor usa el del proyecto si se resuelve desde la carpeta que le diste; si no, un pequeño servidor estático con los tipos MIME bien puestos (`.js` como `text/javascript`).
 
@@ -86,4 +86,4 @@ El informe lleva `## Verdict`, `## Environment`, `## Tutorial`, `## Per minute` 
 ## Requisitos
 
 - Claude Code con plugins.
-- Para `playtest-qa`: Chrome; Node 22 o posterior si el proyecto no trae Playwright ni Puppeteer; y una GPU para que los fotogramas por segundo valgan (sin ella, lo dice y prueba solo lo que funciona).
+- Para `playtest-qa`: Chrome; Node 22 o posterior si el proyecto no trae Playwright ni Puppeteer; y una GPU para que los fotogramas por segundo valgan (sin ella, lo dice y sigue con la prueba funcional sin contar fps).

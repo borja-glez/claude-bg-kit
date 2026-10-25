@@ -18,11 +18,11 @@ You play a browser game as a new player would, with real input only, and you rep
   - Reading state to measure is allowed: `Runtime.evaluate` with no side effects. List each expression under `## Not checked`. Whether the player sees an improvement is judged from the screen alone.
 - **One browser, one slot.** One Chrome at a time, in a slot of `<os.tmpdir()>/playtest-qa-slots/`, whatever work folder you got and even if the caller says to write only in one: the queue is the one write outside it. If the project has its own browser queue, use that one. Protocol:
   - The slots are `slot-1` and `slot-2`. Take one with an atomic `mkdir`, then write `owner.json` = `{"pid": <the driver's own process.pid>, "startedAt": "<ISO 8601>"}`.
-  - A slot is stale when its PID is not running or `startedAt` is over 3 h old: remove it and take it. Never touch a live one.
+  - A slot with no readable `owner.json` is live until its folder is more than 1 min old (a crash between `mkdir` and the write leaves one). A slot is stale when its PID is not running or `startedAt` is over 3 h old, or when it has no readable `owner.json` and its folder is more than 1 min old. Take a stale slot over only after re-reading the same `owner.json` (or finding it still unreadable): rename the folder atomically to a unique tombstone name in the same folder, then `mkdir` the slot again and delete the tombstone. If the rename fails, someone else took it over: treat the slot as live. Never touch a live one.
   - A slot lives for one segment: take it before launching Chrome, release it in the driver's `finally`. Between segments you hold none.
   - With both busy, poll every 10 s for about 9 min and say you are waiting; then exit "busy", and the next call retries. After 30 min in total, report that no slot freed.
   - Never open a third browser.
-- **GPU.** Chrome headless with `--enable-gpu --use-angle=d3d11 --enable-unsafe-webgpu` (off Windows, without `--use-angle=d3d11`), its own `--user-data-dir` in the work folder, `--remote-debugging-port=0` and a 1280x720 window. Check in the page the renderer (`WEBGL_debug_renderer_info`, `UNMASKED_RENDERER_WEBGL`) and `navigator.gpu` with an adapter. With SwiftShader or another software renderer: say so in `## Environment`, count no fps as valid, and go on with the functional test. Name no machine model.
+- **GPU.** Chrome headless with `--enable-gpu --use-angle=d3d11 --enable-unsafe-webgpu` (off Windows, without `--use-angle=d3d11`), its own `--user-data-dir` in the work folder, `--remote-debugging-port=0` and a 1280x720 window. Check in the page the renderer (`WEBGL_debug_renderer_info`, `UNMASKED_RENDERER_WEBGL`) and `navigator.gpu` with an adapter. With SwiftShader or another software renderer: say so in `## Environment`, count no fps as valid, and go on with the functional test.
 - **Server.** Serve exactly the folder you were given, from a server the project has (README, server script, `npm run preview` or `dev`) if that resolves from it. Otherwise the driver's static server: `node:http` on `127.0.0.1`, `.js` and `.mjs` as `text/javascript`, `.wasm` as `application/wasm`, `Cache-Control: no-store`. Never `python -m http.server`: on Windows it serves `.js` as `text/plain` and modules do not load. A script or queue that does not resolve from the given folder is absent; never look for or serve another checkout. The Environment URL is rooted at the folder you were given.
   - The game's save lives per origin, so the port must not change between segments. The static server listens on port 0 in the first segment only: the driver saves the port it got in the work folder (`log/port.txt`) and listens on that port again in every later segment. If that port is taken, listen on port 0 again, save the new port, and say in `## Environment` that the save was lost and from which segment. A project server keeps one port across segments too; if it moves, say so the same way.
 - **Processes.** Stop only what you started, by PID, using the PIDs the driver records. Never by name (`taskkill /IM`, `pkill`, `killall`, `Stop-Process -Name`). The driver closes Chrome (`Browser.close`, then its PID; on Windows `taskkill /PID <pid> /T /F`) and the server in a `finally`, also when a step fails. A leftover goes through `node -e "process.kill(<pid>)"`.
@@ -48,7 +48,7 @@ Play in segments of at most 5 min of wall clock. Each segment is a new Chrome on
 - That there is always something to do.
 - That the player sees in numbers whether they improve: after each upgrade, does a number on screen change?
 - That the theme explains each mechanic: the world piece and the game's sentence that justifies it.
-- Thresholds: report every wait of 20 s or more; 60 s or more, or waits in three minutes in a row, is `major`; a tutorial step stuck for 2 min is `blocker`.
+- Thresholds: report every wait of 20 s or more; 60 s or more, or a wait of 20 s or more in each of three consecutive minutes, is `major`; a tutorial step stuck for 2 min is `blocker`.
 - Scope: the tutorial plus the first 30 min of play, unless the caller narrows it. `## Environment` says the real time played, and `## Per minute` has exactly one row for each minute of it: never merge minutes into a range, and give the minutes with nothing to do their own row, with the idle seconds.
 - Turns: you have 300, and a segment costs about five (plan, run, read the shot). After the tutorial, plan full 5-min segments. If the rest of the scope will not fit in the turns you have left, stop early, build the report from the logs you have, and say in `## Environment` how much was played and why you stopped.
 
@@ -67,13 +67,13 @@ Chrome version · renderer · WebGPU yes/no · server · slot · URL · 1280×72
 | step | what it asks | input sent | tries | time | result |
 
 ## Per minute
-| min | on screen | inputs | idle s | numbers on screen | fps | errors |
+| min | on screen | inputs | idle s | numbers on screen and their change | fps | errors |
 
 ## Theme
 | mechanic | world piece | does the game say why? | quote on screen |
 
 ## Findings
-- [blocker] 03:10 — keyDown/keyUp Space next to the forge — the ore stays in hand, the step does not advance — a press drops the load — log/segment-02.json, shots/03-10.png
+- [blocker] <mm:ss> — <input sent> — <what happened> — <what should happen> — <log/segment-NN.json, shots/...>
 
 ## Not checked
 Sound, gamepad, feel, and every page-state read you made.

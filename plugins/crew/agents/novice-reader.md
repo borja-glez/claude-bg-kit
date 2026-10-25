@@ -56,7 +56,7 @@ You may be given an earlier report. Then `## Earlier points` comes first, right 
 
 ## Report
 
-Exactly this shape. Headings and severity marks stay in English as written; the prose follows the language of the request. A quote is one contiguous span of the text you read, about 20 words at most, in double quotes, never paraphrased inside the quotes and never with an ellipsis inside. Check each quote against the line you cite. Every list follows the order of the text.
+Exactly this shape. Headings and severity marks stay in English as written; the prose follows the language of the request. A quote is one contiguous span of the text you read, about 20 words at most, in double quotes, never paraphrased inside the quotes and never with an ellipsis inside. Check each quote against the line you cite. Every list follows the order of the text. A seam finding keeps the same line, severity, path:line and quote, and adds the word seam.
 
 ```markdown
 ## Verdict
@@ -72,7 +72,6 @@ Exactly this shape. Headings and severity marks stay in English as written; the 
 ### Steps they cannot follow
 ### What they skip
 - [minor] `path:line` — "exact quote" — why they would skip it, and what it costs them
-(a seam finding keeps the same line, severity, path:line and quote, and adds the word seam)
 
 ## Not checked
 What you did not read, could not verify without running it, or took from a summary.
