@@ -167,10 +167,10 @@ export function selectValidators(all: Validator[], scope: Scope): Validator[] {
 // starting with - (a runner would read it as an option).
 const SAFE_PATH = /^(?!-)[A-Za-z0-9_@+.,=/\\ ()-]{1,300}$/;
 export const MAX_AFFECTED = 100;
-const isPytestModule = (f: string) => /(^|\/)test_[^/]*\.py$/.test(f) || /_test\.py$/.test(f);
-const isTestFile = (f: string) => /(^|\/)tests?\//.test(f) || /\.(test|spec)\.[^/]+$/.test(f) || isPytestModule(f);
+export const isPytestModule = (f: string) => /(^|\/)test_[^/]*\.py$/.test(f) || /_test\.py$/.test(f);
+export const isTestFile = (f: string) => /(^|\/)tests?\//.test(f) || /\.(test|spec)\.[^/]+$/.test(f) || isPytestModule(f);
 // pytest given a file that is not a test module (a conftest, a helper, a fixture) collects nothing or fails (exit 4 or 5).
-const runsPytest = (cmd: string) => /\bpytest\b/.test(cmd);
+export const runsPytest = (cmd: string) => /\bpytest\b/.test(cmd);
 export type AffectedRun = { mode: 'cmd'; cmd: string } | { mode: 'skip'; why: string } | { mode: 'full'; why: string };
 
 /**
@@ -316,7 +316,7 @@ export function validateEvent(ts: string, task: string | undefined, results: Val
 }
 
 // vitest, jest, mocha and Playwright when the project has no test files yet.
-const NO_TESTS = /\b(no test files found|no tests found)\b/i;
+export const NO_TESTS = /\b(no test files found|no tests found)\b/i;
 const RUNS_TESTS = new Set(['test', 'e2e']);
 
 // Without options: one at a time, every failure retried, as forge 0.16 ran them.
