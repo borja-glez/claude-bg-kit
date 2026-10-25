@@ -22097,14 +22097,18 @@ var AUTONOMY_RULES = [selfRule, filesRule, installRule, gitRule, networkRule, cl
 // src/forge/guard-secrets.ts
 var import_node_os3 = __toESM(require("node:os"), 1);
 var import_node_path17 = __toESM(require("node:path"), 1);
-var SECRETS_RULE_ID = "secrets";
-var SECRET_PATHS = [".ssh", ".aws", ".config/gh", ".netrc", ".git-credentials", ".kube"];
-var DOTENV_TEMPLATES = [".env.example", ".env.sample", ".env.template", ".env.dist"];
-var VERIFY_AGENTS = ["forge-verify", "forge-verify-heavy"];
+
+// src/forge/guard-fast.ts
 var READ_TOOLS = ["Read", "Grep", "Glob"];
 function isForgeAgent(agentType) {
   return typeof agentType === "string" && agentType.startsWith("forge");
 }
+
+// src/forge/guard-secrets.ts
+var SECRETS_RULE_ID = "secrets";
+var SECRET_PATHS = [".ssh", ".aws", ".config/gh", ".netrc", ".git-credentials", ".kube"];
+var DOTENV_TEMPLATES = [".env.example", ".env.sample", ".env.template", ".env.dist"];
+var VERIFY_AGENTS = ["forge-verify", "forge-verify-heavy"];
 function isVerifyAgent2(agentType) {
   if (typeof agentType !== "string") return false;
   return VERIFY_AGENTS.includes(agentType.startsWith("forge:") ? agentType.slice("forge:".length) : agentType);
@@ -34158,7 +34162,7 @@ var HEAD_CHARS = 80;
 var isObject3 = (x) => typeof x === "object" && x !== null && !Array.isArray(x);
 function agentTranscript(configDir, sessionId, agentId) {
   if (!isSafeId(sessionId) || !isSafeId(agentId)) return null;
-  const projects = import_node_path65.default.join(configDir, "projects");
+  const projects = import_node_path65.default.resolve(configDir, "projects");
   let names3;
   try {
     names3 = (0, import_node_fs64.readdirSync)(projects).sort();
@@ -34204,23 +34208,10 @@ function pendingCall(tailText, now) {
   const at2 = typeof last.timestamp === "string" ? Date.parse(last.timestamp) : NaN;
   return { tool: last.name, waitedSec: Math.round((now - at2) / 1e3), head: redactSecrets(command48).slice(0, HEAD_CHARS) };
 }
-function readTail3(file) {
-  if (!(0, import_node_fs64.statSync)(file).isFile()) throw new Error("not a file");
-  const fd = (0, import_node_fs64.openSync)(file, "r");
-  try {
-    const size = (0, import_node_fs64.fstatSync)(fd).size;
-    const len = Math.min(size, TRANSCRIPT_TAIL2);
-    const buf = Buffer.alloc(len);
-    let off = 0;
-    while (off < len) {
-      const n = (0, import_node_fs64.readSync)(fd, buf, off, len - off, size - len + off);
-      if (n <= 0) break;
-      off += n;
-    }
-    return buf.subarray(0, off).toString("utf8");
-  } finally {
-    (0, import_node_fs64.closeSync)(fd);
-  }
+function transcriptCall(file, now) {
+  const m = measureJsonl(file);
+  const tail = m ? readTail2(m.file, TRANSCRIPT_TAIL2) : null;
+  return tail === null ? "unreadable" : pendingCall(tail, now);
 }
 function liveDocs(ctx) {
   const dir = import_node_path65.default.join(ctx.main, ".forge", "live");
@@ -34255,12 +34246,7 @@ var WAITING_CHECK = {
           if (!(now - Date.parse(agent.since) >= WAITING_MINUTES * 6e4)) continue;
           const file = agentTranscript(ctx.configDir, live.sessionId, agent.id);
           if (!file) continue;
-          let call2;
-          try {
-            call2 = pendingCall(readTail3(file), now);
-          } catch {
-            call2 = "unreadable";
-          }
+          const call2 = transcriptCall(file, now);
           if (call2 === "unreadable") return { id: "waiting-calls", status: "unverified", detail: `a transcript does not read: ${file}` };
           if (call2 && call2.waitedSec >= WAITING_MINUTES * 60) waiting.push({ agent: agent.type, tool: call2.tool, waitedSec: call2.waitedSec, head: call2.head });
         }
