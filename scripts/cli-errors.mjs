@@ -10,6 +10,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
+// The names in COMMANDS of src/forge/cli/commands/index.ts (plus the `cycle`-style ones listed there), and the waypoint ones.
+const FORGE_COMMANDS = ['triage', 'doctor', 'brief', 'validate', 'stats', 'verdict', 'round', 'review-prep', 'review-close', 'prep', 'shadow',
+  'log', 'decision', 'agents', 'last', 'diagnose', 'proposals', 'surfaces', 'tools', 'local', 'prefs', 'begin', 'route',
+  'verify-env', 'verify-plan', 'verify-preflight', 'verify-result', 'verify-cleanup', 'verify-close', 'verify-spawn',
+  'waypoint-cli', 'sp-path', 'sp-specs', 'sp-plans', 'sp-plan', 'tdd', 'tree', 'config', 'infinite', 'cycle', 'authorize', 'swarm',
+  'setup', 'stop', 'hook', 'resource', 'blocked', 'market', 'roadmap-doc', 'roadmap-run'];
+const WAYPOINT_COMMANDS = ['session', 'plugin', 'doctor', 'replan', 'track', 'block', 'commit-info'];
+
 export const ACTIONABLE = [
   // the flag to pass or to correct
   /--[a-z][\w-]*/i,
@@ -18,7 +26,12 @@ export const ACTIONABLE = [
   // a command, a file or a value between backticks
   /`[^`]+`/,
   // a command to run
-  /\b(?:forge|FORGE|waypoint|git|npm|node|claude)\s+[a-z][\w-]*/,
+  // (only real orders: a forge or waypoint command, a git verb, an npm script, a node script; `git status failed` is not one)
+  new RegExp(`\\b(?:forge|FORGE)\\s+(?:${FORGE_COMMANDS.join('|')})\\b`),
+  new RegExp(`\\bwaypoint\\s+(?:${WAYPOINT_COMMANDS.join('|')})\\b`),
+  /\bgit\s+(?:add|commit|checkout|switch|worktree|rebase|merge|pull|fetch|restore|rm|init)\b/,
+  /\bnpm\s+(?:run|install|ci|test)\b/,
+  /\bnode\s+\S+\.[cm]?js\b/,
   // a command after a colon, a semicolon, a parenthesis or a comma (a verb followed by a colon is a label, not an order)
   /(?:^|[:;(,]\s*|\b(?:then|first|or)\s+)(?:run|use|pass|give|add|set|remove|rename|integrate|answer|retry|wait|ask|fix|delete|untrack|commit|list|name|write|start|stop|open|check|install|update|resume|choose|close|drop|keep|create|move|switch|read|regenerate|rebase|merge)\b(?!\s*:)/i,
   // what is required

@@ -6,7 +6,7 @@ const ROOT = process.cwd();
 const BASELINE = 'tests/fixtures/cli-error-baseline.json';
 // A7: how many exit-2 errors of the forge CLI did not say what to do at 2e9ae79. The list only shrinks: fixing one removes
 // its entry and lowers this number by one. It never goes up: a new error says what to do.
-const BASELINE_MAX = 148;
+const BASELINE_MAX = 159;
 /** a minus b, as multisets. */
 const minus = (a: string[], b: string[]) => { const left = [...b]; return a.filter(x => { const i = left.indexOf(x); if (i < 0) return true; left.splice(i, 1); return false; }); };
 
@@ -26,7 +26,9 @@ describe('the forge CLI error ratchet (A7)', () => {
       'local set: .forge/verify/x.md changed since verify-plan showed it: run verify-plan again', 'usage: forge <triage|brief> ...',
       'swarm start: x has work not on y; use another id', 'config get: `x` is not a config key']) expect(isActionable(ok), ok).toBe(true);
     for (const bad of ['swarm close: no execution', 'proposals to-task: ${} not found', 'review-prep: cannot diff ${}..HEAD',
-      'config get: ${} is not a config key', '<dynamic: dirtyMsg>', 'stop: nothing here']) expect(isActionable(bad), bad).toBe(false);
+      'config get: ${} is not a config key', '<dynamic: dirtyMsg>', 'stop: nothing here',
+      'begin: git status failed in ${}', 'x: git could not add the worktree ${}', 'x: forge has no record of task ${}', 'y: next to this forge install']) expect(isActionable(bad), bad).toBe(false);
+    for (const ok of ['x: failed, git checkout main', 'x: npm run build first', 'x: see node scripts/cli-errors.mjs', 'x: forge swarm status', 'x: waypoint session start']) expect(isActionable(ok), ok).toBe(true);
   });
   it('takes each message from the source: literals, templates, both sides of a condition, a const of the file, the stderr of an exit 2', () => {
     const src = [
