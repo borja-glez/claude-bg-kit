@@ -31382,7 +31382,7 @@ function synthesize(reviews, weights, validatorsOk, failingValidators = [], opts
   const blockingImportant = important;
   let deferred;
   if (action === "accept") {
-    deferred = residual;
+    deferred = [...residual];
     if (residual.length) reasons.push(`${residual.length} finding(s) left open as residual (${[...new Set(residual.map((f) => f.residual))].join(", ")})`);
   } else {
     important = [...important, ...residual.filter((f) => RIDES_ALONG.includes(f.residual))];
