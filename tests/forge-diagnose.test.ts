@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/forge/cli/run.js';
-import { sortTimeline, type Entry, type Finding, type StepRow } from '../src/forge/diagnose-rules.js';
+import { KIND_ORDER, sortTimeline, type Entry, type Finding, type StepRow } from '../src/forge/diagnose-rules.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import { DIAG_NOW, DIAG_SUBAGENT, writeDiagnoseFixture } from './fixtures/diagnose.js';
 import { walk } from './helpers/files.js';
@@ -176,6 +176,24 @@ describe('forge diagnose (A6)', () => {
     for (const f of ['src/forge/transcript-file.ts', 'src/forge/diagnose.ts', 'src/forge/diagnose-transcript.ts', 'src/forge/diagnose-sources.ts',
       'src/forge/diagnose-rules.ts', 'src/forge/cli/commands/diagnose.ts']) {
       expect(readFileSync(new URL(`../${f}`, import.meta.url), 'utf8'), f).not.toMatch(WRITERS);
+    }
+  });
+});
+
+describe('the forge:diagnose skill and the READMEs (A6)', () => {
+  const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+  it('the skill has its frontmatter, stays short, and names the two scopes, every kind of finding and the parts of the output', () => {
+    const md = read('plugins/forge/skills/diagnose/SKILL.md');
+    expect(md).toMatch(/^---\r?\nname: diagnose\r?\ndescription: .+\r?\n---\r?\n/);
+    expect(Buffer.byteLength(md)).toBeLessThan(6000);
+    for (const w of ['`FORGE` = `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs"`', 'FORGE diagnose --task <id>', 'FORGE diagnose --execution <runId>', '--transcript <file>',
+      ...KIND_ORDER.map(k => `\`${k}\``), '`waiting`', '`tasks`', '`usage`', '`coverage`', '`sources`', '`timeline`']) expect(md, w).toContain(w);
+  });
+  it('the forge READMEs list /forge:diagnose and the diagnose command, in English and in Spanish', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      expect(md, f).toContain('| `/forge:diagnose <task> \\| --execution <runId>` |');
+      expect(md, f).toContain('- `diagnose (--task id [--project p] | --execution runId) [--transcript f]` - ');
     }
   });
 });
