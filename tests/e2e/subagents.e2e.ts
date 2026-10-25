@@ -2,9 +2,9 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { agentTool, agentUse } from './harness/agents.js';
+import { agentTool, agentUse, resultOf } from './harness/agents.js';
 import { findClaude } from './harness/claude-bin.js';
-import { all, hasTools, not, startMessagesServer, toolResults, turn, userHas, type ReplyBlock } from './harness/messages-server.js';
+import { all, hasTools, not, startMessagesServer, turn, userHas, type ReplyBlock } from './harness/messages-server.js';
 import { failureReport, runClaude } from './harness/session.js';
 import { makeWorkspace } from './harness/workspace.js';
 import { liveFile } from '../../src/forge/live.js';
@@ -58,6 +58,7 @@ describe.skipIf(!CLAUDE)('subagents against the real claude (A8)', () => {
     let liveAtL1: string[] = [];
     let liveAtL2: string[] = [];
     let nestedOffered = false;
+    let levelTwoNeverFinished = false;
     const nest = (n: number) => all(hasTools, userHas('E2E-NEST'), not(userHas('E2E-L1')), turn(n));
     const l1 = (n: number) => all(hasTools, userHas('E2E-L1'), not(userHas('E2E-L2')), turn(n));
     const l2 = (n: number) => all(hasTools, userHas('E2E-L2'), turn(n));
@@ -71,15 +72,21 @@ describe.skipIf(!CLAUDE)('subagents against the real claude (A8)', () => {
       { name: 'l2#0', when: l2(0), reply: async () => { liveAtL2 = await snapshot(2); return [read('toolu_e2e_l2_0')]; } },
       { name: 'l2#1', when: l2(1), reply: [{ type: 'text', text: 'level two finished' }] },
       { name: 'l1#2', when: l1(2), reply: [{ type: 'text', text: 'level one finished' }] },
-      // the agent tool starts agents in the background, so the main session would read at once: wait for level one to finish,
-      // so that the three reads happen in the order level one, level two, main
-      { name: 'nest#1', when: nest(1), reply: async () => { for (let i = 0; i < 200 && !server.log.some(l => l.step === 'l1#2'); i++) await sleep(100); return [read('toolu_e2e_nest_1')]; } },
+      // the agent tool starts agents in the background, so the main session would read at once: wait for level two's second
+      // request (it carries the result of level two's Read, so level two's PreToolUse Read has fired), so that the three reads
+      // happen in the order level one, level two, main. If it never comes, say so instead of reading on silently.
+      { name: 'nest#1', when: nest(1), reply: async () => {
+        for (let i = 0; i < 200 && !server.log.some(l => l.step === 'l2#1'); i++) await sleep(100);
+        if (!server.log.some(l => l.step === 'l2#1')) { levelTwoNeverFinished = true; return [{ type: 'text', text: 'e2e: level two never finished (no l2#1 request in 20 s)' }]; }
+        return [read('toolu_e2e_nest_1')];
+      } },
       { name: 'nest#2', when: nest(2), reply: [{ type: 'text', text: 'nest done' }] },
     ]);
     try {
       const nestTool = (() => { const b = server.log.find(l => l.step === 'nest#0')?.body; return b ? agentTool(b) : null; });
       const r = await runClaude(CLAUDE!, { ws, server, turns: ['E2E-NEST: start one agent'] });
       expect(r.timedOut, failureReport(r, server)).toBe(false);
+      expect(levelTwoNeverFinished, 'level two never finished: the main session read without waiting for it').toBe(false);
       const starts = r.hooks.filter(h => h.event === 'SubagentStart');
       const observed = {
         agentTool: nestTool(),
@@ -121,8 +128,8 @@ describe.skipIf(!CLAUDE)('subagents against the real claude (A8)', () => {
       expect(r.timedOut, failureReport(r, server)).toBe(false);
       // denied(id): the tool_result of id, in the next request of its thread, is an error and lacks the file's content
       const denied = (id: string): boolean => {
-        const res = server.log.flatMap(l => (l.body ? toolResults(l.body) : [])).find(t => t.tool_use_id === id);
-        return res !== undefined && res.is_error && !res.text.includes('E2E-DENIED-CONTENT');
+        const res = resultOf(server.log, id);
+        return res !== null && res.is_error && !res.text.includes('E2E-DENIED-CONTENT');
       };
       expect(denied('toolu_e2e_deny_main'), 'the control: the rule must deny the main session first').toBe(true);
       expect({ subagentDenied: denied('toolu_e2e_deny_sub') }).toEqual(PINNED_DENY);

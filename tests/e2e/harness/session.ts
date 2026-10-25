@@ -13,12 +13,15 @@ import { E2E_KEY, PLUGIN_DIRS, readHooks, type HookRecord, type Workspace } from
 export const E2E_MODEL = 'claude-sonnet-4-5';
 export type Permissions = 'bypass' | 'deny-prompts' | 'host';
 
-const DROPPED_PREFIXES = ['CLAUDE', 'ANTHROPIC', 'FORGE_', 'WAYPOINT_', 'VITEST'];
-const DROPPED_NAMES = ['NODE_ENV', 'TEST', 'NODE_OPTIONS', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'HOME', 'USERPROFILE'];
+const DROPPED_PREFIXES = ['CLAUDE', 'ANTHROPIC', 'FORGE_', 'WAYPOINT_', 'VITEST', 'OTEL_'];
+// Claude Code settings without the CLAUDE/ANTHROPIC prefix, which a session hands to its children when settings.json `env` sets them
+const DROPPED_NAMES = ['NODE_ENV', 'TEST', 'NODE_OPTIONS', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'HOME', 'USERPROFILE',
+  'ENABLE_TOOL_SEARCH', 'MAX_THINKING_TOKENS', 'DISABLE_PROMPT_CACHING', 'BASH_DEFAULT_TIMEOUT_MS', 'BASH_MAX_TIMEOUT_MS', 'MCP_TIMEOUT', 'API_TIMEOUT_MS'];
 const KEPT = 'CLAUDE_CODE_GIT_BASH_PATH';
 
 /** The child's environment: `base` without the parent session's, vitest's, forge's and the proxy's variables (in any case:
- *  NODE_ENV=test changes Claude Code, CLAUDECODE makes it refuse to start inside another session), pointed at the server.
+ *  NODE_ENV=test changes Claude Code, CLAUDECODE makes it refuse to start inside another session; also the Claude Code settings
+ *  that lack the CLAUDE/ANTHROPIC prefix, such as ENABLE_TOOL_SEARCH, MAX_THINKING_TOKENS and OTEL_*), pointed at the server.
  *  CLAUDE_CODE_DISABLE_CLAUDE_MDS=1: Claude Code reads the CLAUDE.md files of the working directory's ancestors, and on Windows
  *  the OS temp dir lies under the user profile, so no CLAUDE.md is loaded. */
 export function e2eEnv(base: Record<string, string | undefined>, ws: Pick<Workspace, 'home' | 'configDir' | 'hookLog'>, serverUrl: string): Record<string, string> {
@@ -141,7 +144,15 @@ export function runClaude(bin: ClaudeBin, o: RunOptions): Promise<RunResult> {
       } else if (msg.type === 'control_request') {
         const c = msg as unknown as ControlRequest;
         if (c.request?.subtype === 'can_use_tool') {
-          respond(c.request_id, o.onControl ? o.onControl(c) : { behavior: 'deny', message: 'e2e: no host answer' });
+          let answer: Record<string, unknown> = { behavior: 'deny', message: 'e2e: no host answer' };
+          if (o.onControl) {
+            try { answer = o.onControl(c); } catch (e) {
+              const why = (e as Error).message;
+              stderr += `e2e: onControl threw: ${why}\n`;
+              answer = { behavior: 'deny', message: `e2e: onControl threw: ${why}` };
+            }
+          }
+          respond(c.request_id, answer);
         } else {
           write(JSON.stringify({ type: 'control_response', response: { subtype: 'error', request_id: c.request_id, error: 'e2e: unsupported' } }) + '\n');
         }

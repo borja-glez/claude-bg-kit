@@ -13,7 +13,7 @@ const CLAUDE = findClaude(process.env);
 const tmp = useTempDirs();
 
 // The values below were read from the server log of a real run (see the README).
-const PINNED_COMPACT = { summary: true, skillHead: true, skillTail: true, reference: true };
+const PINNED_COMPACT = { summary: true, skillHead: true, skillTail: true, reference: true, unreadReference: false };
 
 const lines = (file: string) => readFileSync(file, 'utf8').split('\n').map(l => l.trim()).filter(l => l !== '');
 
@@ -26,6 +26,9 @@ describe.skipIf(!CLAUDE)('/compact against the real claude (A8)', () => {
     const tail = skillLines[skillLines.length - 1];
     const skillText = readFileSync(skill, 'utf8');
     const refLine = lines(ref).find(l => !skillText.includes(l))!; // the first line of large.md that SKILL.md does not contain ("# Large" is a substring of its "## Large")
+    // a line of a reference of the same skill that was not read, and that neither SKILL.md nor large.md carries
+    const readText = skillText + readFileSync(ref, 'utf8');
+    const unreadLine = lines(path.join(PLUGIN_DIRS.forge, 'skills', 'run', 'references', 'resuming.md')).find(l => !readText.includes(l))!;
     const ws = makeWorkspace(tmp);
     const step = (n: number) => all(hasTools, userHas('E2E-COMPACT'), turn(n));
     const server = await startMessagesServer([
@@ -44,7 +47,7 @@ describe.skipIf(!CLAUDE)('/compact against the real claude (A8)', () => {
       expect(start?.input).toMatchObject({ session_id: ws.sessionId });
       for (const k of Object.keys(hookFixture('session-start-compact'))) expect(start?.input, k).toHaveProperty(k);
       const after = requestText(server.log.find(l => l.step === 'after#0')!.body!);
-      const observed = { summary: after.includes('E2E compact summary'), skillHead: after.includes(head), skillTail: after.includes(tail), reference: after.includes(refLine) };
+      const observed = { summary: after.includes('E2E compact summary'), skillHead: after.includes(head), skillTail: after.includes(tail), reference: after.includes(refLine), unreadReference: after.includes(unreadLine) };
       expect(observed).toEqual(PINNED_COMPACT);
     } finally { await server.close(); }
   });

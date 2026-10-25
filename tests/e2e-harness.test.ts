@@ -140,6 +140,9 @@ describe('the e2e session (A8)', () => {
       PATH: '/bin', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 's', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_PROJECT_DIR: '/p', CLAUDE_CODE_OAUTH_TOKEN: 't',
       Claude_Config_Dir: '/real', ANTHROPIC_AUTH_TOKEN: 'a', ANTHROPIC_API_KEY: 'real', NODE_ENV: 'test', TEST: 'true', VITEST_POOL_ID: '1',
       HTTPS_PROXY: 'http://p', https_proxy: 'http://p', NODE_OPTIONS: '--inspect', FORGE_ROUTE_HINT: 'off', UserProfile: 'C:\\real', CLAUDE_CODE_GIT_BASH_PATH: 'C:\\g\\bash.exe',
+      // Claude Code settings a session hands to its children when settings.json `env` sets them, without the CLAUDE/ANTHROPIC prefix
+      ENABLE_TOOL_SEARCH: 'false', MAX_THINKING_TOKENS: '1', DISABLE_PROMPT_CACHING: '1', BASH_DEFAULT_TIMEOUT_MS: '1', BASH_MAX_TIMEOUT_MS: '1',
+      MCP_TIMEOUT: '1', API_TIMEOUT_MS: '1', OTEL_METRICS_EXPORTER: 'otlp', otel_service_name: 'x',
     }, { home: '/h', configDir: '/h/.claude', hookLog: '/h/hooks.jsonl' }, 'http://127.0.0.1:9');
     expect(env).toEqual({
       PATH: '/bin', CLAUDE_CODE_GIT_BASH_PATH: 'C:\\g\\bash.exe', ANTHROPIC_BASE_URL: 'http://127.0.0.1:9', ANTHROPIC_API_KEY: E2E_KEY,
@@ -204,6 +207,20 @@ describe('the e2e session (A8)', () => {
       expect(seen).toEqual(['AskUserQuestion']);
       const result = r.out.find(l => l.type === 'result');
       expect(JSON.parse(String(result?.result))).toEqual({ behavior: 'allow', updatedInput: { answers: { 'Q?': 'Yes' } } });
+    } finally { await server.close(); }
+  });
+  it('an onControl that throws is answered with a deny that carries the error, and the error is appended to stderr: the run does not wait for the timeout', async () => {
+    const ws = makeWorkspace(tmp);
+    const server = await startMessagesServer([]);
+    try {
+      const r = await runClaude(fake, {
+        ws, server, turns: ['ask'], timeoutMs: 20_000, env: { ...process.env, FAKE_CLAUDE_MODE: 'ask' },
+        onControl: () => { throw new Error('boom'); },
+      });
+      expect([r.code, r.timedOut]).toEqual([0, false]);
+      expect(r.stderr).toContain('e2e: onControl threw: boom');
+      const result = r.out.find(l => l.type === 'result');
+      expect(JSON.parse(String(result?.result))).toEqual({ behavior: 'deny', message: 'e2e: onControl threw: boom' });
     } finally { await server.close(); }
   });
   it('a child that never ends is killed by its own pid at the timeout: timedOut, the process is gone, and the report carries the debug tail', async () => {

@@ -33,6 +33,8 @@ describe.skipIf(!CLAUDE)('AskUserQuestion and forge hook answer against the real
           : { behavior: 'allow', updatedInput: input };
       } });
       expect(r.timedOut, failureReport(r, server)).toBe(false);
+      // the real binary answers the harness's initialize: otherwise the run only starts after the fallback timer
+      expect(r.out.some(l => l.type === 'control_response' && (l.response as { request_id?: string } | undefined)?.request_id === 'e2e-init'), 'no control_response to e2e-init').toBe(true);
       expect(server.log.map(l => l.step).filter(Boolean)).toEqual(['ask#0', 'ask#1']);
       expect(asked.map(c => c.request.tool_name)).toContain('AskUserQuestion');
       const post = r.hooks.find(h => h.event === 'PostToolUse' && h.input.tool_name === 'AskUserQuestion');
