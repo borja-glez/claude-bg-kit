@@ -29,6 +29,22 @@ export interface BandFiles {
   /** The bound.json texts of the active execution's coordinator (its hook session, any via) in every .waypoint/<p>/ of
    *  the main checkout, by `<p>/<seat>` ('.' the checkout seat): an open conversation holds one live. */
   coordinatorBindings?: Record<string, string>;
+  /** What waits for the person (w7 A5). All but `notes` come from the main checkout's .forge; each is absent when its
+   *  folder lists nothing, and a null is a listed file that could not be read. `auth`: .forge/execution/auth/<id>.json
+   *  by id (the 20 newest, 64 KiB at most). */
+  auth?: Record<string, string | null>;
+  /** The asked.json of the newest review round of each running task in review, by task (64 KiB at most): its path from
+   *  the main checkout and its text. */
+  asked?: Record<string, { file: string; text: string | null }>;
+  /** The surfaces the open run asked about, .forge/execution/asked/<runId>/<name>.json by name (20, 4 KiB at most). */
+  surfacesAsked?: Record<string, string | null>;
+  /** .forge/local.yaml (64 KiB at most), read only when some surface was asked about. */
+  local?: string;
+  /** .forge/proposals/<id>.json by id (the 50 newest by name, 64 KiB at most). */
+  proposals?: Record<string, string | null>;
+  /** The roadmap's notes of this project's cache, .waypoint/<p>/dbcache/notes/<id>.json by id (the 100 newest by name,
+   *  16 KiB at most). */
+  notes?: Record<string, string | null>;
   /** $.session.id() of the conversation that looks; null or absent: it owns nothing. */
   sessionId?: string | null;
   /** The engine's clock in ms; absent: Date.now(). */

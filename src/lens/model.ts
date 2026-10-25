@@ -1,5 +1,5 @@
 import type { BandModel } from '../mod/model.js';
-import { normalizeProposal } from '../lib/proposals.js';
+import { normalizeProposal, PROPOSAL_ID } from '../lib/proposals.js';
 import { cleanText, normalizeStatus, statusKey, type ForgeStatus } from '../lib/forge-status.js';
 import { parseRun } from '../lib/forge-run.js';
 import { FUTURE_SKEW_MS, isSafeId, normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
@@ -272,7 +272,8 @@ function superpowers(input: {
 
 const FORGE_WINDOW_MS = 24 * 3600_000;
 const MAX_PROPOSALS = 5;
-export const PROPOSAL_ID = /^p\d{14}[0-9a-z]{4}$/;
+// The proposal id rule lives in lib/proposals.ts now (the band reads proposals too); lens's importers keep their path.
+export { PROPOSAL_ID };
 
 /** The forge section of one task's status: its fields without the times, its briefs and its timing (C5: of the expanded activity). */
 export function forgeOf(st: ForgeStatus, now: number, briefs: number | null = null, liveTypes: readonly string[] = []): NonNullable<PanelModel['forge']> {
