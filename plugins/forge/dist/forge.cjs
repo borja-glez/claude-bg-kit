@@ -33492,6 +33492,10 @@ function sameReviewedTree(git2, reviewed, now, extraPassive = []) {
   const changed = out.split("\0").filter((p) => p !== "" && !NOTES_PATH.test(p) && !extraPassive.includes(p));
   return changed.length === 0 ? { ok: true } : { ok: false, changed };
 }
+var CHANGED_MAX = 20;
+function changedOut(changed) {
+  return { changed: changed.slice(0, CHANGED_MAX), ...changed.length > CHANGED_MAX ? { changedTotal: changed.length } : {} };
+}
 function taskReceipt(events, e, task, roots, git2) {
   const started = Date.parse(e.startedAt);
   const accepts = eventsOf(events, { project: e.kind === "plan" ? e.project : null, task }).filter((v) => v.kind === "verdict" && v.action === "accept" && Date.parse(v.ts) >= started);
@@ -34139,9 +34143,13 @@ function reviewAgain(io, e, task, t, reason, changed, at2) {
   }
   const lease = new Date(io.now().getTime() + LEASE_MINUTES * 6e4).toISOString();
   let changedNow = false;
+  let state = null;
   updateExecution(io.cwd, (cur) => {
     const c = cur?.tasks[task];
-    if (!cur || !c || c.status !== "accepted") return null;
+    if (!cur || !c || c.status !== "accepted") {
+      state = c?.status ?? null;
+      return null;
+    }
     changedNow = true;
     const next = {
       ...c,
@@ -34172,7 +34180,8 @@ function reviewAgain(io, e, task, t, reason, changed, at2) {
     });
     appendPhase(io.cwd, { ts: at2, kind: "phase", task, phase: "validate", ...e.kind === "plan" && isSafeId(e.project) ? { project: e.project } : {} });
   }
-  return { code: 0, stdout: JSON.stringify({ result: "unreviewed", reason, changed, detail: `${task}: ${reason}; it is reviewed again` }) + "\n", stderr: "" };
+  const outcome = changedNow ? "it is reviewed again" : `${state === null ? "it is no longer in the execution" : `it is ${state} now`}, so it is not reviewed again`;
+  return { code: 0, stdout: JSON.stringify({ result: "unreviewed", reason, ...changedOut(changed), detail: `${task}: ${reason}; ${outcome}` }) + "\n", stderr: "" };
 }
 function integrate(rest, io, deps, planArg, db) {
   const task = rest[0];
@@ -34373,7 +34382,7 @@ function mergeFinal(rest, io, deps) {
     const same = sameReviewedTree(deps.git, v.tree, now, [`docs/forge/decisions/${e.runId}.md`]);
     return same.ok ? { ok: true } : { ok: false, reason: FINAL_TREE_CHANGED, changed: same.changed };
   })();
-  const why = receipt && !receipt.ok ? { reason: receipt.reason, ...receipt.changed.length ? { changed: receipt.changed } : {} } : {};
+  const why = receipt && !receipt.ok ? { reason: receipt.reason, ...receipt.changed.length ? changedOut(receipt.changed) : {} } : {};
   const finishedRun = (x) => !!x && x.runId === e.runId && x.mergeOnFinish && !x.active && x.stopReason === "finished" && !x.closedAt && receipt?.ok === true;
   const asks = !isForgeBranch(e.base);
   const onFinish = asks && finishedRun(e);
@@ -35197,6 +35206,7 @@ function predictionsOf(main, e) {
   const accepted = Object.entries(e.tasks).filter(([, t]) => t.status === "accepted");
   return {
     merge: e.kind === "plan" ? predictMerge(run2, e.base, e.branch) : null,
+    // An ephemeral run's branch is its base (swarm start sets it so): its tasks are predicted against the branch they integrate into.
     tasks: Object.fromEntries(accepted.map(([id, t]) => [id, predictMerge(run2, e.branch, t.branch)]))
   };
 }
