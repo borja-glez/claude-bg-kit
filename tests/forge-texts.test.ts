@@ -11,4 +11,12 @@ describe("forge's texts (A7)", () => {
     expect(md).toContain('**Declined to judge**');
     expect(read('plugins/forge/skills/run/references/large.md').split('\n').find(l => l.startsWith('5. '))).toContain("the final verdict's `deferred`");
   });
+  it('the automatic decisions the skills write carry their cost if wrong, and the report and the list show it (A7)', () => {
+    const shape = '"ifWrong": {"cost": "<low|medium|high>", "note": "<one line>"}';
+    const ref = read('plugins/forge/skills/run/references/decisions.md');
+    expect(ref).toContain(shape);
+    expect(ref.split('\n').find(l => l.startsWith('- **Report.**'))).toContain('coste si es erróneo: <ifWrong.cost>');
+    expect(read('plugins/forge/skills/member/SKILL.md')).toContain(shape);
+    expect(read('plugins/forge/skills/decisions/SKILL.md')).toContain('`ifWrong`');
+  });
 });

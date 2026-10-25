@@ -12,7 +12,7 @@ description: List the decisions forge took without asking (unattended runs, auto
 ## List (`/forge:decisions`)
 
 1. `FORGE decision list` (the latest scope). Add `--all` when the user asks for every decision, `--task <id>` or `--run <runId>` when they name one.
-2. One line per decision: `n. <what> → <chosen> (<why>)`, marked by who decided (`user`: the user; `auto`: auto mode; `unattended`: an unattended run), plus its `revert` when it has one. With none, say that no decision is recorded.
+2. One line per decision: `n. <what> → <chosen> (<why>)`, marked by who decided (`user`: the user; `auto`: auto mode; `unattended`: an unattended run), plus its `revert` when it has one, and its `ifWrong` (the cost and its note) when it has one. With none, say that no decision is recorded.
 
 ## Revert (`/forge:decisions revert <n>`)
 

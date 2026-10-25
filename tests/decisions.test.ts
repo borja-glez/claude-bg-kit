@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DECISIONS_MAX, LIMITS, clean, decisionScope, decisionsSummary, nextDecisionsDoc, normalizeAlternative, normalizeDecision, normalizeDecisionsDoc,
-  normalizeUndo, scopeFileName, weightOf, type Decision,
+  normalizeIfWrong, normalizeUndo, scopeFileName, weightOf, type Decision,
 } from '../src/lib/decisions.js';
 
 const TS = '2026-10-13T10:00:00.000Z';
@@ -134,5 +134,16 @@ describe('alternatives with why not and trade-offs (6b-1)', () => {
   it('lens reads the summary of a decision with structured alternatives', () => {
     const doc = nextDecisionsDoc(null, normalizeDecision({ ...NEW, alternatives: [{ option: 'redis', whyNot: 'w' }] })!, 1);
     expect(decisionsSummary(JSON.stringify(doc), Date.parse(TS))).toEqual({ count: 1, autonomy: 'auto', lastMajor: 'diseño aprobado (v4)' });
+  });
+});
+
+describe('the cost if wrong (A7)', () => {
+  it('reads ifWrong; an event without it normalizes as before, same keys in the same order (so its note id does not change)', () => {
+    const ifWrong = { cost: 'high', note: 'the run builds on a design nobody approved' };
+    expect(normalizeDecision({ ...NEW, ifWrong })!.ifWrong).toEqual(ifWrong);
+    expect(Object.keys(normalizeDecision(NEW)!)).toEqual(['ts', 'point', 'what', 'chosen', 'alternatives', 'tradeoffs', 'why', 'by', 'weight', 'revert', 'undo', 'task', 'runId', 'safePath', 'revertOf']);
+    for (const odd of [{ cost: 'huge', note: 'x' }, { cost: 'low' }, { cost: 'low', note: ' \u0007 ' }, 'high', null])
+      expect(normalizeDecision({ ...NEW, ifWrong: odd }), JSON.stringify(odd)).not.toHaveProperty('ifWrong');
+    expect(normalizeIfWrong({ cost: 'medium', note: `a\u0007\n${'b'.repeat(300)}` })!.note).toHaveLength(200);
   });
 });
