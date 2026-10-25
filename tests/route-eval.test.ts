@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import {
-  CONFIGS, DEMO_SHOP, claudeArgs, demoRepo, parseArgs, passes, projectSettingsFor, readStream, sessionEnv, settingsFor, summarize, table, type EvalPrompt, type EvalResult,
+  CONFIGS, DEMO_SHOP, appendTrial, claudeArgs, demoRepo, parseArgs, passes, pending, projectSettingsFor, providerError, readStream, readTrials, sessionEnv, settingsFor,
+  stopReason, summarize, table, trialKey, wilson, type EvalPrompt, type EvalResult,
 } from '../scripts/route-eval/lib.mjs';
 import { locateSuperpowers } from '../src/forge/superpowers.js';
 import { run, type Io } from '../src/forge/cli/run.js';
@@ -11,6 +12,8 @@ import { useTempDirs } from './helpers/tmp.js';
 
 const tmp = useTempDirs();
 const line = (o: unknown) => JSON.stringify(o);
+const row = (config: string, id: string, rep: number, o: Partial<EvalResult> = {}): EvalResult => ({ id, size: 'medium', lang: 'en', expected: 'route', competing: null,
+  config, rep, firstSkill: 'forge:route', plugins: null, cost: 0.01, error: null, provider: null, hookRan: true, ...o });
 
 describe('route-eval', () => {
   it('reads the first Skill tool_use and the plugins of the init message', () => {
@@ -21,19 +24,19 @@ describe('route-eval', () => {
       line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'forge:route' } }] } }),
       line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'superpowers:brainstorming' } }] } }),
     ].join('\n');
-    expect(readStream(stream)).toEqual({ firstSkill: 'forge:route', plugins: ['forge', 'waypoint'], stop: null, cost: null });
-    expect(readStream('')).toEqual({ firstSkill: null, plugins: null, stop: null, cost: null });
+    expect(readStream(stream)).toEqual({ firstSkill: 'forge:route', plugins: ['forge', 'waypoint'], stop: null, cost: null, isError: null, apiStatus: null, hooks: [] });
+    expect(readStream('')).toEqual({ firstSkill: null, plugins: null, stop: null, cost: null, isError: null, apiStatus: null, hooks: [] });
   });
   it('reads why the session stopped and what it cost from its result message (K1-02)', () => {
     const stream = [
       line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: 'a' } }] } }),
       line({ type: 'result', subtype: 'error_max_turns', is_error: true, total_cost_usd: 0.0123 }),
     ].join('\n');
-    expect(readStream(stream)).toEqual({ firstSkill: null, plugins: null, stop: 'error_max_turns', cost: 0.0123 });
+    expect(readStream(stream)).toEqual({ firstSkill: null, plugins: null, stop: 'error_max_turns', cost: 0.0123, isError: true, apiStatus: null, hooks: [] });
   });
   it('builds the claude arguments, the --settings of every configuration and the repository settings of each (K1-02)', () => {
     expect(claudeArgs('Add X', { settings: 's.json', pluginDirs: ['/p/forge', '/p/waypoint'] })).toEqual(
-      ['-p', 'Add X', '--output-format', 'stream-json', '--verbose', '--max-turns', '2', '--settings', 's.json', '--plugin-dir', '/p/forge', '--plugin-dir', '/p/waypoint']);
+      ['-p', 'Add X', '--output-format', 'stream-json', '--verbose', '--include-hook-events', '--max-turns', '2', '--settings', 's.json', '--plugin-dir', '/p/forge', '--plugin-dir', '/p/waypoint']);
     const keys = ['forge@bg-kit', 'waypoint@bg-kit', 'lens@bg-kit', 'superpowers@claude-plugins-official', 'context7@claude-plugins-official'];
     expect(settingsFor(keys)).toEqual({ enabledPlugins: { 'forge@bg-kit': false, 'waypoint@bg-kit': false, 'lens@bg-kit': false } });
     expect(projectSettingsFor(false, keys)).toEqual({ enabledPlugins: { 'superpowers@claude-plugins-official': false } });
@@ -56,7 +59,8 @@ describe('route-eval', () => {
     const r = (id: string, expected: EvalResult['expected'], firstSkill: string | null, cost: number | null = 0.01): EvalResult =>
       ({ id, size: expected === 'route' ? 'medium' : 'question', lang: 'en', expected, config: 'with', firstSkill, plugins: null, cost, error: null });
     const ok = [...Array.from({ length: 10 }, (_, i) => r(`m${i}`, 'route', 'forge:route')), r('q', 'none', null), r('a', 'none', null, null)];
-    expect(summarize(ok)).toEqual([{ config: 'with', routed: 10, routable: 10, rate: 1, falseNegatives: 0, falsePositives: 0, others: 2, either: 0, eitherRouted: 0, competing: 0, competingRouted: 0, plugins: null, cost: 0.11 }]);
+    expect(summarize(ok)).toEqual([{ config: 'with', routed: 10, routable: 10, rate: 1, falseNegatives: 0, falsePositives: 0, others: 2, either: 0, eitherRouted: 0, competing: 0, competingRouted: 0, plugins: null, cost: 0.11,
+      ci: { low: 0.7225, high: 1 }, providerErrors: 0, hookMissing: 0 }]);
     expect(passes(summarize(ok))).toBe(true);
     expect(passes(summarize([...ok.slice(0, 9), r('m9', 'route', 'superpowers:brainstorming'), ...ok.slice(10)]))).toBe(true);
     const missed = [...ok.slice(0, 8), r('m8', 'route', null), r('m9', 'route', null), ...ok.slice(10)];
@@ -67,7 +71,7 @@ describe('route-eval', () => {
     expect(passes(summarize(fired))).toBe(false);
     expect(passes([])).toBe(false);
     expect(summarize([r('q', 'none', null, null)])[0].cost).toBeNull();
-    expect(table(ok, summarize(ok))).toContain('| m0 | medium | en | route |  | with | forge:route | $0.0100 |');
+    expect(table(ok, summarize(ok))).toContain('| m0 | medium | en | route |  | with | 1 | forge:route | $0.0100 |');
   });
   it("a Small prompt expects either: forge's rules load forge:route, which steps aside, so it is neither a false positive nor a miss (I1)", () => {
     const r = (id: string, expected: EvalResult['expected'], firstSkill: string | null): EvalResult =>
@@ -79,7 +83,7 @@ describe('route-eval', () => {
     expect(passes([s])).toBe(true);
     expect(passes(summarize([...routed, r('t', 'none', null), r('s1', 'either', 'forge:route'), r('s2', 'either', 'forge:route')]))).toBe(true);
     const out = table(results, [s]);
-    expect(out).toContain('| s1 | small | en | either |  | with | forge:route |');
+    expect(out).toContain('| s1 | small | en | either |  | with | 1 | forge:route |');
     const head = out.split('\n').find(l => l.startsWith('| config |'))!;
     const row = out.split('\n').find(l => l.startsWith('| with |'))!;
     const cell = (name: string) => row.split('|').map(c => c.trim())[head.split('|').map(c => c.trim()).indexOf(name)];
@@ -94,7 +98,7 @@ describe('route-eval', () => {
     expect(s).toMatchObject({ routed: 8, routable: 8, falseNegatives: 0, competing: 2, competingRouted: 1 });
     expect(passes([s])).toBe(true);
     const out = table(results, [s]);
-    expect(out).toContain('| c1 | medium | en | route | direct | with | superpowers:brainstorming |');
+    expect(out).toContain('| c1 | medium | en | route | direct | with | 1 | superpowers:brainstorming |');
     const head = out.split('\n').find(l => l.startsWith('| config |'))!.split('|').map(c => c.trim());
     expect(out.split('\n').find(l => l.startsWith('| with |'))!.split('|').map(c => c.trim())[head.indexOf('competing')]).toBe('1/2');
   });
@@ -121,11 +125,101 @@ describe('route-eval', () => {
     expect(sessionEnv(noHint, { PATH: 'p' })).toEqual({ PATH: 'p', FORGE_ROUTE_HINT: 'off' });
   });
   it('takes only --dry-run, --keep, --only <v> and --config <v> (M1)', () => {
-    expect(parseArgs([])).toEqual({ dry: false, keep: false, only: null, config: null });
-    expect(parseArgs(['--keep', '--only', 'm-es-1', '--config', 'no-hint', '--dry-run'])).toEqual({ dry: true, keep: true, only: 'm-es-1', config: 'no-hint' });
+    expect(parseArgs([])).toEqual({ dry: false, keep: false, only: null, config: null, reps: 1, resume: null });
+    expect(parseArgs(['--keep', '--only', 'm-es-1', '--config', 'no-hint', '--dry-run'])).toEqual({ dry: true, keep: true, only: 'm-es-1', config: 'no-hint', reps: 1, resume: null });
     for (const bad of [['--dryrun'], ['--dry_run'], ['-n'], ['dry-run'], ['--only'], ['--config'], ['--only', '--dry-run'], ['--config', '--keep']]) {
       expect(parseArgs(bad), bad.join(' ')).toHaveProperty('error');
     }
+  });
+  it('reads the hooks that ran and the API error of the result message (A7)', () => {
+    const stream = [
+      line({ type: 'system', subtype: 'hook_started', hook_id: 'h1', hook_name: 'UserPromptSubmit', hook_event: 'UserPromptSubmit' }),
+      line({ type: 'system', subtype: 'hook_response', hook_id: 'h1', hook_name: 'UserPromptSubmit', hook_event: 'UserPromptSubmit', exit_code: 0, stdout: '' }),
+      line({ type: 'system', subtype: 'hook_response', hook_event: 'SessionStart' }),
+      line({ type: 'result', subtype: 'success', is_error: true, api_error_status: 529, total_cost_usd: 0 }),
+    ].join('\n');
+    expect(readStream(stream)).toMatchObject({ hooks: ['UserPromptSubmit', 'SessionStart'], isError: true, apiStatus: 529, stop: 'success' });
+  });
+  it('takes --reps <1..10> and --resume <file>, and refuses any other value (A7)', () => {
+    expect(parseArgs(['--reps', '3', '--resume', 'r.jsonl'])).toEqual({ dry: false, keep: false, only: null, config: null, reps: 3, resume: 'r.jsonl' });
+    for (const bad of [['--reps'], ['--reps', '0'], ['--reps', '11'], ['--reps', 'x'], ['--reps', '1.5'], ['--resume'], ['--resume', '--keep']])
+      expect(parseArgs(bad), bad.join(' ')).toHaveProperty('error');
+  });
+  it('tells a provider error from a valid trial: error_max_turns is a valid one (A7)', () => {
+    const e = (o: Partial<Parameters<typeof providerError>[0]>) => providerError({ spawnError: null, stop: 'success', isError: false, apiStatus: null, ...o });
+    expect(e({ spawnError: 'spawnSync claude ETIMEDOUT', stop: null })).toBe('timeout');
+    expect(e({ spawnError: 'spawnSync claude ENOENT', stop: null })).toBe('spawn');
+    expect(e({ stop: null, isError: null })).toBe('no-result');
+    expect(e({ isError: true, apiStatus: 401 })).toBe('auth');
+    expect(e({ isError: true, apiStatus: 403 })).toBe('auth');
+    expect(e({ isError: true, apiStatus: 529 })).toBe('api');
+    expect(e({ stop: 'error_during_execution', isError: true })).toBe('api');
+    expect(e({ stop: 'error_max_turns', isError: true })).toBeNull();
+    expect(e({})).toBeNull();
+  });
+  it('resumes by key: a valid trial is done, a provider error or a missing hook runs again, a broken line is skipped, more reps add only the new ones (A7)', () => {
+    const prompts = [{ id: 'm1', size: 'medium', lang: 'en', expected: 'route', text: 'x' }, { id: 't1', size: 'trivial', lang: 'en', expected: 'none', text: 'y' }] as EvalPrompt[];
+    const rows = [row('with-superpowers', 'm1', 1), row('with-superpowers', 't1', 1, { provider: 'api' }), row('without-superpowers', 'm1', 1, { hookRan: false }),
+      row('no-hint', 'm1', 1, { hookRan: false })];
+    const done = readTrials([JSON.stringify(rows[0]), '{"id": "m1", "con', ...rows.slice(1).map(r => JSON.stringify(r)), ''].join('\n'));
+    expect(done).toEqual(rows);
+    const keys = (reps: number) => pending(prompts, CONFIGS, reps, done).map(t => trialKey({ config: t.config.name, id: t.prompt.id, rep: t.rep }));
+    expect(keys(1)).toEqual(['with-superpowers/t1/1', 'without-superpowers/m1/1', 'without-superpowers/t1/1', 'no-hint/t1/1']);
+    expect(keys(2)).toEqual(['with-superpowers/m1/2', 'with-superpowers/t1/1', 'with-superpowers/t1/2', 'without-superpowers/m1/1', 'without-superpowers/m1/2',
+      'without-superpowers/t1/1', 'without-superpowers/t1/2', 'no-hint/m1/2', 'no-hint/t1/1', 'no-hint/t1/2']);
+    expect(readTrials('')).toEqual([]);
+    expect(trialKey({ config: 'no-hint', id: 'a' })).toBe('no-hint/a/1');
+    // A pass killed while writing leaves a cut last line: the next trial still gets its own line.
+    const file = path.join(tmp('route-eval-append-'), 'r.jsonl');
+    writeFileSync(file, `${JSON.stringify(rows[0])}\n{"id": "m1", "con`);
+    appendTrial(file, rows[1]);
+    expect(readTrials(readFileSync(file, 'utf8'))).toEqual([rows[0], rows[1]]);
+  });
+  it('stops on a refused login, on three provider errors in a row and on a configuration whose hook did not run (A7)', () => {
+    const t = (o: Partial<EvalResult> = {}) => row('with-superpowers', 'm1', 1, o);
+    expect(stopReason([t()])).toBeNull();
+    expect(stopReason([t({ provider: 'auth' })])).toMatch(/credentials/);
+    expect(stopReason([t({ provider: 'api' }), t({ provider: 'timeout' })])).toBeNull();
+    expect(stopReason([t({ provider: 'api' }), t({ provider: 'timeout' }), t({ provider: 'api' })])).toMatch(/three provider errors in a row/);
+    expect(stopReason([t({ provider: 'api' }), t(), t({ provider: 'api' }), t({ provider: 'api' })])).toBeNull();
+    expect(stopReason([t({ hookRan: false })])).toMatch(/UserPromptSubmit hook did not run in with-superpowers/);
+    expect(stopReason([row('no-hint', 'm1', 1, { hookRan: false })])).toBeNull();
+    // A session the provider failed ran no hook either: that is a provider error, not a missing hook.
+    expect(stopReason([t({ provider: 'timeout', hookRan: false })])).toBeNull();
+    expect(summarize([t({ provider: 'timeout', hookRan: false })])[0]).toMatchObject({ providerErrors: 1, hookMissing: 0 });
+  });
+  it('wilson: the 95 % interval of a rate, clamped and rounded to four decimals (A7)', () => {
+    expect(wilson(8, 8)).toEqual({ low: 0.6756, high: 1 });
+    expect(wilson(5, 10)).toEqual({ low: 0.2366, high: 0.7634 });
+    expect(wilson(0, 4)).toEqual({ low: 0, high: 0.4899 });
+    expect(wilson(0, 0)).toBeNull();
+  });
+  it('summarizes the last valid trial of each key, with Wilson, and counts provider errors and missing hooks apart (A7)', () => {
+    const rows = [row('with-superpowers', 'm1', 1), row('with-superpowers', 'm1', 2, { firstSkill: null }),
+      row('with-superpowers', 'm2', 1, { provider: 'api', firstSkill: null, cost: 0.002, error: 'exit 1: success' }), row('with-superpowers', 'm2', 1),
+      row('with-superpowers', 'm3', 1, { hookRan: false, firstSkill: null })];
+    const [s] = summarize(rows);
+    expect(s).toMatchObject({ routed: 2, routable: 3, falseNegatives: 1, providerErrors: 1, hookMissing: 1, ci: { low: 0.2077, high: 0.9385 }, cost: 0.042 });
+    const out = table(rows, [s]).split('\n');
+    expect(out).toContain('| m2 | medium | en | route |  | with-superpowers | 1 | — | $0.0020 | api | exit 1: success |');
+    expect(out).toContain('| m3 | medium | en | route |  | with-superpowers | 1 | — | $0.0100 | no hook |  |');
+    const head = out.find(l => l.startsWith('| config |'))!.split('|').map(c => c.trim());
+    const cells = out.find(l => l.startsWith('| with-superpowers |'))!.split('|').map(c => c.trim());
+    expect([cells[head.indexOf('Wilson 95 %')], cells[head.indexOf('provider errors')], cells[head.indexOf('no hook')]]).toEqual(['21–94 %', '1', '1']);
+  });
+  it('a --dry-run prints one command per pending session: --reps multiplies them, --resume leaves out what is done (A7)', () => {
+    const dry = (...extra: string[]) => spawnSync(process.execPath, ['scripts/route-eval/run.mjs', '--dry-run', ...extra], { encoding: 'utf8', timeout: 60000 });
+    const cmds = (r: ReturnType<typeof dry>) => r.stdout.trim().split(/\r?\n/).filter(l => /^(FORGE_ROUTE_HINT=off )?claude /.test(l));
+    expect(cmds(dry('--only', 'm-es-1', '--reps', '2'))).toHaveLength(6);
+    const file = path.join(tmp('route-eval-resume-'), 'r.jsonl');
+    writeFileSync(file, JSON.stringify({ ...row('with-superpowers', 'm-es-1', 1), lang: 'es' }) + '\n');
+    expect(cmds(dry('--only', 'm-es-1', '--resume', file))).toHaveLength(2);
+    for (const bad of [['--resume', path.join(path.dirname(file), 'missing.jsonl')], ['--reps', '0'], ['--reps', 'x']]) {
+      const r = dry(...bad);
+      expect(r.status, bad.join(' ')).toBe(2);
+      expect(r.stdout, bad.join(' ')).toBe('');
+    }
+    expect(readFileSync(file, 'utf8').split('\n').filter(Boolean)).toHaveLength(1);
   });
   it('resets the demo shop before each session: its first commit, and nothing else on disk but .claude/ (M2)', () => {
     const repo = tmp('route-eval-reset-');
