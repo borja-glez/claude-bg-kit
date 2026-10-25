@@ -3,11 +3,12 @@ import { UsageError } from '../errors.js';
 import { doctorExit, doctorSay, runChecks, type DoctorCheck, type DoctorCtx } from '../../doctor.js';
 import { STATE_CHECKS } from '../../doctor-state.js';
 import { INSTALL_CHECKS } from '../../doctor-install.js';
+import { WAITING_CHECK } from '../../waiting-calls.js';
 import { mainCheckout } from '../../local.js';
 import { claudeConfigDir } from '../../superpowers.js';
 
 /** A4: every check forge doctor runs, in the order it reports them. */
-export const DOCTOR_CHECKS: readonly DoctorCheck[] = [...STATE_CHECKS, ...INSTALL_CHECKS];
+export const DOCTOR_CHECKS: readonly DoctorCheck[] = [...STATE_CHECKS, ...INSTALL_CHECKS, WAITING_CHECK];
 
 /** A4, forge doctor: a read-only health report. Exit 0 all well, 2 something to look at, 1 only unverified checks. */
 export const command: Command = (_args, ctx) => {

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { doctorExit, doctorSay, runChecks, satisfiesRange, type CheckResult, type DoctorCheck, type DoctorCtx } from '../src/forge/doctor.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { assumeTrustedForTests } from '../src/forge/trust-flag.js';
+import { agentTranscript, pendingCall } from '../src/forge/waiting-calls.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
 
@@ -227,5 +228,48 @@ describe('forge doctor · install', () => {
     writeFileSync(left, 'abc\n');
     expect(check('waypoint-doctor')).toMatchObject({ status: 'warn', fix: { kind: 'confirm' }, data: { leftovers: ['.waypoint/demo-shop/last-head'] } });
     expect(readFileSync(left, 'utf8')).toBe('abc\n');
+  });
+});
+
+describe('forge doctor · waiting calls', () => {
+  const NOW = Date.parse('2026-10-24T10:00:00.000Z');
+  const use = (id: string, timestamp: string, input: object) => JSON.stringify({ type: 'assistant', timestamp, message: { content: [{ type: 'tool_use', id, name: 'Bash', input }] } });
+  const answer = (id: string, timestamp: string) => JSON.stringify({ type: 'user', timestamp, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } });
+  it('pendingCall reports the last tool_use with no result, redacted, and nothing when it has one', () => {
+    const tail = [use('t1', '2026-10-24T09:40:00.000Z', { command: 'ls' }), answer('t1', '2026-10-24T09:40:01.000Z'), use('t2', '2026-10-24T09:45:00.000Z', { command: 'npm test -- --password=hunter2' })].join('\n') + '\n';
+    expect(pendingCall(tail, NOW)).toEqual({ tool: 'Bash', waitedSec: 900, head: 'npm test -- --password=***' });
+    expect(pendingCall(tail + answer('t2', '2026-10-24T09:50:00.000Z') + '\n', NOW)).toBeNull();
+    expect(pendingCall('', NOW)).toBeNull();
+    expect(pendingCall('{cut line\nnot json\n', NOW)).toBe('unreadable');
+  });
+  it('agentTranscript builds the path only from safe ids, under any project folder', () => {
+    const cfg = tmp('doctor-cfg-');
+    expect(agentTranscript(cfg, '../x', 'a')).toBeNull();
+    expect(agentTranscript(cfg, 's1', 'bad/id')).toBeNull();
+    expect(agentTranscript(cfg, 's1', 'a1')).toBeNull();
+    const f = path.join(cfg, 'projects', 'E--work-shop', 's1', 'subagents', 'agent-a1.jsonl');
+    mkdirSync(path.dirname(f), { recursive: true });
+    writeFileSync(f, '');
+    expect(agentTranscript(cfg, 's1', 'a1')).toBe(f);
+  });
+  it('a live subagent older than 10 min with a pending call is data, status ok; a transcript that does not read is unverified; only the tail is read', () => {
+    const root = tmp('doctor-wait-');
+    const cfg = path.join(root, 'cfg');
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+    mkdirSync(path.join(root, '.forge', 'live'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'live', 's1.json'), JSON.stringify({ sessionId: 's1', role: 'coordinator', runId: null, task: null, event: 'SubagentStart',
+      ts: '2026-10-24T09:40:00.000Z', agents: [{ id: 'a1', type: 'forge:forge-impl', since: '2026-10-24T09:40:00.000Z' }, { id: 'a2', type: 'forge:forge-mech', since: '2026-10-24T09:55:00.000Z' }], ended: false }));
+    const f = path.join(cfg, 'projects', 'p', 's1', 'subagents', 'agent-a1.jsonl');
+    mkdirSync(path.dirname(f), { recursive: true });
+    const waiting = () => (JSON.parse(run(['doctor'], { cwd: root, now: () => new Date(NOW), env: { CLAUDE_CONFIG_DIR: cfg }, scriptPath: path.join(root, 'plugins', 'forge', 'dist', 'forge.cjs') }).stdout).checks as CheckResult[])
+      .find(c => c.id === 'waiting-calls')!;
+    writeFileSync(f, use('t1', '2026-10-24T09:45:00.000Z', { command: 'npm test' }) + '\n');
+    expect(waiting()).toMatchObject({ status: 'ok', data: { waiting: [{ agent: 'forge:forge-impl', tool: 'Bash', waitedSec: 900, head: 'npm test' }] } });
+    writeFileSync(f, 'not json\n');
+    expect(waiting().status).toBe('unverified');
+    // a call more than 2 MiB back, before plain lines, is not seen: only the tail is read
+    const filler = (JSON.stringify({ type: 'user', timestamp: '2026-10-24T09:41:00.000Z', message: { content: 'x'.repeat(1000) } }) + '\n').repeat(3 * 1024);
+    writeFileSync(f, use('t0', '2026-10-24T09:41:00.000Z', { command: 'sleep 999' }) + '\n' + filler);
+    expect(waiting()).toMatchObject({ status: 'ok', data: { waiting: [] } });
   });
 });
