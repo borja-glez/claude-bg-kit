@@ -74,7 +74,7 @@ Input from the coordinator:
      - run `FORGE swarm task <T> --stage implement --agent <its agent> --round <round + 1> --lease-minutes 90`;
      - `resume`: resume the same implementer with `findings`;
      - `fresh-stronger`: spawn its `agent` as in 1, with `handover` and `findings` too;
-     - `redo`: first run git with `revert.args`, or with each list of `revert.steps` in order, as `convergence.md` says. If a revert stops on a conflict, run `git -C <worktree> revert --abort` and hand back. Then spawn its `agent` as in 1, with `handover` too;
+     - `redo`: first run git with `revert.args`, or with each list of `revert.steps` in order, as `convergence.md` says. If a revert stops on a conflict, run `git -C <worktree> revert --abort` and hand back with `redo revert conflict`; if any other git command of the redo fails, hand back with `redo failed`. Then spawn its `agent` as in 1, with `handover` too;
      - go to 2.
    - `ask` in its output, `breaker`, `stalled`, or anything else: hand back.
 
