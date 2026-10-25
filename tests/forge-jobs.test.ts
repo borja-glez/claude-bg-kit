@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { jobsDir, liveJobs, withJob, slotFor, normalizeJob, JOB_MAX_AGE_MS, SLOT_POLL_MS, type JobDoc } from '../src/forge/jobs.js';
+import { jobsDir, liveJobs, scanJobs, withJob, slotFor, normalizeJob, JOB_MAX_AGE_MS, SLOT_POLL_MS, type JobDoc } from '../src/forge/jobs.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readEvents } from '../src/forge/ledger.js';
 import { useTempDirs } from './helpers/tmp.js';
@@ -28,6 +28,17 @@ describe('jobs (C-03)', () => {
     expect(liveJobs(root, now()).map(j => j.name)).toEqual(['a']);
     expect(jobFiles()).toEqual(['a.json', 'junk.json']);
     expect(liveJobs(path.join(root, 'none'), now())).toEqual([]);
+  });
+  it('scanJobs reads without removing: the live ones and the dead ones with their reason, every file kept', () => {
+    put(job({ name: 'a' }));
+    put(job({ name: 'dead', pid: deadPid() }));
+    put(job({ name: 'old', startedAt: new Date(Date.parse(T) - JOB_MAX_AGE_MS - 1000).toISOString() }));
+    writeFileSync(path.join(jobsDir(root), 'junk.json'), '{oops');
+    const scan = scanJobs(root, now());
+    expect(scan.live.map(j => j.name)).toEqual(['a']);
+    expect(scan.dead.map(d => [d.name, d.why]).sort()).toEqual([['dead', 'dead'], ['old', 'old']]);
+    expect(jobFiles()).toEqual(['a.json', 'dead.json', 'junk.json', 'old.json']);
+    expect(scanJobs(path.join(root, 'none'), now())).toEqual({ live: [], dead: [] });
   });
   it('normalizeJob keeps the fields of the contract and drops what it cannot trust', () => {
     expect(normalizeJob({ ...job(), session: 'a b', extra: 1 })).toEqual({ ...job(), session: null });

@@ -58,23 +58,31 @@ function writeJob(main: string, job: JobDoc): string {
   return file;
 }
 
-/** The jobs alive now. A dead pid or a job older than JOB_MAX_AGE_MS is a leftover: its file goes. An unreadable file is skipped. */
-export function liveJobs(main: string, now: Date, alive: (pid: number) => boolean = pidAlive): JobDoc[] {
+/** Reads the jobs without removing any file (doctor is read-only); liveJobs removes the `file` of each dead one. An unreadable file is skipped. */
+export interface JobScan { live: JobDoc[]; dead: { file: string; name: string; cmd: string; task: string | null; why: 'dead' | 'old' }[] }
+export function scanJobs(main: string, now: Date, alive: (pid: number) => boolean = pidAlive): JobScan {
+  const scan: JobScan = { live: [], dead: [] };
   let names: string[] = [];
-  try { names = readdirSync(jobsDir(main)).filter(f => f.endsWith('.json')).slice(0, MAX_JOB_FILES); } catch { return []; }
-  const out: JobDoc[] = [];
+  try { names = readdirSync(jobsDir(main)).filter(f => f.endsWith('.json')).slice(0, MAX_JOB_FILES); } catch { return scan; }
   for (const f of names) {
     const file = path.join(jobsDir(main), f);
     let job: JobDoc | null = null;
     try { job = normalizeJob(JSON.parse(readFileSync(file, 'utf8'))); } catch { job = null; }
     if (!job) continue;
-    if (!alive(job.pid) || now.getTime() - Date.parse(job.startedAt) > JOB_MAX_AGE_MS) {
-      try { rmSync(file, { force: true }); } catch { /* the next reader tries again */ }
-      continue;
-    }
-    out.push(job);
+    const why = !alive(job.pid) ? 'dead' : now.getTime() - Date.parse(job.startedAt) > JOB_MAX_AGE_MS ? 'old' : null;
+    if (why) scan.dead.push({ file, name: job.name, cmd: job.cmd, task: job.task, why });
+    else scan.live.push(job);
   }
-  return out;
+  return scan;
+}
+
+/** The jobs alive now. A dead pid or a job older than JOB_MAX_AGE_MS is a leftover: its file goes. An unreadable file is skipped. */
+export function liveJobs(main: string, now: Date, alive: (pid: number) => boolean = pidAlive): JobDoc[] {
+  const scan = scanJobs(main, now, alive);
+  for (const d of scan.dead) {
+    try { rmSync(d.file, { force: true }); } catch { /* the next reader tries again */ }
+  }
+  return scan.live;
 }
 
 /** Runs `fn` as a job: its file is written first and removed in a finally. A file that cannot be written only costs a
