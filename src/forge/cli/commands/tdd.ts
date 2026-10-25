@@ -12,7 +12,8 @@ import { sayTdd, tddForBrief } from '../../tdd.js';
 /**
  * `FORGE tdd check --task <id>-<n> --base <sha> --dir <dir> [--baseline <f>] [--locale es|en]`: the Small path's TDD
  * check (it has no review-prep): runs the brief's new tests on BASE, writes `<dir>/tdd-<n>.json` and prints the row with
- * `file`, `reused` and, with --locale, `say`. Every refusal (exit 2) comes before anything is written.
+ * `file` (null when no file holds the check), `reused` and, with --locale, `say`. Every refusal (exit 2) comes before
+ * anything is written.
  */
 function tddCheck(args: string[], ctx: Ctx) {
   const { io, repoDir, flag, has, json } = ctx;
@@ -39,7 +40,7 @@ function tddCheck(args: string[], ctx: Ctx) {
   const { check, row, file, reused } = tddForBrief({
     repoDir, git, execAt: defaultExec, timeoutSec: config.validatorTimeoutSec, baseline, validators: detectValidators(repo, config), repo, base: sha, dir, n: m[2],
   });
-  const shown = path.relative(io.cwd, file).split(path.sep).join('/');
+  const shown = file === null ? null : path.relative(io.cwd, file).split(path.sep).join('/');
   return json({ ...row.tdd, file: shown, reused, ...(locale ? { say: sayTdd(check, locale as 'es' | 'en') } : {}) });
 }
 

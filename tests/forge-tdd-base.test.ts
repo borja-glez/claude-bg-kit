@@ -30,9 +30,9 @@ const MATH_BASE = "import * as m from '../src/math.mjs';\ntest('add sums', () =>
  * root (forge's state) with wt (the code, its own git) inside. BASE: add, its test and, with `broken`, a test that already
  * fails (the baseline says so). HEAD: mul with a test that fails on BASE, a test that passes on BASE (unless `passing` is
  * false), a new test file whose module BASE lacks, and `broken` edited, so its title line is added again. node_modules
- * and .venv hold an untracked sentinel.
+ * (unless `deps` is false) and .venv hold an untracked sentinel.
  */
-function fixture(o: { broken?: boolean; passing?: boolean; config?: string } = {}) {
+function fixture(o: { broken?: boolean; passing?: boolean; config?: string; deps?: boolean } = {}) {
   const root = tmp('tdd-base-');
   const wt = path.join(root, 'wt');
   const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: wt, encoding: 'utf8' }).trim();
@@ -42,7 +42,7 @@ function fixture(o: { broken?: boolean; passing?: boolean; config?: string } = {
   put('run-tests.mjs', RUNNER);
   put('src/math.mjs', 'export const add = (a, b) => a + b;\n');
   put('tests/math.test.mjs', MATH_BASE + (o.broken ? "test('broken', () => { throw new Error('was broken'); });\n" : ''));
-  put('node_modules/sentinel.txt', 'keep me\n');
+  if (o.deps !== false) put('node_modules/sentinel.txt', 'keep me\n');
   put('.venv/sentinel.txt', 'keep me\n');
   git('init', '-q'); git('add', '-A'); git('commit', '-q', '-m', 'base');
   const base = git('rev-parse', 'HEAD');
@@ -122,13 +122,33 @@ describe('the TDD check on BASE (A9)', () => {
     expect(existsSync(stale)).toBe(false);
     expect(readFileSync(path.join(target, 'sentinel.txt'), 'utf8')).toBe('keep me\n');
   });
-  it('a BASE that cannot be checked out is no-checkout, with nothing left behind', () => {
+  it('a BASE that cannot be checked out is no-checkout, says why in note, leaves nothing behind and names no file', () => {
     const f = fixture();
     const plan = tddPlan(f.ctx().validators, ['tests/math.test.mjs'], f.base, { git: defaultGit(f.wt), repo: repoReader(f.wt), platform: process.platform, repoDir: f.wt });
-    expect(runTdd({ ...plan, base: '0'.repeat(40) }, f.ctx()).skipped).toBe('no-checkout');
-    expect(tddForBrief(f.ctx({ base: '--output=x' })).check.skipped).toBe('no-checkout');
+    const zero = '0'.repeat(40);
+    expect(runTdd({ ...plan, base: zero }, f.ctx())).toMatchObject({ skipped: 'no-checkout', note: `git worktree add failed for ${zero}` });
+    // The tdd-1.json of an earlier check (another key) stays on disk, and the output names no file: none holds this check.
+    expect(tddForBrief(f.ctx()).file).toBe(tddFile(f.work, '1'));
+    expect(tddForBrief(f.ctx({ base: '--output=x' }))).toMatchObject({ file: null, check: { skipped: 'no-checkout' } });
+    expect(existsSync(tddFile(f.work, '1'))).toBe(true);
     expect(left(f.tmpRoot)).toEqual([]);
     expect(worktrees(f.wt)).toHaveLength(1);
+  });
+  it('a check that cannot be written names no file', () => {
+    const f = fixture();
+    mkdirSync(tddFile(f.work, '1'));
+    expect(tddForBrief(f.ctx())).toMatchObject({ file: null, reused: false, check: { skipped: null, passedOnBase: ['tests/math.test.mjs > add still sums'] } });
+  });
+  it('a bare node runs without node_modules: only a package manager, a runner or a script from node_modules needs them', () => {
+    const f = fixture({ deps: false });
+    expect(tddForBrief(f.ctx()).check).toMatchObject({
+      skipped: null, red: ['tests/fresh.test.mjs > fresh works', 'tests/math.test.mjs > mul multiplies'], passedOnBase: ['tests/math.test.mjs > add still sums'],
+    });
+    const ran: string[] = [];
+    const t = fixture({ deps: false, config: CONFIG.replace('affected_cmd: node run-tests.mjs {tests}', 'affected_cmd: node --test {tests}') });
+    const check = tddForBrief(t.ctx({ execAt: cwd => { const exec = defaultExec(cwd); return (cmd, s) => { ran.push(cmd); return exec(cmd, s); }; } })).check;
+    expect(check).toMatchObject({ skipped: null, cmd: expect.stringMatching(/^node --test /) });
+    expect(ran).toEqual([check.cmd]);
   });
   it('reuses tdd-<n>.json while the test files do not change, runs again when one does, and tddPending says when the express review waits', () => {
     const f = fixture();
@@ -147,19 +167,39 @@ describe('the TDD check on BASE (A9)', () => {
     expect(readTdd(tddFile(f.work, '1'))).toEqual(again.check);
     expect(tddPending(counted)).toBe(false);
   });
-  it('a check that timed out or could not check out BASE is neither written nor reused, and no-checkout keeps its error in note', () => {
+  it('a check that timed out or could not check out BASE runs once more; the second is kept, with both reasons in note', () => {
     const slow = fixture({ config: CONFIG.replace('affected_cmd: node run-tests.mjs {tests}', 'affected_cmd: node -e "setTimeout(() => {}, 20000)" {tests}') });
-    expect(tddForBrief(slow.ctx({ timeoutSec: 1 }))).toMatchObject({ reused: false, check: { skipped: 'timeout' } });
-    expect(existsSync(tddFile(slow.work, '1'))).toBe(false);
-    expect(tddPending(slow.ctx())).toBe(true);
+    let runs = 0;
+    const counted = (over: Partial<TddBriefCtx> = {}) => slow.ctx({ timeoutSec: 1, execAt: cwd => { const exec = defaultExec(cwd); return (cmd, s) => { runs++; return exec(cmd, s); }; }, ...over });
+    const file = tddFile(slow.work, '1');
+    // The first is written under its key, marked to be retried, and the output names its file.
+    const first = tddForBrief(counted());
+    expect(first).toMatchObject({ reused: false, file, check: { skipped: 'timeout', retry: true } });
+    expect(readTdd(file)).toEqual(first.check);
+    expect(tddPending(counted())).toBe(true);
+    // The second under the same key, here a no-checkout, is kept like any other result.
+    const second = tddForBrief(counted({ tmpRoot: path.join(slow.root, 'no', 'such') }));
+    expect(second).toMatchObject({ reused: false, file, check: { skipped: 'no-checkout', note: expect.stringMatching(/^kept after two attempts: timeout, then no-checkout \(ENOENT/) } });
+    expect(second.check).not.toHaveProperty('retry');
+    expect(readTdd(file)).toEqual(second.check);
+    expect(tddPending(counted())).toBe(false);
+    expect(tddForBrief(counted())).toMatchObject({ reused: true, file, check: second.check });
+    expect(runs).toBe(1);
+  });
+  it('a first no-checkout keeps its error in note and is run again: a result that holds is written as always', () => {
     const f = fixture();
-    const lost = tddForBrief(f.ctx({ tmpRoot: path.join(f.root, 'no', 'such') }));
-    expect(lost.check).toMatchObject({ skipped: 'no-checkout', note: expect.stringContaining('ENOENT') });
-    expect(existsSync(tddFile(f.work, '1'))).toBe(false);
-    // One stored before, under the same key, is run again.
-    writeTdd(tddFile(f.work, '1'), lost.check);
+    const file = tddFile(f.work, '1');
+    const missing = { tmpRoot: path.join(f.root, 'no', 'such') };
+    const lost = tddForBrief(f.ctx(missing));
+    expect(lost).toMatchObject({ file, check: { skipped: 'no-checkout', retry: true, note: expect.stringMatching(/^ENOENT/) } });
     expect(tddPending(f.ctx())).toBe(true);
-    expect(tddForBrief(f.ctx())).toMatchObject({ reused: false, check: { skipped: null, red: ['tests/fresh.test.mjs > fresh works', 'tests/math.test.mjs > mul multiplies'] } });
+    const ok = tddForBrief(f.ctx());
+    expect(ok).toMatchObject({ reused: false, file, check: { skipped: null, red: ['tests/fresh.test.mjs > fresh works', 'tests/math.test.mjs > mul multiplies'] } });
+    expect(readTdd(file)).toEqual(ok.check);
+    expect(ok.check).not.toHaveProperty('retry');
+    // A first attempt stored under another key does not count: this one is a first attempt too.
+    writeTdd(file, { ...lost.check, key: 'another' });
+    expect(tddForBrief(f.ctx(missing)).check).toMatchObject({ skipped: 'no-checkout', retry: true, note: expect.stringMatching(/^ENOENT/) });
   });
   it('a runner that stopped early leaves the tests it did not report unjudged, and says why in note', () => {
     const stop = "node -e \"console.log(' FAIL  tests/math.test.mjs > mul multiplies'); console.log('!!! stopping after 1 failures !!!'); process.exit(1)\" {tests}";
@@ -202,6 +242,13 @@ describe('forge tdd check (A9)', () => {
     expect(again).toMatchObject({ reused: true });
     expect(again).not.toHaveProperty('say');
   });
+  it('prints file null when tdd-<n>.json could not be written', () => {
+    const f = fixture();
+    mkdirSync(path.join(f.work, 'tdd-1.json'));
+    const r = run(args(f), io(f));
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ file: null, reused: false, skipped: null, passedOnBase: ['tests/math.test.mjs > add still sums'] });
+  });
   it('refuses without tdd: verified, without its flags, or with a base that is not HEAD or below it, and writes nothing', () => {
     const off = fixture({ config: CONFIG.replace('tdd: verified', 'tdd: off') });
     expect(run(args(off), io(off)).code).toBe(2);
@@ -237,6 +284,11 @@ describe('review-prep with tdd: verified (A9)', () => {
     expect(rows(f.work).map(r => [r.validator, r.ok])).toEqual([['unit', true], ['tdd', true]]);
     expect(readEvents(f.root).filter(e => e.kind === 'validate').at(-1)!.results).toEqual([expect.objectContaining({ validator: 'unit' })]);
     expect(out.spawn[0].inputs.report).toBeUndefined();
+  });
+  it('prints tdd.file null when tdd-<n>.json could not be written', () => {
+    const f = setup();
+    mkdirSync(path.join(f.work, 'tdd-1.json'));
+    expect(f.prep().tdd).toMatchObject({ file: null, red: 2, skipped: null, reused: false });
   });
   it('without the option nothing changes: no tdd row, no tdd output, no tdd-<n>.json', () => {
     const f = setup({ config: CONFIG.replace('tdd: verified', 'tdd: off') });

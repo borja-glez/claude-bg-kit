@@ -262,10 +262,15 @@ describe('what the TDD check reads and decides (A9)', () => {
       expect(skip({ ...T, 'package.json': `{${dep}}\n` }, T2), dep).toBe('linked-code');
     }
     expect(skip({ ...T, 'pnpm-workspace.yaml': 'packages: ["p/*"]\n' }, T2)).toBe('linked-code');
-    // A Node runner with no node_modules of the task's own for BASE to link: never run (npx would download the runner).
+    // A Node runner with no node_modules of the task's own for BASE to link: never run (npx would download the runner, and
+    // a runner or a script from node_modules is not there). A bare node runs with what BASE has.
     const bare = planRepo(T, T2, false);
-    for (const cmd of [VITEST.affectedCmd as string, 'pnpm exec vitest related --run {files}', 'node --test {tests}']) {
+    for (const cmd of [VITEST.affectedCmd as string, 'pnpm exec vitest related --run {files}', 'node --experimental-vm-modules node_modules/jest/bin/jest.js {files}',
+      './node_modules/.bin/vitest related --run {files}']) {
       expect(tddPlan([{ ...VITEST, affectedCmd: cmd }], bare.touched, bare.base, bare.at).skipped, cmd).toBe('no-deps');
+    }
+    for (const cmd of ['node --test {tests}', 'NODE_ENV=test node --test {tests}', 'node.exe --test {tests}']) {
+      expect(tddPlan([{ ...VITEST, affectedCmd: cmd }], bare.touched, bare.base, bare.at), cmd).toMatchObject({ skipped: null, cmd: expect.stringContaining('--test ') });
     }
     const py = planRepo({ 'tests/test_a.py': 'def test_a():\n    pass\n' }, { 'tests/test_a.py': 'def test_a():\n    pass\ndef test_b():\n    pass\n' }, false);
     expect(tddPlan([PYTEST], py.touched, py.base, py.at).skipped).toBeNull();
@@ -300,11 +305,17 @@ describe('what the TDD check reads and decides (A9)', () => {
   });
   it('tdd-<n>.json round-trips, a broken or foreign one reads as none, and the say names why a check did not run', () => {
     const dir = tmp('tdd-file-');
-    writeTdd(tddFile(dir, '1'), CHECK);
+    expect(writeTdd(tddFile(dir, '1'), CHECK)).toBe(true);
     expect(readTdd(tddFile(dir, '1'))).toEqual(CHECK);
+    const retry: TddCheck = { ...CHECK, skipped: 'timeout', retry: true };
+    writeTdd(tddFile(dir, '5'), retry);
+    expect(readTdd(tddFile(dir, '5'))).toEqual(retry);
     writeFileSync(tddFile(dir, '2'), '{"v":2}');
     writeFileSync(tddFile(dir, '3'), 'not json');
-    for (const n of ['2', '3', '4']) expect(readTdd(tddFile(dir, n)), n).toBeNull();
+    writeFileSync(tddFile(dir, '6'), JSON.stringify({ ...CHECK, retry: 'yes' }));
+    for (const n of ['2', '3', '4', '6']) expect(readTdd(tddFile(dir, n)), n).toBeNull();
+    mkdirSync(tddFile(dir, '7'));
+    expect(writeTdd(tddFile(dir, '7'), CHECK)).toBe(false);
     expect(sayTdd(CHECK, 'es')).not.toBe(sayTdd(CHECK, 'en'));
     expect(sayTdd({ ...CHECK, skipped: 'lockfile' }, 'en')).toContain('lockfile');
   });

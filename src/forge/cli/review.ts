@@ -454,7 +454,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     round, reviews: reviewsCount, validators: { ok, failing, preexisting, file: rel(deps.cwd, validatorsFile) }, spawn, cached: cachedNames(results), durationMs: validation.durationMs,
     ...(plan.carried.length ? { carried: plan.carried.map(c => c.name) } : {}),
     ...(restored.length ? { restored } : {}),
-    ...(t ? { tdd: { file: rel(deps.cwd, t.file), red: t.check.red.length, passedOnBase: t.check.passedOnBase, alreadyFailing: t.check.alreadyFailing,
+    ...(t ? { tdd: { file: t.file === null ? null : rel(deps.cwd, t.file), red: t.check.red.length, passedOnBase: t.check.passedOnBase, alreadyFailing: t.check.alreadyFailing,
       unjudged: t.check.unjudged, skipped: t.check.skipped, durationMs: t.check.durationMs, reused: t.reused } } : {}),
   };
   if (locale === 'es' || locale === 'en') {

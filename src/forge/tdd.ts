@@ -30,11 +30,14 @@ export interface TddPlan {
   testPaths: string[];
   skipped: TddSkip | null; note: string | null;
 }
-/** tdd-<n>.json: a check's result. red, passedOnBase and alreadyFailing are `<file> > <test>`; unjudged are files. */
+/**
+ * tdd-<n>.json: a check's result. red, passedOnBase and alreadyFailing are `<file> > <test>`; unjudged are files. `retry`
+ * marks the first `timeout` or `no-checkout` of its key: kept only so the next check knows it is the second, never reused.
+ */
 export interface TddCheck {
   v: 1; key: string; base: string; validator: string | null; cmd: string | null; files: string[];
   red: string[]; passedOnBase: string[]; alreadyFailing: string[]; unjudged: string[];
-  skipped: TddSkip | null; note: string | null; durationMs: number;
+  skipped: TddSkip | null; note: string | null; durationMs: number; retry?: true;
 }
 export type TddRow = ValidatorResult & { tdd: TddCheck & { bug?: { rootCause: string | null } } };
 export interface BaseRun { code: number; output: string; timedOut: boolean }
@@ -201,8 +204,13 @@ export function classifyTdd(files: string[], names: ReadonlyMap<string, string[]
 const CONFTEST = /(^|\/)conftest\.py$/;
 const TEST_MODULE = /\.(test|spec)\.[^/]+$/;
 const LINKED_DEP = /^(?:file|link|workspace):/;
-/** A command run by Node or one of its package managers or test runners (after any VAR=value). */
-const NODE_RUNNER = /^\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:node|npx|npm|pnpm|yarn|bunx?|vitest|jest|mocha)(?:\.cmd|\.exe)?(?=\s|$)/i;
+/**
+ * A command that needs the task's node_modules: one run by a Node package manager or test runner (after any VAR=value),
+ * which npx and its kin would download, or one that names a program or script under node_modules. A bare `node` runs
+ * with what BASE has.
+ */
+const NODE_RUNNER = /^\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:npx|npm|pnpm|yarn|bunx?|vitest|jest|mocha)(?:\.cmd|\.exe)?(?=\s|$)/i;
+const IN_NODE_MODULES = /(?:^|[\s"'=/\\])node_modules[/\\]/;
 const SITE_DIRS = (repo: RepoReader): string[] => {
   const dirs: string[] = [];
   for (const venv of ['.venv', 'venv']) {
@@ -288,7 +296,7 @@ export function tddPlan(validators: Validator[], touched: string[], base: string
   if (linkedCode(at)) return done('linked-code');
   // Without a node_modules of repoDir's own BASE gets no link: the runner would run without the task's dependencies, and
   // npx would download it. Never.
-  if (NODE_RUNNER.test(a.cmd) && linkSource(at.repoDir, 'node_modules') === null) return done('no-deps');
+  if ((NODE_RUNNER.test(a.cmd) || IN_NODE_MODULES.test(a.cmd)) && linkSource(at.repoDir, 'node_modules') === null) return done('no-deps');
   return done(null);
 }
 
@@ -329,19 +337,25 @@ export function readTdd(file: string): TddCheck | null {
   const r = x as Record<string, unknown>;
   if (r.v !== 1 || typeof r.key !== 'string' || typeof r.base !== 'string' || !orNull(r.validator) || !orNull(r.cmd) || !orNull(r.note)
     || !strings(r.files) || !strings(r.red) || !strings(r.passedOnBase) || !strings(r.alreadyFailing) || !strings(r.unjudged)
-    || (r.skipped !== null && (typeof r.skipped !== 'string' || !SKIPS.includes(r.skipped))) || typeof r.durationMs !== 'number') return null;
+    || (r.skipped !== null && (typeof r.skipped !== 'string' || !SKIPS.includes(r.skipped))) || typeof r.durationMs !== 'number'
+    || (r.retry !== undefined && r.retry !== true)) return null;
   return r as unknown as TddCheck;
 }
 
-/** Writes the check through a temporary file and a rename; any failure is ignored (a missing file only costs a run). */
-export function writeTdd(file: string, check: TddCheck): void {
+/**
+ * Writes the check through a temporary file and a rename. Returns whether it did: a failure is otherwise ignored (a
+ * missing file only costs a run).
+ */
+export function writeTdd(file: string, check: TddCheck): boolean {
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     mkdirSync(path.dirname(file), { recursive: true });
     writeFileSync(tmp, JSON.stringify(check) + '\n');
     renameSync(tmp, file);
+    return true;
   } catch {
     try { rmSync(tmp, { force: true }); } catch { /* ignore */ }
+    return false;
   }
 }
 
@@ -380,8 +394,14 @@ const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const RM = { recursive: true, force: true, maxRetries: 3, retryDelay: 100 } as const;
 /** A check's notes in one: the given ones, `; ` between them, or null without any. */
 const notes = (...n: (string | null | undefined)[]): string | null => n.filter(Boolean).join('; ') || null;
-/** A check that timed out or could not check out BASE says nothing that lasts: it is never written nor reused. */
+/** A check that timed out or could not check out BASE: run once more before it is kept. */
 const transient = (c: TddCheck): boolean => c.skipped === 'timeout' || c.skipped === 'no-checkout';
+/** A transient check's reason, short: its skip and what its note adds to the plan's own. */
+function attempt(c: TddCheck, planNote: string | null): string {
+  const own = planNote !== null && c.note?.startsWith(planNote) ? c.note.slice(planNote.length).replace(/^; /, '') : c.note;
+  const text = (own ?? '').replace(/\s+/g, ' ').trim();
+  return text ? `${c.skipped} (${text.length > 120 ? `${text.slice(0, 119)}…` : text})` : String(c.skipped);
+}
 const winPath = (s: string) => (process.platform === 'win32' ? path.resolve(s).toLowerCase() : path.resolve(s));
 
 const isDir = (p: string): boolean => { try { return statSync(p).isDirectory(); } catch { return false; } };
@@ -471,7 +491,9 @@ export function runTdd(plan: TddPlan, ctx: TddRunCtx): TddCheck {
     const hooks = path.join(tmpDir, 'no-hooks');
     mkdirSync(hooks);
     const baseDir = path.join(tmpDir, 'base');
-    if (ctx.git(['-c', `core.hooksPath=${hooks}`, 'worktree', 'add', '--detach', '--quiet', baseDir, plan.base]) === null) return done({ skipped: 'no-checkout' });
+    if (ctx.git(['-c', `core.hooksPath=${hooks}`, 'worktree', 'add', '--detach', '--quiet', baseDir, plan.base]) === null) {
+      return done({ skipped: 'no-checkout', note: notes(check.note, `git worktree add failed for ${plan.base}`) });
+    }
     for (const name of TDD_LINKS) {
       const src = linkSource(ctx.repoDir, name);
       if (!src || lexists(path.join(baseDir, name))) continue;
@@ -514,30 +536,35 @@ function planOf(c: PlanCtx): { plan: TddPlan; file: string; stored: TddCheck | n
 const readText = (file: string): string | null => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
 
 /**
- * The brief's check: tdd-<n>.json when its key still holds, else a run that writes it (a `timeout` or `no-checkout` is
- * neither written nor reused); the row with the bug's root cause.
+ * The brief's check: tdd-<n>.json when its key still holds, else a run that writes it; the row with the bug's root cause.
+ * The first `timeout` or `no-checkout` of a key is written with `retry` and never reused; the second is kept, its note
+ * naming both attempts. `file` is the tdd-<n>.json that holds this check, or null when none does.
  */
-export function tddForBrief(c: TddBriefCtx): { check: TddCheck; row: TddRow; file: string; reused: boolean } {
+export function tddForBrief(c: TddBriefCtx): { check: TddCheck; row: TddRow; file: string | null; reused: boolean } {
   const bug = BUG_BRIEF.test(readText(path.join(c.dir, `brief-${c.n}.md`)) ?? '')
     ? { rootCause: rootCauseOf(readText(path.join(c.dir, `report-${c.n}.txt`))) } : null;
   const p = planOf(c);
-  const file = tddFile(c.dir, c.n);
   if (!p) {
     const check: TddCheck = {
       v: 1, key: '', base: c.base, validator: null, cmd: null, files: [], red: [], passedOnBase: [], alreadyFailing: [], unjudged: [],
       skipped: 'no-checkout', note: null, durationMs: 0,
     };
-    return { check, row: tddRow(check, bug), file, reused: false };
+    return { check, row: tddRow(check, bug), file: null, reused: false };
   }
-  const reused = p.stored !== null && p.stored.key === p.plan.key && !transient(p.stored);
-  const check = reused ? (p.stored as TddCheck) : runTdd(p.plan, c);
-  if (!reused && !transient(check)) writeTdd(p.file, check);
-  return { check, row: tddRow(check, bug), file: p.file, reused };
+  const same = p.stored !== null && p.stored.key === p.plan.key ? p.stored : null;
+  if (same && same.retry !== true) return { check: same, row: tddRow(same, bug), file: p.file, reused: true };
+  let check = runTdd(p.plan, c);
+  if (transient(check)) {
+    check = same
+      ? { ...check, note: notes(p.plan.note, `kept after two attempts: ${attempt(same, p.plan.note)}, then ${attempt(check, p.plan.note)}`) }
+      : { ...check, retry: true };
+  }
+  return { check, row: tddRow(check, bug), file: writeTdd(p.file, check) ? p.file : null, reused: false };
 }
 
 /** True when tddForBrief would run, or the stored check has tests that pass on BASE (the express review waits). */
 export function tddPending(c: PlanCtx): boolean {
   const p = planOf(c);
   if (!p) return false;
-  return p.stored === null || p.stored.key !== p.plan.key || transient(p.stored) || p.stored.passedOnBase.length > 0;
+  return p.stored === null || p.stored.key !== p.plan.key || p.stored.retry === true || p.stored.passedOnBase.length > 0;
 }
