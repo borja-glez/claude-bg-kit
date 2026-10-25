@@ -32,6 +32,14 @@ jobs:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
           TMPDIR: ${{ runner.temp }}
+      # A8: the e2e scenarios of the hooks, against the Claude Code installed above and a local scripted Messages API (no
+      # account, no cost; tests/e2e/README.md). The temp dir is the runner's, long form, as for npm run ci.
+      - run: npm run test:e2e
+        env:
+          DISABLE_AUTOUPDATER: "1"
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TMPDIR: ${{ runner.temp }}
   node20:
     strategy:
       fail-fast: false

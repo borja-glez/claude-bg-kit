@@ -8,7 +8,8 @@ The real `claude` binary runs against a local, scripted Messages API: no account
 
 - `npm run test:e2e` runs every `*.e2e.ts` scenario. It prints one line, `e2e: claude <version> (<path>)`, with the binary it found.
 - The scenarios skip themselves when no `claude` is found. `BGKIT_E2E_CLAUDE=<path>` picks the binary, for example the version CI pins.
-- They do not run in `npm test`, and they do not run in GitHub CI today.
+- They do not run in `npm test` or `npm run ci`. GitHub CI runs them in a step of their own after `npm run ci`, on Ubuntu and Windows, against the `claude` the job installs (the version `.github/workflows/ci.yml` pins, which may differ from `OBSERVED_WITH`).
+- That step went in after three runs in a row of `npm run test:e2e` on `w7/integration` (Windows, Claude Code 2.1.310, 7 files and 10 tests) all passed, in 25.2 s, 25.1 s and 25.2 s.
 
 ## Isolation
 
