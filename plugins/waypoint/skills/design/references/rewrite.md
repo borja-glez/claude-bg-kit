@@ -1,0 +1,5 @@
+Read from waypoint:design (`## rewrite` in `SKILL.md`). `waypoint`, `DESIGN`, `LOCAL`, `CRITIQUES`, `<CSID>`, the commit pathspecs, the approved-design rule, **Auto** and **Publish** mean what that skill says.
+
+1. Write a complete improved version to `LOCAL/design.rewrite.md` (same front matter; fold in the open proposals of the latest critique).
+2. Show the real diff: `git diff --no-index --word-diff DESIGN LOCAL/design.rewrite.md` (exit code 1 only means they differ), plus a summary of the main differences.
+3. Ask whether to accept. If yes: apply the approved-design rule above, then copy it over `DESIGN` (its front matter's `status` as that rule left it), run `design-validate`, `design-snapshot` with `--note-file LOCAL/snapshot-note.txt --round R --rewrite --kind rewrite` (the note: <summary, in the person's language>; `R` = `design-gate`'s `latestRound`; `--rewrite` tells `design-gate` the rewrite folded in its proposals; without a critique, the note "full rewrite" in the user's language, `--kind rewrite` and no `--round`), commit `Design v<N>: rewrite` (pathspecs as above) and publish. If no: leave `LOCAL/design.rewrite.md`; it is overwritten next time.

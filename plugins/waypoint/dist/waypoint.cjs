@@ -15148,6 +15148,54 @@ ${(0, import_yaml4.stringify)(meta2, { lineWidth: 0 })}---
 ${body}`;
 }
 
+// src/lib/design-comments.ts
+var THREAD_ID = /^[\x21-\x2b\x2d-\x7e]{1,200}$/;
+var COMMENTS_MAX_BYTES = 256 * 1024;
+var posIntOrNull = (v) => v === null ? null : typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : void 0;
+function parseCommentsSeen(text3) {
+  let raw;
+  try {
+    raw = JSON.parse(text3);
+  } catch {
+    return {};
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const entries2 = [];
+  for (const [id, v] of Object.entries(raw)) {
+    if (!THREAD_ID.test(id) || !v || typeof v !== "object" || Array.isArray(v)) continue;
+    const round = posIntOrNull(v.round);
+    const taken = posIntOrNull(v.taken);
+    if (round === void 0 || taken === void 0) continue;
+    entries2.push([id, { round, taken }]);
+  }
+  return Object.fromEntries(entries2);
+}
+function threadIds(value) {
+  const ids = value.split(",").map((s) => s.trim()).filter(Boolean);
+  if (!ids.length || ids.some((id) => !THREAD_ID.test(id))) return null;
+  return ids;
+}
+var withEntries = (s, add) => Object.fromEntries([...Object.entries(s), ...add]);
+function markSeen(s, ids, round) {
+  const add = [];
+  for (const id of ids) {
+    const cur = Object.hasOwn(s, id) ? s[id] : void 0;
+    add.push([id, { round: cur?.round ?? round, taken: cur?.taken ?? null }]);
+  }
+  return withEntries(s, add);
+}
+function markTaken(s, ids, version2) {
+  const add = [];
+  for (const id of ids) {
+    const cur = Object.hasOwn(s, id) ? s[id] : void 0;
+    add.push([id, { round: cur?.round ?? null, taken: version2 }]);
+  }
+  return withEntries(s, add);
+}
+function unseenOf(s, ids) {
+  return ids.filter((id) => !Object.hasOwn(s, id) || s[id].round === null);
+}
+
 // src/lib/critique.ts
 var ROUND_MAX = 999999;
 var CRITIQUE_FILE = /^r([1-9]\d{0,5})\.json$/;
@@ -15162,7 +15210,9 @@ function critiqueSchemas() {
     severity: _enum(SEVERITIES),
     section: string2().min(1),
     problem: string2().min(1),
-    change: string2().min(1)
+    change: string2().min(1),
+    // w7 A2: the ids of the person's comment threads this proposal takes up; absent in the critiques written before it.
+    threads: array(string2().regex(THREAD_ID)).max(20).optional()
   });
   const CritiqueSchema = object({
     round: number2().int().positive(),
@@ -17643,6 +17693,22 @@ function writeDismissed(f, d) {
 `);
   return p;
 }
+function readCommentsSeen(f) {
+  const p = import_node_path4.default.join(f.critiques, "comments.json");
+  try {
+    if ((0, import_node_fs4.statSync)(p).size > COMMENTS_MAX_BYTES) return {};
+    return parseCommentsSeen((0, import_node_fs4.readFileSync)(p, "utf8"));
+  } catch {
+    return {};
+  }
+}
+function writeCommentsSeen(f, s) {
+  const p = import_node_path4.default.join(f.critiques, "comments.json");
+  const sorted = Object.fromEntries(Object.entries(s).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  writeAtomic(p, `${JSON.stringify(sorted, null, 2)}
+`);
+  return p;
+}
 function readHistory(dir) {
   const hist = import_node_path4.default.join(dir, "design", "history");
   const out = {};
@@ -18461,7 +18527,7 @@ var noClaudeSession = (cmd, flagName) => `${cmd}: no Claude session id: pass ${f
 
 // src/cli/run.ts
 var nodeSpawn = (command, options) => (0, import_node_child_process4.spawn)(command, options);
-var USAGE = `usage: waypoint <validate|replan|hash|clean-cache|page|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
+var USAGE = `usage: waypoint <validate|replan|hash|clean-cache|page|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-comments|design-page|hook> ...`;
 function run(argv, io) {
   const [cmd, ...args] = argv;
   const flag = (name) => {
@@ -19386,6 +19452,42 @@ warning: artifacts.design is not the design's artifact: set it to ${line2(design
         if (bare.length) return fail(`critique-dismiss: ${bare.length === 1 ? "proposal" : "proposals"} ${bare.join(", ")} of round ${round} ${bare.length === 1 ? "is" : "are"} major or critical and need a reason: pass --reason-file <f> with the person's words`, 2);
         writeDismissed(files, next);
         return ok(JSON.stringify({ round, dismissed: (next[round] ?? []).map((x2) => x2.n) }));
+      }
+      case "design-comments": {
+        const usage = "usage: waypoint design-comments <design.md> [--seen <ids> --round R] [--taken <ids> --version V]";
+        if (!args[0] || args[0].startsWith("--")) return fail(usage, 2);
+        const design = readDesignArg("design-comments", args[0]);
+        if ("code" in design) return design;
+        const idsOf = (name, value) => {
+          if (!args.includes(`--${name}`)) return null;
+          const ids = threadIds(value ?? "");
+          return ids ?? fail(`design-comments: --${name} needs thread ids (printable, no space), comma-separated: ${usage}`, 2);
+        };
+        const seen = idsOf("seen", flag("seen"));
+        if (seen && !Array.isArray(seen)) return seen;
+        const taken = idsOf("taken", flag("taken"));
+        if (taken && !Array.isArray(taken)) return taken;
+        let round = 0, version2 = 0;
+        if (seen) {
+          const n = posInt("round");
+          if (n === null) return fail("design-comments: --seen needs --round, a positive integer: the round of the critic that got these threads", 2);
+          round = n;
+        }
+        if (taken) {
+          const n = posInt("version");
+          if (n === null) return fail("design-comments: --taken needs --version, a positive integer: the version that applied the proposals taking these threads up", 2);
+          version2 = n;
+        }
+        const files = designFilesOf(abs(args[0]), design.meta.project);
+        const current = readCommentsSeen(files);
+        let next = seen ? markSeen(current, seen, round) : current;
+        if (taken) {
+          const missing = unseenOf(next, taken);
+          if (missing.length) return fail(`design-comments: no critic got thread ${missing.join(", ")} (no --seen for it): leave it out of --taken`, 2);
+          next = markTaken(next, taken, version2);
+        }
+        if (seen || taken) writeCommentsSeen(files, next);
+        return ok(JSON.stringify({ threads: next }));
       }
       case "critique-check": {
         const target = abs(args[0]);

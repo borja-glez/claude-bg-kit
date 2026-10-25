@@ -29341,11 +29341,34 @@ function forgeDrives(io, main, sid) {
   if (exec?.active && (exec.hookSession === sid || memberForHook(main, sid, exec.runId))) return true;
   const run2 = parseRun(readRunText(main)) ?? parseRun(readRunText(io.cwd));
   if (run2?.active && run2.sessionId === sid) return true;
+  return openTasks(io, main, sid).length > 0;
+}
+function openTasks(io, main, sid) {
   const now = io.now().getTime();
-  return [.../* @__PURE__ */ new Set([io.cwd, main])].some((dir) => Object.values(readStatuses(dir, { maxAgeMs: OPEN_TASK_MS, now })).some((st) => {
-    const last = Date.parse(st.lastAt ?? st.ts);
-    return st.session === sid && st.doneAt === null && Number.isFinite(last) && now - last < OPEN_TASK_MS;
-  }));
+  const at2 = (st) => Date.parse(st.lastAt ?? st.ts);
+  return [.../* @__PURE__ */ new Set([io.cwd, main])].flatMap((dir) => Object.values(readStatuses(dir, { maxAgeMs: OPEN_TASK_MS, now }))).filter((st) => st.session === sid && st.doneAt === null && Number.isFinite(at2(st)) && now - at2(st) < OPEN_TASK_MS).sort((a, b) => at2(b) - at2(a));
+}
+var COMPACT_RUN = "invoke forge:run again before the next step";
+var COMPACT_INFINITE = "invoke forge:infinite again before the next step";
+function compactText(io, main, sid) {
+  const found = parseRun(readRunText(main)) ?? parseRun(readRunText(io.cwd));
+  const infinite = found?.active && found.sessionId === sid ? found : null;
+  if (!infinite) {
+    const exec = readExecution(main);
+    if (exec?.active && (exec.hookSession === sid || memberForHook(main, sid, exec.runId))) return null;
+  }
+  const st = openTasks(io, main, sid).find((s2) => isSafeId(s2.task) && ["trivial", "small", "medium", "large"].includes(s2.path)) ?? null;
+  if (!infinite && !st) return null;
+  let parts = "";
+  if (st) {
+    const list = [`path ${st.path}`];
+    if (/^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(st.phase)) list.push(`phase ${st.phase}`);
+    if (st.brief !== null) list.push(`brief ${st.brief}`);
+    if (st.round !== null) list.push(st.cap !== null ? `round ${st.round} of ${st.cap}` : `round ${st.round}`);
+    parts = list.join(", ");
+  }
+  const text4 = infinite ? `forge: this session runs the forge infinite mode (cycle ${infinite.cycle})${st ? `, on the forge task ${st.task} (${parts})` : ""}. After the compaction, ${COMPACT_INFINITE}, and go on from where the cycle is.` : `forge: this session has the forge task ${st.task} open (${parts}). After the compaction, ${COMPACT_RUN}, and go on from where the task is.`;
+  return text4 + (sessionReply(infinite, null, () => planLocale(main, st?.project ?? null)) ?? "");
 }
 function hookRoute(io, which) {
   try {
@@ -29355,6 +29378,10 @@ function hookRoute(io, which) {
     const sid = typeof o.session_id === "string" && o.session_id ? o.session_id : null;
     if (inForgeWorktree(io.cwd)) return "";
     const main = mainCheckout(io.cwd);
+    if (which === "session" && o.source === "compact" && sid) {
+      const recall = compactText(io, main, sid);
+      if (recall) return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: recall } });
+    }
     const config2 = loadConfig(io.cwd);
     const workflow = resolvePrefs({}, readLocal(io.cwd), config2).workflow;
     if (workflow === "superpowers" || workflow === "off" || forgeDrives(io, main, sid)) return "";
@@ -32666,7 +32693,7 @@ function releaseWrites(e, ids) {
   const del = { __delete__: true };
   return ids.filter((id) => Object.hasOwn(e.tasks, id) && e.tasks[id].executor === "subagents").map((id) => ({ task: id, write: { op: "update", collection: "state", doc_id: id, data: { status: "free", owner: del, claimedAt: del, startedAt: del, exec: del } } }));
 }
-var openTasks = (e) => Object.entries(e.tasks).filter(([, t]) => t.status === "running" || t.status === "stopped").map(([id]) => id);
+var openTasks2 = (e) => Object.entries(e.tasks).filter(([, t]) => t.status === "running" || t.status === "stopped").map(([id]) => id);
 function closeEnded(root, at2, by, deps) {
   let closed = false;
   updateExecution(root, (cur) => {
@@ -33441,7 +33468,7 @@ var subcommand2 = (rest, ctx) => {
   if (e.active) throw new UsageError(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
   if (e.closedAt) return json4({ closed: "already", runId: e.runId, closedAt: e.closedAt, closedBy: e.closedBy ?? null });
   closeEnded(main, iso5, "close", lockDeps);
-  const open2 = openTasks(e).map((id) => [id, e.tasks[id]]);
+  const open2 = openTasks2(e).map((id) => [id, e.tasks[id]]);
   const sessions = allMembersOf(main, e.runId).map((m) => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
   const runs = runsOf(io, e.runId);
   for (const m of sessions) (0, import_node_fs56.rmSync)(memberFile(main, m.sessionId), { force: true });
@@ -35051,7 +35078,7 @@ var subcommand13 = (rest, ctx) => {
     ...unbound ? { unbound: true, warning: UNBOUND_WARNING } : {},
     // J-15: meta/run as the roadmap takes it, built by the CLI; carry 10: once the run ended, the writes that free the
     // coordinator's tasks it left running or stopped.
-    publish: state ? { run: runDocOf(main, state), ...!state.active ? { release: releaseWrites(state, openTasks(state)) } : {} } : null
+    publish: state ? { run: runDocOf(main, state), ...!state.active ? { release: releaseWrites(state, openTasks2(state)) } : {} } : null
   });
 };
 

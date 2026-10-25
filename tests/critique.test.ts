@@ -23,6 +23,16 @@ describe('parseCritique', () => {
   it('rejects non-json', () => {
     expect(() => parseCritique('nope')).toThrow(CritiqueError);
   });
+  it('a proposal may name the threads of the person\'s notes it takes up; an old critique without them still reads (w7 A2)', () => {
+    const withThreads = { ...ok, proposals: [{ ...ok.proposals[0], threads: ['t-1', 'c:42'] }, ok.proposals[1]] };
+    const c = parseCritique(JSON.stringify(withThreads));
+    expect(c.proposals[0].threads).toEqual(['t-1', 'c:42']);
+    expect(selectProposals(c, '1')[0].threads).toEqual(['t-1', 'c:42']);
+    expect(parseCritique(JSON.stringify(ok)).proposals[0].threads).toBeUndefined();
+    for (const bad of [['a b'], ['a,b'], [''], [7]]) {
+      expect(issuesOf({ ...ok, proposals: [{ ...ok.proposals[0], threads: bad }, ok.proposals[1]] }).some(i => i.includes('threads')), JSON.stringify(bad)).toBe(true);
+    }
+  });
 });
 
 describe('selectProposals', () => {

@@ -1,5 +1,5 @@
 // K3-10: where a design's critiques live. They are versioned with the design in docs/waypoint/<project>/design/critiques/
-// (r<N>.json and dismissed.json); the ones written before waypoint 0.27.0 stay in the repository's .waypoint/<project>/
+// (r<N>.json, dismissed.json and comments.json); the ones written before waypoint 0.27.0 stay in the repository's .waypoint/<project>/
 // (critique-r<N>.json and dismissed.json) and are still read. Every path comes from the design file, never from the
 // working directory, so a session in a worktree or in another folder finds the same files.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -7,6 +7,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { CRITIQUE_FILE, LEGACY_CRITIQUE_FILE, parseCritique, type Critique } from '../lib/critique.js';
 import { DISMISSED_MAX_CHARS, parseDismissed, unionDismissed, type Dismissed, type GateCritique } from '../lib/design-gate.js';
+import { COMMENTS_MAX_BYTES, parseCommentsSeen, type CommentsSeen } from '../lib/design-comments.js';
 import { listVersions } from '../lib/history.js';
 import { writeAtomic } from '../lib/bound-fs.js';
 
@@ -15,7 +16,7 @@ export interface DesignFiles {
   file: string;
   /** Its folder: docs/waypoint/<project>/. */
   dir: string;
-  /** <folder>/design/critiques/: r<N>.json and dismissed.json, committed with the design. */
+  /** <folder>/design/critiques/: r<N>.json, dismissed.json and comments.json (ids, rounds, versions), committed with the design. */
   critiques: string;
   /** <repository>/.waypoint/<project>/: critique-r<N>.json and dismissed.json from before waypoint 0.27.0. */
   legacy: string;
@@ -84,6 +85,23 @@ export function writeDismissed(f: DesignFiles, d: Dismissed): string {
   const p = path.join(f.critiques, 'dismissed.json');
   const kept = Object.fromEntries(Object.entries(d).filter(([, items]) => items.length));
   writeAtomic(p, `${JSON.stringify(kept, null, 2)}\n`);
+  return p;
+}
+
+/** design/critiques/comments.json: missing, unreadable, over COMMENTS_MAX_BYTES or junk, it is {}. Only this place, never .waypoint/. */
+export function readCommentsSeen(f: DesignFiles): CommentsSeen {
+  const p = path.join(f.critiques, 'comments.json');
+  try {
+    if (statSync(p).size > COMMENTS_MAX_BYTES) return {};
+    return parseCommentsSeen(readFileSync(p, 'utf8'));
+  } catch { return {}; }
+}
+
+/** Writes comments.json atomically, keys in sorted order, and returns its path. */
+export function writeCommentsSeen(f: DesignFiles, s: CommentsSeen): string {
+  const p = path.join(f.critiques, 'comments.json');
+  const sorted = Object.fromEntries(Object.entries(s).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  writeAtomic(p, `${JSON.stringify(sorted, null, 2)}\n`);
   return p;
 }
 

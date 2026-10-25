@@ -1,4 +1,5 @@
 import * as z from 'zod';
+import { THREAD_ID } from './design-comments.js';
 
 /** The highest round a critique can have: six digits, the bound of the critique file names below. */
 export const ROUND_MAX = 999_999;
@@ -26,6 +27,8 @@ function critiqueSchemas() {
     section: z.string().min(1),
     problem: z.string().min(1),
     change: z.string().min(1),
+    // w7 A2: the ids of the person's comment threads this proposal takes up; absent in the critiques written before it.
+    threads: z.array(z.string().regex(THREAD_ID)).max(20).optional(),
   });
   const CritiqueSchema = z.object({
     round: z.number().int().positive(),
