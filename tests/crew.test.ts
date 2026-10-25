@@ -66,4 +66,14 @@ describe('crew plugin (w7 D4)', () => {
       for (const t of ['Agent', 'Task', 'Edit', 'NotebookEdit']) expect(toolsOf(agent(n).head), `${n}: ${t}`).not.toContain(t);
     }
   });
+  it('the crew READMEs in English and Spanish, and the root READMEs list and install crew', () => {
+    for (const [f, other] of [['README.md', 'README.es.md'], ['README.es.md', 'README.md']]) {
+      const md = read(`plugins/crew/${f}`);
+      for (const w of [`](${other})`, '](../../README', 'claude plugin install crew@bg-kit', '`novice-reader`', '`playtest-qa`', 'playtest-qa-slots'])
+        expect(md, `${f}: ${w}`).toContain(w);
+    }
+    expect(read('README.md')).toContain('[plugins/crew](plugins/crew/README.md)');
+    expect(read('README.es.md')).toContain('[plugins/crew](plugins/crew/README.es.md)');
+    for (const f of ['README.md', 'README.es.md']) expect(read(f), f).toContain('claude plugin install crew@bg-kit');
+  });
 });

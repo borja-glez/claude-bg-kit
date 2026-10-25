@@ -38,6 +38,7 @@ Design them, plan them, build them with independent review, run them in parallel
 | 🧭 | **waypoint** | Design docs refined in critic rounds, a `plan.yaml` of tracks, phases and tasks, a **live roadmap** published as a claude.ai artifact, and parallel sessions coordinated across git worktrees. | [plugins/waypoint](plugins/waypoint/README.md) |
 | 🔨 | **forge** | An adaptive way of working: **triage by size**, the right model for each role, your own validators first, **independent weighted review**, an **execution** of parallel tasks (subagents or sessions) and an unattended **infinite mode**. | [plugins/forge](plugins/forge/README.md) |
 | 🔍 | **lens** | A **live progress panel** inside Claude Code: **model and effort in use**, roadmap, forge stages and executions, superpowers runs, todos, subagents, Claude Code tasks, and **token and dollar usage** compared with working without forge. | [plugins/lens](plugins/lens/README.md) |
+| 👥 | **crew** | Two on-demand agents: **novice-reader** tells where a newcomer gets lost in a doc, a course or a web page, with the exact quote and its severity, and never rewrites; **playtest-qa** plays a browser prototype as a new player, with real keyboard and mouse input in headless Chrome on the GPU, and gives figures per minute. | [plugins/crew](plugins/crew/README.md) |
 
 ## Mix and match
 
@@ -80,6 +81,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install waypoint@bg-kit
 claude plugin install forge@bg-kit     # pulls in waypoint ^0.35.0 as a dependency
 claude plugin install lens@bg-kit
+claude plugin install crew@bg-kit
 ```
 
 Inside a session, `/plugin marketplace add borja-glez/claude-bg-kit` does the same. To get new versions later, run `claude plugin marketplace update bg-kit`.
@@ -218,6 +220,7 @@ plugins/
   waypoint/   skills, design-critic agent, hooks, roadmap and design page templates, built CLI
   forge/      skills, implementer, reviewer, planner and scout agents, hooks, built CLI
   lens/       the panel mod (hooks/register.js) and its engine tests
+  crew/       two on-demand agents, novice-reader and playtest-qa (text only)
 src/          TypeScript sources: lib/ (shared), page/ (roadmap), mod/ (waypoint band), lens/, forge/
 tests/        vitest suites
 docs/
