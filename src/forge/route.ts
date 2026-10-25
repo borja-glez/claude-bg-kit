@@ -122,6 +122,12 @@ export function routeOptions(i: {
   } else if (i.path === 'large' && i.prefs.autonomy === 'auto') recommended = { option: 'forge', why: 'large, in auto mode: forge designs, critiques and approves it without asking' };
   else if (i.path === 'large') recommended = { option: 'forge', why: 'large: forge designs it with waypoint, critiques, plans and builds' };
   else recommended = { option: 'forge', why: 'forge triages, implements and reviews it' };
+  // A request to carry out a plan that gets none while a plan with no trace of progress is in the window (one
+  // writing-plans wrote and nobody ran yet): forge stays the choice, but its why names the newest such plan, so the
+  // person at the question and the session learn it exists and can name it.
+  if (recommended.option === 'forge' && i.runPlan && !plan && untraced?.length) {
+    recommended = { ...recommended, why: `${recommended.why}; ${untraced[0].path} has no task marked done (superpowers' own executors never mark one): name it to carry it out` };
+  }
   return { ...base, options: ['forge', 'superpowers', 'superpowers-design', 'superpowers-plan'], recommended };
 }
 

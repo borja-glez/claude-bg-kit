@@ -391,7 +391,8 @@ describe('forge route CLI', () => {
     const named = rec('Carry out the coupons plan and review each task\n');
     expect(named.recommended).toMatchObject({ option: 'superpowers-plan', plan: 'docs/superpowers/plans/2026-10-12-coupons.md', why: expect.stringContaining('no task marked done') });
     expect(named.plans).toEqual([]);
-    expect(rec('Carry out the plan and review each task\n').recommended).toEqual({ option: 'forge', why: expect.any(String) });
+    // Unnamed, forge is recommended, and its why names the plan so the person and the session learn it exists.
+    expect(rec('Carry out the plan and review each task\n').recommended).toEqual({ option: 'forge', why: expect.stringContaining('docs/superpowers/plans/2026-10-12-coupons.md') });
     expect(JSON.parse(run(['sp-plans'], io).stdout)).toEqual([]);
   });
 });
