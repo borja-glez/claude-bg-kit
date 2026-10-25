@@ -15803,12 +15803,12 @@ function writeAtomic(file, text4, rename = import_node_fs9.renameSync) {
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     (0, import_node_fs9.writeFileSync)(tmp, text4);
-    for (let attempt = 1; ; attempt++) {
+    for (let attempt2 = 1; ; attempt2++) {
       try {
         rename(tmp, file);
         return;
       } catch (e) {
-        if (attempt >= RENAME_TRIES || !RENAME_TRANSIENT.has(e.code ?? "")) throw e;
+        if (attempt2 >= RENAME_TRIES || !RENAME_TRANSIENT.has(e.code ?? "")) throw e;
         sleepSync(RENAME_WAIT_MS);
       }
     }
@@ -22060,8 +22060,8 @@ var worktreesDir = (main) => import_node_path17.default.join(main, ".claude", "w
 function readRun(main) {
   const file = runFile(main);
   if (!(0, import_node_fs13.existsSync)(file)) return null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (attempt > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  for (let attempt2 = 0; attempt2 < 2; attempt2++) {
+    if (attempt2 > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     try {
       return (0, import_node_fs13.readFileSync)(file, "utf8");
     } catch {
@@ -26624,7 +26624,7 @@ var REFUSED2 = /* @__PURE__ */ new Set(["EEXIST", "EPERM", "EACCES", "EBUSY"]);
 function lockPort(i, port) {
   const file = lockFile(i.main, port);
   const mine = JSON.stringify({ key: i.key, startedAt: i.now.toISOString() });
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt2 = 0; attempt2 < 2; attempt2++) {
     try {
       const fd = (i.open ?? import_node_fs27.openSync)(file, "wx");
       try {
@@ -34624,7 +34624,7 @@ var subcommand8 = (rest, ctx) => {
     update((cur) => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, status: "blocked", detail: verdict.reason, updatedAt: iso5, finishedAt: iso5 } } });
     return json4({ task, blocked: true, reason: verdict.reason });
   }
-  const attempt = verdict.attempt;
+  const attempt2 = verdict.attempt;
   const log = deps.git(["log", "--oneline", "-n", "20", `${e.branch}..${t.branch}`])?.trim();
   const commits = log ? log.split(/\r?\n/).map((l) => `  - ${l}`).join("\n") : "  - none";
   const ref = { project: e.kind === "plan" ? e.project : null, task };
@@ -34633,7 +34633,7 @@ var subcommand8 = (rest, ctx) => {
   const memberWork = pickWorkDir(workDir(memberRoot, ref), workDir(memberRoot, { project: null, task }));
   (0, import_node_fs60.mkdirSync)(import_node_path66.default.dirname(note), { recursive: true });
   (0, import_node_fs60.writeFileSync)(note, [
-    `# Handover: ${task} (attempt ${attempt} of ${RELAUNCH_CAP + 1})`,
+    `# Handover: ${task} (attempt ${attempt2} of ${RELAUNCH_CAP + 1})`,
     "",
     `- Run: ${e.runId} \xB7 coordinator ${e.coordinator} \xB7 run branch ${e.branch}`,
     `- Last stage: ${t.stage} \xB7 round ${t.round} \xB7 agent ${t.agent ?? "none"} \xB7 since ${t.stageSince}`,
@@ -34647,8 +34647,8 @@ var subcommand8 = (rest, ctx) => {
     `Resume from ${t.branch} in this worktree: read the brief in ${memberWork} if it exists (else write it as the brief stage says), do not redo a step whose output file is already written, and continue from the last stage.`,
     ""
   ].join("\n"));
-  update((cur) => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, attempts: attempt, startedAt: iso5, nudgedAt: null, updatedAt: iso5 } } });
-  return json4({ task, attempt, note, work: workRel(ref), launch });
+  update((cur) => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, attempts: attempt2, startedAt: iso5, nudgedAt: null, updatedAt: iso5 } } });
+  return json4({ task, attempt: attempt2, note, work: workRel(ref), launch });
 };
 
 // src/forge/cli/swarm/report.ts
@@ -35528,7 +35528,8 @@ function classifyTdd(files, names3, run2, kind, baseFailing) {
 var CONFTEST = /(^|\/)conftest\.py$/;
 var TEST_MODULE = /\.(test|spec)\.[^/]+$/;
 var LINKED_DEP = /^(?:file|link|workspace):/;
-var NODE_RUNNER = /^\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:node|npx|npm|pnpm|yarn|bunx?|vitest|jest|mocha)(?:\.cmd|\.exe)?(?=\s|$)/i;
+var NODE_RUNNER = /^\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:npx|npm|pnpm|yarn|bunx?|vitest|jest|mocha)(?:\.cmd|\.exe)?(?=\s|$)/i;
+var IN_NODE_MODULES = /(?:^|[\s"'=/\\])node_modules[/\\]/;
 var SITE_DIRS = (repo) => {
   const dirs = [];
   for (const venv of [".venv", "venv"]) {
@@ -35609,7 +35610,7 @@ function tddPlan(validators, touched, base, at2) {
   plan.cmd = runsPytest(v.affectedCmd) ? `${a.cmd} --continue-on-collection-errors` : a.cmd;
   if (lockBase !== lockHead) return done("lockfile");
   if (linkedCode(at2)) return done("linked-code");
-  if (NODE_RUNNER.test(a.cmd) && linkSource(at2.repoDir, "node_modules") === null) return done("no-deps");
+  if ((NODE_RUNNER.test(a.cmd) || IN_NODE_MODULES.test(a.cmd)) && linkSource(at2.repoDir, "node_modules") === null) return done("no-deps");
   return done(null);
 }
 function rootCauseOf(report) {
@@ -35651,7 +35652,7 @@ function readTdd(file) {
   }
   if (!x || typeof x !== "object" || Array.isArray(x)) return null;
   const r2 = x;
-  if (r2.v !== 1 || typeof r2.key !== "string" || typeof r2.base !== "string" || !orNull(r2.validator) || !orNull(r2.cmd) || !orNull(r2.note) || !strings2(r2.files) || !strings2(r2.red) || !strings2(r2.passedOnBase) || !strings2(r2.alreadyFailing) || !strings2(r2.unjudged) || r2.skipped !== null && (typeof r2.skipped !== "string" || !SKIPS.includes(r2.skipped)) || typeof r2.durationMs !== "number") return null;
+  if (r2.v !== 1 || typeof r2.key !== "string" || typeof r2.base !== "string" || !orNull(r2.validator) || !orNull(r2.cmd) || !orNull(r2.note) || !strings2(r2.files) || !strings2(r2.red) || !strings2(r2.passedOnBase) || !strings2(r2.alreadyFailing) || !strings2(r2.unjudged) || r2.skipped !== null && (typeof r2.skipped !== "string" || !SKIPS.includes(r2.skipped)) || typeof r2.durationMs !== "number" || r2.retry !== void 0 && r2.retry !== true) return null;
   return r2;
 }
 function writeTdd(file, check) {
@@ -35660,11 +35661,13 @@ function writeTdd(file, check) {
     (0, import_node_fs66.mkdirSync)(import_node_path69.default.dirname(file), { recursive: true });
     (0, import_node_fs66.writeFileSync)(tmp, JSON.stringify(check) + "\n");
     (0, import_node_fs66.renameSync)(tmp, file);
+    return true;
   } catch {
     try {
       (0, import_node_fs66.rmSync)(tmp, { force: true });
     } catch {
     }
+    return false;
   }
 }
 function sayTdd(check, locale) {
@@ -35683,6 +35686,11 @@ var SHA3 = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 var RM = { recursive: true, force: true, maxRetries: 3, retryDelay: 100 };
 var notes = (...n) => n.filter(Boolean).join("; ") || null;
 var transient = (c) => c.skipped === "timeout" || c.skipped === "no-checkout";
+function attempt(c, planNote) {
+  const own2 = planNote !== null && c.note?.startsWith(planNote) ? c.note.slice(planNote.length).replace(/^; /, "") : c.note;
+  const text4 = (own2 ?? "").replace(/\s+/g, " ").trim();
+  return text4 ? `${c.skipped} (${text4.length > 120 ? `${text4.slice(0, 119)}\u2026` : text4})` : String(c.skipped);
+}
 var winPath = (s2) => process.platform === "win32" ? import_node_path69.default.resolve(s2).toLowerCase() : import_node_path69.default.resolve(s2);
 var isDir = (p) => {
   try {
@@ -35802,7 +35810,9 @@ function runTdd(plan, ctx) {
     const hooks = import_node_path69.default.join(tmpDir, "no-hooks");
     (0, import_node_fs66.mkdirSync)(hooks);
     const baseDir = import_node_path69.default.join(tmpDir, "base");
-    if (ctx.git(["-c", `core.hooksPath=${hooks}`, "worktree", "add", "--detach", "--quiet", baseDir, plan.base]) === null) return done({ skipped: "no-checkout" });
+    if (ctx.git(["-c", `core.hooksPath=${hooks}`, "worktree", "add", "--detach", "--quiet", baseDir, plan.base]) === null) {
+      return done({ skipped: "no-checkout", note: notes(check.note, `git worktree add failed for ${plan.base}`) });
+    }
     for (const name of TDD_LINKS) {
       const src = linkSource(ctx.repoDir, name);
       if (!src || lexists(import_node_path69.default.join(baseDir, name))) continue;
@@ -35844,7 +35854,6 @@ var readText4 = (file) => {
 function tddForBrief(c) {
   const bug = BUG_BRIEF.test(readText4(import_node_path69.default.join(c.dir, `brief-${c.n}.md`)) ?? "") ? { rootCause: rootCauseOf(readText4(import_node_path69.default.join(c.dir, `report-${c.n}.txt`))) } : null;
   const p = planOf2(c);
-  const file = tddFile(c.dir, c.n);
   if (!p) {
     const check2 = {
       v: 1,
@@ -35861,17 +35870,20 @@ function tddForBrief(c) {
       note: null,
       durationMs: 0
     };
-    return { check: check2, row: tddRow(check2, bug), file, reused: false };
+    return { check: check2, row: tddRow(check2, bug), file: null, reused: false };
   }
-  const reused = p.stored !== null && p.stored.key === p.plan.key && !transient(p.stored);
-  const check = reused ? p.stored : runTdd(p.plan, c);
-  if (!reused && !transient(check)) writeTdd(p.file, check);
-  return { check, row: tddRow(check, bug), file: p.file, reused };
+  const same = p.stored !== null && p.stored.key === p.plan.key ? p.stored : null;
+  if (same && same.retry !== true) return { check: same, row: tddRow(same, bug), file: p.file, reused: true };
+  let check = runTdd(p.plan, c);
+  if (transient(check)) {
+    check = same ? { ...check, note: notes(p.plan.note, `kept after two attempts: ${attempt(same, p.plan.note)}, then ${attempt(check, p.plan.note)}`) } : { ...check, retry: true };
+  }
+  return { check, row: tddRow(check, bug), file: writeTdd(p.file, check) ? p.file : null, reused: false };
 }
 function tddPending(c) {
   const p = planOf2(c);
   if (!p) return false;
-  return p.stored === null || p.stored.key !== p.plan.key || transient(p.stored) || p.stored.passedOnBase.length > 0;
+  return p.stored === null || p.stored.key !== p.plan.key || p.stored.retry === true || p.stored.passedOnBase.length > 0;
 }
 
 // src/forge/cli/review.ts
@@ -36279,7 +36291,7 @@ function reviewPrep(args, deps) {
     ...plan.carried.length ? { carried: plan.carried.map((c) => c.name) } : {},
     ...restored.length ? { restored } : {},
     ...t ? { tdd: {
-      file: rel2(deps.cwd, t.file),
+      file: t.file === null ? null : rel2(deps.cwd, t.file),
       red: t.check.red.length,
       passedOnBase: t.check.passedOnBase,
       alreadyFailing: t.check.alreadyFailing,
@@ -38342,7 +38354,7 @@ function tddCheck(args, ctx) {
     dir,
     n: m[2]
   });
-  const shown3 = import_node_path78.default.relative(io.cwd, file).split(import_node_path78.default.sep).join("/");
+  const shown3 = file === null ? null : import_node_path78.default.relative(io.cwd, file).split(import_node_path78.default.sep).join("/");
   return json4({ ...row2.tdd, file: shown3, reused, ...locale ? { say: sayTdd(check, locale) } : {} });
 }
 var command32 = (args, ctx) => {
