@@ -61,7 +61,7 @@ JpaProductRepository productRepository(ProductJpaRepository products, DomainEven
 }
 ```
 
-- **A `@Bean` declares the adapter class it returns, not its port** (for example `CatalogConfiguration`). The AOT build of a native image generates proxies (the read-only transactions of an adapter) from the declared type; declared as the interface, the adapter loses them silently.
+- **A `@Bean` declares the adapter class it returns, not its port**, as `CatalogConfiguration` does. The AOT build of a native image generates proxies (the read-only transactions of an adapter) from the declared type; declared as the interface, the adapter loses them silently.
 - **Time** is an injected `Clock` bean; tests replace it.
 - **Transactions, with cqrs.** The bus opens one per command (`cqrs.transactions.enabled`) and adapters join it; queries get none (`cqrs.transactions.queries=none`) and the read side opens its own read-only ones.
 - **Transactions, without it.** Wrap the use case where it is built, with the wrapper implementing the same port:
@@ -80,6 +80,6 @@ PlaceOrderUseCase placeOrder(OrderRepository orders, Clock clock, PlatformTransa
 
 ## When you add an inbound adapter
 
-- Inbound REST: contract first. The OpenAPI file generates `rest.v<N>.api` and `.model`; the controller implements the generated interface and only maps HTTP to a message and the answer back. The URL carries the major version.
+- Inbound REST: contract first. The OpenAPI file generates `rest.v<N>.api` and `.model`; the controller implements the generated interface and only maps HTTP to a message and the answer back. The URL carries the major version where the project versions its API; otherwise follow its URLs and say so once.
 - Inbound messaging: a listener translates a contract message into a command and sends it; it holds no rule.
 - A scheduled job or a listener reaches the same inbound port as the controller. The business rule lives once, in the root, and protects every path.

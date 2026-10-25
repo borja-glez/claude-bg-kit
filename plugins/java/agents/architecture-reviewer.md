@@ -20,9 +20,9 @@ Input from the caller: the repository root; a diff file, or a branch and its bas
 1. The change. Run `git diff <base>...<branch>` and `git log --oneline <base>..<branch>` from the repository root, without `cd` and without `git -C`. Only read-only git: `diff`, `log`, `show`, `merge-base`, `ls-files` and `status`. Take the file names from the diff, then read each changed file whole, because a hunk alone hides what the file already does.
 2. What the project has, to know which rules apply: `gradle/libs.versions.toml` (cqrs, specification-repository, Flyway, ArchUnit) and its shared rule set.
 3. The tests.
-   - With `*ArchitectureTest*.java` files (Glob), run `./gradlew <module path>:test --tests "*ArchitectureTest*"` for each module that has one, with the Bash timeout at 600000 ms.
+   - With `*ArchitectureTest*.java` files (Glob), run `./gradlew <module path>:test --tests "*ArchitectureTest*"` for each module that has one, from the repository root, without `cd`, in the foreground, with the Bash timeout at 600000 ms.
    - With none, and if the root build defines `quality`, run `./gradlew quality`.
-   - Otherwise, nothing.
+   - Otherwise, nothing: the `tests:` line reads `not run: no ArchUnit tests and no quality task`.
    - Never a task that needs Docker (`integrationTest`, `componentTest`, an `*IT`).
    - Every failure is a finding, anchored at the diff line that causes it: the line that breaks what the test checks. Cite the test file only if the diff changed it. Put the test's name in the `tests:` line.
    - A test that cannot run (no wrapper, no JDK, a timeout) does not stop the review: say why in the `tests:` line and go on reading.
@@ -49,4 +49,4 @@ not applicable: <rule ids and why, in one line, or none>
 verdict: <clean | changes needed>
 ```
 
-8. Never: write or edit a file (you have no tool for it), commit, `checkout`, `stash`, any git that changes the repository, any other build task, kill a process.
+8. Never: write or edit a file, not through Bash either: no redirect or command that writes; commit, `checkout`, `stash`, any git that changes the repository, any other build task, kill a process.

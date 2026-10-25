@@ -8,7 +8,6 @@ Las reglas de DDD y hexagonal de un servicio, el mantenimiento de las librerías
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
 ![versión 0.1.0](https://img.shields.io/badge/versi%C3%B3n-0.1.0-f9e2af?style=flat-square)
-![sin coste en tokens](https://img.shields.io/badge/coste%20en%20tokens-ninguno-a6e3a1?style=flat-square)
 
 </div>
 
@@ -24,7 +23,7 @@ Las reglas de DDD y hexagonal de un servicio, el mantenimiento de las librerías
 
 ## Por qué java
 
-Cada proyecto de Java te obligaba a redescubrir lo mismo: dónde se publica un evento, qué excepción acaba en un 422, cómo entra un starter nuevo en el build. java fija esas decisiones una vez. Es solo texto: dos skills y un agente, sin hooks, y no cuesta tokens salvo mientras se usa una skill.
+Cada proyecto de Java te obligaba a redescubrir lo mismo: dónde se publica un evento, qué excepción acaba en un 422, cómo entra un starter nuevo en el build. java fija esas decisiones una vez. Es solo texto: dos skills y un agente, sin hooks, y solo las descripciones de sus dos skills y la del agente ocupan contexto hasta que se usan.
 
 ## Instalación
 

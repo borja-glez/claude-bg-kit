@@ -84,4 +84,4 @@ Kafka keeps order within a partition, and events share a topic keyed by name, so
 
 ## Cancelling and compensating
 
-A saga writes its row in the same transaction as the aggregate that starts it: there is no order without a saga and no saga without an order. A cancellation moves the saga to a compensating state in one transaction and is rejected with a clear 409 while the checkout runs.
+A saga writes its row in the same transaction as the aggregate that starts it: there is no order without a saga and no saga without an order. A cancellation moves the saga to a compensating state in one transaction and is rejected with a clear 409 while the saga runs.

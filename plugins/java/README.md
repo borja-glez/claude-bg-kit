@@ -8,7 +8,6 @@ The DDD and hexagonal rules of a service, the upkeep of the Java libraries, and 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
 ![version 0.1.0](https://img.shields.io/badge/version-0.1.0-f9e2af?style=flat-square)
-![no token cost](https://img.shields.io/badge/token%20cost-none-a6e3a1?style=flat-square)
 
 </div>
 
@@ -24,7 +23,7 @@ The DDD and hexagonal rules of a service, the upkeep of the Java libraries, and 
 
 ## Why java
 
-Every Java project made you rediscover the same things: where an event is published, which exception becomes a 422, how a new starter joins the build. java fixes those decisions once. It is text only: two skills and one agent, with no hooks, and it costs no tokens except while a skill is in use.
+Every Java project made you rediscover the same things: where an event is published, which exception becomes a 422, how a new starter joins the build. java fixes those decisions once. It is text only: two skills and one agent, with no hooks, and only its two skill descriptions and the agent's description sit in context until used.
 
 ## Install
 

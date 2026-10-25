@@ -11,11 +11,11 @@ description: Use when maintaining spring-boot-cqrs, spring-boot-specification-re
 ## Build
 
 - Change how the build behaves in the `build-logic` conventions (`cqrs-*`, `specification-*`), never in a module's own build file. No version lives outside the catalog.
-- A new library module goes into `settings.gradle.kts`, into every list of the root `build.gradle.kts` that names a sibling module (`quality`, `coverage`, `spotlessCheckAll`, `spotlessApplyAll` and any other that does), and into the BOM `constraints`. A module missing from a list is skipped by CI without a warning.
-- Leave a new module out of `apiCompatibility` until its first release. That check resolves the module's artifact at `apiBaseline` from Maven Central, and the artifact does not exist yet: listing the module breaks `quality`. Do not patch the convention to skip it, and do not touch `apiBaseline`. The first release of the module is what puts it in the list.
+- A new library module goes into `settings.gradle.kts`, into every list of the root `build.gradle.kts` that names a sibling module (`quality`, `coverage`, `spotlessCheckAll`, `spotlessApplyAll` and any other that does), and, where the repository has a BOM (`*-bom`), into its `constraints`. A module missing from a list is skipped by CI without a warning.
+- Where the repository has `apiCompatibility` (japicmp), leave a new module out of it until its first release. That check resolves the module's artifact at `apiBaseline` from Maven Central, and the artifact does not exist yet: listing the module breaks `quality`. Do not patch the convention to skip it, and do not touch `apiBaseline`. The first release of the module is what puts it in the list.
 - Two starters, Boot 3 (Jackson 2) and Boot 4 (Jackson 3): an auto-configuration change goes into both, and `verifyBoot3Compatibility verifyBoot4Compatibility` proves it.
 - Every library module keeps 100 % JaCoCo coverage, lines and branches, with its tests in the same change.
-- Spotless runs Google Java Format with the import order `java, javax, jakarta, org, com, io`: run `spotlessApplyAll` before every commit. Write new files with LF line endings even when git has `core.autocrlf=true`: Spotless in these repositories fails `spotlessJavaCheck` on CRLF, so never convert files to CRLF. Run the module's `spotlessApply` (or `spotlessApplyAll`) before the single `check` run, so that run reaches the tests and the JaCoCo gate.
+- Spotless runs Google Java Format with the import order `java, javax, jakarta, org, com, io`: run `spotlessApplyAll` before every commit. Spotless decides the line ending: run the module's `spotlessApply` (or `spotlessApplyAll`) before the single `check` run, so that run reaches the tests and the JaCoCo gate.
 
 ## Issues and milestones
 
@@ -38,6 +38,6 @@ Each thought below was seen breaking a rule. The rule wins.
 
 | Thought | Rule |
 |---|---|
-| "Without this change CI would fail: the baseline artifact does not exist yet. So I list the new module in the compatibility check and make the check skip modules that have no release." (and it admits the new skip logic never ran) | `Build`: leave the module out of `apiCompatibility` until its first release. Do not bend the convention or `apiBaseline` to make CI pass. |
+| "Without this change CI would fail: the baseline artifact does not exist yet. So I list the new module in the compatibility check and make the check skip modules that have no release." | `Build`: leave the module out of `apiCompatibility` until its first release. Do not bend the convention or `apiBaseline` to make CI pass. |
 | "The issue is labelled `needs-design` and has no decision, so `AGENTS.md` says to stop. If you let me touch the repo, this is how I would do it: only one design point, and the issue itself leaves it out of scope." | `Issues and milestones`: stopping means the open questions, with no plan and no code. A design point is not settled because it looks small. |
 | "The release is ready once every artifact resolves from Maven Central." | `references/release.md`: try it in a service that consumes it before announcing it, and know that git-cliff skips the `chore: bump version to` commit. |
