@@ -45,7 +45,7 @@ forge asks at its gates unless autonomy is `auto`: `begin` prints `autonomy: aut
 3. **Announce.** Print `announce` exactly as printed, as the first lines of your reply, before any brief, edit or spawn, also late in a long session (it names path, reason, implementer and new validators, and says the user can correct it); ask nothing. When you do a Small yourself (`## Small` step 1), add «lo hago yo, el cambio ya está en contexto».
 4. **forge's own files.** With `untracked`, commit `.forge/.gitignore` alone right away: `git add .forge/.gitignore` and `git commit -m "forge: track .forge/.gitignore" -- .forge/.gitignore` (forge's file, not the user's).
 
-**TDD.** When `begin`'s `tdd.line` is not null, every implementer brief you write by hand (any path) ends with that line as printed (it starts `TDD: required`; `FORGE brief` adds it itself), and `review-correctness` for such a brief also gets the implementer's report path. When `tdd.mode` is `superpowers` and `tdd.line` is null, say in the triage line that superpowers is not installed (or has no `test-driven-development` skill) and the task goes on without TDD.
+**TDD.** When `begin`'s `tdd.line` is not null, every implementer brief you write by hand (any path) ends with that line as printed (it starts `TDD: required`; `FORGE brief` adds it itself), and `review-correctness` for such a brief also gets the implementer's report path. When `tdd.mode` is `superpowers` and `tdd.line` is null, say in the triage line that superpowers is not installed (or has no `test-driven-development` skill) and the task goes on without TDD. With `tdd.mode` `verified`, read `references/tdd.md` now.
 
 **From a spec.** With `--from-spec <f>`, read `### From a spec` in `references/large.md` now, before step 1.
 

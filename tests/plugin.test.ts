@@ -2410,3 +2410,21 @@ describe('plugin layout', () => {
     }
   });
 });
+
+describe('verified TDD in the texts (A9)', () => {
+  it('correctness reads the tdd row of the validators file and the root cause of a Bug: brief', () => {
+    const rc = read('plugins/forge/agents/forge-review-correctness.md');
+    for (const w of ['`"validator": "tdd"`', '`passedOnBase`', '`red`', '`alreadyFailing`', '`unjudged`', '`skipped`', '`no-tests`', '`Bug:`', '`tdd.bug.rootCause`']) {
+      expect(rc, w).toContain(w);
+    }
+    // The report check of today stays for the cases the row does not cover.
+    expect(rc.split(/\r?\n/).find(l => l.startsWith('When the brief has a `TDD: required` line'))).toContain('no `tdd` row');
+  });
+  it('forge:run reads references/tdd.md under tdd: verified, which adds the bug line and runs the Small check', () => {
+    expect(read('plugins/forge/skills/run/SKILL.md')).toContain('With `tdd.mode` `verified`, read `references/tdd.md` now.');
+    const ref = runRef('tdd');
+    for (const w of ['`kind: "bug"`', '`bugLine`', 'Root cause:', '`validators-<n>.json`', '`passedOnBase`', '`bug.rootCause`',
+      'FORGE tdd check --task <id>-1 --base <BASE> --dir .forge/work/<id> --locale <es|en>']) expect(ref, w).toContain(w);
+    for (const w of ['${CLAUDE_', 'SKILL.md']) expect(ref, w).not.toContain(w);
+  });
+});

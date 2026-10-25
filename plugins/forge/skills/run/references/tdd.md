@@ -1,0 +1,11 @@
+# Verified TDD (`tdd: verified`)
+
+Read this when `FORGE begin` printed `tdd.mode` `verified`. forge checks the TDD itself: it runs the task's new and changed test files on BASE (the commit the brief started from, with HEAD's versions of those test files on top) and expects each new test to fail there, by name. It never runs the whole suite for it, never installs anything, and reuses the task's `node_modules`, `.venv` or `venv`.
+
+**Briefs.** `tdd.line` ends every brief you write by hand, as forge:run's **TDD.** rule says. When `FORGE triage` printed `kind: "bug"` (a bug from Small up), that brief also ends with its `bugLine` as printed, after the TDD line: the implementer reproduces the bug with a failing test first and ends its report with `Root cause: <file>:<line> - <what was wrong>`. `FORGE brief` adds both lines itself to a plan task's brief.
+
+**Medium and Large.** Nothing to run: `FORGE review-prep` runs the check in round 1 (again in a later round only when the test files changed), adds the row `tdd` to `validators-<n>.json` and prints `tdd`; print its `say` as it is. The correctness reviewer reads that row and the bug's root cause; the verdict, the validators round and the review cap do not change. While the check is due or a test passes on BASE there is no express review.
+
+**Small.** After `## Small` step 2, run `FORGE tdd check --task <id>-1 --base <BASE> --dir .forge/work/<id> --locale <es|en>` and print its `say`. When it lists `passedOnBase`, or the brief has the `Bug:` line and `bug.rootCause` is `null`, resume the same implementer once with that output file (`file`) and what it says, then run step 2 and this check again; what still holds goes in your two-line report.
+
+**Not checked.** `skipped` says why nothing ran: no changed test file (`no-tests`), no related-tests command (`no-command`), tests that share their package with the code as in Go and Rust (`same-package`), more than 30 test files (`too-many`), a path that cannot go into a command (`unsafe-path`), a changed lockfile (`lockfile`), dependencies that link the task's own code, such as workspaces or an editable install (`linked-code`), BASE could not be checked out (`no-checkout`), or the run took over 5 minutes (`timeout`). Go on as without the option; correctness then reads the report.
