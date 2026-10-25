@@ -62,10 +62,10 @@ Each thought below was seen breaking a rule. The rule wins.
 
 | Thought | Rule |
 |---|---|
-| "The email is sent after the commit of the review, through `ReviewPublishedV1`. That way only a review that really was saved is confirmed." | `outbox`: after-commit alone loses the event if the process dies before publishing. Use the outbox, or publish through one adapter, and say once in your report that there is no outbox and what is lost. |
-| "It translates the domain events into integration events and publishes them after the commit: the confirmation email only goes out if the review was saved." | `outbox`, and the paragraph above: a missing outbox is reported, even in a hurry. |
-| "Rating and comment are value objects. `Rating` validates 1..5. `Comment` counts real characters." | `domain-exception`: value-object validation is a business failure. Throw a named `DomainException` subtype, not `IllegalArgumentException`. |
-| "A value object has rejected the input: rating outside 1..5, long comment, malformed UUID." (answered with a generic `400 InvalidInput`) | `domain-exception`: a named subtype with its own title and a kebab-case `code`; if the base has no `code`, report it. |
+| "The notification is sent after the commit, through the integration event. That way only what really was saved is confirmed." | `outbox`: after-commit alone loses the event if the process dies before publishing. Use the outbox, or publish through one adapter, and say once in your report that there is no outbox and what is lost. |
+| "It translates the domain events into integration events and publishes them after the commit: the notification only goes out if the change was saved." | `outbox`, and the paragraph above: a missing outbox is reported, even in a hurry. |
+| "These fields are value objects. Each one validates its own range at construction." | `domain-exception`: value-object validation is a business failure. Throw a named `DomainException` subtype, not `IllegalArgumentException`. |
+| "A value object has rejected the input: a value out of range, a text too long, a malformed id." (answered with a generic 400) | `domain-exception`: a named subtype with its own title and a kebab-case `code`; if the base has no `code`, report it. |
 
 ## Before you report
 
