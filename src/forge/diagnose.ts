@@ -84,10 +84,11 @@ export function diagnose(main: string, scope: Scope, opts: DiagnoseOpts): Diagno
     coverage.push(`${files.length - TRANSCRIPTS_MAX} more transcripts not read (at most ${TRANSCRIPTS_MAX})`);
     files = files.slice(0, TRANSCRIPTS_MAX);
   }
-  /** Reads one transcript and adds its row to the sources: the bytes are the measured size, the lines those read. */
+  /** Reads one transcript and adds its row to the sources: the bytes are its size, the lines those read. A file read whole is
+   *  as large as the bytes read; only one read in part, or not at all, is measured again. */
   const load = (file: string, kind: 'transcript' | 'subagent'): TranscriptFacts | null => {
     const facts = readTranscript(file);
-    const bytes = measureJsonl(file)?.bytes ?? null;
+    const bytes = facts && !facts.stats.truncated ? facts.stats.bytes : measureJsonl(file)?.bytes ?? null;
     if (!facts) { sources.push({ file, kind, bytes, error: 'unreadable' }); return null; }
     const { stats } = facts;
     sources.push({ file, kind, bytes, lines: stats.lines, ...(stats.long.length ? { long: stats.long } : {}), truncated: stats.truncated });
@@ -104,7 +105,6 @@ export function diagnose(main: string, scope: Scope, opts: DiagnoseOpts): Diagno
   let window = scope.kind === 'execution'
     ? { from: src.exec?.startedAt ?? spanOf(src.scoped.map(l => l.event.ts)).from, to: spanOf([...src.scoped.map(l => l.event.ts), src.exec?.lastStepAt]).to }
     : spanOf(src.scoped.map(l => l.event.ts));
-  if (scope.kind === 'execution' && window.from === null && window.to === null) window = { from: null, to: null };
   const inWindow = (ts: string): boolean => {
     const x = Date.parse(ts);
     if (Number.isNaN(x)) return true;
@@ -153,8 +153,9 @@ export function diagnose(main: string, scope: Scope, opts: DiagnoseOpts): Diagno
       }
       seenAgents.add(id);
       const sf = subagentFile(mainFile, id);
-      const sub = sf ? load(sf.file, 'subagent') : null;
-      if (!sf || !sub) { if (!sf) coverage.push(`no transcript for agent ${id} (${sc.at})`); continue; }
+      if (!sf) { coverage.push(`no transcript for agent ${id} (${sc.at})`); continue; }
+      const sub = load(sf.file, 'subagent');
+      if (!sub) { coverage.push(`could not read transcript of agent ${id} (${sc.at})`); continue; }
       try {
         sources.push({ file: sf.metaFile, kind: 'meta', bytes: statSync(sf.metaFile).size });
       } catch { /* no meta file */ }
@@ -306,7 +307,7 @@ export function diagnose(main: string, scope: Scope, opts: DiagnoseOpts): Diagno
   const waiting: Waiting[] = [];
   const pending = (facts: TranscriptFacts, all: boolean): void => {
     for (const c of facts.calls) {
-      if (facts.results.has(c.id) || !c.ts) continue;
+      if (facts.results.has(c.id) || !c.ts || Number.isNaN(time(c.ts))) continue;
       if (!all && window.from !== null && time(c.ts) < time(window.from)) continue;
       if (now - time(c.ts) < WAITING_MS) continue;
       waiting.push({ at: cite(facts.file, c.line), ts: c.ts, tool: c.tool, forge: c.forge[0]?.name ?? null, minutes: Math.floor((now - time(c.ts)) / 60_000) });

@@ -317,6 +317,15 @@ describe('forge diagnose: the call that wrote an out file, the failed jobs of a 
     put(path.join(s.r, '.forge', 'execution.json'), JSON.stringify(execOf('shop-20261025T100000000Z', s.r, { tasks: { T002: taskOf(s.r) } })));
     check('execution.json of another run');
   });
+  it('a call with no result whose time does not parse is not listed as waiting', () => {
+    const s = scenario([{ ts: at(1), kind: 'triage', task: 'fix', path: 'small', session: 's1' }], [
+      /* 1 */ toolUse(at(0.9), 'b1', 'Bash', { command: `${F} triage --task fix` }),
+      /* 2 */ toolResult(at(1), 'b1', { text: '{"path":"small"}' }),
+      /* 3 */ toolUse('yesterday', 'r1', 'Read', { file_path: '/x' }),
+      /* 4 */ toolUse(at(5), 'r2', 'Read', { file_path: '/y' }),
+    ]);
+    expect(s.diag(['--task', 'fix']).waiting).toEqual([{ at: `${s.t}:4`, ts: at(5), tool: 'Read', forge: null, minutes: 115 }]);
+  });
 });
 
 describe('the forge:diagnose skill and the READMEs (A6)', () => {
