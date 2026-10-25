@@ -5,7 +5,8 @@ import path from 'node:path';
 
 export interface ClaudeBin { file: string; prefix: readonly string[]; version: string; viaCmd: boolean }
 
-/** The claude version tests/e2e/README.md was recorded with; whoever re-records its observations raises this. */
+/** The claude version tests/e2e/README.md was recorded with; whoever re-records its observations raises this, and the
+ *  version .github/workflows/ci.yml installs with it (tests/ci-script.test.ts). */
 export const OBSERVED_WITH = '2.1.310';
 
 /** The claude to run: BGKIT_E2E_CLAUDE when set (that file or none), else the first one on PATH. */

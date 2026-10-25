@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { SKIP_MOD_TYPES, ciSteps, generatedPaths } from '../scripts/ci.mjs';
 import { tagCommands } from '../scripts/tag-plugins.mjs';
+import { OBSERVED_WITH } from './e2e/harness/claude-bin.js';
 import { useTempDirs } from './helpers/tmp.js';
 
 const tmp = useTempDirs();
@@ -59,6 +60,10 @@ describe('npm run ci (I-05)', () => {
     expect(cmds.indexOf('npm ci')).toBeLessThan(cmds.indexOf('npm run ci'));
     expect(cmds.some(c => /^npm install -g @anthropic-ai\/claude-code@\d+\.\d+\.\d+$/.test(c))).toBe(true);
     expect(cmds.some(c => /core\.longpaths true/.test(c))).toBe(true);
+  });
+  it('.github/workflows/ci.yml installs the Claude Code the e2e observations were recorded with (OBSERVED_WITH)', () => {
+    const cmds = (parse(read('.github/workflows/ci.yml')).jobs.ci.steps as { run?: string }[]).map(s => s.run).filter((x): x is string => !!x);
+    expect(cmds.filter(c => c.startsWith('npm install -g @anthropic-ai/claude-code@'))).toEqual([`npm install -g @anthropic-ai/claude-code@${OBSERVED_WITH}`]);
   });
   it('.github/workflows/ci.yml runs npm run ci with TEMP, TMP and TMPDIR at the runner temp dir (Windows gives an 8.3 TEMP)', () => {
     const steps = parse(read('.github/workflows/ci.yml')).jobs.ci.steps as { run?: string; env?: Record<string, string> }[];

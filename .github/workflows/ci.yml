@@ -1,5 +1,6 @@
 # I-05: the checks of `npm run ci`, on Ubuntu and Windows. The engine types (types/claude-code) are not in git, so
-# typecheck:mod is skipped here with a warning. The Claude Code CLI is pinned and bumped by hand.
+# typecheck:mod is skipped here with a warning. The Claude Code CLI is pinned and bumped by hand, to the version the e2e
+# observations were recorded with (OBSERVED_WITH in tests/e2e/harness/claude-bin.ts; tests/ci-script.test.ts checks it).
 # The node20 job loads the committed CLI bundles on the oldest Node the plugins promise (development needs 22.12).
 name: ci
 on:
@@ -21,7 +22,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: git config --global user.name ci && git config --global user.email ci@example.invalid && git config --global core.autocrlf false && git config --global core.longpaths true
-      - run: npm install -g @anthropic-ai/claude-code@2.1.302
+      - run: npm install -g @anthropic-ai/claude-code@2.1.310
         env:
           DISABLE_AUTOUPDATER: "1"
       # The runner's own temp dir, long form: on Windows TEMP is an 8.3 path (C:\Users\RUNNER~1\…) that git reports long.
