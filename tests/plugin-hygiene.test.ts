@@ -8,13 +8,14 @@ const cp = (n: number) => String.fromCodePoint(n);
 // A7: what a reader cannot see. Built from code points, so this file never holds one.
 const INVISIBLE = new RegExp(`[${[[0x00ad], [0x061c], [0x115f, 0x1160], [0x180e], [0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x2069],
   [0x3164], [0xfeff], [0xffa0], [0xfff9, 0xfffb], [0xe0000, 0xe007f]].map(([a, b]) => (b ? `${cp(a)}-${cp(b)}` : cp(a))).join('')}]`, 'gu');
-// A7: a person's folder. A placeholder (or a name that starts with <, $, % or {) is not one.
+// A7: a person's folder. A placeholder (or a name that starts with <, $, % or {) is not one. A drive letter starts a
+// word, so the end of a name before a colon (the D of "$PWD:/work") is not one.
 const NAME = String.raw`(?!(?:user|username|you|me|name|example|runner|public|default)(?![\w.-]))[A-Za-z0-9._-]+`;
 const PERSONAL = new RegExp([
-  String.raw`[A-Za-z]:[\\/]+Users[\\/]+${NAME}`,
+  String.raw`(?<!\w)[A-Za-z]:[\\/]+Users[\\/]+${NAME}`,
   String.raw`(?<![\w.])/(?:[a-z]/)?Users/${NAME}`,
   String.raw`(?<![\w.])/home/${NAME}`,
-  String.raw`[A-Za-z]:[\\/]+work(?![\w-])`,
+  String.raw`(?<!\w)[A-Za-z]:[\\/]+work(?![\w-])`,
   String.raw`(?<![\w.])/[a-z]/work(?![\w-])`,
 ].join('|'), 'gi');
 const AGENT_KEYS = ['name', 'description', 'model', 'effort', 'maxTurns', 'tools', 'disallowedTools', 'skills', 'memory', 'background', 'isolation', 'color', 'initialPrompt'];
@@ -121,7 +122,7 @@ describe('what the plugins publish (A7)', () => {
     expect(hits('/home/carol/.claude')).toEqual(['/home/carol']);
     expect(hits('E:\\work\\x, e:/work/y, /e/work/z')).toEqual(['E:\\work', 'e:/work', '/e/work']);
     for (const ok of ['C:\\Users\\<name>\\.claude', 'C:\\Users\\you', '/home/user/x', '/Users/me', '~/.claude/projects',
-      '${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs', 'E:\\workspace', 'src/work/x', 'docs/home/x']) expect(hits(ok), ok).toEqual([]);
+      '${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs', 'E:\\workspace', 'src/work/x', 'docs/home/x', 'docker run -v "$PWD:/work" -w /work']) expect(hits(ok), ok).toEqual([]);
     expect(`a${cp(0x200b)}b${cp(0x202e)}c`.match(INVISIBLE)).toHaveLength(2);
     expect(`a${cp(0xe0041)}b`.match(INVISIBLE)).toHaveLength(1);
     expect(`a${cp(0xfff9)}b${cp(0xfffb)}c`.match(INVISIBLE)).toHaveLength(2);
