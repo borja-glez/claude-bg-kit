@@ -7,6 +7,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { CRITIQUE_FILE, LEGACY_CRITIQUE_FILE, parseCritique, type Critique } from '../lib/critique.js';
 import { DISMISSED_MAX_CHARS, parseDismissed, unionDismissed, type Dismissed, type GateCritique } from '../lib/design-gate.js';
+import { COMMENTS_MAX_BYTES, parseCommentsSeen, type CommentsSeen } from '../lib/design-comments.js';
 import { listVersions } from '../lib/history.js';
 import { writeAtomic } from '../lib/bound-fs.js';
 
@@ -87,7 +88,24 @@ export function writeDismissed(f: DesignFiles, d: Dismissed): string {
   return p;
 }
 
-/** The design's history: version → the text of design/history/v<N>.md. */
+/** design/critiques/comments.json: missing, unreadable, over COMMENTS_MAX_BYTES or junk, it is {}. Only this place, never .waypoint/. */
+export function readCommentsSeen(f: DesignFiles): CommentsSeen {
+  const p = path.join(f.critiques, 'comments.json');
+  try {
+    if (statSync(p).size > COMMENTS_MAX_BYTES) return {};
+    return parseCommentsSeen(readFileSync(p, 'utf8'));
+  } catch { return {}; }
+}
+
+/** Writes comments.json atomically, keys in sorted order, and returns its path. */
+export function writeCommentsSeen(f: DesignFiles, s: CommentsSeen): string {
+  const p = path.join(f.critiques, 'comments.json');
+  const sorted = Object.fromEntries(Object.entries(s).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  writeAtomic(p, `${JSON.stringify(sorted, null, 2)}\n`);
+  return p;
+}
+
+/** The design's history: version →the text of design/history/v<N>.md. */
 export function readHistory(dir: string): Record<number, string> {
   const hist = path.join(dir, 'design', 'history');
   const out: Record<number, string> = {};

@@ -16,7 +16,8 @@ import { designGate, line, mergeDismissed } from '../lib/design-gate.js';
 import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, roundList, AppliedError, ENTRY_KINDS, entryKind, entryRound, type EntryKind } from '../lib/history.js';
 import { parseCritique, selectProposals, formatProposals, CritiqueError, budgetFor, budgetIssues, CRITIQUE_FILE, LEGACY_CRITIQUE_FILE } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
-import { designFilesOf, readCritiques, readDismissedOf, readHistory, writeDismissed } from './design-files.js';
+import { designFilesOf, readCommentsSeen, readCritiques, readDismissedOf, readHistory, writeCommentsSeen, writeDismissed } from './design-files.js';
+import { markSeen, markTaken, threadIds, unseenOf } from '../lib/design-comments.js';
 import { budgetRound, nextRound } from '../lib/design-round.js';
 import { eventId, eventIds, sessionIdFrom } from '../lib/ids.js';
 import { computeMetrics } from '../lib/metrics.js';
@@ -46,7 +47,7 @@ const nodeSpawn: Spawn = (command, options) => spawn(command, options);
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined>; spawn?: Spawn }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|replan|hash|clean-cache|page|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|replan|hash|clean-cache|page|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-comments|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -969,6 +970,47 @@ export function run(argv: string[], io: Io): Result {
         if (bare.length) return fail(`critique-dismiss: ${bare.length === 1 ? 'proposal' : 'proposals'} ${bare.join(', ')} of round ${round} ${bare.length === 1 ? 'is' : 'are'} major or critical and need a reason: pass --reason-file <f> with the person's words`, 2);
         writeDismissed(files, next);
         return ok(JSON.stringify({ round, dismissed: (next[round] ?? []).map(x => x.n) }));
+      }
+      case 'design-comments': {
+        // waypoint design-comments <design> [--seen <ids> --round R] [--taken <ids> --version V]: remembers, in
+        // design/critiques/comments.json, which threads of the design page a critic got (the first round) and which
+        // version of the design last took them up. It prints the record; --seen or --taken write it, --seen first.
+        // Everything is checked before anything is written: a refusal writes nothing.
+        const usage = 'usage: waypoint design-comments <design.md> [--seen <ids> --round R] [--taken <ids> --version V]';
+        if (!args[0] || args[0].startsWith('--')) return fail(usage, 2);
+        const design = readDesignArg('design-comments', args[0]);
+        if ('code' in design) return design;
+        // A present but valueless flag (or one followed by another flag) has no ids: exit 2, not "absent".
+        const idsOf = (name: string, value: string | undefined): string[] | null | Result => {
+          if (!args.includes(`--${name}`)) return null;
+          const ids = threadIds(value ?? '');
+          return ids ?? fail(`design-comments: --${name} needs thread ids (printable, no space), comma-separated: ${usage}`, 2);
+        };
+        const seen = idsOf('seen', flag('seen'));
+        if (seen && !Array.isArray(seen)) return seen as Result;
+        const taken = idsOf('taken', flag('taken'));
+        if (taken && !Array.isArray(taken)) return taken as Result;
+        let round = 0, version = 0;
+        if (seen) {
+          const n = posInt('round');
+          if (n === null) return fail('design-comments: --seen needs --round, a positive integer: the round of the critic that got these threads', 2);
+          round = n;
+        }
+        if (taken) {
+          const n = posInt('version');
+          if (n === null) return fail('design-comments: --taken needs --version, a positive integer: the version that applied the proposals taking these threads up', 2);
+          version = n;
+        }
+        const files = designFilesOf(abs(args[0]), design.meta.project);
+        const current = readCommentsSeen(files);
+        let next = seen ? markSeen(current, seen as string[], round) : current;
+        if (taken) {
+          const missing = unseenOf(next, taken as string[]);
+          if (missing.length) return fail(`design-comments: no critic got thread ${missing.join(', ')} (no --seen for it): leave it out of --taken`, 2);
+          next = markTaken(next, taken as string[], version);
+        }
+        if (seen || taken) writeCommentsSeen(files, next);
+        return ok(JSON.stringify({ threads: next }));
       }
       case 'critique-check': {
         const target = abs(args[0]);
