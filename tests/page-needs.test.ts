@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs } from '../src/lib/sync.js';
-import { DEFERRED_DAYS, needsOf, parseSeen, pruneSeen, seenKey } from '../src/page/needs.js';
+import { needsYou, RUN_HALTS } from '../src/lib/needs-you.js';
+import { DEFERRED_DAYS, HALTS, needsOf, parseSeen, pruneSeen, seenKey } from '../src/page/needs.js';
 import { proposalDigest, type ApprovalDoc } from '../src/lib/proposals.js';
 import type { Model } from '../src/page/render.js';
 
@@ -22,6 +23,26 @@ const model = (over: Partial<Model> = {}): Model => ({
 });
 
 describe('needsOf (G-24)', () => {
+  it('its questions, proposals and stopped run follow needsYou, the rule lens and the band share (w7 A5)', () => {
+    const note = (id: string, o: object = {}) => ({ id, ts: iso(NOW - DAY), type: 'question' as const, author: 'user:a', text: id, ...o });
+    const notes = [note('n1'), note('n2', { answer: 'sí' }), note('n3', { answeredByNote: 'e9' })];
+    const prop = (id: string, status: string, o: object = {}) => ({ id, ts: iso(NOW - DAY), category: 'perf' as const, risk: 'low' as const, title: id, rationale: 'r', evidence: 'e', pillar: 'x', status, source: 'scout' as const, author: 'session:main', ...o });
+    const proposals = [prop('p1', 'proposed'), prop('p2', 'discussing', { parked: { why: 'w', loses: 'l', at: iso(NOW) } }), prop('p3', 'approved')];
+    const run = { runId: 'r1', mode: 'subagents' as const, parallel: 2, branch: 'b', mergeOnFinish: false, active: false, stopReason: 'stalled', coordinator: 'main', kind: 'plan' as const, loose: [], slots: [], startedAt: iso(NOW - 7_200_000), lastStepAt: iso(NOW - 3_600_000), stallReason: 'untrusted-commands' };
+    const needs = needsOf(model({ notes, proposals: proposals as never, run }));
+    expect(needs.map(n => n.kind)).toEqual(['question', 'proposals', 'stalled']);
+    expect(needs[0]).toMatchObject({ note: { id: 'n1' } });
+    expect(needs[1]).toEqual({ kind: 'proposals', count: 2 });
+    expect(needs[2]).toEqual({ kind: 'stalled', runId: 'r1', reason: 'untrusted-commands', stop: 'stalled' });
+    const shared = needsYou({ now: NOW, notes: Object.fromEntries(notes.map(n => [n.id, n])), proposals: Object.fromEntries(proposals.map(p => [p.id, p])), run: { runId: 'r1', active: false, stopReason: 'stalled', stallReason: 'untrusted-commands', startedAt: run.startedAt, lastStepAt: run.lastStepAt, closedAt: null, coordinatorOpen: null } });
+    expect(shared.map(n => [n.kind, n.id])).toEqual([['question', 'n1'], ['proposal', 'p1'], ['proposal', 'p2'], ['untrusted-commands', 'r1']]);
+    expect(HALTS).toBe(RUN_HALTS);
+  });
+  it("the questions keep the page's order of m.notes, not needsYou's date order (A5.m9b)", () => {
+    const note = (id: string, ago: number) => ({ id, ts: iso(NOW - ago), type: "question" as const, author: "user:a", text: id });
+    const needs = needsOf(model({ notes: [note("newer", DAY), note("older", 2 * DAY)] }));
+    expect(needs.map(n => (n.kind === "question" ? n.note.id : n.kind))).toEqual(["newer", "older"]);
+  });
   it('the decisions that changed after the mark go apart by whose mark it was: the owner’s, or forge’s policy (carry 4b-3)', () => {
     const prop = (id: string, title: string) => ({ id, ts: '', category: 'perf' as const, risk: 'low' as const, title, rationale: 'r', evidence: 'e', pillar: 'x', status: 'approved' as const, source: 'scout' as const, author: 'session:main' });
     const mark = (pid: string, by: ApprovalDoc['by']): ApprovalDoc => ({ status: 'approved', decidedAt: iso(NOW), by, digest: proposalDigest(pid, prop(pid, 'antes')) });

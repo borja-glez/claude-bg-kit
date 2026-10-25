@@ -365,6 +365,18 @@ describe('bandParts (F-04, F-09, F-10, F-11, the notice band)', () => {
     expect(fitParts(parts, 16).shown.map(p => p.key)).toEqual(['notice', 'task']);
     expect(joinParts(fitParts(parts, 16).shown)).toBe('◌ a medias T019');
   });
+  it('what waits for the person is one part of priority 2 on the work, run and design bands, never on a notice (w7 A5)', () => {
+    const needs = { total: 3, items: [] };
+    for (const m of [WORKM({ needs }), RUN({ needs })]) {
+      expect(bandParts(m, NOW).find(p => p.key === 'needs')).toEqual({ key: 'needs', text: '» te toca 3', short: '» 3', prio: 2, hue: 'warn' });
+    }
+    expect(bandParts(WORKM({ needs }), NOW).map(p => p.key).slice(-3)).toEqual(['needs', 'inbox', 'decision']);
+    const design = { mode: 'design', project: 'demo', locale: 'en', version: 3, round: 2, proposals: 0, critical: 0, pending: 0, pendingCritical: 0, designUrl: null, viewer: NO_VIEWER, needs } as BandModel;
+    expect(bandParts(design, NOW).find(p => p.key === 'needs')).toMatchObject({ text: '» waiting for you 3' });
+    expect(bandParts(NOTICE({ needs }), NOW).some(p => p.key === 'needs')).toBe(false);
+    expect(bandParts(WORKM(), NOW).some(p => p.key === 'needs')).toBe(false);
+    expect(fitParts(bandParts(WORKM({ needs }), NOW), 40).shown.map(p => p.key)).toContain('needs');
+  });
 });
 
 describe('the short labels (F-05)', () => {

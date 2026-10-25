@@ -384,11 +384,13 @@ describe('buildBandModel · design', () => {
   });
   it('a design that does not read draws nothing for its conversation, as a parse failure did: the plan\'s language, no role (I-13)', () => {
     const f = { ...empty, ...designer, changelog };
-    expect(buildBandModel('demo-shop', { ...f, plan, design: 'no front matter' })).toEqual({ mode: 'none', locale: 'es', viewer: NO_VIEWER });
+    // The band draws nothing, and lens is told the design could not be read.
+    const needs = { total: 1, items: [{ kind: 'design-approval', id: '', what: '', task: null, runId: null, file: 'docs/waypoint/demo-shop/design.md', since: null, command: null, place: null, unverified: true }] };
+    expect(buildBandModel('demo-shop', { ...f, plan, design: 'no front matter' })).toEqual({ mode: 'none', locale: 'es', viewer: NO_VIEWER, needs });
     const frozen = design.replace('start_prompt:', 'status: frozen\nstart_prompt:');
-    expect(buildBandModel('demo-shop', { ...f, plan, design: frozen })).toEqual({ mode: 'none', locale: 'es', viewer: NO_VIEWER });
+    expect(buildBandModel('demo-shop', { ...f, plan, design: frozen })).toEqual({ mode: 'none', locale: 'es', viewer: NO_VIEWER, needs });
     // Without a plan, nothing gives the language.
-    expect(buildBandModel('demo-shop', { ...f, design: frozen })).toEqual({ mode: 'none', viewer: NO_VIEWER });
+    expect(buildBandModel('demo-shop', { ...f, design: frozen })).toEqual({ mode: 'none', viewer: NO_VIEWER, needs });
   });
 });
 
@@ -686,7 +688,58 @@ describe('buildBandModel · every slot of the run, at most 12, and those waiting
     expect(buildBandModel('demo-shop', coordinator(tasks))).toMatchObject({ mode: 'run', running: 2, queued: 2, integrated: 1, stalled: false });
     const stalled = buildBandModel('demo-shop', { ...coordinator(tasks), execution: EXEC({ parallel: 14, tasks, active: false, stopReason: 'stalled' }) });
     expect(stalled).toMatchObject({ mode: 'run', queued: 2, integrated: 1, stalled: true });
-    expect(bandLine(stalled, Date.now())).toBe('► EJECUCIÓN · ▲ parada · 1/5 integradas · por integrar 2');
+    expect(bandLine(stalled, Date.now())).toBe('► EJECUCIÓN · ▲ parada · 1/5 integradas · por integrar 2 · » te toca 1');
+  });
+});
+
+describe('buildBandModel · what waits for the person (w7 A5)', () => {
+  const T0 = Date.now();
+  const at = (min: number) => new Date(T0 - min * 60_000).toISOString();
+  const work = { ...empty, plan, session: j({ sessionId: 'main', track: null }), ...ownerOf('main'), now: T0 };
+  const crit = (severity: string) => j({ round: 1, version: 1, scope: 'full', verdict: severity === 'minor' ? 'ready' : 'changes', proposals: [{ n: 1, category: 'gap', severity, section: 's', problem: 'p', change: 'c' }] });
+  const changelog = j([{ version: 1, date: '2026-10-11', note: 'v1', words: 40, round: 0 }]);
+  it('every band carries the oldest ten and how many in all; with nothing waiting, no needs', () => {
+    const notes = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`e${String(i).padStart(2, '0')}`, j({ ts: at(100 - i), type: 'question', author: 'session:main', text: `pregunta ${i}` })]));
+    const m = buildBandModel('demo-shop', { ...work, notes });
+    expect(m).toMatchObject({ mode: 'work', needs: { total: 12 } });
+    expect(m.needs!.items.map(n => n.what)).toEqual(Array.from({ length: 10 }, (_, i) => `pregunta ${i}`));
+    expect(m.needs!.items[0]).toMatchObject({ kind: 'question', place: 'roadmap', since: at(100) });
+    expect(buildBandModel('demo-shop', work)).not.toHaveProperty('needs');
+    // Without a waypoint project the band draws nothing, and still carries what forge holds for lens.
+    const auth = { 'merge-r1-ab12': j({ authId: 'merge-r1-ab12', kind: 'merge', runId: 'r1', target: 'main', question: 'q', yes: 'Sí', createdAt: at(5), session: 's1' }) };
+    expect(buildBandModel('demo-shop', { ...empty, execution: EXEC(), auth, now: T0 })).toMatchObject({ mode: 'none', needs: { total: 1, items: [{ kind: 'authorization', runId: 'r1', what: 'main' }] } });
+  });
+  it('the design waits for approval once its latest critique is ready and nothing critical or major is pending', () => {
+    const f = { ...empty, design, changelog, critiques: { 'critique-r1.json': crit('minor') }, now: T0 };
+    expect(buildBandModel('demo-shop', f).needs?.items).toEqual([
+      { kind: 'design-approval', id: 'demo-shop', what: 'v1', task: null, runId: null, file: 'docs/waypoint/demo-shop/design.md', since: '2026-10-11', command: '/waypoint:design approve', place: null },
+    ]);
+    expect(buildBandModel('demo-shop', { ...f, critiques: { 'critique-r1.json': crit('major') } })).not.toHaveProperty('needs');
+    expect(buildBandModel('demo-shop', { ...f, critiques: {} })).not.toHaveProperty('needs');
+    expect(buildBandModel('demo-shop', { ...f, design: design.replace('start_prompt:', 'status: approved\nstart_prompt:') })).not.toHaveProperty('needs');
+  });
+  it("2c: a stopped run whose coordinator's conversation is open is answered there, and its notice offers no Resume (Review Focus 2)", () => {
+    const f = { ...empty, plan, sessionId: 'B', execution: EXEC({ active: false, stopReason: 'stalled', stallReason: 'x', lastStepAt: ago(60) }) };
+    const open = { coordinatorBindings: { 'demo-shop/.': bound('main', 's1', { via: 'forge-run' }) } };
+    expect(buildBandModel('demo-shop', { ...f, ...open })).toMatchObject({ mode: 'notice', coordinatorOpen: true, needs: { items: [{ kind: 'run', place: 'coordinator', command: null }] } });
+    const gone = buildBandModel('demo-shop', f);
+    expect(gone).not.toHaveProperty('coordinatorOpen');
+    expect(gone.needs?.items).toMatchObject([{ kind: 'run', command: '/forge:run --resume', place: null }]);
+  });
+  it('a surface decided in local.yaml is asked no more; a local.yaml that does not read decides nothing', () => {
+    const f = { ...empty, execution: EXEC(), surfacesAsked: { web: j({ task: 'T002', at: at(3) }), db: j({ task: 'T002', at: at(2) }) }, now: T0 };
+    expect(buildBandModel('demo-shop', { ...f, local: 'surfaces:\n  web: { state: allowed, hash: h }\n' }).needs?.items.map(n => n.id)).toEqual(['db']);
+    expect(buildBandModel('demo-shop', { ...f, local: '{nope' }).needs?.items.map(n => n.id)).toEqual(['web', 'db']);
+  });
+  it("a surface declined for this run («No, esta vez»: the run's verifySkip, not local.yaml) is asked no more either", () => {
+    const web = j({ task: 'T002', at: at(3) });
+    const f = { ...empty, execution: EXEC({ verifySkip: ['web'] }), now: T0 };
+    expect(buildBandModel('demo-shop', { ...f, surfacesAsked: { web } })).not.toHaveProperty('needs');
+    expect(buildBandModel('demo-shop', { ...f, surfacesAsked: { web, db: j({ task: 'T002', at: at(2) }) } }).needs?.items.map(n => n.id)).toEqual(['db']);
+  });
+  it("an execution.json that does not read is one unverified item; another project's run says nothing here", () => {
+    expect(buildBandModel('demo-shop', { ...empty, execution: '{nope', now: T0 }).needs?.items).toMatchObject([{ kind: 'run', unverified: true, file: '.forge/execution.json' }]);
+    expect(buildBandModel('demo-shop', { ...empty, execution: EXEC({ project: 'other', active: false, stopReason: 'stalled', stallReason: 'x' }), now: T0 })).not.toHaveProperty('needs');
   });
 });
 

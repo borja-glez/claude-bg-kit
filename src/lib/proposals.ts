@@ -1,5 +1,7 @@
 import { sha256Hex } from './sha256.js';
 import { clean as cleanLine } from './decisions.js';
+/** A proposal's id, also its file name without `.json`: `p`, the time as 14 digits, 4 letters or digits. */
+export const PROPOSAL_ID = /^p\d{14}[0-9a-z]{4}$/;
 export const PROPOSAL_CATEGORIES = ['feature', 'security', 'perf', 'quality', 'tests', 'deps'] as const;
 export const PROPOSAL_RISKS = ['low', 'medium', 'high'] as const;
 export const PROPOSAL_STATUSES = ['proposed', 'approved', 'rejected', 'discussing', 'auto_approved', 'done'] as const;

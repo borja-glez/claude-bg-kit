@@ -854,3 +854,22 @@ describe('statusRootOf (C5)', () => {
     expect(statusRootOf('/elsewhere/task-T1', '/repo')).toBe('/elsewhere/task-T1');
   });
 });
+
+describe('the Todos and Claude Code tasks cards come only from their own events (w7 A5)', () => {
+  const base = { band: NONE_BAND, now: 100_000 };
+  it('without a TodoWrite that lists something or a TaskCreated there is neither; with one, its card', () => {
+    expect(buildPanelModel({ ...base, activity: act() })).toMatchObject({ todos: null, ccTasks: null });
+    expect(buildPanelModel({ ...base, activity: act({ todos: [] }) }).todos).toBeNull();
+    expect(buildPanelModel({ ...base, activity: act({ todos: [{ content: 'a', status: 'completed' }] }) }).todos).toMatchObject({ total: 1, done: 1 });
+    expect(buildPanelModel({ ...base, activity: act({ ccTasks: [{ id: '1', subject: 'Write the spec', done: false }] }) }).ccTasks)
+      .toEqual({ open: 1, done: 0, recent: ['Write the spec'] });
+  });
+});
+
+describe('buildPanelModel · what waits for the person (w7 A5)', () => {
+  it('takes what the band carries, as it is; nothing when the band carries nothing', () => {
+    const needs = { total: 1, items: [{ kind: 'proposal' as const, id: 'p1', what: 'Cache', task: null, runId: null, file: '.forge/proposals/p1.json', since: null, command: '/forge:decide p1', place: null }] };
+    expect(buildPanelModel({ band: { ...NONE_BAND, needs }, activity: act(), now: 0 }).needs).toEqual(needs);
+    expect(buildPanelModel({ band: NONE_BAND, activity: act(), now: 0 })).not.toHaveProperty('needs');
+  });
+});

@@ -7,6 +7,7 @@ import {
   ratio, duration, span, short, fmtTokens, fmtUsd, fmtUsdRange, type Hue,
 } from './view.js';
 import { shortModelName } from '../lib/prices.js';
+import type { NeedKind } from '../lib/needs-you.js';
 
 export interface CardTexts {
   sRoadmap: string; sSuperpowers: string; sNow: string; sTodos: string; sSubagents: string; sTasks: string; sForge: string;
@@ -24,6 +25,8 @@ export interface CardTexts {
   sTasksInProgress: string; otherSession: string; validating: string; integrating: string; skipped: string; noResult: string;
   accepted: string; acceptedInRound: (n: number) => string; waitingOn: (n: number, wake: string | null) => string; waitingLbl: string;
   cached: string; reviewersLbl: string;
+  // Wave 7 A5: what waits for the person.
+  sNeeds: string; needKind: Record<NeedKind, string>; needCoordinator: string; needConversation: string; needRoadmap: string; needUnverified: string;
 }
 
 type Forge = NonNullable<PanelModel['forge']>;
@@ -35,6 +38,7 @@ const modelRight = (s: { model?: string; effort?: string }, t: CardTexts): strin
 
 const VERDICT_HUE: Record<string, Hue> = { accept: 'green', fix: 'yellow', redo: 'red' };
 const VALIDATING = new Set(['prep', 'review-prep', 'validate']);
+const NEEDS_ROWS = 6;
 
 /** What a job in the background does, as a row says it: validating, integrating, or its own command. */
 export function jobText(name: string, t: CardTexts): string {
@@ -204,6 +208,27 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       blocks.push({ kind: 'row', dot: 'sky', spinning: true, text: [jobText(j.name, t), j.task].filter(Boolean).join(' '), right: short(j.seconds) ?? undefined });
     }
     out.push({ id: 'now', icon: SECTION_ICON.now, title: t.sNow, hue: SECTION_HUE.now, blocks });
+  }
+
+  if (m.needs?.total) {
+    const n = m.needs;
+    const place = { coordinator: t.needCoordinator, conversation: t.needConversation, roadmap: t.needRoadmap };
+    const shown = n.items.slice(0, NEEDS_ROWS);
+    const blocks: Block[] = shown.map((it): Block => {
+      const label = t.needKind[it.kind];
+      if (it.unverified) {
+        return { kind: 'row', dot: 'yellow', tag: { text: label, hue: 'yellow' }, text: it.file ? `${t.needUnverified}: ${it.file}` : t.needUnverified, dim: true };
+      }
+      const since = it.since ? Date.parse(it.since) : NaN;
+      const age = Number.isFinite(since) ? short((nowMs - since) / 1000) : null;
+      const how = it.command ?? (it.place ? place[it.place] : null);
+      return {
+        kind: 'row', dot: 'yellow', tag: { text: label, hue: 'yellow' }, text: `${it.task ? `[${it.task}] ` : ''}${it.what || label}`,
+        right: [how, age].filter(Boolean).join(' · ') || undefined,
+      };
+    });
+    if (n.total > shown.length) blocks.push({ kind: 'text', text: `+${n.total - shown.length}`, dim: true });
+    out.push({ id: 'needs', icon: '»', title: t.sNeeds, hue: 'yellow', chip: { text: String(n.total), hue: 'yellow' }, blocks });
   }
 
   if (m.waypoint) {

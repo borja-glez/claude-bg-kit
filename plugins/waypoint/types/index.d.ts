@@ -23,7 +23,9 @@ export type WaypointBand = (
   | { mode: 'notice'; project: string; locale: string; kind: 'other-live' | 'previous'; subject: 'task' | 'run' | 'design';
       seat: string | null; task: string | null; title: string | null; since: string | null; runId: string | null;
       integrated?: number; total?: number; stopReason?: string | null; joinable?: boolean; coordinatorOpen?: boolean; roadmapUrl: string | null; key: string }
-) & { viewer: { role: 'owner' | 'other-live' | 'previous' | 'none'; coordinator: boolean; runId: string | null } };
+) & { viewer: { role: 'owner' | 'other-live' | 'previous' | 'none'; coordinator: boolean; runId: string | null };
+  // what waits for the person (src/lib/needs-you.ts), oldest first: the first ten and how many in all; absent when nothing does.
+  needs?: { total: number; items: { kind: 'review-question' | 'authorization' | 'untrusted-commands' | 'run' | 'question' | 'proposal' | 'design-approval' | 'surface'; id: string; what: string; task: string | null; runId: string | null; file: string | null; since: string | null; command: string | null; place: 'coordinator' | 'conversation' | 'roadmap' | null; unverified?: true }[] } };
 declare module 'claude-code' {
   interface PluginState {
     waypoint: { band: WaypointBand; hidden: boolean; drawn: boolean | null };

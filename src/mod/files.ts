@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
-import { buildBandModel, checkoutSidOf, executionViewer, noneBand, seatsOf, type BandFiles, type BandModel, type BandSeat } from './model.js';
+import { BAND_SLOTS_MAX, buildBandModel, checkoutSidOf, executionViewer, noneBand, seatsOf, withNeeds, type BandFiles, type BandModel, type BandSeat } from './model.js';
 import { pickProject, type ProjectEntry } from '../lib/project-pick.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
 import { BOUND_MAX_BYTES, BOUND_REREAD_MS, CACHE_DOCS_MAX, MAX_PROJECTS, MAX_SEATS, parseBound, SESSION_MAX_BYTES, type BoundDoc } from '../lib/bound.js';
@@ -9,6 +9,10 @@ import { newestMemberFiles } from '../lib/member-doc.js';
 import { CRITIQUE_FILE, LEGACY_CRITIQUE_FILE } from '../lib/critique.js';
 import { DISMISSED_MAX_CHARS } from '../lib/design-gate.js';
 import { oneLine } from '../lib/one-line.js';
+import { isVisibleRun } from '../lib/execution-view.js';
+import { AUTH_ID } from '../lib/needs-you.js';
+import { NOTE_ID } from '../lib/notes.js';
+import { PROPOSAL_ID } from '../lib/proposals.js';
 import { clip as clipCells } from './band-line.js';
 
 export type Engine = EngineInterface;
@@ -185,9 +189,8 @@ async function claudeBindingTexts($: Engine, main: string, claude: string, now: 
 // The main checkout's .forge, listed once per refresh whichever worktree this session is in: the execution the
 // coordinator writes (with its task files, live signals and members) and forge's decisions summary (a few hundred
 // bytes; not read above DECISIONS_MAX). The coordinator's own signal is read even when it is not among the newest.
-async function loadForge($: Engine, root: string, now: number): Promise<ForgeFiles> {
+async function loadForge($: Engine, main: string, now: number): Promise<ForgeFiles> {
   try {
-    const main = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
     const dir = join(main, '.forge');
     const entries = await listOpt($, dir);
     const out: ForgeFiles = {};
@@ -213,14 +216,129 @@ async function loadForge($: Engine, root: string, now: number): Promise<ForgeFil
     if (hook && isSafeId(hook)) {
       const signal = out.live?.[hook] ?? await readSmall($, join(dir, 'live', `${hook}.json`), EXEC_FILE_MAX);
       if (signal !== undefined) out.coordinatorLive = signal;
-      // While the run is active, whether its coordinator's conversation is open: a live binding of its own.
-      if (parsed?.active) {
+      // Whether its coordinator's conversation is open: a live binding of its own. Read for every run still drawn, not
+      // only an active one: a stopped run whose conversation is open is not taken up from another one (2c), and that
+      // conversation renews its binding every minute although no hook writes a signal.
+      if (parsed && isVisibleRun(parsed, now, 'owner')) {
         const bindings = await claudeBindingTexts($, main, hook, now);
         if (Object.keys(bindings).length) out.coordinatorBindings = bindings;
       }
     }
     return out;
   } catch { return {}; }
+}
+
+const NEED_FILE_MAX = 64 * 1024;
+const SURFACE_FILE_MAX = 4 * 1024;
+const NOTE_FILE_MAX = 16 * 1024;
+const AUTH_KEEP = 20;
+const SURFACES_KEEP = 20;
+const PROPOSALS_KEEP = 50;
+const NOTES_KEEP = 100;
+const ROUND_DIR = /^reviews-(\d+)-(\d+)$/;
+
+type Listed = Awaited<ReturnType<Engine['fs']['list']>>;
+type NeedFiles = Pick<BandFiles, 'auth' | 'asked' | 'surfacesAsked' | 'local' | 'proposals' | 'notes'>;
+
+/** The texts of `files` in `dir` by name without `.json`; a file that cannot be read is null. Undefined when there are none. */
+async function readListed($: Engine, dir: string, files: Listed): Promise<Record<string, string | null> | undefined> {
+  if (!files.length) return undefined;
+  const out: Record<string, string | null> = {};
+  for (const f of files) out[f.name.slice(0, -5)] = (await readOpt($, join(dir, f.name))) ?? null;
+  return out;
+}
+
+/** The `.json` files of `dir` that are at most `max` bytes and whose name, without the extension, passes `ok`. */
+async function jsonFiles($: Engine, dir: string, max: number, ok: (id: string) => boolean): Promise<Listed> {
+  return (await listOpt($, dir)).filter(f => f.kind === 'file' && f.name.endsWith('.json') && f.size <= max && ok(f.name.slice(0, -5)));
+}
+
+const byNameDesc = (a: { name: string }, b: { name: string }) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0);
+
+// The proposals' texts, read again only when their listing (names, sizes, mtimes) changes, as lens reads them: lens reads
+// the band on every refresh of its panel. Not kept when some file did not read.
+let proposalCache: { key: string; proposals: Record<string, string | null> } | null = null;
+
+async function readProposals($: Engine, main: string): Promise<Record<string, string | null> | undefined> {
+  const dir = join(main, '.forge', 'proposals');
+  const files = (await jsonFiles($, dir, NEED_FILE_MAX, id => PROPOSAL_ID.test(id))).sort(byNameDesc).slice(0, PROPOSALS_KEEP);
+  if (!files.length) return undefined;
+  const key = JSON.stringify([dir, files.map(f => [f.name, f.size, f.mtimeMs])]);
+  if (proposalCache?.key === key) return proposalCache.proposals;
+  const proposals = (await readListed($, dir, files))!;
+  proposalCache = Object.values(proposals).includes(null) ? null : { key, proposals };
+  return proposals;
+}
+
+/** The asked.json of the newest review round (the highest brief, then round, as numbers) of the task, in the first folder that has rounds. */
+async function readAsked($: Engine, main: string, folders: readonly string[]): Promise<{ file: string; text: string | null } | undefined> {
+  for (const folder of folders) {
+    const rounds = (await listOpt($, join(main, folder))).filter(d => d.kind === 'dir')
+      .flatMap(d => { const m = ROUND_DIR.exec(d.name); return m ? [{ name: d.name, n: Number(m[1]), r: Number(m[2]) }] : []; })
+      .sort((a, b) => b.n - a.n || b.r - a.r);
+    if (!rounds.length) continue;
+    const round = join(folder, rounds[0].name);
+    const asked = (await listOpt($, join(main, round))).find(f => f.kind === 'file' && f.name === 'asked.json');
+    if (!asked) return undefined;
+    const file = join(round, 'asked.json');
+    // Over the cap it is still listed, unread: forge writes it uncapped, and a question must not vanish (A5.m6).
+    return { file, text: asked.size > NEED_FILE_MAX ? null : (await readOpt($, join(main, file))) ?? null };
+  }
+  return undefined;
+}
+
+/**
+ * w7 A5: what the band reads for the list of what waits for the person. From the main checkout's .forge: the pending
+ * authorizations, the asked.json of each running task in review, the surfaces the run asked about (with local.yaml)
+ * and the proposals; from this project's cache under `root`, the roadmap's notes. The asked.json and the surfaces belong
+ * to the execution of this project (an ephemeral one, or any without a project) that is not closed. Never throws: what
+ * fails leaves its field as it is.
+ */
+async function loadNeeds($: Engine, main: string, root: string, project: string | null, execution: string | undefined, now: number): Promise<NeedFiles> {
+  const out: NeedFiles = {};
+  const forge = join(main, '.forge');
+  try {
+    const dir = join(forge, 'execution', 'auth');
+    const files = (await jsonFiles($, dir, NEED_FILE_MAX, id => AUTH_ID.test(id))).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, AUTH_KEEP);
+    const auth = await readListed($, dir, files);
+    if (auth) out.auth = auth;
+  } catch { /* no authorizations */ }
+  try {
+    const run = execution === undefined ? null : parseExecution(execution, now);
+    if (run && !run.closedAt && (run.kind !== 'plan' || project === null || run.project === project)) {
+      const asked: NonNullable<BandFiles['asked']> = {};
+      const reviewing = Object.entries(run.tasks).filter(([id, t]) => t.status === 'running' && t.stage === 'review' && isSafeId(id)).slice(0, BAND_SLOTS_MAX);
+      for (const [id] of reviewing) {
+        const folders = [...(run.kind === 'plan' && isSafeId(run.project) ? [join('.forge', 'work', run.project, id)] : []), join('.forge', 'work', id)];
+        const found = await readAsked($, main, folders);
+        if (found) asked[id] = found;
+      }
+      if (Object.keys(asked).length) out.asked = asked;
+      if (isSafeId(run.runId)) {
+        const dir = join(forge, 'execution', 'asked', run.runId);
+        const files = (await jsonFiles($, dir, SURFACE_FILE_MAX, id => isSafeId(id))).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).slice(0, SURFACES_KEEP);
+        const surfaces = await readListed($, dir, files);
+        if (surfaces) {
+          out.surfacesAsked = surfaces;
+          const local = await readSmall($, join(forge, 'local.yaml'), NEED_FILE_MAX);
+          if (local !== undefined) out.local = local;
+        }
+      }
+    }
+  } catch { /* no review questions, no surfaces */ }
+  try {
+    const proposals = await readProposals($, main);
+    if (proposals) out.proposals = proposals;
+  } catch { /* no proposals */ }
+  try {
+    if (project) {
+      const dir = join(root, '.waypoint', project, 'dbcache', 'notes');
+      const files = (await jsonFiles($, dir, NOTE_FILE_MAX, id => NOTE_ID.test(id))).sort(byNameDesc).slice(0, NOTES_KEEP);
+      const notes = await readListed($, dir, files);
+      if (notes) out.notes = notes;
+    }
+  } catch { /* no notes */ }
+  return out;
 }
 
 /**
@@ -237,11 +355,14 @@ async function readBandFiles($: Engine): Promise<{ project: string | null; files
   const root = await $.session.root();
   const now = await nowMs($);
   const sessionId = await sessionIdOf($);
+  // The main checkout (the session may be in a worktree of it), resolved once for forge's files and the sources of the band.
+  const main = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
   const projects = await projectEntries($, root, now);
   const project = pickProject(projects.map(p => p.entry), sessionId);
   const chosen = projects.find(p => p.entry.name === project);
   if (!project || !chosen) {
-    return { project: null, files: { states: {}, messages: {}, critiques: {}, ...(await loadForge($, root, now)), sessionId, now } };
+    const forge = await loadForge($, main, now);
+    return { project: null, files: { states: {}, messages: {}, critiques: {}, ...forge, ...(await loadNeeds($, main, root, null, forge.execution, now)), sessionId, now } };
   }
   const pdocs = join(root, 'docs', 'waypoint', project);
   const pstate = join(root, '.waypoint', project);
@@ -263,6 +384,7 @@ async function readBandFiles($: Engine): Promise<{ project: string | null; files
     const text = await readOpt($, file);
     if (text !== undefined) critiques[`critique-r${round}.json`] = text;
   }
+  const forge = await loadForge($, main, now);
   const files: BandFiles = {
     plan: await readOpt($, join(pdocs, 'plan.yaml')),
     design: await readOpt($, join(pdocs, 'design.md')),
@@ -276,7 +398,8 @@ async function readBandFiles($: Engine): Promise<{ project: string | null; files
     // The newest MAX_DOCS: the band reads them again on every 30 s tick, one engine call each, so it does not count
     // every message as the start hook does once per session; an open message older than the newest 500 is rare.
     messages: await readCollection($, join(pstate, 'dbcache', 'messages'), 'last'),
-    ...(await loadForge($, root, now)),
+    ...forge,
+    ...(await loadNeeds($, main, root, project, forge.execution, now)),
     critiques,
     sessionId,
     now,
@@ -287,7 +410,7 @@ async function readBandFiles($: Engine): Promise<{ project: string | null; files
 /** The band of this conversation; without a waypoint project it draws nothing, with the role from forge's execution (I2). */
 export async function loadBandModel($: Engine): Promise<BandModel> {
   const { project, files } = await readBandFiles($);
-  return project ? buildBandModel(project, files) : noneBand(undefined, executionViewer(files));
+  return project ? buildBandModel(project, files) : withNeeds(noneBand(undefined, executionViewer(files)), null, files);
 }
 
 /**

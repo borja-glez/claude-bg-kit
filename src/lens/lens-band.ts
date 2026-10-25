@@ -49,7 +49,7 @@ export function bandSubject(m: PanelModel | null, live: { todos?: readonly strin
 }
 
 /** The band's parts, its section (icon and colour), its boxes and their ratio, and whether a spinner shows. */
-export function lensBand(m: PanelModel | null, t: { sSubagents: string; sNow: string }, agentsHeard: number): LensBand {
+export function lensBand(m: PanelModel | null, t: { sSubagents: string; sNow: string; needsN: (n: number) => string }, agentsHeard: number): LensBand {
   const acts = ownInProgress(m);
   const head = m ? headline(m) : null;
   const agents = m ? m.subagents.length : agentsHeard;
@@ -66,6 +66,8 @@ export function lensBand(m: PanelModel | null, t: { sSubagents: string; sNow: st
     if (cells?.total) parts.push({ key: 'count', text: `${cells.done}/${cells.total}`, prio: 5, hue: 'accent' });
     if (head?.detail) parts.push({ key: 'detail', text: head.detail, prio: 6, hue: 'dim' });
   }
+  const needs = m?.needs?.total;
+  if (needs) parts.push({ key: 'needs', text: `» ${t.needsN(needs)}`, short: `» ${needs}`, prio: 3, hue: 'accent' });
   if (agents > 0) parts.push({ key: 'agents', text: `◎ ${agents}`, prio: 5, hue: 'accent' });
   const adhoc = (m?.activities ?? []).find(a => a.kind === 'adhoc')?.agents ?? [];
   for (const g of adhoc.slice(0, AGENTS_NAMED)) {

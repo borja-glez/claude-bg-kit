@@ -1,5 +1,5 @@
 import type { BandModel } from '../mod/model.js';
-import { normalizeProposal } from '../lib/proposals.js';
+import { normalizeProposal, PROPOSAL_ID } from '../lib/proposals.js';
 import { cleanText, normalizeStatus, statusKey, type ForgeStatus } from '../lib/forge-status.js';
 import { parseRun } from '../lib/forge-run.js';
 import { FUTURE_SKEW_MS, isSafeId, normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
@@ -187,6 +187,8 @@ export type PanelModel = {
     queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];
   } | null;
   proposals: { id: string; title: string; category: string; risk: string }[];
+  // what waits for the person, as the band carries it (needs-you.ts in lib): absent when nothing does
+  needs?: { total: number; items: { kind: 'review-question' | 'authorization' | 'untrusted-commands' | 'run' | 'question' | 'proposal' | 'design-approval' | 'surface'; id: string; what: string; task: string | null; runId: string | null; file: string | null; since: string | null; command: string | null; place: 'coordinator' | 'conversation' | 'roadmap' | null; unverified?: true }[] };
   mainModel: { model: string; effort: string | null } | null;
   // one entry per piece of work going on: a forge task, a workflow run, superpowers, the todos, the agents without a task.
   activities: {
@@ -272,7 +274,8 @@ function superpowers(input: {
 
 const FORGE_WINDOW_MS = 24 * 3600_000;
 const MAX_PROPOSALS = 5;
-export const PROPOSAL_ID = /^p\d{14}[0-9a-z]{4}$/;
+// The proposal id rule lives in lib/proposals.ts now (the band reads proposals too); lens's importers keep their path.
+export { PROPOSAL_ID };
 
 /** The forge section of one task's status: its fields without the times, its briefs and its timing (C5: of the expanded activity). */
 export function forgeOf(st: ForgeStatus, now: number, briefs: number | null = null, liveTypes: readonly string[] = []): NonNullable<PanelModel['forge']> {
@@ -640,6 +643,7 @@ export function buildPanelModel(input: {
     decisions: decisionsSummary(input.forgeDecisions, now),
     execution: withAgents,
     proposals: pendingProposals(input.proposals),
+    ...(band.needs ? { needs: band.needs } : {}),
     mainModel: mainLoop?.model ? { model: mainLoop.model, effort: mainLoop.effort } : null,
     activities: view.activities, waiting: view.waiting, jobs: view.jobs,
     usage,

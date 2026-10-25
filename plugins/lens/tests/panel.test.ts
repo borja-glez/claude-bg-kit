@@ -260,7 +260,7 @@ test('without a waypoint project, activity shows the lens minimal band whose Pan
     expect(await ui.find({ key: 'panel' })).toBeUndefined();
     await ui.unmount();
   }
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'lens', surface, component: 'AbovePrompt', props: BAND_PROPS });
     expect((await ui.findAll({ type: 'Button' })).map(b => b.key)).toEqual(['panel', 'dismiss']);
@@ -312,15 +312,21 @@ async function bandButtons($: Engine) {
   return out;
 }
 
-test('a todo list with every item completed shows no minimal band', async ($, on) => {
+test('todos alone, open or completed, show no minimal band and keep nothing reading (w7 A5)', async ($, on) => {
+  const reads: string[] = [];
   servePanes(on);
-  serveFiles(on, []);
-  start(on);
+  serveFiles(on, reads);
+  const clock = start(on);
   engineBand(on);
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'completed', activeForm: 'A' }] });
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }, { content: 'b', status: 'completed', activeForm: 'B' }] });
   expect(await bandButtons($)).toEqual([[], []]);
+  await clock.advance(30000);
+  expect(reads).toEqual([]);
+  // Another activity still brings it.
+  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  expect(await bandButtons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
 });
 
 test('a subagent heard of more than an hour ago shows no minimal band', async ($, on) => {
@@ -342,14 +348,14 @@ test('the cross hides the minimal band until the next session', async ($, on) =>
   engineBand(on);
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
   await ui.press({ key: 'dismiss' });
   expect(await ui.find({ key: 'panel' })).toBeUndefined();
   expect(await ui.find({ text: 'engine band' })).toBeDefined();
   await ui.unmount();
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
   expect(await bandButtons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
 });
 
@@ -373,7 +379,7 @@ test('once the pane is closed no panel state is written, and the band reads file
   written.length = 0;
   await clock.advance(30000);
   expect(reads).toEqual([]);
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
   await clock.advance(30000);
   expect(written).not.toContain('lens.panel');
 });

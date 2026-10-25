@@ -556,3 +556,84 @@ describe("renewBindings (C3): the band keeps this conversation's bindings alive"
     expect(JSON.parse(files[`${web}/bound.json`]).seenAt).toBe(t(0));
   });
 });
+
+describe('loadBandFiles · what waits for the person (w7 A5)', () => {
+  const main = '/repo';
+  const stalled = (over: object = {}) => JSON.stringify({
+    ...JSON.parse(EXEC), active: false, stopReason: 'stalled', stallReason: 'x',
+    tasks: { T002: task('running', { stage: 'review' }), T003: task('running'), T001: task('integrated') }, ...over,
+  });
+  const auth = (id: string) => `${main}/.forge/execution/auth/${id}.json`;
+  it("reads forge's sources from the main checkout when the session is a worktree of it, and the notes from its own project cache (Review Focus 1)", async () => {
+    const root = '/repo-w';
+    const f: Record<string, string> = {
+      ...base(root), [`${root}/.git`]: `gitdir: ${main}/.git/worktrees/w\n`,
+      [`${main}/.forge/execution.json`]: stalled(),
+      [auth('merge-r1-ab12')]: 'A', [`${main}/.forge/execution/auth/notes.txt`]: 'no',
+      [`${main}/.forge/execution/asked/r1/web.json`]: 'S',
+      [`${main}/.forge/local.yaml`]: 'L',
+      [`${main}/.forge/work/demo-shop/T002/reviews-1-9/asked.json`]: 'old',
+      [`${main}/.forge/work/demo-shop/T002/reviews-1-10/asked.json`]: 'Q',
+      [`${main}/.forge/work/T003/reviews-1-1/asked.json`]: 'not in review',
+      [`${main}/.forge/proposals/p20261024100000abcd.json`]: 'P',
+      [`${root}/.forge/proposals/p20261024100000zzzz.json`]: 'another checkout',
+      [`${root}/.waypoint/demo-shop/dbcache/notes/e1.json`]: 'N',
+    };
+    const files = (await loadBandFiles(fake(root, f).$))!.files;
+    expect(files).toMatchObject({
+      auth: { 'merge-r1-ab12': 'A' }, surfacesAsked: { web: 'S' }, local: 'L', notes: { e1: 'N' },
+      asked: { T002: { file: '.forge/work/demo-shop/T002/reviews-1-10/asked.json', text: 'Q' } },
+    });
+    expect(Object.keys(files.auth!)).toEqual(['merge-r1-ab12']);
+    expect(Object.keys(files.asked!)).toEqual(['T002']);
+    expect(files.proposals).toEqual({ p20261024100000abcd: 'P' });
+  });
+  it('a file listed but not read stays null; an oversized one, a foreign name or a folder that is not there gives nothing', async () => {
+    const root = main;
+    const f: Record<string, string> = { ...base(root), [`${root}/.forge/execution.json`]: EXEC, [auth('merge-r1-ab12')]: 'A', [auth('merge-r1-zz99')]: 'B', [auth('mof-r1-cd34')]: 'C' };
+    const fk = fake(root, f, { beforeRead: p => { if (p.endsWith('zz99.json')) throw new Error('EBUSY'); }, over: { [auth('mof-r1-cd34')]: { size: 65 * 1024 } } });
+    const files = (await loadBandFiles(fk.$))!.files;
+    expect(files.auth).toEqual({ 'merge-r1-ab12': 'A', 'merge-r1-zz99': null });
+    for (const k of ['asked', 'surfacesAsked', 'local', 'proposals', 'notes']) expect(files, k).not.toHaveProperty(k);
+  });
+  it("an asked.json over the cap is still reported, with no text, so the inbox names the file (A5.m6)", async () => {
+    const root = main;
+    const asked = `${main}/.forge/work/T002/reviews-1-1/asked.json`;
+    const f: Record<string, string> = { ...base(root), [`${root}/.forge/execution.json`]: stalled(), [asked]: "Q" };
+    const files = (await loadBandFiles(fake(root, f, { over: { [asked]: { size: 65 * 1024 } } }).$))!.files;
+    expect(files.asked).toEqual({ T002: { file: ".forge/work/T002/reviews-1-1/asked.json", text: null } });
+  });
+  it("2c: a stopped run's coordinator bindings are read until it is closed, so an open conversation keeps [Resume] away past 12 minutes (Review Focus 2)", async () => {
+    const root = main;
+    const seat = `${root}/.waypoint/other/seats/main-2/bound.json`;
+    const mine = bound('main-2', 'coord-h');
+    const f: Record<string, string> = { ...base(root), [`${root}/.forge/execution.json`]: stalled({ hookSession: 'coord-h', lastStepAt: iso(now - 20 * 60_000) }), [seat]: mine };
+    const looks = () => fake(root, f, { id: 'conv-9' }).$;
+    expect((await loadBandFiles(looks()))?.files.coordinatorBindings).toEqual({ 'other/main-2': mine });
+    expect(await loadBandModel(looks())).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'run', coordinatorOpen: true });
+    f[`${root}/.forge/execution.json`] = stalled({ hookSession: 'coord-h', closedAt: iso(now) });
+    const closed = (await loadBandFiles(looks()))!.files;
+    for (const k of ['coordinatorBindings', 'asked', 'surfacesAsked']) expect(closed, k).not.toHaveProperty(k);
+  });
+  it('proposal files are read again only when their listing changes, as lens reads them', async () => {
+    // A root of its own: the cache outlives each call, and another test's listing must not answer for this one.
+    const root = '/cached';
+    const file = `${root}/.forge/proposals/p20261024100000abcd.json`;
+    const f: Record<string, string> = { ...base(root), [`${root}/.forge/execution.json`]: EXEC, [file]: 'P1' };
+    expect((await loadBandFiles(fake(root, f).$))!.files.proposals).toEqual({ p20261024100000abcd: 'P1' });
+    const same = fake(root, f);
+    expect((await loadBandFiles(same.$))!.files.proposals).toEqual({ p20261024100000abcd: 'P1' });
+    expect(same.reads).not.toContain(file);
+    f[file] = 'P2';
+    const moved = fake(root, f, { over: { [file]: { mtimeMs: 2 } } });
+    expect((await loadBandFiles(moved.$))!.files.proposals).toEqual({ p20261024100000abcd: 'P2' });
+    expect(moved.reads).toContain(file);
+  });
+  it('loadBandModel carries what waits, with and without a waypoint project', async () => {
+    const root = main;
+    const pending = JSON.stringify({ authId: 'merge-r1-ab12', kind: 'merge', runId: 'r1', target: 'main', question: 'q', yes: 'Sí', createdAt: iso(now - 60_000), session: ID });
+    const forge = { [`${root}/.forge/execution.json`]: EXEC, [auth('merge-r1-ab12')]: pending };
+    expect(await loadBandModel(fake(root, { ...base(root), ...forge }).$)).toMatchObject({ needs: { total: 1, items: [{ kind: 'authorization', what: 'main', place: 'coordinator' }] } });
+    expect(await loadBandModel(fake(root, forge).$)).toMatchObject({ mode: 'none', needs: { total: 1 } });
+  });
+});

@@ -52,6 +52,7 @@ function start(on: On) {
   const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   return clock;
 }
 
@@ -87,7 +88,9 @@ const status = (task: string, over: object = {}) => JSON.stringify({
 });
 
 const SESSION = { cwd: ROOT, surface: 'terminal' as const, isInteractive: true };
-const TODOS = { tool: 'TodoWrite' as const, todos: [{ content: 'a', status: 'in_progress' as const, activeForm: 'a' }] };
+// w7 A5: todos no longer bring lens's band. A forge.cjs call that names a task this session works on does, for 10 minutes
+// (forgeHeardAt), and draws nothing of its own while that task has no status.
+const FORGE_CALL = { tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T009-1 --path medium', tool_use_id: 'f1' } as never;
 // A waypoint project this session has joined, which waypoint draws a band for: a plan and its session.
 const SHOP_PLAN = `project: shop
 locale: es
@@ -134,7 +137,7 @@ test('with a waypoint project and the waypoint plugin, lens leaves the band to w
   start(on);
   on('command.list', () => ({ value: [WAYPOINT_COMMAND] }));
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   expect(await buttons($)).toEqual([[], []]);
 });
 
@@ -144,7 +147,7 @@ test('a waypoint project without the waypoint plugin still gets the lens minimal
   start(on);
   on('command.list', () => ({ value: [] }));
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   expect(await buttons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
 });
 
@@ -154,7 +157,7 @@ test('a plan without a session still gets the lens minimal band', async ($, on) 
   start(on);
   on('command.list', () => ({ value: [WAYPOINT_COMMAND] }));
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   expect(await buttons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
 });
 
@@ -178,7 +181,7 @@ test('the 30 s tick hands the band to waypoint once its project is joined', asyn
   const clock = start(on);
   on('command.list', () => ({ value: [WAYPOINT_COMMAND] }));
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   expect(await buttons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
   Object.assign(files, WAYPOINT_PROJECT);
   await clock.advance(30000);
@@ -194,7 +197,7 @@ test("the lens minimal band stacks over another plugin's band beneath", async ($
   start(on);
   on('command.list', () => ({ value: [] }));
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'lens', surface, component: 'AbovePrompt', props: BAND_PROPS });
     expect(await ui.find({ key: 'panel' })).toBeDefined();
@@ -222,7 +225,7 @@ test('a waypoint command the engine does not attribute still counts as the waypo
   start(on);
   on('command.list', () => ({ value: [{ name: 'waypoint:work', description: 'Work', source: 'plugin' as const }] }));
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   expect(await buttons($)).toEqual([[], []]);
 });
 
@@ -233,7 +236,7 @@ test('with the waypoint band closed with ×, lens draws its minimal band (F-16)'
   on('command.list', () => ({ value: [WAYPOINT_COMMAND] }));
   serveWaypointState(on, { hidden: true });
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   expect(await buttons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
 });
 
@@ -245,7 +248,7 @@ test('waypoint says whether it draws: a dismissed notice (drawn false) leaves th
   const state = { drawn: false };
   serveWaypointState(on, state);
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   expect(await buttons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
   state.drawn = true;
   expect(await buttons($)).toEqual([[], []]);
@@ -259,7 +262,7 @@ test("waypoint's own word wins over its × flag: drawn false with hidden set dra
   const state = { hidden: true, drawn: false };
   serveWaypointState(on, state);
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   expect(await buttons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
   state.drawn = true;
   expect(await buttons($)).toEqual([[], []]);
@@ -273,7 +276,7 @@ test('a waypoint unloaded mid-session leaves its last drawn behind: within a tic
   on('command.list', () => ({ value: commands }));
   serveWaypointState(on, { drawn: true });
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   expect(await buttons($)).toEqual([[], []]);
   commands = [];
   await clock.advance(30_000);
@@ -288,7 +291,7 @@ test("an x within 5 s of waypoint's band going does not close lens's band, which
   const state = { drawn: true };
   serveWaypointState(on, state);
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   const mount = () => $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
   let ui = await mount();
   expect(await ui.find({ key: 'panel' })).toBeUndefined();
@@ -315,8 +318,8 @@ test("lens's × closes its band for what it is about: todos that move on keep it
   engineBand(on);
   const clock = start(on);
   on('command.list', () => ({ value: [] }));
-  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   await $.session.start(SESSION);
+  await $.tool.call(FORGE_CALL);
   // The same list throughout (re-review m-4 keys it by its items): only its statuses move on.
   await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'in_progress', activeForm: 'a' }, { content: 'b', status: 'pending', activeForm: 'b' }] });
   await clock.advance(30_000);
@@ -346,6 +349,7 @@ test("lens's × on the todos holds while the list moves on, and a new todo bring
   const todo = (content: string, status: 'pending' | 'in_progress' | 'completed') => ({ content, status, activeForm: content });
   const mount = () => $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
   await $.session.start(SESSION);
+  await $.tool.call(FORGE_CALL);
   await $.tool.call({ tool: 'TodoWrite', todos: [todo('a', 'in_progress'), todo('b', 'pending')] });
   await clock.advance(30_000);
   let ui = await mount();
@@ -399,7 +403,7 @@ test('a command listing that fails keeps waypoint loaded: its own drawn still ke
   });
   serveWaypointState(on, { drawn: true });
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   expect(await buttons($)).toEqual([[], []]);
   fails = true;
   await clock.advance(30_000);
@@ -418,7 +422,7 @@ test("lens's band names this session's tasks in progress, each as short as a ban
   const clock = start(on);
   on('command.list', () => ({ value: [] }));
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   await clock.advance(30_000);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
   expect(await lineOf(ui)).toBe('T001 impl · T002 rev r2 · T003 val');
@@ -431,6 +435,7 @@ test("lens's band fits the width: at 80 columns its parts and measured buttons s
   const clock = start(on);
   on('command.list', () => ({ value: [] }));
   await $.session.start(SESSION);
+  await $.tool.call(FORGE_CALL);
   await $.tool.call({ tool: 'TodoWrite', todos: [
     { content: 'a', status: 'completed', activeForm: 'A' },
     { content: 'b', status: 'in_progress', activeForm: 'Writing the parser for every configuration file of the whole project' },
@@ -458,6 +463,7 @@ test("under 30 columns lens's band still draws its two buttons, and what is left
   start(on);
   on('command.list', () => ({ value: [] }));
   await $.session.start(SESSION);
+  await $.tool.call(FORGE_CALL);
   await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'in_progress', activeForm: 'Writing the parser for every configuration file' }] });
   for (const bodyColumns of [12, 16, 20, 24, 28]) {
     for (const isFullscreen of [true, false]) {
@@ -484,7 +490,7 @@ test("lens's hint follows its band's state, not its last drawing: there before a
     return h(Text, {}, e.props.hint) as RenderElement;
   });
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   const viewport = { columns: 105, rows: 30, isFullscreen: false };
   const HINT = { plugin: 'lens' as const, surface: 'terminal' as const, component: 'PromptHint' as const, props: { isDraft: false, isWorking: false, hint: '?' }, viewport };
   let hint = await $.ui.mount(HINT);
@@ -510,7 +516,7 @@ test("lens's band buttons have their letters, plain outside fullscreen, and the 
     return h(Text, {}, e.props.hint) as RenderElement;
   });
   await $.session.start(SESSION);
-  await $.tool.call(TODOS);
+  await $.tool.call(FORGE_CALL);
   for (const isFullscreen of [true, false]) {
     const viewport = { columns: 105, rows: 30, isFullscreen };
     const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS, viewport });

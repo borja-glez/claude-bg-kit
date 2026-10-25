@@ -2,9 +2,11 @@
 // mark and decisions changed after their mark, the owner's or forge's policy's (only to the owner), open escalations,
 // external blocks with their reason, recent deferred findings, a stalled run, an infinite run without its coordinator and
 // a page older than the plan's waypoint. Pure: the page decides each entry from
-// its model; the view says what to do and links the object. Nothing here changes shared state.
+// its model; the view says what to do and links the object. Nothing here changes shared state. The questions, the
+// proposals and the stopped run come out of needsYou (src/lib/needs-you.ts), the rule that lens and the band share.
 import { liveness } from '../lib/coordination.js';
 import { isPlanId } from '../lib/ids.js';
+import { needsYou, RUN_HALTS } from '../lib/needs-you.js';
 import type { ForgeDocV2 } from '../lib/roadmap-doc.js';
 import { withinRunTtl } from '../lib/run-ttl.js';
 import type { MessageDoc, NoteDoc, TaskState } from '../lib/types.js';
@@ -13,7 +15,7 @@ import { unmarkedReason } from './html.js';
 import type { Model } from './model.js';
 
 /** §4.3: what stops a run without closing it; each one names itself in «Te necesita» and in the banner of Ejecuciones (C33). */
-export const HALTS = ['stalled', 'stopped', 'budget'] as const;
+export const HALTS = RUN_HALTS;
 export type Halt = (typeof HALTS)[number];
 
 /** How long the deferred findings of a done task stay in «Te necesita» (§2, decisión menor). */
@@ -51,9 +53,19 @@ function recentDeferred(m: Model, id: string): { doneAt: string; findings: numbe
 /** The entries of «Te necesita», in the order of the table of §4.6.1. */
 export function needsOf(m: Model, pageVersion: string = WAYPOINT_VERSION): Need[] {
   const out: Need[] = [];
-  // An open question: no answer, and not closed by a decision (H-17, answeredByNote).
-  for (const n of m.notes) if (n.type === 'question' && !n.answer && !n.answeredByNote) out.push({ kind: 'question', note: n });
-  const open = m.proposals.filter(p => p.status === 'proposed' || p.status === 'discussing').length;
+  // The questions, the open proposals and the stopped run are needsYou's (the rule lens and the band share). The records
+  // go in by position, not by id: the page's own order of m.notes is what comes out, and an id never has to match back.
+  const r = m.run;
+  const shared = needsYou({
+    now: m.now,
+    notes: Object.fromEntries(m.notes.map((n, i) => [String(i), n])),
+    proposals: Object.fromEntries(m.proposals.map((p, i) => [String(i), p])),
+    run: r ? { runId: r.runId, active: r.active, stopReason: r.stopReason ?? null, stallReason: r.stallReason ?? null,
+      startedAt: r.startedAt ?? null, lastStepAt: r.lastStepAt ?? null, closedAt: r.closedAt ?? null, coordinatorOpen: null } : undefined,
+  }).filter(n => !n.unverified);
+  const asked = new Set(shared.filter(n => n.kind === 'question').map(n => Number(n.id)));
+  m.notes.forEach((n, i) => { if (asked.has(i)) out.push({ kind: 'question', note: n }); });
+  const open = shared.filter(n => n.kind === 'proposal').length;
   if (open) out.push({ kind: 'proposals', count: open });
   // §4.1: only to the owner, the approvals that will not count until they carry the owner's mark (the one shared predicate):
   // those without a mark, to confirm, and apart (review I2, re-review N1) those whose decision changed after the owner took
@@ -79,11 +91,8 @@ export function needsOf(m: Model, pageVersion: string = WAYPOINT_VERSION): Need[
   });
   if (deferred.length) out.push({ kind: 'deferred', findings: deferred.reduce((n, x) => n + x.findings, 0), tasks: deferred.map(({ id, doneAt }) => ({ id, doneAt })) });
   // §4.3: a run that stopped without being closed, within its 24 h.
-  const r = m.run;
-  const stop = r && !r.active && !r.closedAt ? HALTS.find(x => x === r.stopReason) : undefined;
-  if (r && stop) {
-    if (withinRunTtl(m.now, Date.parse(r.lastStepAt ?? r.startedAt ?? ''))) out.push({ kind: 'stalled', runId: r.runId, reason: r.stallReason ?? null, stop });
-  }
+  const stop = r ? HALTS.find(x => x === r.stopReason) : undefined;
+  if (r && stop && shared.some(n => n.kind === 'run' || n.kind === 'untrusted-commands')) out.push({ kind: 'stalled', runId: r.runId, reason: r.stallReason ?? null, stop });
   // G-08: an active infinite run whose coordinator's lease stopped, within its 24 h (the same rule, carry 7).
   const c = m.infinite?.active === true ? m.infinite.coordinator : null;
   if (c && liveness(m.now, c.leaseUntil) === 'stopped' && withinRunTtl(m.now, Date.parse(c.leaseUntil))) out.push({ kind: 'infinite', since: c.seenAt });

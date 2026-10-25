@@ -47,11 +47,15 @@ function servePanes(on: On) {
   return open;
 }
 
+// w7 A5: todos no longer bring lens's band. A forge.cjs call that names a task this session works on does, for 10 minutes
+// (forgeHeardAt), and draws nothing of its own while that task has no status.
+const FORGE_CALL = { tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T009-1 --path medium', tool_use_id: 'f1' } as never;
+
 function start(on: On) {
   const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('agent.list', () => ({ value: [] }));
-  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   return clock;
 }
 
@@ -289,7 +293,7 @@ test("in fullscreen the band's Panel button runs /lens foto at 109 columns and /
   const ran: string[] = [];
   on('command.run', (_$, e) => { ran.push(`/${e.command} ${e.args}`.trimEnd()); return { text: '' }; });
   await $.session.start(SESSION);
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await $.tool.call(FORGE_CALL);
   for (const columns of [109, 110]) {
     const band = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND_PROPS, bodyColumns: columns - 5 }, viewport: { columns, rows: 30, isFullscreen: true } });
     await band.press({ key: 'panel' });
@@ -309,7 +313,7 @@ test('a Panel press that cannot run /lens leaves it in the prompt and says to pr
   on('prompt.fill', (_$, e) => { filled.push(e.text); return { isFilled: true }; });
   on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
   await $.session.start(SESSION);
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await $.tool.call(FORGE_CALL);
   const band = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS, viewport: { columns: 105, rows: 30, isFullscreen: false } });
   await band.press({ key: 'panel' });
   await band.unmount();
@@ -327,7 +331,7 @@ test("outside fullscreen the band's Panel button runs /lens foto (§4.6, step 2)
   const ran: string[] = [];
   on('command.run', (_$, e) => { ran.push(`/${e.command} ${e.args}`.trimEnd()); return { text: '' }; });
   await $.session.start(SESSION);
-  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await $.tool.call(FORGE_CALL);
   const band = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS, viewport: { columns: 105, rows: 30, isFullscreen: false } });
   await band.press({ key: 'panel' });
   await band.unmount();

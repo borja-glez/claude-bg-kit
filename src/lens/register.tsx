@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
 import { noneBand, type BandModel } from '../mod/model.js';
-import { buildPanelModel, bandKey, parseSddLedger, summarizeTodos, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
+import { buildPanelModel, bandKey, parseSddLedger, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
 import { normalizeStatus, statusKey } from '../lib/forge-status.js';
 import { JOB_FILE_MAX, runRoleOf } from './activities.js';
@@ -79,7 +79,7 @@ const agentTools = new Map<string, Map<string, { name: string; since: number }>>
 const pendingEnds = new Map<string, number>();
 const PENDING_END_MS = 2 * 60_000;
 const PENDING_ENDS_MAX = 50;
-// Whether there is activity worth a band of its own (open todos or recent subagents) when no waypoint band shows.
+// Whether there is activity worth a band of its own (recent subagents, links agents or forge work; todos alone do not count) when no waypoint band shows.
 let busy = false;
 // The roadmap section, read from the waypoint project's files at the panel's pace while the pane is open.
 let roadmap: BandModel = noneBand();
@@ -246,14 +246,13 @@ function applyPendingEnd(id: string, now: number): void {
   if (now - at <= PENDING_END_MS) links = endAgent(links, id, at);
 }
 
-// Open todos, a subagent heard of within the hour (older entries are dropped here), an agent of links still alive, or
+// A subagent heard of within the hour (older entries are dropped here), an agent of links still alive, or
 // this session's own forge work: in progress in the last model and moving (final review m-3: a task left in progress for
 // LEFT_OPEN_MS keeps nothing reading), or a forge.cjs call heard within 10 minutes (§4.6: the surfaces need the tick
-// reading while it lasts).
+// reading while it lasts). Todos alone count for nothing: Claude Code 2.1.233 took TodoWrite away from the newest models.
 function isBusy(now: number): boolean {
   activity.subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
-  const todos = summarizeTodos(activity.todos);
-  return todos.total - todos.done > 0 || activity.subagents.length > 0 || links.some(l => l.status !== 'done')
+  return activity.subagents.length > 0 || links.some(l => l.status !== 'done')
     || ownBusy(bandModel, runRoleOf(roadmap)) || (forgeHeardAt !== null && now - forgeHeardAt < FORGE_HEARD_MS);
 }
 
@@ -1013,6 +1012,10 @@ const TEXT = {
     accepted: 'aceptado', acceptedInRound: (n: number) => `aceptado en la ronda ${n}`,
     waitingOn: (n: number, wake: string | null) => `esperando a ${n} ${n === 1 ? 'subagente' : 'subagentes'}${wake ? ` · despierta en ${wake}` : ''}`,
     waitingLbl: 'en espera', cached: 'caché', reviewersLbl: 'revisan',
+    sNeeds: 'Te toca',
+    needKind: { 'review-question': 'pregunta de revisión', authorization: 'fusión por autorizar', 'untrusted-commands': 'confianza en los comandos', run: 'ejecución parada', question: 'pregunta', proposal: 'propuesta', 'design-approval': 'diseño por aprobar', surface: 'permiso de superficie' },
+    needCoordinator: 'te toca en la conversación de la coordinadora', needConversation: 'en la conversación que preguntó', needRoadmap: 'en el roadmap', needUnverified: 'no se pudo leer',
+    needsN: (n: number) => `te toca ${n}`,
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
     briefs: 'briefs', cycle: 'ciclo', task: 'Tarea', proposals: 'Propuestas',
     sUsage: 'Consumo', effort: 'esfuerzo', thisSession: 'esta sesión', active: 'activo', sinceStart: 'desde el inicio', taskTime: 'tarea', run: 'ejecución', gMain: 'Sesión principal', gImpl: 'Implementadores', gReview: 'Revisores', gVerify: 'Verificación', blocked: 'bloqueada', gPlan: 'Planificación y scout', gOther: 'Otros subagentes', tracking: 'Seguimiento', withoutForge: 'Sin forge (estimado)', withoutForgeNote: 'orientativo: en una sola sesión el contexto crecería y costaría más, y no habría revisión; el extremo bajo supone que todo el seguimiento se releía en cada paso', forgeCosts: (usd: string, pct: number) => `forge cuesta +${usd} (+${pct} %)`, forgeSaves: (usd: string) => `forge ahorra −${usd}`, pricesAsOf: 'precios a', drift: 'precios o medición incompletos', various: 'varios', noReview: 'sin revisiones independientes', effortLevel: (e: string) => ({ low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' } as Record<string, string>)[e] ?? e,
@@ -1043,6 +1046,10 @@ const TEXT = {
     accepted: 'accepted', acceptedInRound: (n: number) => `accepted in round ${n}`,
     waitingOn: (n: number, wake: string | null) => `waiting on ${n} subagent${n === 1 ? '' : 's'}${wake ? ` · wakes in ${wake}` : ''}`,
     waitingLbl: 'waiting', cached: 'cached', reviewersLbl: 'reviewers',
+    sNeeds: 'Waiting for you',
+    needKind: { 'review-question': 'review question', authorization: 'merge to authorize', 'untrusted-commands': 'trust in the commands', run: 'stopped execution', question: 'question', proposal: 'proposal', 'design-approval': 'design to approve', surface: 'surface permission' },
+    needCoordinator: "your turn in the coordinator's conversation", needConversation: 'in the conversation that asked', needRoadmap: 'on the roadmap', needUnverified: 'could not be read',
+    needsN: (n: number) => `waiting for you ${n}`,
     pressEnter: 'Command ready in the prompt: press Enter',
     briefs: 'briefs', cycle: 'cycle', task: 'Task', proposals: 'Proposals',
     sUsage: 'Usage', effort: 'effort', thisSession: 'this session', active: 'active', sinceStart: 'since start', taskTime: 'task', run: 'run', gMain: 'Main session', gImpl: 'Implementers', gReview: 'Reviewers', gVerify: 'Verification', blocked: 'blocked', gPlan: 'Planning and scout', gOther: 'Other subagents', tracking: 'Tracking', withoutForge: 'Without forge (estimate)', withoutForgeNote: 'rough: in one session the context would grow and cost more, with no review; the low end assumes all the tracking was re-read on every step', forgeCosts: (usd: string, pct: number) => `forge costs +${usd} (+${pct}%)`, forgeSaves: (usd: string) => `forge saves −${usd}`, pricesAsOf: 'prices as of', drift: 'prices or measurement incomplete', various: 'mixed', noReview: 'no independent review', effortLevel: (e: string) => e,

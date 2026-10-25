@@ -37,7 +37,7 @@ export const TEXT = {
     approve: 'Aprobar', viewDesign: 'Ver diseño', nextTask: 'Siguiente tarea', status: 'Estado',
     launch: 'Lanzar sesión en un frente…', roadmap: 'Abrir roadmap',
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
-    panel: 'Panel',
+    panel: 'Panel', needs: 'te toca',
     run: 'EJECUCIÓN', subagents: 'subagentes', sessions: 'sesiones', silentSfx: 'sin señal', signalShort: 'señal', stoppedSfx: 'parada', stopRun: 'Parar',
     integratedN: 'integradas', queuedN: 'por integrar', memberOf: 'de la ejecución de {c}',
     otherTrack: 'Otro frente', view: 'Ver', join: 'Unirme', resume: 'Retomar', release: 'Liberar', close: 'Cerrar',
@@ -69,7 +69,7 @@ export const TEXT = {
     approve: 'Approve', viewDesign: 'View design', nextTask: 'Next task', status: 'Status',
     launch: 'Launch session on track…', roadmap: 'Open roadmap',
     pressEnter: 'Command ready in the prompt: press Enter',
-    panel: 'Panel',
+    panel: 'Panel', needs: 'waiting for you',
     run: 'EXECUTION', subagents: 'subagents', sessions: 'sessions', silentSfx: 'no signal', signalShort: 'signal', stoppedSfx: 'stopped', stopRun: 'Stop',
     integratedN: 'integrated', queuedN: 'to integrate', memberOf: "in {c}'s execution",
     otherTrack: 'Other track', view: 'View', join: 'Join', resume: 'Resume', release: 'Release', close: 'Close',
@@ -100,6 +100,12 @@ export const textsFor = (locale: string | undefined): Texts => (locale === 'es' 
 
 const stageText = (t: Texts, stage: string): string => t.stage[stage as keyof typeof t.stage] ?? stage;
 const decisionPart = (t: Texts): BandPart => ({ key: 'decision', text: `▲ ${t.decision}`, short: `▲ ${t.decisionShort}`, prio: 1, hue: 'alert' });
+
+// what waits for the person (w7 A5): one part, between the pending decision (1) and the inbox (3); lens lists the items.
+function needsPart(m: { needs?: { total: number } }, t: Texts): BandPart[] {
+  const total = m.needs?.total;
+  return total ? [{ key: 'needs', text: `» ${t.needs} ${total}`, short: `» ${total}`, prio: 2, hue: 'warn' }] : [];
+}
 
 // forge's automatic decisions of the last day, appended to any band that draws.
 function autoPart(m: { auto?: { count: number; lastMajor: string | null } }): BandPart[] {
@@ -143,6 +149,7 @@ function workParts(m: Extract<BandModel, { mode: 'work' }>, nowMs: number, t: Te
   }
   if (!m.track) parts.push({ key: 'tasks', text: `${t.tasks} ${m.trackDone}/${m.trackTotal}`, short: `${m.trackDone}/${m.trackTotal}`, prio: 5 });
   parts.push({ key: 'percent', text: `${t.overall} ${m.percent} %`, short: `${m.percent}%`, prio: 7 });
+  parts.push(...needsPart(m, t));
   if (m.inbox > 0) parts.push({ key: 'inbox', text: `✎ ${m.inbox}`, prio: 3 });
   if (m.escalation) parts.push(decisionPart(t));
   return [...parts, ...autoPart(m)];
@@ -157,6 +164,7 @@ function designParts(m: Extract<BandModel, { mode: 'design' }>, t: Texts): BandP
     parts.push({ key: 'pending', text: `${m.pending} ${m.pending === 1 ? t.pendingOne : t.pending}`, prio: 4 });
     parts.push({ key: 'critical', text: `${m.pendingCritical} ${m.pendingCritical === 1 ? t.criticalOne : t.critical}`, prio: 3, ...(m.pendingCritical > 0 ? { hue: 'alert' as const } : {}) });
   }
+  parts.push(...needsPart(m, t));
   return [...parts, ...autoPart(m)];
 }
 
@@ -186,6 +194,7 @@ function runParts(m: Extract<BandModel, { mode: 'run' }>, t: Texts): BandPart[] 
     const silent = m.worst === 'silent';
     parts.push({ key: 'state', text: `▲ ${silent ? t.silentSfx : t.stoppedSfx}`, short: `▲ ${silent ? t.signalShort : t.stoppedSfx}`, prio: 2, hue: 'alert' });
   }
+  parts.push(...needsPart(m, t));
   if ((m.inbox ?? 0) > 0) parts.push({ key: 'inbox', text: `✎ ${m.inbox}`, prio: 3 });
   if (m.escalation) parts.push(decisionPart(t));
   return [...parts, ...autoPart(m)];
