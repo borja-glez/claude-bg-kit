@@ -79,8 +79,9 @@ describe('work folders in the skills of forge (D-08)', () => {
       const out: string[] = [];
       if (/\.forge\/work\/(?:T|<T>)(?=[/\s`])/.test(text)) out.push(rel(f));
       // A reference names a task's folder <WORK>. A loose task's .forge/work/<id> stays in forge:run's own body and in a
-      // superpowers plan, and task.txt is written before any triage.
-      if (rel(f).includes('/references/') && !rel(f).endsWith('superpowers-plan.md') && /\.forge\/work\/<id>(?!\/task\.txt)(?=[/\s`])/.test(text)) out.push(`${rel(f)} (<id>)`);
+      // superpowers plan, and task.txt is written before any triage. tdd.md's Small step runs in the main checkout, in
+      // the task's own .forge/work/<id>, never in an execution's worktree.
+      if (rel(f).includes('/references/') && !rel(f).endsWith('superpowers-plan.md') && !rel(f).endsWith('references/tdd.md') && /\.forge\/work\/<id>(?!\/task\.txt)(?=[/\s`])/.test(text)) out.push(`${rel(f)} (<id>)`);
       return out;
     });
     expect(hits).toEqual([]);
