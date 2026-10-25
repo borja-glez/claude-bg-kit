@@ -66,11 +66,14 @@ describe('the bug route behind tdd: verified (A9)', () => {
     for (const t of ['Fix the crash when saving an empty cart', 'it crashes when the cart is empty', 'Login is broken after the upgrade', 'the export no longer works with CSV',
       'Regression in the date parser', 'it throws an exception on empty input', 'Bug: totals round the wrong way', 'Saving fails with large files',
       'Arregla el fallo al guardar pedidos vacíos', 'El login no funciona tras el cambio', 'error al exportar el CSV', 'regresión en el parser de fechas',
-      'la app se cuelga al abrir el carrito', 'lanza una excepción con la entrada vacía', 'El guardado falla con ficheros grandes']) expect(isBugTask(t), t).toBe(true);
+      'la app se cuelga al abrir el carrito', 'lanza una excepción con la entrada vacía', 'El guardado falla con ficheros grandes',
+      'la app crashea al abrir el carrito', 'el login crasheó tras el cambio']) expect(isBugTask(t), t).toBe(true);
     for (const t of ['fix the typo in the README', 'Add a debug flag to the CLI', 'Handle errors in the parser', 'Add retry on network errors',
       'Add crash reporting to the app', 'Show a message when login fails', 'Si falla la red, reintenta', 'Añade un fallback para el idioma',
       'Document the `bug` label in CONTRIBUTING', 'Añade el botón de exportar',
-      'Añade un aviso que no va a salir en móvil', 'Muestra un mensaje de error al guardar']) expect(isBugTask(t), t).toBe(false);
+      'Añade un aviso que no va a salir en móvil', 'Muestra un mensaje de error al guardar',
+      // The Spanish stem crashe- does not read the English crashes/crashed, which the English list excludes before report.
+      'Add a weekly crashes report to the dashboard', 'List the crashes reported by users']) expect(isBugTask(t), t).toBe(false);
   });
   it('triage gives kind bug and its line from Small up, and logs it, only with tdd: verified', () => {
     const triage = (dir: string, io: Io, task: string, text: string) => {
@@ -172,6 +175,33 @@ describe('what the TDD check reads and decides (A9)', () => {
     expect(classifyTdd(files, mixed, { code: 1, output: collect, timedOut: false }, 'test', new Set()))
       .toEqual({ red: ['tests/test_a.py > test_x', 'tests/test_b.py > test_y'], passedOnBase: [], alreadyFailing: [], unjudged: ['tests/test_a.py'] });
     expect(classifyTdd(['tests/c.test.ts'], new Map(), { code: 0, output: '', timedOut: false }, 'test', new Set())).toMatchObject({ passedOnBase: [], unjudged: ['tests/c.test.ts'] });
+  });
+  it('classifyTdd finds a title as the runner prints it: escapes undone, a trailing duration and spaces tidied, a cut entry by its start', () => {
+    const patch = ['diff --git a/tests/a.test.ts b/tests/a.test.ts', '--- a/tests/a.test.ts', '+++ b/tests/a.test.ts', '@@ -1,0 +1,6 @@',
+      "+it('doesn\\'t crash', () => {", '+it("says \\"hi\\"", () => {', "+it('a\\\\b', () => {", "+it('two\\nlines', () => {",
+      "+it('retries after 100ms', () => {", "+it('two  spaces', () => {"].join('\n');
+    const names = newTestNames(patch);
+    // \n is an escape the runner prints otherwise: that title reads as dynamic, like ${…}.
+    expect(Object.fromEntries(names)).toEqual({ 'tests/a.test.ts': ["doesn't crash", 'says "hi"', 'a\\b', 'retries after 100ms', 'two  spaces'] });
+    const all = ["doesn't crash", 'says "hi"', 'a\\b', 'retries after 100ms', 'two  spaces'].map(x => `tests/a.test.ts > ${x}`);
+    const fail = all.map(l => ` FAIL  ${l}`).join('\n');
+    expect(classifyTdd(['tests/a.test.ts'], names, { code: 1, output: fail, timedOut: false }, 'test', new Set())).toEqual({ red: all, passedOnBase: [], alreadyFailing: [], unjudged: [] });
+    // vitest's per-case marks (no FAIL line) keep the case's own duration after the title.
+    const marks = new Map([['tests/a.test.ts', ['retries after 100ms', 'still passes']]]);
+    expect(classifyTdd(['tests/a.test.ts'], marks, { code: 1, output: '   × retries after 100ms 12ms\n', timedOut: false }, 'test', new Set()))
+      .toMatchObject({ red: ['tests/a.test.ts > retries after 100ms'], passedOnBase: ['tests/a.test.ts > still passes'] });
+    // failingTests cuts an entry to 300 characters: a long title is found by the start the entry keeps.
+    const long = `keeps ${'a very long title '.repeat(20)}to the end`;
+    const cut = new Map([['tests/a.test.ts', [long, 'still passes']]]);
+    expect(classifyTdd(['tests/a.test.ts'], cut, { code: 1, output: ` FAIL  tests/a.test.ts > suite > ${long}\n`, timedOut: false }, 'test', new Set()))
+      .toMatchObject({ red: [`tests/a.test.ts > ${long}`], passedOnBase: ['tests/a.test.ts > still passes'] });
+    // Cut inside its suites, an entry may name any new test of its file; a title that is only a duration leaves nothing
+    // of itself in its entry. Neither passes on BASE.
+    const deep = ` FAIL  tests/a.test.ts > ${'a long suite name '.repeat(20)}> short one\n`;
+    expect(classifyTdd(['tests/a.test.ts'], new Map([['tests/a.test.ts', ['short one']]]), { code: 1, output: deep, timedOut: false }, 'test', new Set()))
+      .toMatchObject({ red: [], passedOnBase: [], unjudged: ['tests/a.test.ts'] });
+    expect(classifyTdd(['tests/a.test.ts'], new Map([['tests/a.test.ts', ['100ms']]]), { code: 1, output: ' FAIL  tests/a.test.ts > 100ms\n', timedOut: false }, 'test', new Set()))
+      .toMatchObject({ red: [], passedOnBase: [], unjudged: ['tests/a.test.ts'] });
   });
   it('tddPlan picks the test validator and the changed test files, and keys them by BASE, the command, their content and the lockfiles', () => {
     const js = planRepo({ 'src/a.ts': 'x\n', 'tests/a.test.ts': "it('a', () => {})\n", 'package-lock.json': '{}\n' },

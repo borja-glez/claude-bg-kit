@@ -188,7 +188,7 @@ export function isPerfTask(text: string): boolean {
 // «error al» after «de») do not count.
 const BUG = [
   /\b(?:bugs?|bugfix|crash(?:es|ed|ing)?(?!\s+report)|regressions?|broken|segfaults?|stack trace|(?:throws|raises|unhandled)(?:\s+\S+){0,2}?\s+(?:exception|error)|does not work|doesn't work|no longer works|stopped working|isn't working|is not working|fails\s+(?:on|when|with|for|if|after))\b/i,
-  es('crashe|lanza una excepci|salta una excepci',
+  es('crashe(?![sd])|lanza una excepci|salta una excepci',
     'bugs?|fallos?|fallan?\\s+(?:al|con|cuando|en|tras|si)|no funciona|ya no funciona|no va(?!\\s+al?(?![\\p{L}\\p{N}_]))|regresi[oó]n|rot[oa]s?|se rompe|se cuelga|cuelgue|(?<!\\bde\\s)error(?:es)? al'),
 ];
 /** Bug work: the head of the text, its mentions removed, reads as a defect and not as mechanical work. */

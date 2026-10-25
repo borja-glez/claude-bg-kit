@@ -9,7 +9,7 @@ import path from 'node:path';
 import type { ExecResult } from './cli/run.js';
 import { LOCKFILES } from './validate-cache.js';
 import {
-  baseFailingNames, failingTests, isPytestModule, isTestFile, NO_TESTS, resolveAffected, runsPytest,
+  baseFailingNames, FAILING_NAME_MAX, failingTests, isPytestModule, isTestFile, NO_TESTS, resolveAffected, runsPytest, tidy,
   type RepoReader, type Validator, type ValidatorResult,
 } from './validators.js';
 
@@ -26,6 +26,8 @@ export interface TddPlan {
   overlay: string[];
   /** The test modules the command runs. */
   files: string[];
+  /** Every test path HEAD changed, deleted ones included: the diff the new titles are read from (a moved title is not new). */
+  testPaths: string[];
   skipped: TddSkip | null; note: string | null;
 }
 /** tdd-<n>.json: a check's result. red, passedOnBase and alreadyFailing are `<file> > <test>`; unjudged are files. */
@@ -44,10 +46,21 @@ const slash = (s: string) => s.replace(/\\/g, '/');
 const JS_TITLE = /^\s*(?:it|test)(?:\.(?:only|concurrent|sequential|fails))?\s*\(\s*(['"`])((?:\\.|(?!\1).)+)\1/;
 const PY_TEST = /^\s*(?:async\s+)?def\s+(test\w*)\s*\(/;
 
+/** A JS title as the runner prints it: \' \" \` and \\ undone; null with any other escape (\n, \u…), read as dynamic. */
+function jsTitle(source: string): string | null {
+  let other = false;
+  const title = source.replace(/\\(.)/g, (_, c: string) => {
+    if (`'"\`\\`.includes(c)) return c;
+    other = true;
+    return '';
+  });
+  return other ? null : title;
+}
+
 /**
  * The tests a diff adds, file by file: the titles of the it/test calls and the def test_* of its `+` lines. A comment, a
- * dynamic title (`${`), a `.skip` or `.todo` and a title that only moved (the same trimmed line is removed anywhere in
- * the patch) give none. A file without names is not in the map.
+ * dynamic title (`${`, or an escape other than \' \" \` \\), a `.skip` or `.todo` and a title that only moved (the same
+ * trimmed line is removed anywhere in the patch) give none. A file without names is not in the map.
  */
 export function newTestNames(patch: string): Map<string, string[]> {
   const lines = patch.split(/\r?\n/);
@@ -70,7 +83,8 @@ export function newTestNames(patch: string): Map<string, string[]> {
     const text = l.slice(1);
     const trimmed = text.trim();
     if (/^(?:\/\/|#|\*)/.test(trimmed)) continue;
-    const name = JS_TITLE.exec(text)?.[2] ?? PY_TEST.exec(text)?.[1];
+    const js = JS_TITLE.exec(text)?.[2];
+    const name = js !== undefined ? jsTitle(js) : PY_TEST.exec(text)?.[1];
     if (!name || name.includes('${')) continue;
     const left = removed.get(trimmed) ?? 0;
     if (left > 0) { removed.set(trimmed, left - 1); continue; }
@@ -85,6 +99,22 @@ const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(`${ESC}\\[[0-9;]*[A-Za-z]`, 'g');
 const SEP = String.raw`(?: > | › |::)`;
 const SEP_AT = new RegExp(`^${SEP}`);
+const SEP_ALL = new RegExp(SEP, 'g');
+/** Where a test's name can start in an entry: its start and the end of each separator. */
+const starts = (t: string): string[] => [t, ...[...t.matchAll(SEP_ALL)].map(m => t.slice((m.index ?? 0) + m[0].length))];
+
+/**
+ * Whether an entry's text names test `x`: x after the start or a separator, read as the entry is (`/` for `\`) and as
+ * failingTests tidies it (no trailing duration, one space between words) or as written (a mark line keeps the case's
+ * duration after the name). An entry failingTests cut to FAILING_NAME_MAX names x when what it has after one of those
+ * starts x.
+ */
+function namer(x: string): (t: string, cut: boolean) => boolean {
+  const y = slash(x);
+  const wants = [...new Set([tidy(y), y.replace(/\s+/g, ' ').trim()])].filter(Boolean);
+  const re = new RegExp(`(?:^|${SEP})(?:${wants.map(esc).join('|')})(?:\\[[^\\]]*\\])?$`);
+  return (t, cut) => (wants.length > 0 && re.test(t)) || (cut && starts(t).some(s => s !== '' && wants.some(w => w.startsWith(s))));
+}
 
 /** A failing entry as classifyTdd reads it: `/` for `\`, and without a vitest workspace's `|project| ` label. */
 function cleanEntry(entry: string, files: string[]): string {
@@ -104,7 +134,7 @@ export function classifyTdd(files: string[], names: ReadonlyMap<string, string[]
   const out = { red: [] as string[], passedOnBase: [] as string[], alreadyFailing: [] as string[], unjudged: [] as string[] };
   if (run.timedOut || NO_TESTS.test(run.output)) { out.unjudged.push(...files); return out; }
   const { names: raw, known } = failingTests(run.output, kind);
-  const entries = raw.map(r => ({ raw: r, text: cleanEntry(r, files) }));
+  const entries = raw.map(r => ({ raw: r, text: cleanEntry(r, files), cut: r.length >= FAILING_NAME_MAX }));
   const text = slash(run.output.replace(ANSI, ''));
   // The module an entry names (the longest of `files` it starts with, followed by a separator), or null.
   const owner = (e: string): string | null => {
@@ -112,6 +142,8 @@ export function classifyTdd(files: string[], names: ReadonlyMap<string, string[]
     for (const f of files) if (e.startsWith(f) && SEP_AT.test(e.slice(f.length)) && (best === null || f.length > best.length)) best = f;
     return best;
   };
+  // What of an entry can name a test of f: the entry less f's path, all of it when it names no file, null for another file's.
+  const rest = (e: string, f: string): string | null => { const o = owner(e); return o === null ? e : o === f ? e.slice(o.length) : null; };
   for (const f of files) {
     const list = names.get(f);
     if (!list?.length) { out.unjudged.push(f); continue; }
@@ -120,18 +152,17 @@ export function classifyTdd(files: string[], names: ReadonlyMap<string, string[]
       || (!known && entries.some(e => e.text === f))
       || (!known && run.code !== 0 && text.includes(f) && !entries.some(e => e.text.startsWith(f) && SEP_AT.test(e.text.slice(f.length))))
     );
+    const tests = list.map(x => ({ x, named: namer(x) }));
+    // A cut entry that names none of f's new tests may be any of them, and a name that is only a duration leaves nothing
+    // in its entry: a failing run cannot say such tests passed.
+    const vague = entries.some(e => { const t = rest(e.text, f); return e.cut && t !== null && !tests.some(n => n.named(t, true)); });
     let unread = false;
-    for (const x of list) {
-      const re = new RegExp(`(?:^|${SEP})${esc(x)}(?:\\[[^\\]]*\\])?$`);
-      const hit = entries.find(e => {
-        const o = owner(e.text);
-        if (o !== null && o !== f) return false;
-        return re.test(o === null ? e.text : e.text.slice(o.length));
-      });
+    for (const { x, named } of tests) {
+      const hit = entries.find(e => { const t = rest(e.text, f); return t !== null && named(t, e.cut); });
       const label = `${f} > ${x}`;
       if (hit && (baseFailing.has(hit.raw) || baseFailing.has(hit.text) || baseFailing.has(label))) out.alreadyFailing.push(label);
       else if (hit || !loads) out.red.push(label);
-      else if (known || run.code === 0) out.passedOnBase.push(label);
+      else if (run.code === 0 || (known && !vague && tidy(` ${x}`) !== '')) out.passedOnBase.push(label);
       else if (!unread) { unread = true; out.unjudged.push(f); }
     }
   }
@@ -186,19 +217,21 @@ function linkedCode(at: PlanAt): boolean {
 /**
  * What a check would run for the files `touched` (HEAD against `base`), without running anything: the test validator and
  * its command over the changed test modules, the files written over BASE, or the reason it runs nothing. The key covers
- * BASE, the command, the content of the overlay and the lockfiles, so a result is reused only for the same question.
+ * BASE, the command, the content of the overlay, the test paths the diff is read from (a deleted one changes what is new)
+ * and the lockfiles, so a result is reused only for the same question.
  */
 export function tddPlan(validators: Validator[], touched: string[], base: string, at: PlanAt): TddPlan {
   const live = touched;
   const overlay = live.filter(f => at.repo.exists(f) && (isTestFile(f) || CONFTEST.test(f)));
   const modules = overlay.filter(f => TEST_MODULE.test(f) || isPytestModule(f));
+  const testPaths = live.filter(isTestFile);
   const lockBase = at.git(['ls-tree', base, '--', ...LOCKFILES]) ?? '';
   const lockHead = at.git(['ls-tree', 'HEAD', '--', ...LOCKFILES]) ?? '';
   const overlayBlobs = overlay.length ? at.git(['ls-tree', 'HEAD', '--', ...overlay]) ?? '' : '';
-  const plan: TddPlan = { key: '', base, validator: null, kind: null, cmd: null, overlay, files: [], skipped: null, note: null };
+  const plan: TddPlan = { key: '', base, validator: null, kind: null, cmd: null, overlay, files: [], testPaths, skipped: null, note: null };
   const done = (skipped: TddSkip | null): TddPlan => {
     plan.skipped = skipped;
-    plan.key = createHash('sha256').update(JSON.stringify([1, base, plan.validator, plan.cmd, overlayBlobs, lockBase, lockHead, skipped])).digest('hex');
+    plan.key = createHash('sha256').update(JSON.stringify([1, base, plan.validator, plan.cmd, overlayBlobs, testPaths, lockBase, lockHead, skipped])).digest('hex');
     return plan;
   };
 
@@ -414,7 +447,8 @@ export function runTdd(plan: TddPlan, ctx: TddRunCtx): TddCheck {
       mkdirSync(path.dirname(dest), { recursive: true });
       writeFileSync(dest, blob);
     }
-    const names = newTestNames(ctx.git(['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-renames', '-U0', `${plan.base}..HEAD`, '--', ...plan.files]) ?? '');
+    // Over every changed test path, so the lines a renamed, split or deleted file removes cancel the titles they moved.
+    const names = newTestNames(ctx.git(['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-renames', '-U0', `${plan.base}..HEAD`, '--', ...plan.testPaths]) ?? '');
     const r = ctx.execAt(baseDir)(plan.cmd ?? '', Math.min(ctx.timeoutSec, TDD_TIMEOUT_MAX));
     const verdict = classifyTdd(plan.files, names, { code: r.code, output: r.output, timedOut: r.timedOut }, plan.kind ?? 'test', new Set(baseFailingNames(ctx.baseline, plan.validator ?? '')));
     return done({ ...verdict, skipped: r.timedOut ? 'timeout' : null });

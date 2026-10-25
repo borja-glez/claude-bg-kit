@@ -79,6 +79,17 @@ describe('the TDD check on BASE (A9)', () => {
     });
     expect(check.durationMs).toBeGreaterThan(0);
   });
+  it('a test moved with its renamed file is not new: it never passes on BASE, and the tests HEAD adds are still judged', () => {
+    const f = fixture();
+    f.git('mv', 'tests/math.test.mjs', 'tests/sum.test.mjs');
+    f.git('commit', '-q', '-m', 'rename');
+    const { check } = tddForBrief(f.ctx());
+    // add sums moved out of the deleted math.test.mjs; mul multiplies and add still sums are new in sum.test.mjs.
+    expect(check).toMatchObject({
+      skipped: null, files: ['tests/fresh.test.mjs', 'tests/sum.test.mjs'],
+      red: ['tests/fresh.test.mjs > fresh works', 'tests/sum.test.mjs > mul multiplies'], passedOnBase: ['tests/sum.test.mjs > add still sums'], unjudged: [],
+    });
+  });
   it('links the task dependencies and never deletes through the link: after a pass and after a timeout', () => {
     const f = fixture();
     tddForBrief(f.ctx());

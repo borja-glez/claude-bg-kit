@@ -235,7 +235,10 @@ const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(`${ESC}\\[[0-9;]*[A-Za-z]`, 'g');
 const MAX_FAILING = 200;
 const DURATION = /\s+[([]?\d+(?:\.\d+)?\s?m?s[)\]]?$/;
-const tidy = (s: string) => s.replace(DURATION, '').replace(/\s+/g, ' ').trim().slice(0, 300);
+/** The length failingTests cuts a failing test's name to. */
+export const FAILING_NAME_MAX = 300;
+/** A failing test's name as failingTests keeps it: no trailing duration, one space between words, cut to FAILING_NAME_MAX. */
+export const tidy = (s: string) => s.replace(DURATION, '').replace(/\s+/g, ' ').trim().slice(0, FAILING_NAME_MAX);
 // One test per line: pytest (FAILED <id>, and ERROR <file>::<test> for a setup or fixture error), go (--- FAIL: <Test>),
 // cargo (test <x> ... FAILED), dotnet (Failed <x>).
 const TEST_LINE = [/^\s*FAILED\s+(\S+)/, /^\s*ERROR\s+(\S+::\S+)/, /^\s*--- FAIL:\s+(\S+)/, /^test\s+(\S+)\s+\.\.\.\s+FAILED/, /^\s*Failed\s+(\S+)\s+\[[^\]]+\]\s*$/];
