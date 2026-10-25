@@ -84,6 +84,19 @@ describe("forge's files of a scope (A6)", () => {
     expect(existsSync(job)).toBe(true);
     expect(existsSync(path.join(root, '.forge', 'execution.json'))).toBe(false);
   });
+  it('a job joins the scope of its (project, task) pair: garden\'s T001 jobs never reach shop\'s T001, and a loose T001 job reaches neither (D-08)', () => {
+    const root = tmp('diag-src-');
+    ledger(root, [{ ts: at(1), kind: 'triage', task: 'T001', project: 'shop' }, { ts: at(2), kind: 'triage', task: 'T001', project: 'garden' }, { ts: at(3), kind: 'triage', task: 'T001' }]);
+    const job = (name: string, out: string) => put(path.join(root, '.forge', 'jobs', `${name}.json`),
+      JSON.stringify({ name, cmd: 'prep', task: 'T001', pid: 999999, startedAt: at(4), out, session: null }));
+    job('prep-shop', '.forge/work/shop/T001/prep-1.json');
+    job('prep-garden', path.join(root, '.forge', 'work', 'garden', 'T001', 'prep-1.json'));
+    job('prep-loose', '.forge/work/T001/prep-1.json');
+    const jobs = (project: string | null) => forgeSources(root, { kind: 'task', task: 'T001', project }).docs.filter(d => d.kind === 'job').map(d => d.file);
+    expect(jobs('shop')).toEqual(['.forge/jobs/prep-shop.json']);
+    expect(jobs('garden')).toEqual(['.forge/jobs/prep-garden.json']);
+    expect(jobs(null)).toEqual(['.forge/jobs/prep-loose.json']);
+  });
   it("an execution comes only from execution.json of that runId: its tasks, their public files and the run folder's outs", () => {
     const root = tmp('diag-src-');
     ledger(root, [{ ts: at(1), kind: 'triage', task: 'T001', project: 'shop', runId: 'r1', session: 's9' }]);

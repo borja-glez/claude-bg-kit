@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { LEDGER_KINDS, type LedgerEvent } from './ledger.js';
-import { attribute, baseOf, eventsOf, readWorkDir } from './task-ref.js';
+import { attribute, baseOf, eventsOf, projectOfDir, readWorkDir } from './task-ref.js';
 import { executionFile, executionTaskFile } from './execution.js';
 import { isSafeId, normalizePublicTask, parseExecution, type ExecutionState } from '../lib/execution-state.js';
 import { jobsDir, normalizeJob } from './jobs.js';
@@ -145,7 +145,8 @@ export function forgeSources(main: string, scope: Scope): ForgeSources {
   }
 
   // Jobs: read without checking their pid and without deleting any.
-  const inScope = new Set(tasks.map(t => t.task));
+  // A job joins a scope by the pair (project, task): the project is the one its out folder names, none for a loose task.
+  const inScope = new Set(tasks.map(t => JSON.stringify([t.project, t.task])));
   for (const f of names(jobsDir(main)).filter(n => n.endsWith('.json')).slice(0, JOB_FILES_MAX)) {
     const abs = path.join(jobsDir(main), f);
     let raw: unknown;
@@ -157,7 +158,8 @@ export function forgeSources(main: string, scope: Scope): ForgeSources {
     const job = normalizeJob(raw);
     if (!job) continue;
     const owner = job.task === null ? (scope.kind === 'execution' ? '' : null) : baseOf(job.task);
-    if (owner === null || (owner !== '' && !inScope.has(owner))) continue;
+    if (owner === null) continue;
+    if (owner !== '' && !inScope.has(JSON.stringify([projectOfDir(job.out, job.task as string), owner]))) continue;
     addDoc(abs, 'job', owner === '' ? null : owner, () => job.startedAt);
   }
 
