@@ -12,7 +12,7 @@ import path from 'node:path';
 import { bashSegments, segmentPath } from './autonomy-shared.js';
 import { writeInfo } from './autonomy-parse.js';
 import { commandName, type Segment, type Word } from './shell-words.js';
-import { confinedIn, guardPath, isInside, SHELL_TOOLS, targetPaths, type GuardCtx, type GuardInput, type GuardRule, type GuardVerdict } from './guard.js';
+import { confinedIn, FILE_TOOLS, guardPath, isInside, SHELL_TOOLS, targetPaths, type GuardCtx, type GuardInput, type GuardRule, type GuardVerdict } from './guard.js';
 
 export const SECRETS_RULE_ID = 'secrets';
 /** Relative to the home folder; compared with isInside. */
@@ -20,8 +20,6 @@ export const SECRET_PATHS: readonly string[] = ['.ssh', '.aws', '.config/gh', '.
 export const DOTENV_TEMPLATES: readonly string[] = ['.env.example', '.env.sample', '.env.template', '.env.dist'];
 export const VERIFY_AGENTS: readonly string[] = ['forge-verify', 'forge-verify-heavy'];
 export const READ_TOOLS: readonly string[] = ['Read', 'Grep', 'Glob'];
-
-const WRITE_TOOLS: readonly string[] = ['Edit', 'Write', 'NotebookEdit'];
 
 /** A forge agent: agent_type is a string that starts with 'forge' (forge:forge-impl, or forge-impl loaded without its prefix). */
 export function isForgeAgent(agentType: unknown): agentType is string {
@@ -239,7 +237,7 @@ export const secretsRule: GuardRule = {
   check(input, ctx) {
     if (!isForgeAgent(input.agent_type)) return null;
     const home = ctx.home ?? os.homedir();
-    const write = WRITE_TOOLS.includes(input.tool_name);
+    const write = FILE_TOOLS.includes(input.tool_name);
     let items: Item[];
     if (input.tool_name === 'Read' || write) {
       // Expand ~ and the Git Bash /x/ spelling here too, so the rule does not rely on Claude Code rewriting file_path first.

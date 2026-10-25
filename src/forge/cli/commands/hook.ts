@@ -155,6 +155,9 @@ function deliver(v: GuardVerdict, input: GuardInput, auto: AutonomousCtx | null,
 
 // The PreToolUse hook (D9): Claude Code's deny for a call the rules deny, nothing for any other call. The rules of an
 // autonomous run are added only for its sessions, which fail closed (guard-error) on any error; every other session fails open.
+// Read, Grep and Glob are the exception, also in an autonomous run's sessions: nothing judged them before A4, so they always
+// fail open (a run.json that does not read must not start denying reads). Outside a forge agent they pass before guardCtx
+// is built (no runMainsOf walk, no git); for one, only the secrets rule judges them.
 function hookGuard(io: Io): { stdout: string; stderr: string } {
   let input: GuardInput | null = null;
   let auto: AutonomousCtx | null = null;
@@ -162,8 +165,9 @@ function hookGuard(io: Io): { stdout: string; stderr: string } {
     input = parseGuardInput(JSON.parse(io.stdin ?? ''));
     if (!input) return { stdout: '', stderr: '' };
     if (READ_TOOLS.includes(input.tool_name)) {
-      // Read, Grep and Glob never build guardCtx and never fail closed: outside a forge agent they pass at once, and for
-      // one only the secrets rule judges them (judgeGuard would deny every call on an unreadable run.json: UNREADABLE_RUN).
+      // Read, Grep and Glob never fail closed: outside a forge agent they pass at once, without building guardCtx; for one,
+      // guardCtx is built and only the secrets rule judges them, and any error lets the call through. Never judgeGuard,
+      // which would deny every call on an unreadable run.json (UNREADABLE_RUN).
       if (!isForgeAgent(input.agent_type)) return { stdout: '', stderr: '' };
       try {
         const rctx = guardCtx(io, input);
