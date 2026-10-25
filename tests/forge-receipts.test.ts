@@ -102,4 +102,25 @@ describe('the texts name the receipts, the predicted conflicts and the unverifie
     expect(read('plugins/forge/README.md')).not.toContain("by the verdict's time");
     expect(read('plugins/forge/README.es.md')).not.toContain('por la hora del veredicto');
   });
+  it('a wait 0 after unreviewed steps again at once under swarm step, as after integrated (A3 polish)', () => {
+    const wait6 = read('plugins/forge/skills/run/references/execution.md').split('\n').find(l => l.startsWith('6. **Wait.**'))!;
+    expect(wait6).toContain('returned `integrated` (under `swarm step`, also `unreviewed`');
+    const wait5 = read('plugins/forge/skills/run/references/step.md').split('\n').find(l => l.startsWith('5. **Wait.**'))!;
+    expect(wait5).toContain('right after an `integrated` or `unreviewed` action: step again at once');
+  });
+  it('the READMEs say the cap of changed, how the shadow trial gathers more cases and what a hand accept after an accept gives (A3 polish)', () => {
+    const lines = (f: string, start: string) => read(f).split('\n').filter(l => l.startsWith(start));
+    for (const [f, cap, more, hand] of [
+      ['plugins/forge/README.md', 'at most 20 paths, with `changedTotal` when there are more', 'run `FORGE shadow start` again to gather more cases (the ones collected are kept)', 'is still bound to the tree of that `accept`'],
+      ['plugins/forge/README.es.md', 'como mucho 20 rutas, con `changedTotal` si hay más', 'vuelve a ejecutar `FORGE shadow start` para reunir más casos (los ya recogidos se conservan)', 'sigue atada al árbol de ese `accept`'],
+    ]) {
+      for (const l of [...lines(f, '- `swarm integrate <'), ...lines(f, '- `swarm merge [')]) expect(l, f).toContain(cap);
+      const shadow = read(f).split('\n').find(l => l.includes('`FORGE shadow start [--tasks N]`')) ?? '';
+      expect(shadow, f).toContain(more);
+      expect(shadow, f).not.toMatch(/the trial goes on|la prueba sigue/);
+      expect(lines(f, '- `swarm integrate <')[0], f).toContain(hand);
+      expect(lines(f, '- `swarm task <')[0], f).toContain('`--status accepted`');
+      expect(lines(f, '- `swarm task <')[0], f).toContain('`swarm integrate`');
+    }
+  });
 });

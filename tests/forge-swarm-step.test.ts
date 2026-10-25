@@ -1049,6 +1049,8 @@ describe('swarm step: a task whose branch changed after its accept is reviewed a
     const s = JSON.parse(r.stdout) as ReturnType<typeof step>;
     expect(s.actions.find(a => a.type === 'accepted')).toMatchObject({ task: 'T1' });
     expect(s.actions.find(a => a.type === 'unreviewed')).toMatchObject({ task: 'T1', reason: 'tree changed since its review', changed: ['src/t1/late.ts'] });
+    // A tick that integrated waits 0: step.md step 5 steps again at once after `unreviewed` too, so the review is prepared without a sleep.
+    expect(s.wait).toBe(0);
     expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'validate' });
     expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnReviewers', round: 2 });
   });
