@@ -1,0 +1,5 @@
+{
+  "name": "bgkit-e2e-probe",
+  "version": "0.0.0",
+  "description": "A8 e2e: records the input of every hook event in BGKIT_E2E_HOOK_LOG."
+}
