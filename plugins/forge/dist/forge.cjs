@@ -37175,6 +37175,7 @@ function nestedOn(root) {
   }
 }
 function heldRunner(c, task, t) {
+  if (!(0, import_node_fs74.existsSync)(import_node_path76.default.join(c.io.cwd, workRel({ project: c.project, task }), RUNNER_FILE))) return null;
   const file = import_node_path76.default.join(c.io.cwd, workOf(c, task, readEvents(c.io.cwd)), RUNNER_FILE);
   const doc = readJson5(file);
   if (!isObject3(doc) || doc.state !== "running" || doc.runId !== c.runId || doc.attempts !== t.attempts) return null;
