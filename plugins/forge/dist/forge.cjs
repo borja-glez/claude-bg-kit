@@ -22084,7 +22084,6 @@ var SECRET_PATHS = [".ssh", ".aws", ".config/gh", ".netrc", ".git-credentials", 
 var DOTENV_TEMPLATES = [".env.example", ".env.sample", ".env.template", ".env.dist"];
 var VERIFY_AGENTS = ["forge-verify", "forge-verify-heavy"];
 var READ_TOOLS = ["Read", "Grep", "Glob"];
-var WRITE_TOOLS = ["Edit", "Write", "NotebookEdit"];
 function isForgeAgent(agentType) {
   return typeof agentType === "string" && agentType.startsWith("forge");
 }
@@ -22266,7 +22265,7 @@ var secretsRule = {
   check(input, ctx) {
     if (!isForgeAgent(input.agent_type)) return null;
     const home = ctx.home ?? import_node_os3.default.homedir();
-    const write = WRITE_TOOLS.includes(input.tool_name);
+    const write = FILE_TOOLS.includes(input.tool_name);
     let items;
     if (input.tool_name === "Read" || write) {
       const tool_input = { ...input.tool_input };
@@ -33323,14 +33322,14 @@ var trackedCheck = {
   run(ctx) {
     const names3 = ["local.yaml", "learned.jsonl"];
     const states = names3.map((name) => ({ name, state: trackedState(ctx.main, name) }));
-    const tracked = states.find((s2) => s2.state === "tracked");
-    if (tracked) {
+    const tracked = states.filter((s2) => s2.state === "tracked").map((s2) => s2.name);
+    if (tracked.length) {
       return {
         id: "tracked-state",
         status: "warn",
-        detail: `git tracks .forge/${tracked.name}, so a repository could ship it; it grants nothing`,
-        data: { tracked: states.filter((s2) => s2.state === "tracked").map((s2) => s2.name) },
-        fix: { do: `git rm --cached .forge/${tracked.name}`, kind: "manual" }
+        detail: `git tracks .forge/${tracked[0]}, so a repository could ship it; it grants nothing`,
+        data: { tracked },
+        fix: { do: `git rm --cached ${tracked.map((n) => `.forge/${n}`).join(" ")}`, kind: "manual" }
       };
     }
     const unknown2 = states.find((s2) => s2.state === "unknown");
@@ -33379,16 +33378,20 @@ var verifyEnvCheck = {
     };
   }
 };
+var readOnlyGit = (cwd2) => {
+  const git2 = defaultGit(cwd2);
+  return (args) => git2(["--no-optional-locks", ...args]);
+};
 function worktreesCheck(ctx) {
   const peek = peekExecution(ctx.main);
   const skip = peek.exec?.active ? "a run is active" : peek.migratable ? "a legacy swarm.json is not migrated yet" : mergeInFlight(ctx.main, ctx.now.getTime()) ? "an integration is merging" : scanJobs(ctx.main, ctx.now).live.length ? "a forge command is running" : stepLockHeld(ctx.main, ctx.now) ? "a swarm step is running" : null;
   if (skip) return { id: "worktrees", status: "ok", detail: `skipped: ${skip}` };
   try {
     const r2 = swarmCommand(["cleanup", "--dry-run"], { cwd: ctx.main, now: () => ctx.now, env: ctx.env }, {
-      git: defaultGit(ctx.main),
+      git: readOnlyGit(ctx.main),
       exec: defaultExec(ctx.main),
       repo: repoReader(ctx.main),
-      at: (dir) => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) })
+      at: (dir) => ({ git: readOnlyGit(dir), exec: defaultExec(dir), repo: repoReader(dir) })
     });
     if (r2.code !== 0) return { id: "worktrees", status: "unverified", detail: (r2.stderr || r2.stdout).trim() || `swarm cleanup --dry-run exited ${r2.code}` };
     const { removed } = JSON.parse(r2.stdout);
@@ -33645,22 +33648,30 @@ var waypointDoctorCheck = {
     const leftovers = [];
     for (const plan of plans) {
       try {
-        const out = (0, import_node_child_process10.execFileSync)(process.execPath, [wp, "doctor", plan], { cwd: ctx.main, input: "", timeout: 1e4, windowsHide: true, encoding: "utf8" });
+        const out = (0, import_node_child_process10.execFileSync)(process.execPath, [wp, "doctor", plan], {
+          cwd: ctx.main,
+          input: "",
+          timeout: 1e4,
+          windowsHide: true,
+          encoding: "utf8",
+          stdio: ["pipe", "pipe", "pipe"]
+        });
         const parsed = JSON.parse(out);
         const list = isObj11(parsed) ? parsed.leftovers : null;
         if (!Array.isArray(list)) return { id, status: "unverified", detail: `waypoint doctor ${plan} gave no leftovers list` };
-        for (const l of list) leftovers.push(isObj11(l) && typeof l.path === "string" ? l.path : String(l));
+        for (const l of list) leftovers.push({ plan, path: isObj11(l) && typeof l.path === "string" ? l.path : String(l) });
       } catch (e) {
         return { id, status: "unverified", detail: `waypoint doctor ${plan} did not run: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}` };
       }
     }
     if (!leftovers.length) return { id, status: "ok", detail: "waypoint left nothing under .waypoint/" };
+    const fixes = plans.filter((p) => leftovers.some((l) => l.plan === p)).map((p) => `waypoint doctor ${p} --fix`);
     return {
       id,
       status: "warn",
       detail: `waypoint left ${leftovers.length} leftover(s) under .waypoint/`,
       data: { leftovers },
-      fix: { do: `waypoint doctor ${plans[0]} --fix removes them`, kind: "confirm" }
+      fix: { do: fixes.length === 1 ? `${fixes[0]} removes them` : `${fixes.join(" and ")} remove them`, kind: "confirm" }
     };
   }
 };
