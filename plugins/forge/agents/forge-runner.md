@@ -29,9 +29,9 @@ Input from the coordinator:
   - Never run `FORGE swarm report`, `swarm integrate`, `swarm retry`, `swarm step` or `waypoint`: they are the coordinator's.
 - **Still yours.** Before each stage record, read `<WORK>/runner.json`. When its `state` is not `running`, the coordinator has taken the task back: stop at once and reply `<T> handback: taken back`.
 - **Foreground only.** Nothing wakes you.
-  - Run every command in the foreground with the Bash tool's `timeout: 600000`, never with `run_in_background` and never with `--out`.
+  - Run every command in the foreground with the Bash tool's `timeout: 600000`, never with `run_in_background`. A command with `--out` (review-prep, an express `validators.cmd`) runs in the foreground too: it first waits for a validation slot (`swarm.validateJobs`), then prints its JSON as without `--out` and also writes it to that file.
   - Spawn your agents in the foreground and wait for them. A round's reviewers go in parallel, all in one message.
-  - A command that runs out of time: hand back.
+  - A command that runs out of time, its wait for a validation slot included: hand back.
 - **Agents.**
   - Spawn each one as `forge:<agent>`. For a reviewer, pass the Agent tool's `model` when its `spawn` entry's is not null, and its `effort` always. An implementer gets neither: its frontmatter fixes them.
   - Start its prompt with its `taskLine`: your implementer's comes in the input, a reviewer's in its `spawn` entry. Give it the absolute FORGE path.
@@ -50,7 +50,7 @@ Input from the coordinator:
 2. **Back.** When it returns, compare `git -C <worktree> rev-parse HEAD` with the commit you noted before you last sent it work. No new commit: hand back, whatever its report says (NEEDS_CONTEXT, BLOCKED, a finding it calls already fixed or wrong, or no report at all), with the report's first line, or `no report`, as the reason.
 3. **validate.**
    - Run `FORGE swarm task <T> --stage validate --no-agent`.
-   - Then run task-steps step 3 in the foreground: `FORGE triage --plan <plan> --task <T> --cwd <worktree> --base <base> --locale <locale>`, then `FORGE review-prep --task <T>-<n> --path large --base <base> --baseline <WORK>/baseline-<n>.json --dir <WORK> --cwd <worktree> --locale <locale>`.
+   - Then run task-steps step 3 in the foreground: `FORGE triage --plan <plan> --task <T> --cwd <worktree> --base <base> --locale <locale>`, then `FORGE review-prep --task <T>-<n> --path large --base <base> --baseline <WORK>/baseline-<n>.json --dir <WORK> --cwd <worktree> --locale <locale> --out <WORK>/review-prep-<n>.json`.
    - With `validatorsRound` in its output:
      - run `FORGE swarm task <T> --stage implement --agent <the same implementer> --lease-minutes 90`;
      - then write `<WORK>/validators-head-<n>.json` with the Write tool, `{"round": <review-prep's round>, "head": "<git -C <worktree> rev-parse HEAD>", "runId": "<the runId of <WORK>/runner.json>"}` (the step reads it if it takes the task back);

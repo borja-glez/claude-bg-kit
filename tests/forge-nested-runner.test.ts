@@ -229,7 +229,8 @@ describe('the runner agent and the coordinator text (A10)', () => {
     for (const w of ['task-steps.md', '<WORK>/runner.json', 'FORGE swarm task <T> --stage', '--lease-minutes 90', 'timeout: 600000',
       'FORGE triage --plan <plan> --task <T> --cwd <worktree> --base <base>', 'FORGE review-prep --task <T>-<n>', 'FORGE verify-plan --task <T>-<n>',
       'FORGE review-close --task <T>-<n>', 'FORGE log --kind agent --task <T>-<n>', '<WORK>/deferred.json', '--stage verdict --status accepted --no-agent',
-      'SendMessage', '`<T> accepted`', '`<T> handback: <', '`<T> handback: taken back`', 'validators-head-<n>.json']) expect(md, w).toContain(w);
+      'SendMessage', '`<T> accepted`', '`<T> handback: <', '`<T> handback: taken back`', 'validators-head-<n>.json',
+      '--out <WORK>/review-prep-<n>.json']) expect(md, w).toContain(w);
   });
   it('step.md hands the coordinator spawnRunner and handback, and a runner that comes back goes in --returned', () => {
     const lines = doc('plugins/forge/skills/run/references/step.md').split('\n');
