@@ -22104,6 +22104,16 @@ function targetsDotenv(lastSegment2) {
   const literal2 = lastSegment2.slice(0, at2).toLowerCase();
   return literal2 === ".env" || literal2.startsWith(".env.");
 }
+function expandHome(p, home, platform = process.platform) {
+  const t = p.trim();
+  if (t === "~") return home;
+  if (t.startsWith("~/") || t.startsWith("~\\")) return import_node_path17.default.join(home, t.slice(2));
+  if (platform === "win32") {
+    const m = /^\/([A-Za-z])\//.exec(t);
+    if (m) return `${m[1].toUpperCase()}:/${t.slice(3)}`;
+  }
+  return p;
+}
 function secretOf(p, home) {
   for (const entry2 of SECRET_PATHS) if (isInside(p, import_node_path17.default.join(home, ...entry2.split("/")))) return "~/" + entry2;
   return null;
@@ -22125,9 +22135,9 @@ function dotenvVerdict(p, input, ctx, write) {
   return confinedIn(p, ctx.main) ? null : deny2(OUTSIDE(p, ctx.main));
 }
 var asString = (x) => typeof x === "string" && x !== "" ? x : null;
-function searchItems(input, ctx) {
+function searchItems(input, ctx, home) {
   const base = (input.cwd ?? ctx.main).replace(/\\/g, "/");
-  const given = asString(input.tool_input.path)?.replace(/\\/g, "/") ?? ".";
+  const given = expandHome(asString(input.tool_input.path) ?? ".", home).replace(/\\/g, "/");
   const isGlob2 = input.tool_name === "Glob";
   const pattern = asString(isGlob2 ? input.tool_input.pattern : input.tool_input.glob)?.replace(/\\/g, "/") ?? null;
   let folder = "";
@@ -22135,7 +22145,7 @@ function searchItems(input, ctx) {
     const wild = pattern.search(WILDCARD);
     folder = wild === -1 ? pattern : pattern.slice(0, pattern.slice(0, wild).lastIndexOf("/") + 1);
   }
-  const root = import_node_path17.default.resolve(base, given, folder);
+  const root = import_node_path17.default.resolve(base, given, expandHome(folder, home).replace(/\\/g, "/"));
   const last = pattern === null ? "" : pattern.slice(pattern.lastIndexOf("/") + 1);
   return [{ p: root, search: true, dotenv: targetsDotenv(import_node_path17.default.basename(root)) || targetsDotenv(last) }];
 }
@@ -22145,6 +22155,15 @@ var PATTERN_COMMANDS = ["grep", "egrep", "fgrep", "rg", "ag", "ack", "findstr", 
 var URL2 = /^[a-z][a-z0-9+.-]+:\/\//i;
 var PS_VALUE_OPTION = /^-(?:path|literalpath|include|exclude|encoding|context|culture)$/i;
 var PS_GLUED = /^-[a-z][a-z0-9-]*:(.+)$/i;
+var VALUE_OPTIONS = {
+  grep: ["-m", "-A", "-B", "-C", "-d", "-D", "--max-count", "--context", "--include", "--exclude", "--exclude-dir", "--label"],
+  rg: ["-g", "--glob", "--iglob", "-t", "--type", "-T", "--type-not", "-m", "-A", "-B", "-C", "-M", "-j", "-E", "--encoding", "-d", "--max-depth", "-r", "--replace", "--sort"]
+};
+VALUE_OPTIONS.egrep = VALUE_OPTIONS.grep;
+VALUE_OPTIONS.fgrep = VALUE_OPTIONS.grep;
+VALUE_OPTIONS.ag = VALUE_OPTIONS.grep;
+VALUE_OPTIONS.ack = VALUE_OPTIONS.grep;
+var FILE_PATTERN_COMMANDS = ["grep", "egrep", "fgrep", "rg"];
 function homeSpelled(text4, home) {
   const m = HOME_SPELLING.exec(text4);
   return m ? home + text4.slice(m[0].length) : text4;
@@ -22153,29 +22172,43 @@ function patternWords(seg, name) {
   const out = /* @__PURE__ */ new Set();
   if (!PATTERN_COMMANDS.includes(name)) return out;
   const args = seg.argv.slice(1);
+  const valueOpts = VALUE_OPTIONS[name] ?? [];
   let explicit = false;
-  args.forEach((a, i) => {
+  let firstOperand = null;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
     const t = a.text;
     if (t === "-e" || t === "--regexp" || /^-pattern$/i.test(t)) {
       explicit = true;
-      if (args[i + 1]) out.add(args[i + 1]);
-    } else if (/^--regexp=/.test(t) || /^-e[^-]/.test(t) || /^-pattern:/i.test(t)) {
+      if (args[i + 1]) out.add(args[++i]);
+      continue;
+    }
+    if (/^--regexp=/.test(t) || /^-e[^-]/.test(t) || /^-pattern:/i.test(t)) {
       explicit = true;
       out.add(a);
+      continue;
     }
-  });
-  if (!explicit) {
-    for (let i = 0; i < args.length; i++) {
-      const t = args[i].text;
-      if (PS_VALUE_OPTION.test(t)) {
-        i++;
-        continue;
-      }
-      if (t.startsWith("-") || name === "findstr" && t.startsWith("/")) continue;
-      out.add(args[i]);
-      break;
+    if (name === "findstr" && /^\/[cg]:/i.test(t)) {
+      explicit = true;
+      continue;
     }
+    if (FILE_PATTERN_COMMANDS.includes(name) && (t === "-f" || t === "--file")) {
+      explicit = true;
+      if (args[i + 1]) i++;
+      continue;
+    }
+    if (FILE_PATTERN_COMMANDS.includes(name) && /^--file=/.test(t)) {
+      explicit = true;
+      continue;
+    }
+    if (valueOpts.includes(t) || PS_VALUE_OPTION.test(t)) {
+      if (args[i + 1]) i++;
+      continue;
+    }
+    if (t.startsWith("-") || name === "findstr" && t.startsWith("/")) continue;
+    if (firstOperand === null) firstOperand = a;
   }
+  if (!explicit && firstOperand !== null) out.add(firstOperand);
   return out;
 }
 var lastSegment = (t) => t.slice(Math.max(t.lastIndexOf("/"), t.lastIndexOf("\\")) + 1);
@@ -22232,21 +22265,25 @@ var secretsRule = {
   id: SECRETS_RULE_ID,
   check(input, ctx) {
     if (!isForgeAgent(input.agent_type)) return null;
+    const home = ctx.home ?? import_node_os3.default.homedir();
     const write = WRITE_TOOLS.includes(input.tool_name);
     let items;
     if (input.tool_name === "Read" || write) {
-      items = targetPaths(input, ctx).map((p) => ({ p, search: false, dotenv: isDotenvName(import_node_path17.default.basename(guardPath(p))) }));
+      const tool_input = { ...input.tool_input };
+      for (const f of ["file_path", "notebook_path"]) {
+        const v = tool_input[f];
+        if (typeof v === "string" && v !== "") tool_input[f] = expandHome(v, home);
+      }
+      items = targetPaths({ ...input, tool_input }, ctx).map((p) => ({ p, search: false, dotenv: isDotenvName(import_node_path17.default.basename(guardPath(p))) }));
     } else if (input.tool_name === "Grep" || input.tool_name === "Glob") {
-      items = searchItems(input, ctx);
+      items = searchItems(input, ctx, home);
     } else if (SHELL_TOOLS.includes(input.tool_name)) {
-      const home2 = ctx.home ?? import_node_os3.default.homedir();
       for (const seg of bashSegments(input, ctx) ?? []) {
-        const v = segmentVerdict(seg, input, ctx, home2);
+        const v = segmentVerdict(seg, input, ctx, home);
         if (v !== null) return v;
       }
       return null;
     } else return null;
-    const home = ctx.home ?? import_node_os3.default.homedir();
     for (const { p, search, dotenv } of items) {
       const secret = secretOf(p, home);
       if (secret !== null) return deny2(CREDS(secret));
