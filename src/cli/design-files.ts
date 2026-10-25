@@ -1,5 +1,5 @@
 // K3-10: where a design's critiques live. They are versioned with the design in docs/waypoint/<project>/design/critiques/
-// (r<N>.json and dismissed.json); the ones written before waypoint 0.27.0 stay in the repository's .waypoint/<project>/
+// (r<N>.json, dismissed.json and comments.json); the ones written before waypoint 0.27.0 stay in the repository's .waypoint/<project>/
 // (critique-r<N>.json and dismissed.json) and are still read. Every path comes from the design file, never from the
 // working directory, so a session in a worktree or in another folder finds the same files.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -16,7 +16,7 @@ export interface DesignFiles {
   file: string;
   /** Its folder: docs/waypoint/<project>/. */
   dir: string;
-  /** <folder>/design/critiques/: r<N>.json and dismissed.json, committed with the design. */
+  /** <folder>/design/critiques/: r<N>.json, dismissed.json and comments.json (ids, rounds, versions), committed with the design. */
   critiques: string;
   /** <repository>/.waypoint/<project>/: critique-r<N>.json and dismissed.json from before waypoint 0.27.0. */
   legacy: string;
@@ -105,7 +105,7 @@ export function writeCommentsSeen(f: DesignFiles, s: CommentsSeen): string {
   return p;
 }
 
-/** The design's history: version →the text of design/history/v<N>.md. */
+/** The design's history: version → the text of design/history/v<N>.md. */
 export function readHistory(dir: string): Record<number, string> {
   const hist = path.join(dir, 'design', 'history');
   const out: Record<number, string> = {};
