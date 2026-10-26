@@ -1646,6 +1646,19 @@ describe('plugin layout', () => {
     const step4 = read('plugins/waypoint/skills/plan/SKILL.md').split('\n').find(l => l.startsWith('4. For each batch'))!;
     expect(step4).toContain('references/roadmap-writes.md');
   });
+  it('waypoint:plan asks the model to write no file of the checkout: the CLI writes them, and a background session lists into the conversation (w8 W2)', () => {
+    const plan = read('plugins/waypoint/skills/plan/SKILL.md');
+    for (const w of ['--write-capabilities', 'set-roadmap <plan> <url>', "--versions '<V>'", 'the three calls in one message', 'clean-cache <plan> meta plan state',
+      '**A background session in the main checkout.**', 'db-import <plan> <collection>=<job tmp>/waypoint-<collection>.txt', "--known .waypoint/<project>/known.json` instead of `--versions`",
+      'from your own worktree, as the work skill\'s delegation does']) expect(plan, w).toContain(w);
+    for (const w of ['capabilities.json` with the Write tool', 'Write `.waypoint/<project>/known.json`', 'Write the returned URL into', 'write them to the file and run the command again',
+      'with cwd = `MAIN_REPO`']) expect(plan, w).not.toContain(w);
+    // The delegation adds the task through the CLI and lists into its own worktree, never into MAIN_REPO.
+    const multi = workRef('multisession');
+    const delegation = multi.slice(multi.indexOf('**Delegation.**'), multi.indexOf('\n## After the task'));
+    for (const w of ['add-task PLAN_MAIN --task-file <SEAT>/delegate.json', 'from this worktree with plan path `PLAN_MAIN`', 'you never write into `MAIN_REPO` yourself']) expect(delegation, w).toContain(w);
+    for (const w of ['out_dir` paths under `MAIN_REPO', 'cd "MAIN_REPO" && node', 'undo the edit']) expect(delegation, w).not.toContain(w);
+  });
   it('waypoint:plan hands page --publish-info the capabilities file it publishes, every time (final review I5)', () => {
     const plan = read('plugins/waypoint/skills/plan/SKILL.md');
     const publish = plan.slice(plan.indexOf('## 3. Publish the roadmap page'), plan.indexOf('## 4. Sync the database'));

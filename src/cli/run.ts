@@ -26,6 +26,7 @@ import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
 import { isCommitCommand, runHook } from './hooks.js';
+import { COLLECTION, PlanFileError, addTaskText, isWebLink, parseListing, parseVersions, setRoadmapText, type ListedDoc } from './plan-files.js';
 import { launchCommand, launchRun, PLAN_PATH } from '../lib/launcher.js';
 import { PAGE_RULES, declaresAssets, roadmapCapabilities, rulesOf, sharingChange, sharingNotice, syncSummary } from '../lib/publish.js';
 import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
@@ -47,7 +48,7 @@ const nodeSpawn: Spawn = (command, options) => spawn(command, options);
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined>; spawn?: Spawn }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|replan|hash|clean-cache|page|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-comments|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|replan|hash|clean-cache|db-import|page|set-roadmap|add-task|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-comments|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -201,14 +202,79 @@ export function run(argv: string[], io: Io): Result {
         return ok(JSON.stringify({ changes: r.changes, history: parsePlan(r.text).history?.length ?? 0 }));
       }
       case 'clean-cache': {
+        // w8 W4: several collections in one call (`clean-cache <plan> meta plan state`), each checked before any goes.
         const p = loadPlan();
-        const collection = args[1] ?? '';
-        if (!/^[a-z_]{1,32}$/.test(collection)) return fail('clean-cache: <collection> must match ^[a-z_]{1,32}$', 2);
+        const collections = args.slice(1);
+        if (!collections.length || collections.some(c => !COLLECTION.test(c))) return fail('clean-cache: each <collection> must match ^[a-z_]{1,32}$', 2);
         const root = path.join(io.cwd, '.waypoint');
-        const target = path.resolve(root, p.project, 'dbcache', collection);
-        if (!target.startsWith(root + path.sep)) return fail('clean-cache: path escapes .waypoint', 2);
-        rmSync(target, { recursive: true, force: true });
-        return ok(target);
+        const targets = collections.map(c => path.resolve(root, p.project, 'dbcache', c));
+        if (targets.some(t => !t.startsWith(root + path.sep))) return fail('clean-cache: path escapes .waypoint', 2);
+        for (const t of targets) rmSync(t, { recursive: true, force: true });
+        return ok(targets.join('\n'));
+      }
+      case 'db-import': {
+        // w8 W2: a background session that has not entered a worktree cannot list into the checkout (bgIsolation refuses
+        // out_dir there, and outside it no one can approve it): it lists into the conversation, saves each result as it is
+        // in its job folder, and this writes the cache and known.json from them. Every file is read before any is written.
+        const p = loadPlan();
+        const pairs = args.slice(1).filter(a => !a.startsWith('--'));
+        if (!pairs.length) return fail('usage: waypoint db-import <plan.yaml> <collection>=<listing file> …', 2);
+        const read: { collection: string; docs: ListedDoc[] }[] = [];
+        for (const pair of pairs) {
+          const at = pair.indexOf('=');
+          const collection = at > 0 ? pair.slice(0, at) : '';
+          if (!COLLECTION.test(collection)) return fail(`db-import: ${JSON.stringify(pair.slice(0, 80))} is not <collection>=<listing file>`, 2);
+          let text: string;
+          try { text = readFileSync(abs(pair.slice(at + 1)), 'utf8'); } catch { return fail(`db-import: cannot read ${pair.slice(at + 1)}`, 2); }
+          let listing: ReturnType<typeof parseListing>;
+          try { listing = parseListing(text); } catch (e) {
+            if (e instanceof PlanFileError) return fail(`db-import: ${pair.slice(at + 1)}: ${e.message}`, 2);
+            throw e;
+          }
+          for (const id of listing.skipped) listingWarnings.push(`warning: skipped ${collection}/${id} (an id that names no file)\n`);
+          read.push({ collection, docs: listing.docs });
+        }
+        const wpDir = path.join(io.cwd, '.waypoint', p.project);
+        const db = path.join(wpDir, 'dbcache');
+        const knownFile = path.join(wpDir, 'known.json');
+        let known: Known = {};
+        try { const v: unknown = JSON.parse(readFileSync(knownFile, 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) known = v as Known; } catch { known = {}; }
+        const imported: Record<string, number> = {};
+        for (const { collection, docs } of read) {
+          const target = path.join(db, collection);
+          rmSync(target, { recursive: true, force: true });
+          mkdirSync(target, { recursive: true });
+          for (const d of docs) writeFileSync(path.join(target, `${d.id}.json`), JSON.stringify(d.data, null, 2));
+          known[collection] = Object.fromEntries(docs.map(d => [d.id, d.version]));
+          imported[collection] = docs.length;
+        }
+        writeAtomic(knownFile, `${JSON.stringify(known)}\n`);
+        return ok(JSON.stringify({ db, known: knownFile, imported }));
+      }
+      case 'set-roadmap': {
+        // w8 W2: the roadmap's URL into plan.yaml, written by the CLI (a background session may not edit the checkout).
+        const url = args[1];
+        if (!args[0] || args[0].startsWith('--') || !isWebLink(url)) return fail('usage: waypoint set-roadmap <plan.yaml> <https URL of the roadmap>', 2);
+        const file = abs(args[0]);
+        const r = setRoadmapText(readFileSync(file, 'utf8'), url);
+        if (r.changed) writeAtomic(file, r.text);
+        return ok(JSON.stringify({ plan: file, roadmap: url, changed: r.changed }));
+      }
+      case 'add-task': {
+        // w8 W2: a task delegated from a track worktree goes into the main checkout's plan through the CLI, never by an
+        // edit of the session outside its worktree. The plan is written only when the result validates.
+        const taskFile = flag('task-file');
+        if (!args[0] || args[0].startsWith('--') || !taskFile) return fail('usage: waypoint add-task <plan.yaml> --task-file <task.json>', 2);
+        let raw: unknown;
+        try { const s = readFileSync(abs(taskFile), 'utf8'); raw = JSON.parse(s.charCodeAt(0) === 0xfeff ? s.slice(1) : s); } catch { return fail(`add-task: cannot read ${taskFile} as JSON`, 2); }
+        const file = abs(args[0]);
+        let r: ReturnType<typeof addTaskText>;
+        try { r = addTaskText(readFileSync(file, 'utf8'), raw); } catch (e) {
+          if (e instanceof PlanFileError) return fail(`add-task: refused, the plan is unchanged: ${e.message}`, 2);
+          throw e;
+        }
+        writeAtomic(file, r.text);
+        return ok(JSON.stringify({ plan: file, task: r.id }));
       }
       case 'hash':
         return ok(planHash(loadPlan()));
@@ -217,18 +283,36 @@ export function run(argv: string[], io: Io): Result {
         const noAssets = args.includes('--no-assets');
         if (noAssets && args.includes('--assets')) return fail('page: --assets and --no-assets cannot be combined', 2);
         const p = loadPlan();
-        // Final review I5: meta/page's rules are those of the capabilities actually published, the file the skill passed to
-        // the Artifact publish; read (and refused) before the page is built.
-        let published: unknown;
-        if (args.includes('--publish-info')) {
-          const capsArg = flag('capabilities');
-          if (!capsArg || capsArg.startsWith('--')) return fail('page: --publish-info needs --capabilities <file>, the capabilities JSON passed to the Artifact publish', 2);
-          try { published = JSON.parse(readFileSync(abs(capsArg), 'utf8')); } catch { return fail(`page: cannot read --capabilities ${capsArg} as JSON`, 2); }
-          if (!published || typeof published !== 'object' || Array.isArray(published)) return fail(`page: --capabilities ${capsArg} must be a JSON object`, 2);
-        }
         // Re-review I1: --page, the listed meta/page.json, to compare who can see the roadmap now with what this publish gives.
         const pageArg = flag('page');
         if (args.includes('--page') && (!pageArg || pageArg.startsWith('--'))) return fail('page: --page needs the listed meta/page.json', 2);
+        // Re-review I1: --page, the listed meta/page.json, says whether the published roadmap declared `assets`.
+        let listed: unknown = null;
+        if (pageArg) { try { listed = JSON.parse(readFileSync(abs(pageArg), 'utf8')); } catch { listed = null; } }
+        const before = listed && typeof listed === 'object' && typeof (listed as { assets?: unknown }).assets === 'boolean' ? (listed as { assets: boolean }).assets : undefined;
+        // A-19: the roadmap carries forge's screenshots (the assets capability) only when its caller says so: forge asks
+        // for it from its own config; waypoint reads none. A roadmap already published with assets keeps them: forge's
+        // sync-only /waypoint:plan calls pass no `assets`, and a republish without them would ask to change who can see the page.
+        // R6b: --no-assets (/waypoint:plan no-assets) drops them all the same, so the republish asks to make it shareable again.
+        const internal = !noAssets && (args.includes('--assets') || before === true);
+        // Final review I5: meta/page's rules are those of the capabilities actually published, the file the skill passed to
+        // the Artifact publish; read (and refused) before the page is built. w8 W2: with --write-capabilities the CLI first
+        // writes that file with what this checkout publishes, so the session never writes it (a background session may not).
+        let published: unknown;
+        let capabilitiesWritten: boolean | undefined;
+        if (args.includes('--publish-info')) {
+          const capsArg = flag('capabilities');
+          if (!capsArg || capsArg.startsWith('--')) return fail('page: --publish-info needs --capabilities <file>, the capabilities JSON passed to the Artifact publish', 2);
+          if (args.includes('--write-capabilities')) {
+            const want = roadmapCapabilities(internal);
+            let cur: unknown;
+            try { cur = JSON.parse(readFileSync(abs(capsArg), 'utf8')); } catch { cur = undefined; }
+            capabilitiesWritten = JSON.stringify(cur) !== JSON.stringify(want);
+            if (capabilitiesWritten) writeAtomic(abs(capsArg), `${JSON.stringify(want)}\n`);
+          }
+          try { published = JSON.parse(readFileSync(abs(capsArg), 'utf8')); } catch { return fail(`page: cannot read --capabilities ${capsArg} as JSON`, 2); }
+          if (!published || typeof published !== 'object' || Array.isArray(published)) return fail(`page: --capabilities ${capsArg} must be a JSON object`, 2);
+        }
         const out = abs(flag('out') ?? '.waypoint/roadmap.html');
         const now = io.now().toISOString();
         // G-13, G-14: the snapshot says which waypoint built the page and, with --states, the states the last listing saw
@@ -242,15 +326,6 @@ export function run(argv: string[], io: Io): Result {
         mkdirSync(path.dirname(out), { recursive: true });
         writeFileSync(out, html);
         if (!args.includes('--publish-info')) return ok(out);
-        // Re-review I1: --page, the listed meta/page.json, says whether the published roadmap declared `assets`.
-        let listed: unknown = null;
-        if (pageArg) { try { listed = JSON.parse(readFileSync(abs(pageArg), 'utf8')); } catch { listed = null; } }
-        const before = listed && typeof listed === 'object' && typeof (listed as { assets?: unknown }).assets === 'boolean' ? (listed as { assets: boolean }).assets : undefined;
-        // A-19: the roadmap carries forge's screenshots (the assets capability) only when its caller says so: forge asks
-        // for it from its own config; waypoint reads none. A roadmap already published with assets keeps them: forge's
-        // sync-only /waypoint:plan calls pass no `assets`, and a republish without them would ask to change who can see the page.
-        // R6b: --no-assets (/waypoint:plan no-assets) drops them all the same, so the republish asks to make it shareable again.
-        const internal = !noAssets && (args.includes('--assets') || before === true);
         // G-13, §4.1: meta/page, the version and the rules of what is published (sync --db compares it; infinite reads rules).
         // `capabilities` is what this checkout should publish; `rules`, what the published file grants (rulesOf).
         // `roadmap` is the plan's project, the id known before the first publish: the approvals warning keys on it.
@@ -262,13 +337,26 @@ export function run(argv: string[], io: Io): Result {
         const changed = pageArg ? sharingChange(p, assets, before) : {};
         return ok(JSON.stringify({
           out, capabilities: roadmapCapabilities(internal), internal, say: sharingNotice(p, internal), pageVersion: WAYPOINT_VERSION, rules, ...changed,
+          ...(capabilitiesWritten !== undefined ? { capabilitiesWritten } : {}),
           write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WAYPOINT_VERSION, rules, assets, roadmap: p.project, publishedAt: now } },
         }));
       }
       case 'sync': {
         const p = loadPlan();
         const knownPath = flag('known');
-        const known: Known = knownPath && existsSync(abs(knownPath)) ? JSON.parse(readFileSync(abs(knownPath), 'utf8')) : {};
+        // w8 W2: --versions gives the listed versions inline, and the CLI keeps them in .waypoint/<project>/known.json
+        // itself, so the session writes no file of the checkout (a background session may not).
+        const versionsArg = flag('versions');
+        if (args.includes('--versions') && versionsArg === undefined) return fail('sync: --versions needs the listed versions as JSON', 2);
+        if (versionsArg !== undefined && args.includes('--known')) return fail('sync: --known and --versions exclude each other', 2);
+        let known: Known;
+        if (versionsArg !== undefined) {
+          try { known = parseVersions(versionsArg); } catch (e) {
+            if (e instanceof PlanFileError) return fail(`sync: ${e.message}`, 2);
+            throw e;
+          }
+          writeAtomic(path.join(io.cwd, '.waypoint', p.project, 'known.json'), `${JSON.stringify(known)}\n`);
+        } else known = knownPath && existsSync(abs(knownPath)) ? JSON.parse(readFileSync(abs(knownPath), 'utf8')) : {};
         const session = flag('session') ?? 'main';
         const now = io.now();
         const outDir = abs(flag('out') ?? '.waypoint/sync');
