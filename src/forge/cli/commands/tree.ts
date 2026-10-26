@@ -30,7 +30,8 @@ export const command: Command = (args, ctx) => {
   if (sub === 'snapshot') {
     // The first snapshot stands: a later one would absorb the files the person created in between.
     if (stored && !has('force')) return ok(`${file} (already taken at ${stored.at}; --force replaces it)`);
-    // .forge/ first, so the .gitignore forgeDir may create is in the snapshot, never a file that "appeared".
+    // .forge/ first, so the exclusions forgeDir adds (or its .gitignore outside git) apply before the snapshot, and
+    // nothing of forge's is a file that "appeared".
     forgeDir(io.cwd);
     const status = git(['status', '--porcelain', '-z', '-uall']);
     if (status === null) throw new UsageError(`tree snapshot: git status failed in ${repoDir}`);

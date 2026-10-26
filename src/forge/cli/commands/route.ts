@@ -1,5 +1,5 @@
 import type { Command } from '../context.js';
-import { lstatSync, readFileSync, readdirSync, rmSync, rmdirSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { readExecution } from '../../execution.js';
 import { planLocale } from '../../../lib/locale.js';
@@ -14,7 +14,7 @@ import { addDecision } from '../../decisions.js';
 import { TASK_ID } from '../../../lib/decisions.js';
 import { SP_MAX, spPlanPool, spPlans, spSpecPool, spSpecs, type SpPlanEntry, type SpPool, type SpSpec } from '../../superpowers.js';
 import {
-  ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, needsPools, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute,
+  ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, needsPools, pruneRoutes, readRoute, routeAsk, routeOptions, stagedRoute, writeRoute,
   type RouteDoc, type RouteOption, type RouteStage,
 } from '../../route.js';
 import { superpowersOf, committedAt, declinedSpecs, spContext, triageCore } from '../shared.js';
@@ -114,7 +114,13 @@ export const command: Command = (args, ctx) => {
     const main = mainCheckout(io.cwd);
     const cur = readRoute(main, session);
     if (!cur || (flag('task') !== undefined && flag('task') !== cur.task)) return json({ updated: false });
-    const next: RouteDoc = { ...cur, stage: stage as RouteStage, ts: ts(), ...files };
+    // w8 fix round 1: when the spec was written, read where the session runs, else in the main checkout.
+    const specMtime = (rel: string | undefined): number | null => {
+      if (rel === undefined) return null;
+      for (const dir of [io.cwd, main]) { try { return statSync(path.resolve(dir, rel)).mtimeMs; } catch { /* not there */ } }
+      return null;
+    };
+    const next = stagedRoute(cur, stage as RouteStage, ts(), files, specMtime(files.spec));
     writeRoute(main, next);
     return json({ updated: true, ...next });
   }
@@ -142,7 +148,7 @@ export const command: Command = (args, ctx) => {
   // A probe that exits 2 (an empty text, a bad --path, --workflow or --autonomy) leaves nothing behind either.
   try { got = inputs(); } catch (e) { if (textFile !== undefined && e instanceof UsageError) cleanProbe(io.cwd, task, textFile); throw e; }
   const { probed, p, wf, au } = got;
-  const prefs = resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir));
+  const prefs = resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir), io.env ?? process.env);
   const sp = superpowersOf(io, repoDir);
   const now = io.now().getTime();
   // K1-07: the request names the plan or spec to recommend; the probe already read the file, so it reads.

@@ -39,7 +39,8 @@ describe('route-eval', () => {
     expect(claudeArgs('Add X', { settings: 's.json', pluginDirs: ['/p/forge', '/p/waypoint'] })).toEqual(
       ['-p', 'Add X', '--output-format', 'stream-json', '--verbose', '--include-hook-events', '--max-turns', '2', '--settings', 's.json', '--plugin-dir', '/p/forge', '--plugin-dir', '/p/waypoint']);
     const keys = ['forge@bg-kit', 'waypoint@bg-kit', 'lens@bg-kit', 'superpowers@claude-plugins-official', 'context7@claude-plugins-official'];
-    expect(settingsFor(keys)).toEqual({ enabledPlugins: { 'forge@bg-kit': false, 'waypoint@bg-kit': false, 'lens@bg-kit': false } });
+    // w8 FR1: the person's FORGE_WORKFLOW (their settings' env) would silence or pin the routing measured here.
+    expect(settingsFor(keys)).toEqual({ enabledPlugins: { 'forge@bg-kit': false, 'waypoint@bg-kit': false, 'lens@bg-kit': false }, env: { FORGE_WORKFLOW: 'ask' } });
     expect(projectSettingsFor(false, keys)).toEqual({ enabledPlugins: { 'superpowers@claude-plugins-official': false } });
     expect(projectSettingsFor(true, keys)).toEqual({ enabledPlugins: {} });
     expect(CONFIGS.map(c => [c.name, c.superpowers, c.hint])).toEqual([['with-superpowers', true, true], ['without-superpowers', false, true], ['no-hint', true, false]]);
@@ -124,6 +125,8 @@ describe('route-eval', () => {
     expect(sessionEnv(withSp, { PATH: 'p', FORGE_ROUTE_HINT: 'off' })).toEqual({ PATH: 'p' });
     expect(sessionEnv(withoutSp, { PATH: 'p', FORGE_ROUTE_HINT: 'on' })).toEqual({ PATH: 'p' });
     expect(sessionEnv(noHint, { PATH: 'p' })).toEqual({ PATH: 'p', FORGE_ROUTE_HINT: 'off' });
+    // w8 FR1: and the FORGE_WORKFLOW they exported, which would silence the hooks or pin the route.
+    expect(sessionEnv(withSp, { PATH: 'p', FORGE_WORKFLOW: 'off' })).toEqual({ PATH: 'p' });
   });
   it('takes only --dry-run, --keep, --only <v> and --config <v> (M1)', () => {
     expect(parseArgs([])).toEqual({ dry: false, keep: false, only: null, config: null, reps: 1, resume: null });

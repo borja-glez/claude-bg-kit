@@ -1,7 +1,7 @@
 // The files git keeps per repository that forge and waypoint write without a commit: info/exclude and info/attributes
 // of the common git directory, shared by every worktree. They came from forge's swarm.ts so that waypoint's launch
 // can use them too (A-08). Also the one rule for the repository's default branch.
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 /** Runs git with these arguments where the caller decided; null when git fails. */
@@ -46,6 +46,33 @@ export function commonDir(git: GitRun): string | null {
   const rel = top ? lines(git(['-C', top, 'rev-parse', '--git-common-dir'])) : [];
   const dir = top && rel.length === 1 ? path.resolve(top, rel[0]) : null;
   return dir && holdsHead(dir) ? dir : null;
+}
+
+/**
+ * w8 FR5: the common git directory of the repository `dir` is in, found without running git (forge's every write asks
+ * it): the nearest `.git` up the tree, a directory, or a file whose `gitdir:` names a worktree's git directory, whose
+ * `commondir` names the common one (a submodule's has none: it is its own). Null outside a repository, and when what it
+ * finds does not hold HEAD.
+ */
+export function commonDirOf(dir: string): string | null {
+  const holdsHead = (d: string) => (existsSync(path.join(d, 'HEAD')) ? d : null);
+  for (let at = path.resolve(dir); ; at = path.dirname(at)) {
+    const dotGit = path.join(at, '.git');
+    let isDir: boolean | null = null;
+    try { isDir = statSync(dotGit).isDirectory(); } catch { /* none here: look further up */ }
+    if (isDir === true) return holdsHead(dotGit);
+    if (isDir === false) {
+      let text = '';
+      try { text = readFileSync(dotGit, 'utf8'); } catch { return null; }
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec(text);
+      if (!m) return null;
+      const gitDir = path.resolve(at, m[1]);
+      let common = gitDir;
+      try { common = path.resolve(gitDir, readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim()); } catch { /* its own */ }
+      return holdsHead(common);
+    }
+    if (path.dirname(at) === at) return null;
+  }
 }
 
 /** `<common dir>/info/<name>`; creates only info/ inside an existing git directory. Null without one; throws on fs errors. */

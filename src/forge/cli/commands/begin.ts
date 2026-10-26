@@ -5,6 +5,7 @@ import { tddFor } from '../shared.js';
 import { foreignPaths, foreignSay } from '../../begin.js';
 import { AUTONOMIES, loadConfig } from '../../config.js';
 import { readLocal } from '../../local.js';
+import { retireForgeIgnore } from '../../ledger.js';
 import { isAutonomy, resolvePrefs } from '../../prefs.js';
 import { parseStatus } from '../../tree.js';
 import { isSafeId } from '../../../lib/execution-state.js';
@@ -34,10 +35,11 @@ export const command: Command = (args, ctx) => {
   const snapshot = snap.code === 0 ? true : null;
   const snapshotError = snapshot ? null : snap.stderr.trim() || `tree snapshot exited ${snap.code}`;
   const tdd = tddFor(io, repoDir);
-  const prefs = resolvePrefs(isAutonomy(autonomy) ? { autonomy } : {}, readLocal(io.cwd), loadConfig(repoDir));
+  const prefs = resolvePrefs(isAutonomy(autonomy) ? { autonomy } : {}, readLocal(io.cwd), loadConfig(repoDir), io.env ?? process.env);
   // forge's .gitignore lives with its state, in the caller's checkout, as triage says.
   const stateGit = io.workdir === undefined ? git : defaultGit(io.cwd);
-  const ignore = (stateGit(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore']) ?? '').trim();
+  // w8 fix round 1: one with exactly forge's rules moves to info/exclude (retireForgeIgnore) and is not named.
+  const ignore = (stateGit(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore']) ?? '').trim() !== '' && !retireForgeIgnore(io.cwd);
   return json({
     foreign, snapshot, ...(snapshotError === null ? {} : { snapshotError }), tdd: { mode: tdd.tdd, line: tdd.line }, autonomy: prefs.autonomy, workflow: prefs.workflow,
     untracked: ignore ? ['.forge/.gitignore'] : [], say: foreign.length ? foreignSay(foreign, locale === 'es' ? 'es' : 'en') : null,

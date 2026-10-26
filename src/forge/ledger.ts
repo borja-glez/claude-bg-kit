@@ -6,11 +6,13 @@ import { claudeSessionId, type SessionEnv } from '../lib/claude-session.js';
 import { attribute, isTask, projectOf, stampEvent } from './task-ref.js';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
 import { samePath } from '../lib/worktree.js';
+import { commonDirOf, hasLine } from '../lib/git-info.js';
 
 export const LEDGER_KINDS = ['triage', 'phase', 'agent', 'validate', 'verdict', 'round', 'ruling', 'cycle', 'proposal', 'verify', 'verify-skip', 'verify-env', 'verify-flow', 'decision'] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 export interface LedgerEvent { ts: string; kind: LedgerKind; task?: string; [key: string]: unknown }
 
+// .forge/.gitignore, written only outside git now (w8 FR5: in a repository, FORGE_EXCLUDE below).
 const GITIGNORE = '*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n';
 // What forge 0.5.x wrote; upgraded in place so surfaces reach git. Any other content is the user's and stays.
 const GITIGNORE_05 = '*\n!.gitignore\n!config.yaml\n';
@@ -40,14 +42,53 @@ export const STATUS_FILES_KEEP = 150;
 /** A status is a few hundred bytes: one above this is not read. */
 const STATUS_FILE_MAX = 64 * 1024;
 
+/**
+ * w8 FR5: forge's exclusions in info/exclude of the repository's common git directory (every worktree reads it), the
+ * same rules as GITIGNORE for any `.forge/` of the tree: no file of forge's to commit on the person's branch.
+ */
+export const FORGE_EXCLUDE = [
+  '# forge: its own files under .forge/ (config.yaml and verify/*.md stay committable)',
+  '**/.forge/*', '!**/.forge/config.yaml', '!**/.forge/verify/', '**/.forge/verify/*', '!**/.forge/verify/*.md',
+];
+
+/** Adds FORGE_EXCLUDE to the info/exclude of the repository `root` is in, once; false outside git or when it cannot. */
+function excludeForge(root: string): boolean {
+  try {
+    const common = commonDirOf(root);
+    if (!common) return false;
+    const info = path.join(common, 'info');
+    mkdirSync(info, { recursive: true });
+    const file = path.join(info, 'exclude');
+    let text = '';
+    try { text = readFileSync(file, 'utf8'); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+    if (!hasLine(text, FORGE_EXCLUDE[1])) appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}${FORGE_EXCLUDE.join('\n')}\n`);
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * w8 fix round 1: a `.forge/.gitignore` git does not track (the caller asked git) whose content is exactly what forge
+ * wrote (this one or 0.5's) is forge's: its rules move to info/exclude and the file goes, so no forge file is left to
+ * commit. Any other content is the person's and stays. True when the file went.
+ */
+export function retireForgeIgnore(root: string): boolean {
+  const ignore = path.join(forgePath(root), '.gitignore');
+  try {
+    const text = readFileSync(ignore, 'utf8').replace(/\r\n/g, '\n');
+    if ((text !== GITIGNORE && text !== GITIGNORE_05) || !excludeForge(root)) return false;
+    rmSync(ignore);
+    return true;
+  } catch { return false; }
+}
+
 export function forgeDir(root: string): string {
   const dir = forgePath(root);
   mkdirSync(dir, { recursive: true });
   const ignore = path.join(dir, '.gitignore');
-  if (!existsSync(ignore)) writeFileSync(ignore, GITIGNORE);
-  else {
+  if (existsSync(ignore)) {
+    // One the person or an earlier forge left is respected; forge 0.5's own is upgraded in place, so surfaces reach git.
     try { if (readFileSync(ignore, 'utf8').replace(/\r\n/g, '\n') === GITIGNORE_05) writeFileSync(ignore, GITIGNORE); } catch { /* leave it */ }
-  }
+  } else if (!excludeForge(root)) writeFileSync(ignore, GITIGNORE);
   return dir;
 }
 

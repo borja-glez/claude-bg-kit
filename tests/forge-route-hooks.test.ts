@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { COMPACT_INFINITE, COMPACT_RUN, hintOn, inForgeWorktree, looksLikeCoding, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
+import { fileURLToPath } from 'node:url';
+import { COMPACT_INFINITE, COMPACT_RUN, hintOn, inForgeWorktree, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
+import { looksLikeCoding } from '../src/forge/route-hint.js';
 import { parseConfig } from '../src/forge/config.js';
 import { listRoutes, readRoute, writeRoute } from '../src/forge/route.js';
 import { writeMember } from '../src/forge/members.js';
@@ -11,6 +13,12 @@ import { run, type Io } from '../src/forge/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
+/** w8 FR2: the routing rule and hint speak only in a git repository, so the hooks run in one. */
+const repo = (prefix: string): string => {
+  const dir = tmp(prefix);
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  return dir;
+};
 
 const NOW = new Date('2026-10-13T10:00:00.000Z');
 const context = (r: { stdout: string }) => (r.stdout ? JSON.parse(r.stdout).hookSpecificOutput : null);
@@ -28,6 +36,217 @@ describe('looksLikeCoding', () => {
   });
 });
 
+// w8 FR2: the hint only for requests to build. HINT = true: it should get the hint.
+const HINT = true;
+const QUIET = false;
+/** The 16 prompts of the forge reviewer (2026-10-26), with what each should get. */
+const REVIEW_FORGE: [string, boolean][] = [
+  ['añade un botón de exportar a CSV en la tabla de usuarios', HINT],
+  ['arregla el typo en el README de la raíz por favor', QUIET],
+  // Fix round 1: a value change counts only when the clause ends in the new value; here it ends in where it goes.
+  ['cambia el color del botón primario a azul en el css', HINT],
+  ['fix the failing test in cart.test.ts please and rerun', HINT],
+  ['add a console.log in the handler so I can debug it', QUIET],
+  ['crea un commit con estos cambios y haz push a origin', QUIET],
+  ['create a PR for this branch with a short description', QUIET],
+  ['por qué falla el build en CI desde ayer?', QUIET],
+  ['¿puedes arreglar el test que falla en cart?', HINT],
+  ['revisa este diff y dime si ves bugs', QUIET],
+  ['build the docker image and run it locally on port 8080', QUIET],
+  // Fix round 1: «actualiza» is a coding verb, and dependencies are work (the triage's deps zone).
+  ['actualiza las dependencias de npm a la última versión menor', HINT],
+  ['renombra la variable foo a bar en utils.ts', QUIET],
+  ['change the timeout from 30 to 60 seconds in config.ts', HINT],
+  ['add an entry to the CHANGELOG for version 1.2.0 today', QUIET],
+  ['migra este proyecto de jest a vitest manteniendo los tests', HINT],
+];
+/** The 7 prompts of the integration reviewer (2026-10-26). */
+const REVIEW_INTEGRATION: [string, boolean][] = [
+  ['crea un resumen de la reunión de ayer en un documento para el equipo', QUIET],
+  ['cambia el tono de este correo para que suene más formal y cercano', QUIET],
+  ['añade una sección de conclusiones al informe del experimento de ayer', QUIET],
+  ['entrena el modelo con el nuevo split y compara las métricas con el anterior', QUIET],
+  ['usa superpowers para añadir el endpoint de login con sus tests', QUIET],
+  ['arregla el test que falla en el módulo de rutas del servidor', HINT],
+  ['sí, sigue con la siguiente tarea del plan por favor ahora', QUIET],
+];
+const BY_KIND: Record<string, [string, boolean][]> = {
+  'git operations': [
+    ['añade estos cambios a un commit nuevo con un mensaje claro', QUIET],
+    ['commit the changes and push them to origin main', QUIET],
+    ['merge the feature branch into main and fix the conflicts', QUIET],
+    ['rebase this branch onto main and fix any conflicts you find', QUIET],
+    ['create a tag v1.2.0 on the last commit and push it', QUIET],
+    ['crea una pull request hacia main con los cambios de hoy', QUIET],
+    ['crea una rama nueva para el trabajo del carrito de la compra', QUIET],
+    ['make a commit with the cart changes and a short message', QUIET],
+    // A request that also builds keeps the hint, and so does code about commits or pushes.
+    ['fix the failing cart test and then commit and push the fix', HINT],
+    ['add a pre-commit hook that runs the linter before each commit', HINT],
+    ['añade notificaciones push a la app de pedidos de la tienda', HINT],
+    ['fix the conflict between the two date libraries in the build', HINT],
+  ],
+  'typos, renames and translations': [
+    ['fix the typo in the error message of the login form', QUIET],
+    ['corrige las erratas del manual de usuario de la aplicación', QUIET],
+    ['fix the spelling mistakes in the onboarding screen texts', QUIET],
+    ['change the name of the variable foo to bar in utils.ts', QUIET],
+    ['cambia el nombre de la función getUser a fetchUser en todo el código', QUIET],
+    ['add the Spanish translation of the onboarding texts please', QUIET],
+    ['añade la traducción al inglés de los textos de la pantalla de inicio', QUIET],
+    ['add i18n support to the app with Spanish and French translations', HINT],
+  ],
+  'texts that are not code': [
+    ['write an email to the team about the release changes of today', QUIET],
+    ['crea un correo para el cliente explicando el retraso del proyecto', QUIET],
+    ['add a summary of the meeting notes to the shared document', QUIET],
+    ['add a section to the README explaining how to install it', QUIET],
+    ['crea el acta de la reunión de planificación del lunes pasado', QUIET],
+    // Code that sends or handles one of those texts is code.
+    ['crea un endpoint que envía un correo de bienvenida al registrarse', HINT],
+    ['add email notifications to the order service when an order ships', HINT],
+    ['añade validación de email y contraseña al formulario de registro', HINT],
+    ['arregla el informe de ventas que sale vacío desde el lunes', HINT],
+  ],
+  questions: [
+    ['explícame cómo se añade un cupón al carrito en el código actual', QUIET],
+    ['dime si hace falta añadir un índice a la tabla de pedidos', QUIET],
+    ['Is there a way to add coupons to the cart without a new table?', QUIET],
+    ['¿me puedes explicar cómo se crea un pedido en el backend?', QUIET],
+    ['explain how coupons work in the cart and add a test for the expiry', HINT],
+  ],
+  'features, fixes, refactors and new projects': [
+    ['añade un descuento por cupón al carrito de la tienda', HINT],
+    ['fix the bug where the cart total ignores the coupon discount', HINT],
+    ['refactoriza el módulo de pagos para separar la validación del cobro', HINT],
+    ['refactor the auth middleware to read the token from a cookie', HINT],
+    ['crea una app de reservas con backend y frontend en Node', HINT],
+    ['create a new CLI project in Rust that converts CSV files to JSON', HINT],
+    ['monta un proyecto nuevo con Vite y React para el panel de control', HINT],
+    ['cambia el sistema de login para usar OAuth con la cuenta de Google', HINT],
+    ['change the color handling of the chart component for dark mode', HINT],
+    ['añade una sección de precios a la landing page con tres planes', HINT],
+  ],
+};
+
+describe('the hint only for requests to build (w8 FR2)', () => {
+  it("the forge reviewer's 16 prompts and the integration reviewer's 7", () => {
+    for (const [p, want] of [...REVIEW_FORGE, ...REVIEW_INTEGRATION]) expect(looksLikeCoding(p), p).toBe(want);
+  });
+  for (const [kind, rows] of Object.entries(BY_KIND)) {
+    it(kind, () => { for (const [p, want] of rows) expect(looksLikeCoding(p), p).toBe(want); });
+  }
+  it('the hook gives the hint as the table says, in a git repository', () => {
+    const root = repo('forge-hint-table-');
+    const cfg = tmp('forge-hint-table-cfg-');
+    for (const [p, want] of [...REVIEW_FORGE, ...REVIEW_INTEGRATION]) {
+      const r = run(['hook', 'route-prompt'], { cwd: root, now: () => NOW, env: { CLAUDE_CONFIG_DIR: cfg }, stdin: JSON.stringify({ session_id: 'S1', prompt: p }) });
+      expect(r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : null, p).toBe(want ? ROUTE_HINT : null);
+    }
+  });
+  it("keeps the hint of route-eval's Medium and Large prompts that name no method, and leaves out its Trivial, question and agent ones", () => {
+    const prompts = JSON.parse(readFileSync(fileURLToPath(new URL('../scripts/route-eval/prompts.json', import.meta.url)), 'utf8')) as { id: string; expected: string; text: string }[];
+    for (const p of prompts.filter(x => x.expected === 'route' && !/superpowers|forge/i.test(x.text))) expect(looksLikeCoding(p.text), p.id).toBe(true);
+    for (const p of prompts.filter(x => x.expected === 'none')) expect(looksLikeCoding(p.text), p.id).toBe(false);
+  });
+  // Fix round 1: every prompt of review 1, with what it gets.
+  const ROUND_1: Record<string, [string, boolean][]> = {
+    'a value change only when the clause ends in the new value; a debug print only as the object of add or put': [
+      ['change the text rendering to support right-to-left languages', HINT],
+      ['change the version check to compare semver ranges properly', HINT],
+      ['cambia el límite de peticiones para que se aplique por usuario y no por IP', HINT],
+      ['cambia el valor por defecto del idioma para que use el del navegador', HINT],
+      ['add a debug panel to the app so I can debug the redux state', HINT],
+      ['add a --verbose flag to the CLI to debug the network calls', HINT],
+      ['implement a logger that wraps console.log with log levels and timestamps', HINT],
+      ['fix the print() call that crashes the script on python 3', HINT],
+      ['add structured logging to the payment service to debug failed charges', HINT],
+      ['change the color handling of the chart component to support dark mode', HINT],
+      ['añade logs al servicio de pagos para depurar los fallos de cobro', HINT],
+      ['add print statements to the parser so I can debug the failing case and then fix it', HINT],
+      ['cambia el color del botón primario a azul', QUIET],
+      ['change the title of the landing page to "Shop demo"', QUIET],
+      ['change the default value of the retry option to 3', QUIET],
+      ['add a console.log in the handler so I can debug it', QUIET],
+      ['pon un print en el bucle para ver qué valores llegan', QUIET],
+    ],
+    'code nouns, git and artifacts that are building': [
+      ['implement the notes feature with markdown support and tags', HINT],
+      ['create a meeting scheduler for the team with calendar sync', HINT],
+      ['build a newsletter signup flow with double opt-in confirmation', HINT],
+      ['add a PDF export of the report with the company logo', HINT],
+      ['crea el resumen semanal por email que se envía a los clientes', HINT],
+      ['implementa el informe de ventas mensual en el panel de admin', HINT],
+      ['add the commit hash to the footer of the app at build time', HINT],
+      ['add a commit message linter to the CI pipeline', HINT],
+      ['create a branch selector in the repository settings screen', HINT],
+      ['build the bundle with code splitting so the first load is faster', HINT],
+      ['build the release binary in CI for linux, mac and windows', HINT],
+      ['añade traducciones dinámicas que se carguen desde la API', HINT],
+      ['implementa el rebase de los descuentos cuando cambia el carrito', HINT],
+      ['construye la imagen docker y arregla el Dockerfile que falla', HINT],
+      // A typo that breaks something is a bug; a rename option is a feature.
+      ['arregla la ortografía del validador de NIF que rechaza NIFs válidos', HINT],
+      ['fix the typo in the variable name that breaks the build', HINT],
+      ['add a rename option to the file menu of the editor', HINT],
+      ['añade un botón de renombrar en la lista de ficheros', HINT],
+      ['build the docker image and run it locally on port 8080', QUIET],
+      ['squash the last three commits and rebase this branch onto main', QUIET],
+    ],
+    'texts, trackers and plans that are not code': [
+      ['crea un plan de entrenamiento para correr una maratón en abril', QUIET],
+      ['create a spreadsheet with the budget for next year and the quarters', QUIET],
+      ['create a tweet thread announcing the release of the new version', QUIET],
+      ['add a section about deployment to the docs folder of the project', QUIET],
+      ['crea una issue en GitHub con el bug que hemos encontrado', QUIET],
+      ['crea un ticket en Jira para el bug del login de ayer', QUIET],
+      ['dame ideas para mejorar la arquitectura del proyecto', QUIET],
+      ['mejora la redacción de este correo para el cliente', QUIET],
+      ['update the README with the new install steps', QUIET],
+      ['update the PR description with the list of changes', QUIET],
+      ['add a ticket system to the help desk app with priorities', HINT],
+    ],
+    'short requests with a code noun, and the new coding verbs': [
+      ['arregla el bug del login', HINT],
+      ['añade validación al formulario', HINT],
+      ['add validation to the form', HINT],
+      ['haz que el botón de guardar se desactive mientras se envía', HINT],
+      ['mejora el rendimiento de la consulta de pedidos que tarda mucho', HINT],
+      ['soluciona el problema de memoria en el worker de colas', HINT],
+      ['actualiza el componente de cabecera para que muestre el avatar', HINT],
+      ['improve the error handling of the upload endpoint', HINT],
+      ['solve the race condition in the cache layer of the service', HINT],
+      ['update the header component to show the user avatar', HINT],
+      ['make the login work again on Safari and Firefox', HINT],
+      // Four words without a code noun, or three words, stay out.
+      ['fix the bug', QUIET],
+      ['arregla esto ahora mismo', QUIET],
+      ['crea un commit nuevo', QUIET],
+      ['añade un resumen al informe', QUIET],
+      ['mejora este texto', QUIET],
+    ],
+  };
+  for (const [kind, rows] of Object.entries(ROUND_1)) {
+    it(`fix round 1: ${kind}`, () => { for (const [p, want] of rows) expect(looksLikeCoding(p), p).toBe(want); });
+  }
+  it('fix round 1: a fix asked after a pasted log keeps the hint; the head and the tail of the prompt are read', () => {
+    const log = Array.from({ length: 45 }, (_, i) => `    at Object.<anonymous> (/srv/app/node_modules/pg/lib/client.js:${i}:13) TypeError: Cannot read properties of undefined (reading 'rows')`).join('\n');
+    for (const ask of ['arregla este error en el parser de fechas por favor', 'fix this error in the date parser so the import works']) {
+      expect(log.length, 'the log alone is longer than head and tail').toBeGreaterThan(4000);
+      expect(looksLikeCoding(`${log}\n\n${ask}`), ask).toBe(true);
+      expect(looksLikeCoding(`${ask}:\n${log}`), ask).toBe(true);
+    }
+    // A long log with a question at the end is still a question; a log with no request asks nothing.
+    expect(looksLikeCoding(`${log}\n\n¿por qué falla esto?`)).toBe(false);
+    expect(looksLikeCoding(log)).toBe(false);
+  });
+  it('stays linear on a long prompt that asks to build', () => {
+    const t0 = performance.now();
+    for (const p of ['añade un botón y '.repeat(20000), 'fix the cart '.repeat(30000) + 'and commit', `cambia el color ${'a '.repeat(50000)}`]) looksLikeCoding(p);
+    expect(performance.now() - t0).toBeLessThan(300);
+  });
+});
+
 describe('routingRule and routeReminder', () => {
   it("names superpowers' process skills only when it is installed", () => {
     expect(routingRule(true)).toContain('superpowers:brainstorming');
@@ -41,6 +260,23 @@ describe('routingRule and routeReminder', () => {
     expect(routeReminder(r, NOW.getTime() + 25 * 3600_000)).toBeNull();
     expect(routeReminder({ ...r, stage: 'handed-off' }, NOW.getTime())).toBeNull();
     expect(routeReminder(null, NOW.getTime())).toBeNull();
+  });
+  it("names the person's choice and that using-superpowers puts their instructions above its skills, over brainstorming's writing-plans gate (w8 FR6)", () => {
+    const r = { task: 't1', chosen: 'superpowers-design' as const, by: 'user' as const, stage: 'designing' as const, ts: NOW.toISOString(), session: 'S1' };
+    const design = routeReminder(r, NOW.getTime())!;
+    expect(design.startsWith('forge: the user chose «superpowers designs, forge builds» for task t1 ("superpowers-design").')).toBe(true);
+    expect(design).toContain("using-superpowers puts the user's instructions above its skills");
+    expect(design).toContain('brainstorming\'s "invoke superpowers:writing-plans and no other skill" gives way to it');
+    // The hand-off comes before the case without a file, and the gate's own words come before the hand-off.
+    expect(design.indexOf('writing-plans and no other skill')).toBeLessThan(design.indexOf('hand off with forge:run --from-spec'));
+    expect(design.indexOf('hand off with forge:run --from-spec')).toBeLessThan(design.indexOf('If brainstorming ends'));
+    const plan = routeReminder({ ...r, chosen: 'superpowers-plan', stage: 'planning', plan: 'docs/p.md' }, NOW.getTime())!;
+    expect(plan.startsWith('forge: the user chose «superpowers plans, forge executes» for task t1 ("superpowers-plan").')).toBe(true);
+    expect(plan).toContain("using-superpowers puts the user's instructions above its skills");
+    expect(plan).toContain('hand off with forge:run --superpowers-plan docs/p.md instead of subagent-driven-development or executing-plans');
+    expect(plan).not.toContain('writing-plans and no other skill');
+    // A route auto mode chose is still the person's: they set auto.
+    expect(routeReminder({ ...r, by: 'auto' }, NOW.getTime())).toMatch(/^forge: the user's auto mode chose «superpowers designs, forge builds»/);
   });
   it('reminds the hand-over of a brainstorming that ends without a file, on both mixed routes (A1)', () => {
     const r = { task: 't1', chosen: 'superpowers-design' as const, by: 'user' as const, stage: 'designing' as const, ts: NOW.toISOString() };
@@ -61,7 +297,7 @@ describe('forge hook route-session and route-prompt', () => {
   let root: string;
   let cfg: string;
   beforeEach(() => {
-    root = tmp('forge-route-hook-');
+    root = repo('forge-route-hook-');
     cfg = tmp('forge-route-hook-cfg-');
   });
   const io = (stdin: string): Io => ({ cwd: root, now: () => NOW, stdin, env: { CLAUDE_CONFIG_DIR: cfg } });
@@ -103,6 +339,49 @@ describe('forge hook route-session and route-prompt', () => {
     expect(hook('route-prompt', PROMPT).stdout).toBe('');
     expect(hook('route-session', { session_id: 'S1' }).stdout).toBe('');
   });
+  it('the message that approves the spec carries the reminder, whatever it says (w8 FR6)', () => {
+    writeRoute(root, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'S1' });
+    for (const prompt of ['Sí, la spec está bien, la apruebo', 'lgtm', 'Approved. Go ahead.']) {
+      const text = context(hook('route-prompt', { session_id: 'S1', prompt }))?.additionalContext as string;
+      expect(text, prompt).toContain("using-superpowers puts the user's instructions above its skills");
+      expect(text, prompt).toContain('hand off with forge:run --from-spec');
+    }
+  });
+  it('outside a git repository there is neither rule nor hint; the same folder once in git gets both (w8 FR2)', () => {
+    const plain = tmp('forge-route-nogit-');
+    const said = (which: string, cwd: string, prompt = PROMPT) => run(['hook', which], {
+      cwd, now: () => NOW, env: { CLAUDE_CONFIG_DIR: cfg },
+      stdin: JSON.stringify(which === 'route-prompt' ? prompt : { session_id: 'S1', hook_event_name: 'SessionStart', source: 'startup' }),
+    });
+    for (const which of ['route-session', 'route-prompt']) expect(said(which, plain), which).toMatchObject({ code: 0, stdout: '' });
+    // A route this session left half done is not reminded there either: forge:run needs a repository.
+    writeRoute(plain, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'S1' });
+    expect(said('route-prompt', plain, { session_id: 'S1', prompt: 'hello there' }).stdout).toBe('');
+    execFileSync('git', ['init', '-q'], { cwd: plain });
+    expect(context(said('route-session', plain)).additionalContext).toContain('<FORGE-ROUTING>');
+    expect(context(said('route-prompt', plain, { session_id: 'S2', prompt: PROMPT.prompt })).additionalContext).toBe(ROUTE_HINT);
+    expect(context(said('route-prompt', plain, { session_id: 'S1', prompt: 'hello there' })).additionalContext).toContain('--from-spec');
+    // A subdirectory of the repository is in it.
+    const sub = path.join(plain, 'src', 'deep');
+    mkdirSync(sub, { recursive: true });
+    expect(context(said('route-prompt', sub, { session_id: 'S2', prompt: PROMPT.prompt })).additionalContext).toBe(ROUTE_HINT);
+  });
+  it('FORGE_WORKFLOW off or superpowers silences both hooks, under what the project says (w8 FR1)', () => {
+    const said = (which: string, env: Record<string, string>) =>
+      run(['hook', which], { cwd: root, now: () => NOW, stdin: JSON.stringify(which === 'route-prompt' ? PROMPT : { session_id: 'S1', source: 'startup' }), env: { CLAUDE_CONFIG_DIR: cfg, ...env } }).stdout;
+    for (const w of ['off', 'superpowers']) {
+      for (const which of ['route-session', 'route-prompt']) expect(said(which, { FORGE_WORKFLOW: w }), `${w} ${which}`).toBe('');
+    }
+    for (const w of ['ask', 'forge', 'superpowers-design', 'superpowers-plan', 'maybe']) {
+      for (const which of ['route-session', 'route-prompt']) expect(said(which, { FORGE_WORKFLOW: w }), `${w} ${which}`).not.toBe('');
+    }
+    // The project's config.yaml wins over the person's default, and local.yaml over both.
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'workflow: forge\n');
+    expect(said('route-prompt', { FORGE_WORKFLOW: 'off' })).not.toBe('');
+    personal('workflow: off\n');
+    expect(said('route-prompt', { FORGE_WORKFLOW: 'forge' })).toBe('');
+  });
   it('stays silent with workflow: superpowers, where forge already drives the session, and on bad input', () => {
     personal('workflow: superpowers\n');
     expect(hook('route-prompt', PROMPT).stdout).toBe('');
@@ -132,7 +411,7 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
   let root: string;
   let cfg: string;
   beforeEach(() => {
-    root = tmp('forge-route-sess-hook-');
+    root = repo('forge-route-sess-hook-');
     cfg = tmp('forge-route-sess-cfg-');
   });
   const io = (stdin: unknown, at = NOW): Io => ({ cwd: root, now: () => at, stdin: JSON.stringify(stdin), env: { CLAUDE_CONFIG_DIR: cfg } });
@@ -327,7 +606,7 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
 
 describe('route-prompt reads every forge task of the session (K1-12 with C5)', () => {
   it("a task of this session keeps the hint away although another session's task changed later and is the alias", () => {
-    const dir = tmp('forge-k112-');
+    const dir = repo('forge-k112-');
     const cfg = tmp('forge-k112-cfg-');
     const at = (min: number) => new Date(NOW.getTime() - min * 60_000).toISOString();
     const status = (task: string, session: string, lastAt: string, doneAt: string | null = null) => ({
@@ -379,7 +658,7 @@ describe('the hint of route-prompt (K1-03)', () => {
     expect(looksLikeCoding('fix the rounding of the cart total in src/cart.js')).toBe(true);
   });
   it('a broken .forge/config.yaml keeps route-prompt silent, the hint and the reminder alike (M8)', () => {
-    const root = tmp('forge-hint-bad-');
+    const root = repo('forge-hint-bad-');
     const said = () => run(['hook', 'route-prompt'], {
       cwd: root, now: () => NOW, env: {}, stdin: JSON.stringify({ session_id: 'S1', prompt: 'Add coupon support to the cart with validation' }),
     });
@@ -396,7 +675,7 @@ describe('the hint of route-prompt (K1-03)', () => {
     expect(performance.now() - t0).toBeLessThan(200);
   });
   it('route.hint: false and true through the hook', () => {
-    const root = tmp('forge-hint2-');
+    const root = repo('forge-hint2-');
     const said = () => {
       const r = run(['hook', 'route-prompt'], { cwd: root, now: () => NOW, env: {}, stdin: JSON.stringify({ session_id: 'S1', prompt: '¿Puedes añadir soporte de cupones al carrito con validación?' }) });
       return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext as string : '';
@@ -408,7 +687,7 @@ describe('the hint of route-prompt (K1-03)', () => {
     expect(said()).toBe(ROUTE_HINT);
   });
   it('route.hint: off and FORGE_ROUTE_HINT=off turn the hint off, never the reminder of a route half done', () => {
-    const root = tmp('forge-hint-');
+    const root = repo('forge-hint-');
     const io = (env: Record<string, string> = {}): Io => ({
       cwd: root, now: () => NOW, env, stdin: JSON.stringify({ session_id: 'S1', prompt: 'Add coupon support to the cart with validation' }),
     });
@@ -432,7 +711,7 @@ describe('route-session after a compaction (w7 A2)', () => {
   let root: string;
   let cfg: string;
   beforeEach(() => {
-    root = tmp('forge-compact-');
+    root = repo('forge-compact-');
     cfg = tmp('forge-compact-cfg-');
   });
   const session = (sid: string, source = 'compact') => run(['hook', 'route-session'],

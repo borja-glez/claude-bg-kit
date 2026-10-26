@@ -44,7 +44,7 @@ forge asks at its gates unless autonomy is `auto`: `begin` prints `autonomy: aut
    - adds new behaviour with its tests, rather than a mechanical or one-spot fix.
    To raise, `FORGE log --kind triage --task <id> --data-file <file>` (file: `{"path":"<new path>","why":"<the reason in the user's language, e.g. cambia el contrato de addItem>"}`) and run step 1's command again: it keeps the highest path logged and its `announce` names your reason. This is the **ratchet**: the path only goes up, also later in the task (e.g. small -> medium on finding a sensitive zone; logged the same way), and you follow the raised path from then on.
 3. **Announce.** Print `announce` exactly as printed, as the first lines of your reply, before any brief, edit or spawn, also late in a long session (it names path, reason, implementer and new validators, and says the user can correct it); ask nothing. When you do a Small yourself (`## Small` step 1), add «lo hago yo, el cambio ya está en contexto».
-4. **forge's own files.** With `untracked`, commit `.forge/.gitignore` alone right away: `git add .forge/.gitignore` and `git commit -m "forge: track .forge/.gitignore" -- .forge/.gitignore` (forge's file, not the user's).
+4. **forge's own files.** forge keeps its files out of git through the repository's `.git/info/exclude` and never commits on the person's branch for them. With `untracked` (a `.forge/.gitignore` git does not track whose rules are not exactly forge's: forge moves its own to `.git/info/exclude` by itself), never commit it: tell the person once, in one line, that they can commit it or delete it.
 
 **TDD.** When `begin`'s `tdd.line` is not null, every implementer brief you write by hand (any path) ends with that line as printed (it starts `TDD: required`; `FORGE brief` adds it itself), and `review-correctness` for such a brief also gets the implementer's report path. When `tdd.mode` is `superpowers` and `tdd.line` is null, say in the triage line that superpowers is not installed (or has no `test-driven-development` skill) and the task goes on without TDD. With `tdd.mode` `verified`, read `references/tdd.md` now.
 
@@ -79,7 +79,7 @@ Read `references/superpowers-plan.md` now and follow it with `/forge:run --super
 
 ## Large
 
-Read `references/large.md` now and follow it (subsystem, architecture, much ambiguity or risk, or a greenfield project): design with its mandatory approval, plan, execution, final review.
+Read `references/large.md` now and follow it (subsystem, architecture, much ambiguity or risk, or a new project with several pieces (a backend and a frontend…)): design with its mandatory approval, plan, execution, final review.
 
 ## Execution
 

@@ -34,7 +34,7 @@ export const CONFIGS = [
 ];
 
 /** The files of the throwaway repository the prompts talk about. Six, not four: forge's triage calls a repository with
- *  fewer than five files greenfield and sends every request to Large, which would hide the Trivial and Small prompts. */
+ *  fewer than five files greenfield and lifts its Small requests to Medium, which would hide the Small prompts. */
 export const DEMO_SHOP = {
   'package.json': JSON.stringify({ name: 'demo-shop', version: '1.0.0', type: 'module', scripts: { test: 'node --test' } }, null, 2) + '\n',
   'src/cart.js': 'export const total = items => items.reduce((s, i) => s + i.price * i.qty, 0);\nexport const withTax = (items, rate) => Math.round(total(items) * (1 + rate));\n',
@@ -65,10 +65,12 @@ export function demoRepo(repo) {
 }
 
 /** M3: the environment of a session. no-hint turns the hint off; the configurations with the hint drop a
- *  FORGE_ROUTE_HINT the person exported, which would make them no-hint too. */
+ *  FORGE_ROUTE_HINT the person exported, which would make them no-hint too. w8 FR1: every configuration drops the
+ *  person's FORGE_WORKFLOW, which would silence the hooks or pin the route. */
 export function sessionEnv(config, env) {
   const out = { ...env };
   delete out.FORGE_ROUTE_HINT;
+  delete out.FORGE_WORKFLOW;
   if (!config.hint) out.FORGE_ROUTE_HINT = 'off';
   return out;
 }
@@ -257,11 +259,12 @@ export function claudeArgs(prompt, { settings, pluginDirs }) {
   return ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--include-hook-events', '--max-turns', '2', '--settings', settings, ...pluginDirs.flatMap(d => ['--plugin-dir', d])];
 }
 
-/** The --settings of every configuration: this kit's installed copies off (the worktree's load with --plugin-dir). */
+/** The --settings of every configuration: this kit's installed copies off (the worktree's load with --plugin-dir), and
+ *  w8 FR1: FORGE_WORKFLOW back to ask, over one the person's own settings set for every project. */
 export function settingsFor(installedKeys) {
   const enabledPlugins = {};
   for (const k of installedKeys) if (/^(forge|waypoint|lens)@/.test(k)) enabledPlugins[k] = false;
-  return { enabledPlugins };
+  return { enabledPlugins, env: { FORGE_WORKFLOW: 'ask' } };
 }
 
 /** K1-02: the test repository's .claude/settings.local.json. superpowers is off there in the configuration without it, so

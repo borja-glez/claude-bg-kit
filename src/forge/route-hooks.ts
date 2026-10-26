@@ -1,19 +1,22 @@
 // forge's routing hooks. SessionStart (`hook route-session`) puts the routing rule in the session's context;
-// UserPromptSubmit (`hook route-prompt`) reminds a route half done, else hints at forge:route for coding work. Both fail
-// open (any error prints nothing), stay silent where forge already drives the session or the user chose superpowers
-// (or off) in local.yaml, and run no git beyond mainCheckout. After a compaction (`source: compact`), route-session tells
-// a session the forge task or the infinite run it has in progress.
+// UserPromptSubmit (`hook route-prompt`) reminds a route half done, else hints at forge:route for coding work (what
+// counts as coding work: route-hint.ts). Both fail open (any error prints nothing), stay silent outside a git
+// repository, where forge already drives the session or the user chose superpowers (or off: local.yaml, config.yaml or
+// FORGE_WORKFLOW), and run no git beyond mainCheckout's.
+// After a compaction (`source: compact`), route-session tells a session the forge task or the infinite run it has in
+// progress.
 import path from 'node:path';
 import { loadConfig, type ForgeConfig } from './config.js';
 import { readExecution } from './execution.js';
 import { readStatuses } from './ledger.js';
-import { mainCheckout, readLocal } from './local.js';
+import { readLocal, repoCheckout } from './local.js';
 import { memberForHook } from './members.js';
 import { isSafeId } from '../lib/execution-state.js';
 import type { ForgeStatus } from '../lib/forge-status.js';
 import { planLocale, sessionReply } from '../lib/locale.js';
 import { resolvePrefs } from './prefs.js';
 import { listRoutes, readRoute, ROUTE_REMINDER_MS, type RouteDoc } from './route.js';
+import { looksLikeCoding } from './route-hint.js';
 import { parseRun, readRunText } from './run.js';
 import { claudeConfigDir, locateSuperpowers } from './superpowers.js';
 import type { Io } from './cli/run.js';
@@ -37,37 +40,6 @@ export function routingRule(superpowers: boolean): string {
 
 export const ROUTE_HINT = 'forge: this looks like coding work. If it is more than a trivial edit, invoke forge:route first, before any other skill.';
 
-// Coding verbs in Spanish and English (scripts/route-eval calibrates the list).
-const VERBS = [
-  'crea', 'crear', 'añade', 'añadir', 'agrega', 'agregar', 'implementa', 'implementar', 'arregla', 'arreglar', 'corrige', 'corregir',
-  'refactoriza', 'refactorizar', 'monta', 'montar', 'construye', 'construir', 'migra', 'migrar', 'cambia', 'cambiar', 'desarrolla', 'desarrollar',
-  'build', 'builds', 'add', 'adds', 'implement', 'implements', 'fix', 'fixes', 'refactor', 'create', 'creates', 'migrate', 'change', 'develop',
-];
-const VERB = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${VERBS.join('|')})(?![\\p{L}\\p{N}_])`, 'iu');
-const METHOD = /(?<![\p{L}\p{N}_])(?:forge|superpowers)(?![\p{L}\p{N}_])/iu;
-
-// K1-03: what is not a request to change code. A message from an agent or the harness (it opens with a tag), a question
-// (¿…, …?) that is not a polite request, and a prompt that opens with an interrogative. «Como» without its accent opens a
-// request («Como usuario, quiero…»), so the Spanish interrogatives need theirs.
-// Only the tags of the harness and of agents; a prompt that opens with JSX or HTML («<Button> add a state…») is a request.
-const TAGGED = /^<(?:teammate-message|agent-message|task-notification|system-reminder|command-|local-command-|user-prompt-submit-hook)/i;
-// A polite request, after a short lead («hola,», «please»). Every pattern is anchored and has no nested quantifier.
-const POLITE = /^(?:(?:hola|oye|hi|hello|please|por favor)[,\s]+){0,3}¿?\s*(?:me\s+)?(?:puedes|podrías|podrias|puede|podría|podria|podéis|podeis|podemos|can you|could you|would you|will you|can we|could we)(?![\p{L}\p{N}_])/iu;
-const INTERROGATIVE = /^¿?\s*(?:qué|cómo|por qué|what|how|why)(?![\p{L}\p{N}_])/iu;
-// A first clause that opens with a coding verb is an order, whatever follows it («…, ¿vale?», «…. ¿Por qué falla?»).
-const IMPERATIVE = new RegExp(`^(?:${VERBS.join('|')})(?![\\p{L}\\p{N}_])`, 'iu');
-
-/** A prompt worth the routing hint: not a slash command nor a tagged message, not a question (a polite request still
- *  counts) nor an interrogative, six words or more, a coding verb, and no method named. */
-export function looksLikeCoding(prompt: string): boolean {
-  const p = prompt.trim();
-  if (!p || p.startsWith('/') || TAGGED.test(p)) return false;
-  if (INTERROGATIVE.test(p)) return false;
-  const asks = p.startsWith('¿') || p.endsWith('?') || p.includes('¿');
-  if (asks && !POLITE.test(p) && !IMPERATIVE.test(p.split(/[¿.!?]/, 1)[0].trim())) return false;
-  return p.split(/\s+/).length >= 6 && VERB.test(p) && !METHOD.test(p);
-}
-
 /** K1-03: route-prompt's hint, unless FORGE_ROUTE_HINT=off (route-eval) or `route.hint: off` in .forge/config.yaml. */
 export function hintOn(env: Record<string, string | undefined>, config: ForgeConfig): boolean {
   return env.FORGE_ROUTE_HINT !== 'off' && config.route?.hint !== 'off';
@@ -84,15 +56,19 @@ function fresh(r: RouteDoc, now: number): boolean {
  *  themselves; a plain forge:run does not, so the hand-over without a file names the command that does. */
 export function routeReminder(r: RouteDoc | null, now: number): string | null {
   if (!r || (r.stage !== 'designing' && r.stage !== 'planning') || !fresh(r, now)) return null;
+  if (r.chosen !== 'superpowers-design' && r.chosen !== 'superpowers-plan') return null;
   // Without a session (never so in the hooks, whose routes all have one) the command takes the environment's id.
   const close = `FORGE route stage --stage handed-off${r.session ? ` --session ${r.session}` : ''}`;
+  // w8 FR6: it rides on every message of the person while the route is half done, the one that approves the spec
+  // included, and wins over the next step a superpowers skill names by naming the person's choice and the rule of
+  // using-superpowers that puts the user's instructions above its skills (brainstorming 7.0.0's gate names writing-plans).
+  const who = r.by === 'auto' ? "the user's auto mode chose" : 'the user chose';
+  const choice = r.chosen === 'superpowers-design' ? '«superpowers designs, forge builds»' : '«superpowers plans, forge executes»';
+  const lead = `forge: ${who} ${choice} for task ${r.task} ("${r.chosen}"). using-superpowers puts the user's instructions above its skills, so this choice wins over the next step a superpowers skill names`;
   if (r.chosen === 'superpowers-design') {
-    return `forge: the user routed task ${r.task} as "${r.chosen}". When the spec is written and approved, hand off with forge:run --from-spec ${r.spec ?? '<the spec path>'} instead of writing-plans. If brainstorming ends without a spec (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r.task}/task.txt, run ${close} and invoke forge:run`;
+    return `${lead}: brainstorming's "invoke superpowers:writing-plans and no other skill" gives way to it. When the spec is written and approved, hand off with forge:run --from-spec ${r.spec ?? '<the spec path>'} instead of writing-plans. If brainstorming ends without a spec (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r.task}/task.txt, run ${close} and invoke forge:run`;
   }
-  if (r.chosen === 'superpowers-plan') {
-    return `forge: the user routed task ${r.task} as "${r.chosen}". When the plan is written, hand off with forge:run --superpowers-plan ${r.plan ?? '<the plan path>'} instead of subagent-driven-development or executing-plans. If brainstorming ends without a spec or a plan (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r.task}/task.txt, run ${close} and invoke forge:run`;
-  }
-  return null;
+  return `${lead}. When the plan is written, hand off with forge:run --superpowers-plan ${r.plan ?? '<the plan path>'} instead of subagent-driven-development or executing-plans. If brainstorming ends without a spec or a plan (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r.task}/task.txt, run ${close} and invoke forge:run`;
 }
 
 /** K1-12: a forge task of this session counts as open this long after its last event. */
@@ -198,17 +174,22 @@ export function hookRoute(io: Io, which: 'session' | 'prompt'): string {
     const sid = typeof o.session_id === 'string' && o.session_id ? o.session_id : null;
     // K1-09: in a task or run worktree of forge, forge drives whatever happens: no rule and no hint.
     if (inForgeWorktree(io.cwd)) return '';
-    const main = mainCheckout(io.cwd);
+    const repo = repoCheckout(io.cwd);
+    const main = repo ?? io.cwd;
     // w7 A2: after a compaction the session is told the forge task or infinite run it has in progress; neither the
     // workflow nor a broken config below silences it.
     if (which === 'session' && o.source === 'compact' && sid) {
       const recall = compactText(io, main, sid);
       if (recall) return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: recall } });
     }
+    // w8 FR2: outside a git repository there is nothing for forge to build on (forge:run needs one): no rule, no hint
+    // and no reminder.
+    if (!repo) return '';
     // With workflow: superpowers forge is optional again, as before routing existed; with off it stays out. The config is
-    // read once, here, for the workflow and the hint; an invalid one throws, and the hook says nothing (fail open).
+    // read once, here, for the workflow and the hint; an invalid one throws, and the hook says nothing (fail open). w8
+    // FR1: below local.yaml and config.yaml, the person's FORGE_WORKFLOW decides it for every project.
     const config = loadConfig(io.cwd);
-    const workflow = resolvePrefs({}, readLocal(io.cwd), config).workflow;
+    const workflow = resolvePrefs({}, readLocal(io.cwd), config, io.env ?? process.env).workflow;
     if (workflow === 'superpowers' || workflow === 'off' || forgeDrives(io, main, sid)) return '';
     if (which === 'session') {
       const sp = locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: main });

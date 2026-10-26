@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { run as cli, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
 import { readExecution, executionTaskFile, executionLock, writePublicTask } from '../src/forge/execution.js';
-import { appendEvent, readStatus } from '../src/forge/ledger.js';
+import { appendEvent, readStatus, FORGE_EXCLUDE } from '../src/forge/ledger.js';
 import { saveRun, startRun } from '../src/forge/run.js';
 import { withJob } from '../src/forge/jobs.js';
 import { normalizeExecution, type ExecTask, type ExecutionState } from '../src/lib/execution-state.js';
@@ -1453,7 +1453,11 @@ describe('forge swarm (execution)', () => {
     expect(lines.filter(l => l === '.claude/worktrees/')).toHaveLength(1);
     expect(git('status', '--porcelain')).not.toContain('.claude');
   });
-  const excludeText = () => { const f = path.join(root, '.git', 'info', 'exclude'); return existsSync(f) ? readFileSync(f, 'utf8') : ''; };
+  // What info/exclude holds besides forge's own exclusions (w8 FR5), which any forge write adds once.
+  const excludeText = () => {
+    const f = path.join(root, '.git', 'info', 'exclude');
+    return (existsSync(f) ? readFileSync(f, 'utf8') : '').split(/\r?\n/).filter(l => !FORGE_EXCLUDE.includes(l)).join('\n');
+  };
   it('an ignore that already covers .claude/worktrees/ (the .gitignore, or a global one) writes nothing to info/exclude (A-08)', () => {
     const before = excludeText();
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));

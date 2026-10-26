@@ -10,7 +10,7 @@ import { run, cleanProbe, type Io } from '../src/forge/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
 
-const PREFS = resolvePrefs({}, {}, {});
+const PREFS = resolvePrefs({}, {}, {}, {});
 const SP = { installed: true, version: '6.4.1' };
 const SPEC = { path: 'docs/superpowers/specs/s.md', title: 'S', modified: '2026-10-12T00:00:00.000Z' };
 const PLAN = { path: 'docs/superpowers/plans/p.md', title: 'P', tasks: 3, done: 1 };
@@ -140,13 +140,13 @@ describe('routeOptions', () => {
     expect(namedOrFirst([OTHER, { ...ES, title: 'Diseño del carrito' }], 'ejecuta el plan «diseño del carrito»')!.path).toBe(ES.path);
   });
   it('in auto mode a Large request without a spec goes to forge, whose design loop never asks', () => {
-    const auto = resolvePrefs({ autonomy: 'auto' }, {}, {});
+    const auto = resolvePrefs({ autonomy: 'auto' }, {}, {}, {});
     expect(routeOptions(input({ path: 'large', prefs: auto })).recommended).toEqual({ option: 'forge', why: expect.stringContaining('auto mode') });
     expect(routeOptions(input({ path: 'large', prefs: auto, specs: [SPEC], buildSpec: true })).recommended).toMatchObject({ option: 'superpowers-design', spec: SPEC.path });
     expect(routeOptions(input({ path: 'large', prefs: auto, plans: [PLAN], runPlan: true })).recommended).toMatchObject({ option: 'superpowers-plan', plan: PLAN.path });
   });
   it('passes the preferences, their sources and the specs and plans through', () => {
-    const r = routeOptions(input({ prefs: resolvePrefs({ autonomy: 'auto' }, { workflow: 'forge' }, {}), specs: [SPEC], plans: [PLAN] }));
+    const r = routeOptions(input({ prefs: resolvePrefs({ autonomy: 'auto' }, { workflow: 'forge' }, {}, {}), specs: [SPEC], plans: [PLAN] }));
     expect(r).toMatchObject({ workflow: 'forge', autonomy: 'auto', sources: { workflow: 'local', autonomy: 'request' }, specs: [SPEC.path], plans: [{ path: PLAN.path, tasks: 3, done: 1 }] });
   });
   it('routeAsk: the method with the recommended option first, and whether to remember it (K1-08)', () => {
@@ -230,6 +230,50 @@ describe('forge route CLI', () => {
     expect(readRoute(root, 'sess-1')).toMatchObject({ session: 'sess-1' });
     expect(JSON.parse(run(['route', 'stage', '--stage', 'planning', '--session', 'sess-1'], io).stdout)).toMatchObject({ session: 'sess-1' });
     expect(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user', '--session', 'a b'], io).code).toBe(2);
+  });
+  it("a spec handed off from brainstorming on this session's superpowers-design route is recorded as approved; any other is not (w8 FR4)", () => {
+    const spec = 'docs/superpowers/specs/2026-10-26-cart-design.md';
+    // Fix round 1: the spec brainstorming wrote on this route, so written after the route was set (io.now()).
+    const write = (rel: string, at: Date) => {
+      mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      writeFileSync(path.join(root, rel), '# Cart\n');
+      utimesSync(path.join(root, rel), at, at);
+    };
+    const later = new Date(io.now().getTime() + 3600_000);
+    write(spec, later);
+    write('docs/superpowers/specs/other-design.md', later);
+    const stage = (...extra: string[]) => JSON.parse(run(['route', 'stage', '--stage', 'handed-off', ...extra], io).stdout);
+    run(['route', 'set', '--task', 't1', '--chosen', 'superpowers-design', '--by', 'user'], io);
+    expect(stage('--spec', spec)).toMatchObject({ updated: true, stage: 'handed-off', spec, specApproved: true });
+    expect(readRoute(root, 'sess-0')).toMatchObject({ spec, specApproved: true });
+    // forge:run runs the same command again after a resume: the same spec stays approved, another one is not.
+    expect(stage('--spec', spec)).toMatchObject({ specApproved: true });
+    expect(stage('--spec', 'docs/superpowers/specs/other-design.md')).not.toHaveProperty('specApproved');
+    expect(readRoute(root, 'sess-0')).not.toHaveProperty('specApproved');
+    // A route that named its spec when it was set never went through brainstorming.
+    expect(JSON.parse(run(['route', 'set', '--task', 't2', '--chosen', 'superpowers-design', '--by', 'user', '--spec', spec], io).stdout)).not.toHaveProperty('specApproved');
+    expect(stage('--spec', spec)).not.toHaveProperty('specApproved');
+    // Brainstorming that ends without a file hands off with no spec; superpowers-plan never hands a spec to the design.
+    run(['route', 'set', '--task', 't3', '--chosen', 'superpowers-design', '--by', 'user'], io);
+    expect(stage()).not.toHaveProperty('specApproved');
+    run(['route', 'set', '--task', 't4', '--chosen', 'superpowers-plan', '--by', 'user'], io);
+    expect(stage('--spec', spec)).not.toHaveProperty('specApproved');
+    // A hand-written route file cannot claim it without its spec.
+    writeRoute(root, { task: 't5', chosen: 'superpowers-design', by: 'user', stage: 'handed-off', ts: '2026-10-13T10:00:00.000Z', session: 'sess-0', specApproved: true });
+    expect(readRoute(root, 'sess-0')).not.toHaveProperty('specApproved');
+    // Fix round 1: an older draft the person switched to, written before the route, or a spec that is not there, is not
+    // the one brainstorming had approved.
+    const old = 'docs/superpowers/specs/2026-09-01-old-design.md';
+    write(old, new Date(io.now().getTime() - 24 * 3600_000));
+    for (const s of [old, 'docs/superpowers/specs/missing-design.md']) {
+      run(['route', 'set', '--task', 't6', '--chosen', 'superpowers-design', '--by', 'user'], io);
+      expect(stage('--spec', s), s).toMatchObject({ updated: true, spec: s });
+      expect(readRoute(root, 'sess-0'), s).not.toHaveProperty('specApproved');
+    }
+    // Written in the same second as the route (a coarse file clock) still counts.
+    run(['route', 'set', '--task', 't7', '--chosen', 'superpowers-design', '--by', 'user'], io);
+    write(old, new Date(io.now().getTime() + 400));
+    expect(stage('--spec', old)).toMatchObject({ specApproved: true });
   });
   it('stage without a route updates nothing', () => {
     expect(JSON.parse(run(['route', 'stage', '--stage', 'done'], io).stdout)).toEqual({ updated: false });

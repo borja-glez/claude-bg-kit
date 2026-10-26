@@ -1,8 +1,8 @@
 // J-12: the start of a forge task (forge begin): which changes of the tree are the person's and not forge's, and the
 // question forge:run asks about them. Pure: no Node and no git.
 
-/** forge's own files: everything under `.forge/` that `.forge/.gitignore` ignores, so neither `.forge/config.yaml` nor
- *  `.forge/verify/*.md`, which are the person's. */
+/** forge's own files: everything under `.forge/` that forge's exclusions (or `.forge/.gitignore`) ignore, so neither
+ *  `.forge/config.yaml` nor `.forge/verify/*.md`, which are the person's. */
 export function isForgeOwn(p: string): boolean {
   const s = p.replace(/\\/g, '/');
   return s.startsWith('.forge/') && s !== '.forge/config.yaml' && !/^\.forge\/verify\/[^/]+\.md$/.test(s);

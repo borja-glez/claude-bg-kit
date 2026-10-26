@@ -1,7 +1,7 @@
 // .forge/local.yaml: what forge knows about this machine (surface permissions, validators already announced, drafts
 // already proposed, workflow, autonomy), and .forge/learned.jsonl: the lines `surfaces learn` appended to a surface.
 // Both live in the main checkout, so every worktree of the repository shares them (outside git: the directory itself).
-// .forge/.gitignore keeps them out of git; one committed anyway grants no surface (localTracked). local.yaml is read
+// forge's exclusions (forgeDir) keep them out of git; one committed anyway grants no surface (localTracked). local.yaml is read
 // leniently, written atomically, unknown keys kept.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -28,15 +28,20 @@ export interface LocalState {
  *  `root`'s checkout (`root` itself at the top, and also when git is unavailable). K2-01: from a subdirectory it is
  *  still the top level, so nothing of forge's lands in that subdirectory. One local.yaml serves every worktree. */
 export function mainCheckout(root: string): string {
+  return repoCheckout(root) ?? root;
+}
+
+/** w8 FR2: mainCheckout's answer, or null when `root` is in no git repository (or git cannot say): the same one call. */
+export function repoCheckout(root: string): string | null {
   try {
     const [gitDir, common, top, cdup] = execFileSync('git', ['rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel', '--show-cdup'], { cwd: root, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
       .split(/\r?\n/).map(l => l.trim());
-    if (!gitDir || !common) return root;
+    if (!gitDir || !common) return null;
     const commonDir = path.resolve(root, common);
     // At the top (no way up) it is `root` as given: git prints the top level resolved (forward slashes, symlinks followed).
     if (path.resolve(root, gitDir) === commonDir || path.basename(commonDir) !== '.git') return cdup && top ? path.resolve(top) : root;
     return path.dirname(commonDir);
-  } catch { return root; }
+  } catch { return null; }
 }
 
 /** The directory a hook works from: the session's project (CLAUDE_PROJECT_DIR), else the hook input's cwd, else the

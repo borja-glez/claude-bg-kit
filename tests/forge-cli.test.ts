@@ -293,7 +293,7 @@ describe('forge CLI', () => {
   });
   it('triage prints the implementer for the size, resolved through the profile; --batch delegates a trivial task', () => {
     io.git = args => {
-      // Five or more tracked files, or the repository counts as greenfield and every task is Large.
+      // Five or more tracked files, or the repository counts as greenfield and a Small task is Medium.
       if (args.includes('ls-files')) return 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n';
       if (args[0] === 'rev-list') return '12\n';
       return '';
@@ -324,9 +324,10 @@ describe('forge CLI', () => {
     expect(out).toMatchObject({ greenfield: false, path: 'small' });
     expect(out.reasons).toContain('git unavailable');
   });
-  it('triage on a repository without commits (rev-list fails) is greenfield', () => {
+  it('triage on a repository without commits (rev-list fails) is greenfield: Medium at most, unless the request has several pieces (w8 FR3)', () => {
     io.git = args => (args.includes('ls-files') ? '' : null);
-    expect(JSON.parse(run(['triage', 'build a todo app'], io).stdout)).toMatchObject({ greenfield: true, path: 'large' });
+    expect(JSON.parse(run(['triage', 'build a todo app'], io).stdout)).toMatchObject({ greenfield: true, path: 'medium' });
+    expect(JSON.parse(run(['triage', 'build a new app with a frontend and a backend'], io).stdout)).toMatchObject({ greenfield: true, path: 'large' });
   });
   it('triage lists the catalog, announces validators not yet known, then remembers them', () => {
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'x' } }));
@@ -471,7 +472,7 @@ describe('forge CLI', () => {
     expect(sp).toMatchObject({ path: 'medium', gate: 'plan' });
     expect(sp.announce).toMatch(/^Medium → forge-impl: .*superpowers plan: the Medium path, its tasks in order\. I show you a short plan/);
   });
-  it('triage names .forge/.gitignore as untracked until it is committed', () => {
+  it('triage leaves nothing of forge to commit, and names an untracked .forge/.gitignore an older forge left until it is committed (w8 FR5)', () => {
     const dir = tmp('forge-untracked-');
     const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' });
     git('init', '-q');
@@ -479,9 +480,21 @@ describe('forge CLI', () => {
     git('add', '.');
     git('commit', '-q', '-m', 'init');
     const dio: Io = { cwd: dir, now: io.now };
+    expect(JSON.parse(run(['triage', 'fix the typo in a.ts'], dio).stdout)).not.toHaveProperty('untracked');
+    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(false);
+    expect(git('status', '--porcelain')).toBe('');
+    // Fix round 1: an untracked one with exactly forge's own rules is forge's: it moves to info/exclude and goes.
+    for (const own of ['*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n', '*\r\n!.gitignore\r\n!config.yaml\r\n!verify/\r\n!verify/*.md\r\n']) {
+      writeFileSync(path.join(dir, '.forge', '.gitignore'), own);
+      expect(JSON.parse(run(['triage', 'fix the typo in a.ts'], dio).stdout)).not.toHaveProperty('untracked');
+      expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(false);
+      expect(git('status', '--porcelain')).toBe('');
+    }
+    // Any other content is the person's: it stays, and triage names it while it is untracked.
+    writeFileSync(path.join(dir, '.forge', '.gitignore'), '*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n!notes.md\n');
     const before = JSON.parse(run(['triage', 'fix the typo in a.ts'], dio).stdout);
-    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(true);
     expect(before.untracked).toEqual(['.forge/.gitignore']);
+    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(true);
     expect(readEvents(dir).at(-1)).not.toHaveProperty('untracked');
     git('add', '.forge/.gitignore');
     git('commit', '-q', '-m', 'forge');
@@ -498,7 +511,7 @@ describe('forge CLI', () => {
     git('add', '.');
     git('commit', '-q', '-m', 'init');
     const out = JSON.parse(run(['triage', 'fix the typo in a.ts'], { cwd: dir, now: io.now }).stdout);
-    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(true);
+    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(false);
     expect(out).not.toHaveProperty('untracked');
   });
   it('triage needs the task text', () => {
@@ -2973,8 +2986,17 @@ describe('forge begin (J-12)', () => {
     expect(existsSync(path.join(root, '.forge', 'work', 'cart', 'tree-start.json'))).toBe(true);
     expect(out.tdd.mode).toBe('superpowers');
     expect(out.tdd.line).toMatch(/^TDD: required/);
-    expect(out).toMatchObject({ autonomy: 'ask', workflow: 'ask', untracked: ['.forge/.gitignore'] });
+    // w8 FR5: forge's exclusions go to info/exclude, so there is no .forge/.gitignore to commit.
+    expect(out).toMatchObject({ autonomy: 'ask', workflow: 'ask', untracked: [] });
+    expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(false);
     expect(JSON.parse(run(['begin', '--task', 'cart', '--autonomy', 'auto'], withTdd()).stdout).autonomy).toBe('auto');
+    // Fix round 1: an untracked .forge/.gitignore with exactly forge's rules goes to info/exclude; another one stays named.
+    put('.forge/.gitignore', '*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n');
+    expect(JSON.parse(run(['begin', '--task', 'cart'], withTdd()).stdout).untracked).toEqual([]);
+    expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(false);
+    put('.forge/.gitignore', '*\n!.gitignore\n');
+    expect(JSON.parse(run(['begin', '--task', 'cart'], withTdd()).stdout).untracked).toEqual(['.forge/.gitignore']);
+    expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(true);
   });
   it("with only forge's files there is nothing foreign and no question; a bad flag exits 2", () => {
     repo();
