@@ -1,13 +1,14 @@
 // forge's routing hooks. SessionStart (`hook route-session`) puts the routing rule in the session's context;
 // UserPromptSubmit (`hook route-prompt`) reminds a route half done, else hints at forge:route for coding work. Both fail
-// open (any error prints nothing), stay silent where forge already drives the session or the user chose superpowers
-// (or off) in local.yaml, and run no git beyond mainCheckout. After a compaction (`source: compact`), route-session tells
-// a session the forge task or the infinite run it has in progress.
+// open (any error prints nothing), stay silent outside a git repository, where forge already drives the session or the
+// user chose superpowers (or off: local.yaml, config.yaml or FORGE_WORKFLOW), and run no git beyond mainCheckout's.
+// After a compaction (`source: compact`), route-session tells a session the forge task or the infinite run it has in
+// progress.
 import path from 'node:path';
 import { loadConfig, type ForgeConfig } from './config.js';
 import { readExecution } from './execution.js';
 import { readStatuses } from './ledger.js';
-import { mainCheckout, readLocal } from './local.js';
+import { readLocal, repoCheckout } from './local.js';
 import { memberForHook } from './members.js';
 import { isSafeId } from '../lib/execution-state.js';
 import type { ForgeStatus } from '../lib/forge-status.js';
@@ -198,13 +199,17 @@ export function hookRoute(io: Io, which: 'session' | 'prompt'): string {
     const sid = typeof o.session_id === 'string' && o.session_id ? o.session_id : null;
     // K1-09: in a task or run worktree of forge, forge drives whatever happens: no rule and no hint.
     if (inForgeWorktree(io.cwd)) return '';
-    const main = mainCheckout(io.cwd);
+    const repo = repoCheckout(io.cwd);
+    const main = repo ?? io.cwd;
     // w7 A2: after a compaction the session is told the forge task or infinite run it has in progress; neither the
     // workflow nor a broken config below silences it.
     if (which === 'session' && o.source === 'compact' && sid) {
       const recall = compactText(io, main, sid);
       if (recall) return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: recall } });
     }
+    // w8 FR2: outside a git repository there is nothing for forge to build on (forge:run needs one): no rule, no hint
+    // and no reminder.
+    if (!repo) return '';
     // With workflow: superpowers forge is optional again, as before routing existed; with off it stays out. The config is
     // read once, here, for the workflow and the hint; an invalid one throws, and the hook says nothing (fail open). w8
     // FR1: below local.yaml and config.yaml, the person's FORGE_WORKFLOW decides it for every project.

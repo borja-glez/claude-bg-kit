@@ -11,6 +11,12 @@ import { run, type Io } from '../src/forge/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
+/** w8 FR2: the routing rule and hint speak only in a git repository, so the hooks run in one. */
+const repo = (prefix: string): string => {
+  const dir = tmp(prefix);
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  return dir;
+};
 
 const NOW = new Date('2026-10-13T10:00:00.000Z');
 const context = (r: { stdout: string }) => (r.stdout ? JSON.parse(r.stdout).hookSpecificOutput : null);
@@ -61,7 +67,7 @@ describe('forge hook route-session and route-prompt', () => {
   let root: string;
   let cfg: string;
   beforeEach(() => {
-    root = tmp('forge-route-hook-');
+    root = repo('forge-route-hook-');
     cfg = tmp('forge-route-hook-cfg-');
   });
   const io = (stdin: string): Io => ({ cwd: root, now: () => NOW, stdin, env: { CLAUDE_CONFIG_DIR: cfg } });
@@ -102,6 +108,25 @@ describe('forge hook route-session and route-prompt', () => {
     personal('workflow: off\n');
     expect(hook('route-prompt', PROMPT).stdout).toBe('');
     expect(hook('route-session', { session_id: 'S1' }).stdout).toBe('');
+  });
+  it('outside a git repository there is neither rule nor hint; the same folder once in git gets both (w8 FR2)', () => {
+    const plain = tmp('forge-route-nogit-');
+    const said = (which: string, cwd: string, prompt = PROMPT) => run(['hook', which], {
+      cwd, now: () => NOW, env: { CLAUDE_CONFIG_DIR: cfg },
+      stdin: JSON.stringify(which === 'route-prompt' ? prompt : { session_id: 'S1', hook_event_name: 'SessionStart', source: 'startup' }),
+    });
+    for (const which of ['route-session', 'route-prompt']) expect(said(which, plain), which).toMatchObject({ code: 0, stdout: '' });
+    // A route this session left half done is not reminded there either: forge:run needs a repository.
+    writeRoute(plain, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'S1' });
+    expect(said('route-prompt', plain, { session_id: 'S1', prompt: 'hello there' }).stdout).toBe('');
+    execFileSync('git', ['init', '-q'], { cwd: plain });
+    expect(context(said('route-session', plain)).additionalContext).toContain('<FORGE-ROUTING>');
+    expect(context(said('route-prompt', plain, { session_id: 'S2', prompt: PROMPT.prompt })).additionalContext).toBe(ROUTE_HINT);
+    expect(context(said('route-prompt', plain, { session_id: 'S1', prompt: 'hello there' })).additionalContext).toContain('--from-spec');
+    // A subdirectory of the repository is in it.
+    const sub = path.join(plain, 'src', 'deep');
+    mkdirSync(sub, { recursive: true });
+    expect(context(said('route-prompt', sub, { session_id: 'S2', prompt: PROMPT.prompt })).additionalContext).toBe(ROUTE_HINT);
   });
   it('FORGE_WORKFLOW off or superpowers silences both hooks, under what the project says (w8 FR1)', () => {
     const said = (which: string, env: Record<string, string>) =>
@@ -148,7 +173,7 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
   let root: string;
   let cfg: string;
   beforeEach(() => {
-    root = tmp('forge-route-sess-hook-');
+    root = repo('forge-route-sess-hook-');
     cfg = tmp('forge-route-sess-cfg-');
   });
   const io = (stdin: unknown, at = NOW): Io => ({ cwd: root, now: () => at, stdin: JSON.stringify(stdin), env: { CLAUDE_CONFIG_DIR: cfg } });
@@ -343,7 +368,7 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
 
 describe('route-prompt reads every forge task of the session (K1-12 with C5)', () => {
   it("a task of this session keeps the hint away although another session's task changed later and is the alias", () => {
-    const dir = tmp('forge-k112-');
+    const dir = repo('forge-k112-');
     const cfg = tmp('forge-k112-cfg-');
     const at = (min: number) => new Date(NOW.getTime() - min * 60_000).toISOString();
     const status = (task: string, session: string, lastAt: string, doneAt: string | null = null) => ({
@@ -395,7 +420,7 @@ describe('the hint of route-prompt (K1-03)', () => {
     expect(looksLikeCoding('fix the rounding of the cart total in src/cart.js')).toBe(true);
   });
   it('a broken .forge/config.yaml keeps route-prompt silent, the hint and the reminder alike (M8)', () => {
-    const root = tmp('forge-hint-bad-');
+    const root = repo('forge-hint-bad-');
     const said = () => run(['hook', 'route-prompt'], {
       cwd: root, now: () => NOW, env: {}, stdin: JSON.stringify({ session_id: 'S1', prompt: 'Add coupon support to the cart with validation' }),
     });
@@ -412,7 +437,7 @@ describe('the hint of route-prompt (K1-03)', () => {
     expect(performance.now() - t0).toBeLessThan(200);
   });
   it('route.hint: false and true through the hook', () => {
-    const root = tmp('forge-hint2-');
+    const root = repo('forge-hint2-');
     const said = () => {
       const r = run(['hook', 'route-prompt'], { cwd: root, now: () => NOW, env: {}, stdin: JSON.stringify({ session_id: 'S1', prompt: '¿Puedes añadir soporte de cupones al carrito con validación?' }) });
       return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext as string : '';
@@ -424,7 +449,7 @@ describe('the hint of route-prompt (K1-03)', () => {
     expect(said()).toBe(ROUTE_HINT);
   });
   it('route.hint: off and FORGE_ROUTE_HINT=off turn the hint off, never the reminder of a route half done', () => {
-    const root = tmp('forge-hint-');
+    const root = repo('forge-hint-');
     const io = (env: Record<string, string> = {}): Io => ({
       cwd: root, now: () => NOW, env, stdin: JSON.stringify({ session_id: 'S1', prompt: 'Add coupon support to the cart with validation' }),
     });
@@ -448,7 +473,7 @@ describe('route-session after a compaction (w7 A2)', () => {
   let root: string;
   let cfg: string;
   beforeEach(() => {
-    root = tmp('forge-compact-');
+    root = repo('forge-compact-');
     cfg = tmp('forge-compact-cfg-');
   });
   const session = (sid: string, source = 'compact') => run(['hook', 'route-session'],
