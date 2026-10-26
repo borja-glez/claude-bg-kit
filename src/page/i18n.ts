@@ -184,7 +184,7 @@ const en = {
     active: 'Running',
     stopped: (r: string) => (r ? `Stopped: ${r}` : 'Stopped'),
     // Task 6 fix 1: the stop line of each reason forge writes, saying it once; any other reason goes through `stopped`.
-    stop: { saturated: 'Saturated', 'budget-cycles': 'Stopped: ran out of cycles', 'budget-hours': 'Stopped: ran out of time', 'stop-file': 'Stopped: by /forge:stop',
+    stop: { saturated: 'Saturated', 'budget-cycles': 'Stopped: ran out of cycles', 'budget-hours': 'Stopped: ran out of time', 'budget-usd': 'Stopped: reached its spending cap', 'stop-file': 'Stopped: by /forge:stop',
       stopped: 'Stopped: by /forge:stop', 'no-progress': 'Stopped: no progress', 'repeated-error': 'Stopped: the same error twice in a row', 'no-cycle': 'Stopped: no cycle recorded',
       'queue-full': 'Stopped: too many proposals waiting' } as Record<string, string>,
     saturated: 'Saturated',
@@ -405,7 +405,7 @@ const es: Dict = {
     title: (p: string) => `Ejecución autónoma · ${p}`,
     active: 'En marcha',
     stopped: (r: string) => (r ? `Parada: ${r}` : 'Parada'),
-    stop: { saturated: 'Saturada', 'budget-cycles': 'Parada: agotó los ciclos', 'budget-hours': 'Parada: agotó el tiempo', 'stop-file': 'Parada: con /forge:stop',
+    stop: { saturated: 'Saturada', 'budget-cycles': 'Parada: agotó los ciclos', 'budget-hours': 'Parada: agotó el tiempo', 'budget-usd': 'Parada: llegó a su tope de gasto', 'stop-file': 'Parada: con /forge:stop',
       stopped: 'Parada: con /forge:stop', 'no-progress': 'Parada: sin avances', 'repeated-error': 'Parada: el mismo error dos veces seguidas', 'no-cycle': 'Parada: sin ciclos registrados',
       'queue-full': 'Parada: demasiadas propuestas esperando' },
     saturated: 'Saturada',

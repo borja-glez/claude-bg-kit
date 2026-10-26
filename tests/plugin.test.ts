@@ -1028,7 +1028,7 @@ describe('plugin layout', () => {
   it('forge:infinite binds its run at start with the Claude id (K5-03)', () => {
     const inf = infiniteText();
     expect(inf).toContain('`CSID` = `${CLAUDE_SESSION_ID}`');
-    expect(inf).toContain('FORGE infinite start --cycles N --hours H --session <CSID>');
+    expect(inf).toContain('FORGE infinite start --cycles N --hours H --max-usd N --session <CSID>');
   });
   it('stopping, stalling or closing an execution publishes meta/run inactive and frees the coordinator tasks (A-23)', () => {
     const step7 = runRef('execution').split('\n').find(l => l.startsWith('7. **End.**'))!;

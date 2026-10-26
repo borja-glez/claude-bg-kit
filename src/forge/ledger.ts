@@ -8,7 +8,7 @@ import { mainCheckoutFrom } from '../lib/main-checkout.js';
 import { samePath } from '../lib/worktree.js';
 import { commonDirOf, hasLine } from '../lib/git-info.js';
 
-export const LEDGER_KINDS = ['triage', 'phase', 'agent', 'validate', 'verdict', 'round', 'ruling', 'cycle', 'proposal', 'verify', 'verify-skip', 'verify-env', 'verify-flow', 'decision'] as const;
+export const LEDGER_KINDS = ['triage', 'phase', 'agent', 'validate', 'verdict', 'round', 'ruling', 'cycle', 'proposal', 'verify', 'verify-skip', 'verify-env', 'verify-flow', 'decision', 'deviation'] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 export interface LedgerEvent { ts: string; kind: LedgerKind; task?: string; [key: string]: unknown }
 

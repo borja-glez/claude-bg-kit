@@ -9,8 +9,9 @@ export interface TCall { line: number; ts: string; id: string; tool: string; for
 export interface TResult { line: number; ts: string; exit: number | null; error: boolean; launched: boolean; agentId: string | null }
 export interface TCompaction { line: number; ts: string; trigger: string | null; preTokens: number | null }
 export interface Tokens { input: number; output: number; cacheRead: number; cacheWrite: number; cacheWrite1h: number }
-/** One message.id: `line` and `ts` of its last line, `lines` how many lines repeated its usage. */
-export interface TMessage { id: string; line: number; lines: number; ts: string; tokens: Tokens }
+/** One message.id: `line` and `ts` of its last line, `lines` how many lines repeated its usage. `model` (when the line
+ *  names one) and `cacheWrite5m` (the part of cacheWrite written to the 5-minute cache, when there is one) price it (FX2). */
+export interface TMessage { id: string; line: number; lines: number; ts: string; tokens: Tokens; model?: string; cacheWrite5m?: number }
 export interface TranscriptFacts {
   file: string; stats: ScanStats; calls: TCall[]; results: Map<string, TResult>; compactions: TCompaction[];
   messages: TMessage[]; usageLines: number; lastTs: string | null;
@@ -151,7 +152,10 @@ export function readTranscript(file: string, opts: ScanOpts = {}): TranscriptFac
         usageLines++;
         const id = typeof message.id === 'string' && message.id ? message.id : `line:${n}`;
         const before = messages.get(id);
-        messages.set(id, { id, line: n, lines: (before?.lines ?? 0) + 1, ts, tokens: tokensOf(message.usage) });
+        const created = isRec(message.usage.cache_creation) ? message.usage.cache_creation : {};
+        const w5 = num(created.ephemeral_5m_input_tokens);
+        messages.set(id, { id, line: n, lines: (before?.lines ?? 0) + 1, ts, tokens: tokensOf(message.usage),
+          ...(typeof message.model === 'string' && message.model ? { model: message.model } : {}), ...(w5 > 0 ? { cacheWrite5m: w5 } : {}) });
       }
     } else if (rec.type === 'user' && message) {
       const extra = isRec(rec.toolUseResult) ? rec.toolUseResult : {};

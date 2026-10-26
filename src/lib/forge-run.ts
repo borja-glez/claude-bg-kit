@@ -2,7 +2,8 @@
 
 export interface RunState {
   mode: 'infinite'; active: boolean; startedAt: string;
-  budget: { cycles?: number; hours?: number }; cycle: number;
+  budget: { cycles?: number; hours?: number; usd?: number }; cycle: number;
+  cost?: RunCost;                     // FX2: what the run spent, as its last cycle counted it (only with budget.usd)
   noProgress: number;                 // consecutive cycles without progress
   lastError: string | null; repeatedError: boolean;
   lastErrorDigest?: string;           // final fix T4-R2-1: the sha256 of the whole cleaned error (lastError keeps 1000 code points); absent with no error
@@ -14,6 +15,22 @@ export interface RunState {
   autonomous?: AutonomousRun;         // 6b: present only in an autonomous run; written by infinite start --profile, read and validated here
   explore?: { rounds: number; dry: number };  // 6b-3: the exploration rounds (cycle --explore) and how many in a row passed nothing
   saturation?: SaturationReport | null;       // 6b-3: the last report, once `dry` reached SATURATION_ROUNDS; null below it
+}
+
+/**
+ * FX2: what a run spent from its start, in USD, as the transcripts of its sessions record it (src/forge/run-cost.ts), at
+ * `at`. `usd` null: no transcript of its sessions was found, so nothing is known. `partial`: a lower bound (a session
+ * without a transcript, a model without a price, a transcript cut at forge's read limit), or unknown.
+ */
+export interface RunCost { usd: number | null; partial: boolean; at: string }
+
+/** A RunCost that reads, or null; never throws. */
+export function runCostOf(x: unknown): RunCost | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const { usd, partial, at } = x as Record<string, unknown>;
+  if (!(usd === null || (typeof usd === 'number' && Number.isFinite(usd) && usd >= 0)) || typeof partial !== 'boolean') return null;
+  if (typeof at !== 'string' || Number.isNaN(Date.parse(at))) return null;
+  return { usd, partial, at };
 }
 
 /** 6b-3: the exploration rounds in a row that must pass nothing (the spec's N, which starts at 3). Here, so that forge
@@ -168,12 +185,13 @@ export function parseRun(text: string | null): RunState | null {
   if (autonomous === null) return null;
   const b = o.budget;
   if (!b || typeof b !== 'object' || Array.isArray(b)) return null;
-  const { cycles, hours } = b as Record<string, unknown>;
+  const { cycles, hours, usd } = b as Record<string, unknown>;
   if (cycles !== undefined && !isPositiveInt(cycles)) return null;
   if (hours !== undefined && !isPositive(hours)) return null;
+  if (usd !== undefined && !isPositive(usd)) return null;
   const run: RunState = {
     mode: 'infinite', active: o.active, startedAt: o.startedAt,
-    budget: { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}) },
+    budget: { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}), ...(usd !== undefined ? { usd } : {}) },
     cycle: o.cycle, noProgress: o.noProgress, lastError: o.lastError as string | null, repeatedError: o.repeatedError,
     lastBlockEvents: o.lastBlockEvents as number | null, queueMax: o.queueMax, sessionId: o.sessionId as string | null,
     blocksSinceCycle: (o.blocksSinceCycle as number | undefined) ?? 0,
@@ -184,6 +202,9 @@ export function parseRun(text: string | null): RunState | null {
   // An invalid locale is dropped, never the run: older run.json files have none.
   if (isLocale(o.locale)) run.locale = o.locale;
   if (autonomous) run.autonomous = autonomous;
+  // FX2: a cost that does not read is dropped, never the run (no cost is no stop).
+  const cost = runCostOf(o.cost);
+  if (cost) run.cost = cost;
   // 6b-3: kept only when they read; one that does not is dropped, never the run (a dropped report is no saturation).
   const explore = exploreOf(o.explore);
   if (explore) run.explore = explore;

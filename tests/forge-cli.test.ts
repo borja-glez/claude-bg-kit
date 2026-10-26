@@ -308,8 +308,8 @@ describe('forge CLI', () => {
     const quality = JSON.parse(run(['triage', 'rename helperOne in src/a.ts and src/b.ts'], io).stdout);
     expect(quality.path).toBe('small');
     expect(quality.implementer).toMatchObject({ role: 'mech', agent: 'forge-impl-light' });
-    // The ledger event keeps its shape: implementer is output only.
-    expect(readEvents(root).at(-1)).not.toHaveProperty('implementer');
+    // FX1: the ledger event records only the agent the triage named (the deviation check reads it), not the whole output.
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', implementer: 'forge-impl-light' });
   });
   it('triage of the same task never lowers the path an earlier triage reached', () => {
     run(['log', '--kind', 'triage', '--task', 'rt', '--data', '{"path":"large"}'], io);

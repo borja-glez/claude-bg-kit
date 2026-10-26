@@ -15,6 +15,7 @@ import { activeProfileAt, prepareProfile, profileArgs, profileBlock, readableRun
 import { autonomousFor, recordSessions } from '../../autonomous.js';
 import { loadConfig, type ForgeConfig } from '../../config.js';
 import { resetDelegation, trustFor, type TrustState } from '../../trust.js';
+import { capNote, costNote } from '../../run-cost.js';
 import { activeProductRun, planOf, stopContext, unownedOf, runRootOf, runReply } from '../shared.js';
 
 export const command: Command = (args, ctx) => {
@@ -43,6 +44,8 @@ export const command: Command = (args, ctx) => {
     const cycles = num('cycles', posInt, 'a positive integer');
     const hours = num('hours', n => Number.isFinite(n) && n > 0, 'a positive number');
     const queueMax = num('queue-max', posInt, 'a positive integer');
+    // FX2: a spending cap besides the cycles or hours, never instead of them (a cost that cannot be counted stops nothing).
+    const maxUsd = num('max-usd', n => Number.isFinite(n) && n > 0, 'a positive number of US dollars');
     const locale = flag('locale');
     if (has('locale') && !isLocale(locale)) throw new UsageError('infinite start: --locale must be a language code (es, en, pt-BR…)');
     if (cycles === undefined && hours === undefined) throw new UsageError('infinite start: a budget is required (--cycles N and/or --hours H)');
@@ -73,7 +76,18 @@ export const command: Command = (args, ctx) => {
       && stopReason(current, stopContext(runRoot, io.now())) === null) throw new UsageError('infinite start: a run is already active (forge stop, or forge infinite status)');
     const main = mainCheckout(io.cwd);
     const autonomous = profiled ? profileBlock(main, io.cwd, profiled.profile, profiled.name) : null;
-    const budget = { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}) };
+    // Without --max-usd, the config's budget.usd. m9: a profile's is its worktree's config, the one its run trusts (below),
+    // read as the trust reads it: one that does not load gives no cap. Any other run's is the main checkout's, whose
+    // triage every cycle loads: one that does not load refuses the start, with or without the cap (cycle 1 would fail on it).
+    let usd = maxUsd;
+    if (autonomous) {
+      if (usd === undefined) { try { usd = loadConfig(autonomous.worktree).budget?.usd; } catch { usd = undefined; } }
+    } else {
+      let own: ForgeConfig;
+      try { own = loadConfig(main); } catch (e) { throw new UsageError(`infinite start: ${(e as Error).message}; fix \`.forge/config.yaml\` before you start: every cycle reads it`); }
+      usd ??= own.budget?.usd;
+    }
+    const budget = { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}), ...(usd !== undefined ? { usd } : {}) };
     const run: RunState = { ...startRun(io.now(), budget, queueMax, session, locale ?? null), ...(autonomous ? { autonomous } : {}) };
     // A block parseRun refuses would make the guard deny every call of the run: never written.
     if (autonomous && !parseRun(JSON.stringify(run))?.autonomous) throw new UsageError(`infinite start: the autonomous block of ${autonomous.runId} does not read back; check its start.json`);
@@ -94,7 +108,8 @@ export const command: Command = (args, ctx) => {
       const t = config ? trustFor(autonomous.worktree, config, ts()) : null;
       if (t?.hash) trust = { state: t.state, hash: t.hash, ...(t.blocked ? { blocked: true as const, note: false as const } : {}) };
     }
-    return json({ ...run, publish: { infinite: infinitePublish(main, run, io.now()) }, ...(trust ? { trust } : {}) });
+    // m10: with a cap, the person hears once what it is checked against and when.
+    return json({ ...run, ...(usd !== undefined ? { costNote: capNote(usd) } : {}), publish: { infinite: infinitePublish(main, run, io.now()) }, ...(trust ? { trust } : {}) });
   }
   if (sub === 'phase') {
     // 6b-3, spec «Fases que se replanifican»: the first phase of the plan, in its order, whose tasks the roadmap's state says are
@@ -126,8 +141,9 @@ export const command: Command = (args, ctx) => {
     const unbound = !!run?.active && run.sessionId === null;
     // G-08: meta/infinite as the roadmap takes it, for the skill to send as it is.
     const publish = run ? { infinite: infinitePublish(mainCheckout(io.cwd), run, io.now()) } : null;
-    return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run),
+    const note = run ? costNote(run) : null;
+    return json({ present: text !== null, valid: run !== null, run, stopReason: reason, ...(note ? { costNote: note } : {}), reply: runReply(runRoot, run),
       ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}), unowned: unownedOf(runRoot, io.now()), publish });
   }
-  throw new UsageError('usage: forge infinite <prepare --profile spike|product --name N|start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE] [--profile P --name N]|phase --plan P --db D [--mark F]|status>');
+  throw new UsageError('usage: forge infinite <prepare --profile spike|product --name N|start --cycles N|--hours H [--max-usd N] [--queue-max N] [--session ID] [--locale CODE] [--profile P --name N]|phase --plan P --db D [--mark F]|status>');
 };

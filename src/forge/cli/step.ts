@@ -15,6 +15,7 @@ import { runDocOf } from '../run-doc.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
 import { normalizePublicTask, type ExecTask, type ExecutionState, type PublicTask } from '../../lib/execution-state.js';
 import { isPlanId, parsePlan } from '../../lib/plan.js';
+import { deviationsOf, tellDeviations } from '../deviation.js';
 
 // D-12: `FORGE swarm step`, one step of a plan execution in one process. It calls the CLI itself (deps.cli) for each
 // command, so every one of them behaves as when the skill runs it alone (its --cwd, its events, the lock).
@@ -59,6 +60,8 @@ const RUNNER_FILE = 'runner.json';
 const RUNNER_AGENT = 'forge-runner';
 const RUNNER_EFFORT = 'medium';
 const RUNNER_SILENT_MINUTES = AGENT_LEASE_MINUTES + LEASE_MINUTES;
+/** FX1 m4: .forge/work/run/<this>: the run and the instant a step last read the deviations it said. */
+const DEVIATIONS_TOLD = 'deviations-told.json';
 interface RunnerDoc { runId: string; attempts: number; state: 'running' | 'back'; at: string; backAt?: string; reason?: 'returned' | 'silent' }
 
 const slash = (p: string) => p.split(path.sep).join('/');
@@ -186,11 +189,12 @@ function lastAgent(c: Ctx, taskN: string): string | null {
 }
 
 /** Logs the implementer handed out for `<T>-<n>` (review-close reads its rung), once: a hand-out a later step retries,
- *  with the same agent and role as the last one logged for that brief, adds nothing. */
+ *  with the same agent and role as the last one logged for that brief, adds nothing. `by: "step"` tells it from an agent
+ *  the session logs by hand: it is who forge named, which the deviation check compares with who started (FX1). */
 function logAgent(c: Ctx, taskN: string, agent: string, role: string): void {
   const last = ledgerOf(c, taskN).filter(e => e.kind === 'agent' && isTask(e, taskN)).at(-1);
   if (last?.agent === agent && last.role === role) return;
-  appendEvent(c.io.cwd, { ts: c.iso(), kind: 'agent', task: taskN, agent, role });
+  appendEvent(c.io.cwd, { ts: c.iso(), kind: 'agent', task: taskN, agent, role, by: 'step' });
 }
 
 /** A reviewer's file that is there and is not a draft (`"complete": false`); one that is not JSON is review-close's to judge. */
@@ -827,11 +831,21 @@ function stepOnce(c: Ctx, e0: ExecutionState, returned: Set<string>, versions: V
   }
   // 4. What the roadmap batch publishes.
   const after = readExecution(io.cwd) ?? e0;
-  const out = {
+  const out: Record<string, unknown> = {
     // The leases it publishes run from now, at the step's end (M7).
     actions: c.actions, publish: publishOf(io, after, started, versions, io.now()),
     running: Object.values(after.tasks).filter(t => t.status === 'running').length, parallel: after.parallel, wait, say: stepSay(c.actions, wait, c.locale),
   };
+  // FX1: the deviations of the run the hook recorded since the previous step read them, said once. m4: the instant of this
+  // read is kept (deviations-told.json, the step's last act), not the tick's lastStepAt: a deviation recorded between the
+  // tick and the read would be said again by the next step.
+  const toldFile = path.join(io.cwd, '.forge', 'work', 'run', DEVIATIONS_TOLD);
+  const told = readJson(toldFile);
+  const since = isObject(told) && told.runId === e0.runId && typeof told.at === 'string' && Number.isFinite(Date.parse(told.at)) ? Date.parse(told.at)
+    : e0.lastStepAt ? Date.parse(e0.lastStepAt) : -Infinity;
+  const readAt = io.now();
+  tellDeviations(out, deviationsOf(readEvents(io.cwd), e => e.runId === e0.runId && Date.parse(e.ts) > since && Date.parse(e.ts) <= readAt.getTime()), c.locale);
+  c.after.push(() => { mkdirSync(path.dirname(toldFile), { recursive: true }); writeJson(toldFile, { runId: e0.runId, at: readAt.toISOString() }); });
   // 5. Last, the writes that must not outlive a step that died before its output (respawned.json, asked.json's re-ask).
   for (const write of c.after) write();
   return { code: 0, stdout: JSON.stringify(out, null, 2) + '\n', stderr: warnings };

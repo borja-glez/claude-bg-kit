@@ -59,6 +59,8 @@ export interface ForgeConfig {
   route?: { hint: 'on' | 'off' };
   /** Globs of tracked build output: forge puts those files back after its validator runs in any checkout. */
   generated: string[];
+  /** FX2: the spending cap `infinite start` takes when it gets no --max-usd. */
+  budget?: { usd?: number };
 }
 export class ConfigError extends Error {}
 
@@ -116,6 +118,7 @@ const Schema = z.object({
     hint: z.union([z.enum(['on', 'off']), z.boolean()]).transform(v => (v === true ? 'on' : v === false ? 'off' : v)).default('on'),
   }).strict().optional(),
   generated: z.array(z.string().min(1).max(200)).max(50).default([]),
+  budget: z.object({ usd: z.number().positive().max(1_000_000).optional() }).strict().optional(),
   threatModel: z.object({
     protects: z.array(z.string().min(1).max(200)).min(1).max(10),
     trusted: z.array(z.string().min(1).max(200)).max(10).default([]),

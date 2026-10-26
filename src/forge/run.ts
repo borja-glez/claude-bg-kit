@@ -19,7 +19,8 @@ const MAX_ERROR = 1000;
 export function startRun(now: Date, budget: RunState['budget'], queueMax = DEFAULT_QUEUE_MAX, sessionId: string | null = null, locale: string | null = null): RunState {
   return {
     mode: 'infinite', active: true, startedAt: now.toISOString(),
-    budget: { ...(budget.cycles !== undefined ? { cycles: budget.cycles } : {}), ...(budget.hours !== undefined ? { hours: budget.hours } : {}) },
+    budget: { ...(budget.cycles !== undefined ? { cycles: budget.cycles } : {}), ...(budget.hours !== undefined ? { hours: budget.hours } : {}),
+      ...(budget.usd !== undefined ? { usd: budget.usd } : {}) },
     cycle: 0, noProgress: 0, lastError: null, repeatedError: false, lastBlockEvents: null, queueMax, sessionId, blocksSinceCycle: 0,
     ...(locale ? { locale } : {}),
   };
@@ -54,6 +55,8 @@ export function stopReason(run: RunState, ctx: StopContext): string | null {
   if (ctx.stopFile) return 'stop-file';
   if (run.budget.cycles !== undefined && run.cycle >= run.budget.cycles) return 'budget-cycles';
   if (run.budget.hours !== undefined && ctx.now.getTime() - Date.parse(run.startedAt) >= run.budget.hours * 3600_000) return 'budget-hours';
+  // FX2: what the last cycle counted (a lower bound already at the cap stops it too); an unknown cost never stops a run.
+  if (run.budget.usd !== undefined && typeof run.cost?.usd === 'number' && run.cost.usd >= run.budget.usd) return 'budget-usd';
   // 6b-3: an autonomous run whose last exploration rounds found nothing left (cycle --explore's report).
   if (run.autonomous && run.saturation?.saturated === true) return 'saturated';
   if (run.noProgress >= NO_PROGRESS_LIMIT) return 'no-progress';
