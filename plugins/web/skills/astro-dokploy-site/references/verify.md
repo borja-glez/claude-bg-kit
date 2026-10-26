@@ -41,10 +41,10 @@ On Windows `lhci` ends with `EPERM` while deleting `...\Temp\lighthouse.*` (the 
 
 1. Start the preview on a free port (see above), in the background.
 2. Launch Chrome on its own, in the background, and note its PID:
-   `<path to chrome.exe> --headless=new --enable-gpu --use-angle=d3d11 --remote-debugging-port=9333 --user-data-dir=<temp dir>`
-   (`--enable-gpu --use-angle=d3d11` is for Windows. 9333 is an example: use a port nothing listens on, the same one in step 3.)
+   `<path to chrome.exe> --headless=new --enable-gpu --use-angle=d3d11 --remote-debugging-port=<free port> --user-data-dir=<temp dir>`
+   (`--enable-gpu --use-angle=d3d11` is for Windows. use a port nothing listens on, the same one in step 3.)
    (`chrome` is not on PATH on Windows; chrome.exe usually sits under `C:\Program Files\Google\Chrome\Application\`.)
-3. Run `npx lighthouse <url> --port=9333 [--preset=<config's preset>] --output=json --output-path=<file>`.
+3. Run `npx lighthouse <url> --port=<free port> [--preset=<config's preset>] --output=json --output-path=<file>`.
 4. Stop Chrome and the preview by those PIDs, never by process name.
 
 Shorter alternative, which writes the report even though it prints the EPERM:

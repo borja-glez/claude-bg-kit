@@ -39,7 +39,7 @@ Se carga cuando trabajas en un sitio Astro estático con islas de Preact, constr
 | --- | --- |
 | Build e islas | El patrón `mounted`, el `min-height` de las islas, la llamada literal al worker de Vite, la prosa MDX con componentes, pnpm fijado en `packageManager`. |
 | CSP | `security.csp` con hashes por página, los scripts `is:inline` con su hash en la config, nada de `<style is:inline>` en las figuras, `worker-src`. |
-| Comprobaciones | Prettier como puerta propia, `astro check` con TypeScript 6, el webServer de Playwright bajo Claude Code, Lighthouse en Windows y en CI, Chrome real. |
+| Comprobaciones | Prettier como puerta propia, `astro check` con el rango de TypeScript de `@astrojs/check`, el webServer de Playwright bajo Claude Code, Lighthouse en Windows y en CI, Chrome real. |
 | Despliegue | El Dockerfile en la raíz, las cabeceras y los tipos MIME de nginx, los campos de ruta y contexto de Dokploy. |
 | Higiene del repo | Ni `CLAUDE.md` ni `.claude/` en el repo de un sitio, y las reglas de la skill no se duplican en `AGENTS.md`. |
 
