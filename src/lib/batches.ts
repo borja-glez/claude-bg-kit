@@ -118,14 +118,19 @@ export function heartbeatBatch(i: HeartbeatInput): BatchOut {
 }
 
 export interface RegisterInput {
-  sid: string; now: Date; name: string; agent: string; branch: string; worktree: string; track: string | null;
+  sid: string; now: Date; name: string; agent: string | null; branch: string; worktree: string; track: string | null;
   claude: string | null; sessionVersion: number | null;
 }
-/** The session's document: `set` when it has none yet (no version), else `update`, with its lease and Claude's id. */
+/**
+ * The session's document: `set` when it has none yet (no version), else `update`, with its lease and Claude's id. w8 W3:
+ * without a messaging name (no ListAgents) a new document has none and an update removes an earlier conversation's,
+ * so no session messages a name that is not this one's.
+ */
 export function registerBatch(i: RegisterInput): BatchOut {
   const now = i.now.toISOString();
   const leaseUntil = iso(i.now.getTime() + LEASE_MINUTES * MIN);
-  const data = { name: i.name, track: i.track, agentName: i.agent, branch: i.branch, worktree: i.worktree, ...(i.claude ? { claude: i.claude } : {}), heartbeatAt: now, leaseUntil, status: 'active' };
+  const agentName = i.agent !== null ? { agentName: i.agent } : i.sessionVersion !== null ? { agentName: DEL } : {};
+  const data = { name: i.name, track: i.track, ...agentName, branch: i.branch, worktree: i.worktree, ...(i.claude ? { claude: i.claude } : {}), heartbeatAt: now, leaseUntil, status: 'active' };
   const write: Write = i.sessionVersion === null
     ? { op: 'set', collection: 'sessions', doc_id: i.sid, data }
     : { op: 'update', collection: 'sessions', doc_id: i.sid, data, if_version: i.sessionVersion };

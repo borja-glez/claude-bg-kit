@@ -748,6 +748,14 @@ describe('task batches from the CLI (A-14)', () => {
     docsAt('db/sessions', { be: { name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', status: 'active', claude: 'c-9', worktree: '/repo/wt' } });
     expect(reg('--sessions', 'db/sessions', '--session-version', '3').code).toBe(0);
   });
+  it('heartbeat --register goes on without --agent when ListAgents is not there (w8 W3); the other fields stay required', () => {
+    const reg = (...extra: string[]) => cli('heartbeat', '--register', '--session', 'be', '--name', 'backend', '--branch', 'track/backend', '--worktree', '/repo/wt', '--claude', 'c-1', ...extra);
+    const r = reg();
+    expect(r.code, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout).batch[0].data).not.toHaveProperty('agentName');
+    expect(JSON.parse(reg('--session-version', '4').stdout).batch[0].data.agentName).toEqual({ __delete__: true });
+    expect(cli('heartbeat', '--register', '--session', 'be', '--name', 'backend', '--branch', 'track/backend').code).toBe(2);
+  });
 });
 
 describe('design commands', () => {

@@ -570,8 +570,9 @@ export function run(argv: string[], io: Io): Result {
         const now = io.now();
         if (args.includes('--register')) {
           const need = (n: string): string | null => { const v = flag(n); return v && !v.startsWith('--') ? v.slice(0, 200) : null; };
+          // w8 W3: --agent is the messaging name ListAgents gives; without that tool the session registers without one.
           const name = need('name'), agent = need('agent'), branch = need('branch'), worktree = need('worktree');
-          if (!name || !agent || !branch || !worktree) return fail('heartbeat --register: --name, --agent, --branch and --worktree are required', 2);
+          if (!name || !branch || !worktree) return fail('heartbeat --register: --name, --branch and --worktree are required (--agent when ListAgents gave a name)', 2);
           const svFlag = flag('session-version');
           const sv = svFlag === undefined ? null : posInt('session-version');
           if (svFlag !== undefined && sv === null) return fail('heartbeat: --session-version must be a positive integer', 2);
