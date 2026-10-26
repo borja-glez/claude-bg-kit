@@ -2,7 +2,7 @@ import type { Command } from '../context.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { appendEvent, readEvents } from '../../ledger.js';
-import { executionHolding, runWorktree } from '../../execution.js';
+import { runWorktree } from '../../execution.js';
 import { samePath } from '../../../lib/worktree.js';
 import { PATH_ORDER } from '../../triage.js';
 import { UsageError } from '../errors.js';
@@ -16,21 +16,8 @@ import { mainCheckout } from '../../local.js';
 import { loadTrusted } from '../../trust.js';
 import { noSlot } from '../../jobs.js';
 import { defaultExec, defaultGit, repoReader } from '../exec.js';
-import { baseOf, eventsOf, resolveProject } from '../../task-ref.js';
+import { eventsOf, resolveProject } from '../../task-ref.js';
 import { deviationSay, deviationsOf, sinceLastTriage, untold } from '../../deviation.js';
-
-/** FX3: whether `--task <T>[-<n>]` is a task the active execution of this checkout runs, so swarm integrate validates it. */
-function toIntegrate(cwd: string, task: string | undefined): boolean {
-  if (!task) return false;
-  try {
-    const ledger = readEvents(cwd);
-    for (const id of [...new Set([task, baseOf(task)])]) {
-      const e = executionHolding(cwd, { project: resolveProject({ task: id, events: ledger }), task: id });
-      if (e?.active && e.tasks[id]?.status === 'running') return true;
-    }
-  } catch { /* no execution that reads: the whole suite */ }
-  return false;
-}
 
 export const command: Command = (args, ctx) => {
   const { io, repoDir, flag, has, json, ts } = ctx;
@@ -58,13 +45,8 @@ export const command: Command = (args, ctx) => {
     return [...new Set([...changed.split('\0'), ...others.split('\0')].filter(Boolean))];
   };
   let scope: Scope;
-  // FX3: the Small pass of a task an active execution runs (ephemeral.md's validate, with --base) takes only what the
-  // change affects: swarm integrate validates every validator on the merged tree before the task lands (heavy scope, which
-  // covers the small one) and rolls it back on a failure. Without an integration after it, Small keeps the whole suite.
-  const integrated = (p === 'trivial' || p === 'small') && has('all') && flag('base') !== undefined && toIntegrate(io.cwd, flag('task'));
   if (has('final')) scope = { mode: 'final' };
   else if (!has('all') && has('affected')) scope = { mode: 'affected', files: affectedFiles() };
-  else if (integrated) scope = { mode: 'affected', files: affectedFiles() };
   else if (p === 'trivial' || p === 'small') scope = { mode: 'small' };
   else {
     const base = flag('base');
@@ -112,7 +94,6 @@ export const command: Command = (args, ctx) => {
   const out = json(results, allOk ? 0 : 1);
   if (!list.length) out.stderr = all.length ? 'no validators cover the affected paths\n' : `${NO_VALIDATORS}\n`;
   out.stderr += plan.notes.map(n => `${n}\n`).join('');
-  if (integrated) out.stderr += 'small path in an execution: only what the change affects ran here; swarm integrate runs every validator on the merged tree before the task lands\n';
   // D8: with a baseline, say which failures are the change's own and which the base already had.
   if (has('baseline') && results.some(r => !r.ok)) {
     const names = (pick: (r: ValidatorResult) => boolean) => results.filter(r => !r.ok && pick(r)).map(r => r.validator).join(', ') || 'none';
@@ -130,7 +111,7 @@ export const command: Command = (args, ctx) => {
   // FX1: the Trivial and Small paths close with this pass: it says this run's deviations of the task (from its last
   // triage), each once (m5: a later pass of the same round says only a new one).
   const task = flag('task');
-  if (task && (scope.mode === 'small' || integrated)) {
+  if (task && scope.mode === 'small') {
     const ledger = readEvents(io.cwd);
     const mine = eventsOf(ledger, { project: resolveProject({ task, events: ledger }), task });
     const line = deviationSay(untold(io.cwd, 'small', deviationsOf(sinceLastTriage(mine, task))), 'en');
