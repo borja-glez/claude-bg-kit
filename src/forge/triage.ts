@@ -258,9 +258,27 @@ export interface AnnounceInput {
   // The `why` of the latest raise logged for this task: it replaces the CLI reasons.
   why?: string | null;
   fresh: string[]; catalog: { name: string; cmd: string }[];
+  // FC3: no validator at all, detected or listed in .forge/config.yaml: nothing will check the change.
+  none?: boolean;
 }
 
-/** The line the session prints before acting on a triage, plus a line for validators it has not seen yet. */
+/** The lines announce prints after its first: the validators the session has not seen yet, and whether there is none
+ *  (FC3). '' or lines that each start with a newline; the announcement after an implementation keeps them too. */
+export function announceNotes(a: Pick<AnnounceInput, 'fresh' | 'catalog' | 'none'>, locale: AnnounceLocale): string {
+  const es = locale === 'es';
+  let out = '';
+  if (a.fresh.length) {
+    const list = a.fresh.map(n => `${n} (\`${a.catalog.find(v => v.name === n)?.cmd ?? ''}\`)`).join(', ');
+    out += `\n${es ? 'Validadores nuevos' : 'New validators'}: ${list}.`;
+  }
+  if (a.none) {
+    out += es ? '\nNo hay validadores: nada comprobará el cambio. Añade tests o declara validadores en .forge/config.yaml.'
+      : '\nNo validators detected: nothing checks the change. Add tests or list validators in .forge/config.yaml.';
+  }
+  return out;
+}
+
+/** The line the session prints before acting on a triage, plus announceNotes. */
 export function announce(a: AnnounceInput, locale: AnnounceLocale): string {
   const es = locale === 'es';
   const why = a.why || (es ? a.reasons.map(reasonEs) : a.reasons).join('; ');
@@ -284,9 +302,7 @@ export function announce(a: AnnounceInput, locale: AnnounceLocale): string {
       line = agent ? (es ? `Large → ${agent}: ${why}. Puedes corregirlo.` : `Large → ${agent}: ${why}. You can correct it.`)
         : es ? `Large: ${why}; primero diseño y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
   }
-  if (!a.fresh.length) return line;
-  const list = a.fresh.map(n => `${n} (\`${a.catalog.find(v => v.name === n)?.cmd ?? ''}\`)`).join(', ');
-  return `${line}\n${es ? 'Validadores nuevos' : 'New validators'}: ${list}.`;
+  return line + announceNotes(a, locale);
 }
 
 /** The line the session prints once a plan task is implemented: its real size and who reviews it. */

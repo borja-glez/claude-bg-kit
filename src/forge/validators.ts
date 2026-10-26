@@ -71,6 +71,16 @@ function relatedCmd(body: string, runner: string): { affectedCmd?: string } {
   return {};
 }
 
+// FC3: what makes a root a Gradle build: either file of the wrapper, or a build or settings script.
+const GRADLE_ROOT = ['gradlew', 'gradlew.bat', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'];
+// Where a build adds checks to `check`: its root scripts, its version catalog and its convention builds.
+const GRADLE_SCRIPTS = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'gradle/libs.versions.toml',
+  'buildSrc/build.gradle', 'buildSrc/build.gradle.kts', 'build-logic/build.gradle', 'build-logic/build.gradle.kts'];
+// A verification plugin that hangs a task on `check`, or the build naming `check` itself (tasks.named("check"), check { … }).
+const GRADLE_CHECK = /\b(?:checkstyle|pmd|spotbugs|spotless|detekt|ktlint|kotlinter|errorprone|codenarc)\b|["']check["']|\btasks\.check\b|^\s*check\s*(?:\{|\.dependsOn)/im;
+/** Whether `gradle check` does more than the tests: one of GRADLE_SCRIPTS names a check. */
+const gradleChecks = (repo: RepoReader): boolean => GRADLE_SCRIPTS.some(f => GRADLE_CHECK.test(repo.read(f) ?? ''));
+
 function detected(repo: RepoReader, which: (name: string) => boolean, platform: NodeJS.Platform): Validator[] {
   const out: Validator[] = [];
   const push = (v: Omit<Validator, 'source'>) => out.push({ ...v, source: 'detected' });
@@ -115,10 +125,25 @@ function detected(repo: RepoReader, which: (name: string) => boolean, platform: 
     push({ name: 'gradle-lint', cmd: `${g} lint`, kind: 'lint' });
     push({ name: 'gradle-test', cmd: `${g} testDebugUnitTest`, kind: 'test' });
   }
+  // FC3: a JVM build at the root. Gradle (not an android app, which has its own above): `check` when the build adds
+  // checks to it (gradleChecks; it runs the tests too, so it is the one test validator), else `test`. Maven: its tests.
+  // The wrapper of this platform when its file is there (gradlew.bat, mvnw.cmd on Windows: the shell is cmd.exe), else
+  // the tool on PATH.
+  const wrapper = (unix: string, win: string, tool: string) => (platform === 'win32' ? (repo.exists(win) ? win : tool) : repo.exists(unix) ? `./${unix}` : tool);
+  if (!androidApp && GRADLE_ROOT.some(f => repo.exists(f))) {
+    const g = wrapper('gradlew', 'gradlew.bat', 'gradle');
+    push(gradleChecks(repo) ? { name: 'gradle-check', cmd: `${g} check`, kind: 'test' } : { name: 'gradle-test', cmd: `${g} test`, kind: 'test' });
+  }
+  if (['mvnw', 'mvnw.cmd', 'pom.xml'].some(f => repo.exists(f))) {
+    push({ name: 'maven-test', cmd: `${wrapper('mvnw', 'mvnw.cmd', 'mvn')} -q test`, kind: 'test' });
+  }
   const make = repo.read('GNUmakefile') ?? repo.read('makefile') ?? repo.read('Makefile');
   if (make !== null && /^test\s*:(?!=)/m.test(make) && !out.some(v => v.kind === 'test')) push({ name: 'make-test', cmd: 'make test', kind: 'test' });
   return out;
 }
+
+/** FC3: what validate and prep say when no validator is detected nor listed. */
+export const NO_VALIDATORS = 'no validators detected: add tests or list validators in .forge/config.yaml';
 
 // Manual validators (the config) and, unless detect is false, detected ones minus `exclude`. A manual validator
 // replaces a detected one of the same name in place; the other manual ones follow. A detected validator that runs

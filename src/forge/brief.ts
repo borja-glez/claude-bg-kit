@@ -16,6 +16,25 @@ export const TDD_VERIFIED_LINE = 'TDD: required (verified by forge; there is no 
 /** The line a bug task's brief carries: reproduce first, and end the report with the root cause. */
 export const BUG_LINE = 'Bug: reproduce it first. Before you change the code, add a test that fails because of this bug (forge runs it on BASE and expects it to fail there), then fix it. End your report with one line: `Root cause: <file>:<line> - <what was wrong>`.';
 
+/** FC6: in a subagent, Claude Code refuses a Write of a `.md` file whose name starts with one of these words (any case). */
+export const REFUSED_MD = /^(?:REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$/i;
+
+/** The paths or names of .md files a brief gives whose last segment REFUSED_MD matches, each once, in order. */
+export function refusedMdNames(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/[^\s`'"()<>[\]{},;]+\.md\b/gi)) {
+    if (REFUSED_MD.test(m[0].split(/[\\/]/).pop() ?? '') && !out.includes(m[0])) out.push(m[0]);
+  }
+  return out;
+}
+
+/** FC6: the line of a brief that names such files: how the implementer still delivers one, and that it says how. */
+export function refusedMdLine(names: readonly string[]): string | null {
+  if (!names.length) return null;
+  return `Files named ${names.map(n => `\`${n}\``).join(', ')}: in a subagent, Claude Code refuses to Write a \`.md\` file whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS (any case). `
+    + 'To create or rewrite one, write it under another name and rename it with git (`git add` it, then `git mv` it to its name, `git mv -f` when that name is already in the repository), or return its text in your reply for the coordinator to write; say which in your report, never in silence.';
+}
+
 // Every visual line break: CRLF, LF, a lone CR, NEL, LS and PS (built from code points so the source stays ASCII).
 const LINE_BREAK = new RegExp(`\\r\\n|[\\n\\r${[0x85, 0x2028, 0x2029].map(c => String.fromCharCode(c)).join('')}]`);
 

@@ -178,6 +178,22 @@ describe('forge config get', () => {
     expect(run(['config', 'get', 'evidence'], io).stdout).toBe('local\n');
     expect(JSON.parse(run(['config', 'get', 'verify.limits'], io).stdout)).toEqual({ checks: 8, shots: 10, minutes: 10 });
   });
+  it('FC4: a known key without a value prints its default, or nothing, and exits 0', () => {
+    for (const key of ['swarm.setup', 'swarm.mode', 'swarm.nested', 'swarm.member.model', 'workflow', 'autonomy', 'verify.ports', 'verify.flow', 'threatModel', 'validators', 'route']) {
+      expect(run(['config', 'get', key], io), key).toEqual({ code: 0, stdout: '', stderr: '' });
+    }
+    // A key whose section is unset has the default the section would give it.
+    expect(run(['config', 'get', 'route.hint'], io)).toEqual({ code: 0, stdout: 'on\n', stderr: '' });
+    expect(run(['config', 'get', 'threatModel.trusted'], io)).toEqual({ code: 0, stdout: '[]\n', stderr: '' });
+    expect(run(['config', 'get', 'threatModel.notes'], io)).toEqual({ code: 0, stdout: '', stderr: '' });
+    // Set, it prints the value; an unknown key, or one below a value, is still not a key.
+    writeConfig('swarm:\n  setup: npm ci\nroute:\n  hint: off\n');
+    expect(run(['config', 'get', 'swarm.setup'], io).stdout).toBe('npm ci\n');
+    expect(run(['config', 'get', 'route.hint'], io).stdout).toBe('off\n');
+    for (const key of ['swarm.nope', 'evidence.x', 'route.hint.x', 'threatModel.nope', 'validators.0', 'nope.x']) {
+      expect(run(['config', 'get', key], io), key).toMatchObject({ code: 2, stderr: expect.stringContaining('is not a config key') });
+    }
+  });
   it('an invalid config or an unknown key exits 2', () => {
     writeConfig('evidence: cloud\n');
     const r = run(['config', 'get', 'evidence'], io);

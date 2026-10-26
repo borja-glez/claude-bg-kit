@@ -28,9 +28,9 @@ Input from the coordinator:
   - When the change dispatches an implementer or reviewers, add `--lease-minutes 90`.
   - Never run `FORGE swarm report`, `swarm integrate`, `swarm retry`, `swarm step` or `waypoint`: they are the coordinator's.
 - **Still yours.** Before each stage record, read `<WORK>/runner.json`. When its `state` is not `running`, the coordinator has taken the task back: stop at once and reply `<T> handback: taken back`.
-- **Foreground only.** Nothing wakes you.
-  - Run every command in the foreground with the Bash tool's `timeout: 600000`, never with `run_in_background`. A command with `--out` (review-prep, an express `validators.cmd`) runs in the foreground too: it first waits for a validation slot (`swarm.validateJobs`), then prints its JSON as without `--out` and also writes it to that file.
-  - Spawn your agents in the foreground and wait for them. A round's reviewers go in parallel, all in one message.
+- **Commands in the foreground, agents back by their reply.**
+  - Run every command in the foreground with the Bash tool's `timeout: 600000`, never with `run_in_background`: each step reads its output before the next one. A command with `--out` (review-prep, an express `validators.cmd`) runs in the foreground too: it first waits for a validation slot (`swarm.validateJobs`), then prints its JSON as without `--out` and also writes it to that file.
+  - The agents you spawn may run in the background (Claude Code decides): when one finishes, its reply comes back to you and wakes you. Once you have spawned what the step needs, end your turn and wait for every reply; never poll for one with commands or sleeps. A round's reviewers go in parallel, all in one message.
   - A command that runs out of time, its wait for a validation slot included: hand back.
 - **Agents.**
   - Spawn each one as `forge:<agent>`. For a reviewer, pass the Agent tool's `model` when its `spawn` entry's is not null, and its `effort` always. An implementer gets neither: its frontmatter fixes them.
@@ -40,7 +40,7 @@ Input from the coordinator:
 - **Resuming.** To resume an implementer, send it the findings with SendMessage to the agent its Agent call returned. Without SendMessage, or when that fails, spawn the same `implementer.agent` again, with the brief, its report, the worktree, the `validate` command and the findings.
 - **No Agent tool.** If you cannot spawn agents, hand back at once.
 - **Files.**
-  - Write your own files with the Write tool, in `<WORK>/`: the `--data-file` files, `validators-head-<n>.json` and `deferred.json`.
+  - Write your own files with the Write tool, in `<WORK>/`: the `--data-file` files, `validators-head-<n>.json`, `deferred.json` and `deliverable-<n>.txt` (`## Handing back`).
   - Never change a project file: implementers do.
   - Agents reply in two lines; read their files only when a step needs them.
 
@@ -86,6 +86,7 @@ Hand back:
 - in every case above;
 - on any `FORGE` command that exits other than as described, «Commands not trusted» included;
 - when a tool refuses you something the task needs (a permission, a write the harness refuses): never work around it;
+- when your implementer returns as text a project file the harness refused to write (a `.md` whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS): save that text with the Write tool to `<WORK>/deliverable-<n>.txt` (never under its own name) and hand back with `deliverable <path>: text in <WORK>/deliverable-<n>.txt` as the reason, `<path>` being the file's place in the project: the coordinator writes it;
 - when you are about to run out of turns.
 
 ## Reply

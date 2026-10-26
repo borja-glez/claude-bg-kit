@@ -323,6 +323,18 @@ describe('forge prep', () => {
     expect(small.validate).not.toContain('--baseline');
   });
 
+  it('FC3: with no validator detected nor listed, prep warns on its output and on stderr, with or without a baseline', () => {
+    const warning = 'no validators detected: add tests or list validators in .forge/config.yaml';
+    expect(JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).stdout).warning).toBeUndefined();
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'detect: false\n');
+    for (const argv of [['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], ['prep', '--task', 'T1-1', '--path', 'small', '--no-baseline', '--cwd', wt]]) {
+      const r = run(argv, io);
+      expect(r.code).toBe(0);
+      expect(JSON.parse(r.stdout).warning).toBe(warning);
+      expect(r.stderr).toBe(`${warning}\n`);
+    }
+  });
+
   it('writes baseline-<n>.json, logs the phase with the brief and the base, and prints the worktree HEAD', () => {
     rmSync(path.join(work(), 'baseline-1.json'));
     const r = run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io);

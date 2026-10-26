@@ -10,7 +10,7 @@ import { restoringRegenerated } from '../swarm.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../../validate-cache.js';
 import {
   detectValidators, selectValidators, runValidators, markPreexisting, blocking, baselineFailing, baseFailingNames, runOptions, validateEvent, planAffected,
-  type Scope, type Validator, type ValidatorResult,
+  NO_VALIDATORS, type Scope, type Validator, type ValidatorResult,
 } from '../../validators.js';
 import { mainCheckout } from '../../local.js';
 import { loadTrusted } from '../../trust.js';
@@ -110,7 +110,7 @@ export const command: Command = (args, ctx) => {
   const allOk = results.every(r => !blocking(r));
   appendEvent(io.cwd, validateEvent(ts(), flag('task'), results, durationMs, scope.mode, has('base-run') ? { baseline: true } : {}));
   const out = json(results, allOk ? 0 : 1);
-  if (!list.length) out.stderr = all.length ? 'no validators cover the affected paths\n' : 'no validators detected: add tests or list validators in .forge/config.yaml\n';
+  if (!list.length) out.stderr = all.length ? 'no validators cover the affected paths\n' : `${NO_VALIDATORS}\n`;
   out.stderr += plan.notes.map(n => `${n}\n`).join('');
   if (integrated) out.stderr += 'small path in an execution: only what the change affects ran here; swarm integrate runs every validator on the merged tree before the task lands\n';
   // D8: with a baseline, say which failures are the change's own and which the base already had.

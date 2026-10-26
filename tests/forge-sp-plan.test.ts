@@ -1,11 +1,54 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { checkSpTask, hasTickedBox, markDone, parseSpPlan, renderSpBrief, sddComplete, SpPlanError } from '../src/lib/sp-plan.js';
 import { run, type Io } from '../src/forge/cli/run.js';
+import { spLedgerDone, spMarkerPath } from '../src/forge/superpowers.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
+
+// FC1: superpowers 7.0.0's sdd-workspace writes a workspace's plan-path from `pwd -P`: the path from the toplevel it runs
+// in when the plan is under it, else the absolute path, which Git Bash spells /c/Users/… (the drive in lower case).
+const pwdP = (p: string): string => {
+  let real = p;
+  try { real = realpathSync(p); } catch { /* a plan that is not there */ }
+  return process.platform === 'win32' ? real.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d: string) => `/${d.toLowerCase()}`) : real;
+};
+
+describe('FC1: the plan-path of an SDD workspace', () => {
+  it('spMarkerPath reads the absolute spellings of a marker on Windows and elsewhere; a relative one is null', () => {
+    expect(spMarkerPath('/e/work/repo/docs/p.md', 'win32')).toBe('E:/work/repo/docs/p.md');
+    expect(spMarkerPath('/cygdrive/e/work/repo/docs/p.md', 'win32')).toBe('E:/work/repo/docs/p.md');
+    expect(spMarkerPath('E:/work/repo/docs/p.md', 'win32')).toBe('E:/work/repo/docs/p.md');
+    expect(spMarkerPath('e:\\work\\repo\\docs\\p.md', 'win32')).toBe('e:/work/repo/docs/p.md');
+    expect(spMarkerPath('  /e/work/repo/docs/p.md\n', 'win32')).toBe('E:/work/repo/docs/p.md');
+    expect(spMarkerPath('/home/x/repo/docs/p.md', 'linux')).toBe('/home/x/repo/docs/p.md');
+    for (const rel of ['docs/p.md', 'docs\\p.md', './docs/p.md', '']) {
+      expect(spMarkerPath(rel, 'win32')).toBeNull();
+      expect(spMarkerPath(rel, 'linux')).toBeNull();
+    }
+  });
+  it("spLedgerDone: a worktree's workspace whose absolute marker names the main checkout's copy of the plan counts", () => {
+    const main = tmp('fc1-main-');
+    const wt = path.join(main, '.claude', 'worktrees', 'a');
+    const P = 'docs/superpowers/plans/cart.md';
+    for (const r of [main, wt]) {
+      mkdirSync(path.join(r, 'docs', 'superpowers', 'plans'), { recursive: true });
+      writeFileSync(path.join(r, P), PLAN);
+    }
+    // sdd-workspace ran in the worktree for the main checkout's plan: outside its toplevel, so the marker is absolute.
+    const ws = path.join(wt, '.superpowers', 'sdd', 'cart');
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(path.join(ws, 'plan-path'), `${pwdP(path.join(main, P))}\n`);
+    writeFileSync(path.join(ws, 'progress.md'), `# SDD ledger — plan: ${realpathSync(path.join(main, P)).replace(/\\/g, '/')}\n\nTask 3: complete (commits a..b)\n`);
+    expect(spLedgerDone([wt, main], path.join(wt, P))).toEqual([3]);
+    expect(spLedgerDone([main], path.join(main, P))).toEqual([]);
+    // A marker naming a plan under no root and not this one is skipped.
+    writeFileSync(path.join(ws, 'plan-path'), `${pwdP(path.join(tmp('fc1-else-'), P))}\n`);
+    expect(spLedgerDone([wt, main], path.join(wt, P))).toEqual([]);
+  });
+});
 
 // LF here whatever git checked out; the CRLF case is built from it.
 const PLAN = readFileSync(new URL('./fixtures/sp-plan.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
@@ -138,6 +181,12 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
     writeFileSync(path.join(root, F), PLAN.replace(/\n/g, '\r\n'));
     io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z'), git: () => null, env: {} };
   });
+  it('FC6: the brief of a superpowers task that names a summary .md carries the line on how to deliver it', () => {
+    const P = 'docs/superpowers/plans/sum.md';
+    writeFileSync(path.join(root, P), '# Sum\n\n### Task 1: a\n\n**Files:**\n- Create: `docs/summary-q3.md`\n\n- [ ] Write the summary\n\n### Task 2: b\n\n- [ ] step\n');
+    expect(run(['brief', '--superpowers-plan', P, '--task', '1'], io).stdout).toMatch(/\nFiles named `docs\/summary-q3\.md`: in a subagent, Claude Code refuses to Write/);
+    expect(run(['brief', '--superpowers-plan', P, '--task', '2'], io).stdout).not.toContain('Files named');
+  });
   it('tasks prints the plan and its tasks', () => {
     const r = JSON.parse(run(['sp-plan', 'tasks', F], io).stdout);
     expect(r.plan).toMatchObject({ title: 'Cart Totals', goal: 'Show the cart total with taxes on the checkout page.' });
@@ -173,6 +222,26 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
     // A workspace whose marker names another plan is not this plan's.
     writeFileSync(path.join(ws, 'plan-path'), 'docs/other/cart.md\n');
     expect(JSON.parse(run(['sp-plan', 'tasks', F], io).stdout).tasks.map((t: { done: boolean }) => t.done)).toEqual([true, false, false]);
+  });
+  it('FC1: a workspace whose plan-path is absolute, as sdd-workspace writes it for a plan outside its toplevel, counts', () => {
+    const ws = path.join(root, '.superpowers', 'sdd', 'cart');
+    mkdirSync(ws, { recursive: true });
+    const abs = path.join(root, F);
+    // The ledger's controller names the plan the way Claude Code spells it (E:/…), the marker the way pwd -P does.
+    writeFileSync(path.join(ws, 'progress.md'), `# SDD ledger — plan: ${realpathSync(abs).replace(/\\/g, '/')}\n\nTask 2: complete (commits a..b)\nTask 3: complete (commits b..c)\n`);
+    const done = () => JSON.parse(run(['sp-plan', 'tasks', F], io).stdout).tasks.map((t: { done: boolean }) => t.done);
+    writeFileSync(path.join(ws, 'plan-path'), `${pwdP(abs)}\n`);
+    expect(done()).toEqual([true, true, true]);
+    if (process.platform === 'win32') {
+      // The same path in Windows' spellings.
+      for (const p of [realpathSync(abs), realpathSync(abs).replace(/\\/g, '/'), realpathSync(abs).toUpperCase()]) {
+        writeFileSync(path.join(ws, 'plan-path'), `${p}\n`);
+        expect(done()).toEqual([true, true, true]);
+      }
+    }
+    // An absolute marker that names another plan with the same file name is not this plan's.
+    writeFileSync(path.join(ws, 'plan-path'), `${pwdP(path.join(root, 'docs', 'other', 'cart.md'))}\n`);
+    expect(done()).toEqual([true, false, false]);
   });
   it('check of a task without boxes records it in .forge/sp-done/<slug>.md, and tasks counts it done (D-17)', () => {
     const P = 'docs/superpowers/plans/no-boxes.md';

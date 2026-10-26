@@ -293,10 +293,12 @@ function startTask(c: Ctx, task: string, resume: boolean): boolean {
   // The skill spawns it from this action: the step logs it, as task-steps step 2 says (review-close reads the rung).
   logAgent(c, `${task}-1`, agent, typeof impl.role === 'string' ? impl.role : 'impl');
   if (!call(c, task, ['swarm', 'task', task, '--stage', 'implement', '--agent', agent, '--round', '0', '--lease', c.agentLease()])) return false;
-  // What spawnImplementer and spawnRunner both hand over.
+  // What spawnImplementer and spawnRunner both hand over. FC3: prep's warning (no validator detected nor listed: nothing
+  // checks the change) rides along, and stepSay says it to the person.
   const handout = {
     brief: slash(brief), report: slash(path.join(work, 'report-1.txt')), validate: pr.validate ?? null, worktree, base: pr.base ?? null,
     ...(w.setup ? { setup: w.setup } : {}), ...(tri.announce ? { announce: tri.announce } : {}),
+    ...(typeof pr.warning === 'string' && pr.warning ? { warning: pr.warning } : {}),
   };
   // A10: a task resumed on its branch (D-02) stays with the coordinator.
   if (c.nested && !resumedBase) {
@@ -719,7 +721,10 @@ export function stepSay(actions: StepAction[], wait: number | null, locale: 'es'
       : a.type === 'error' ? a.command : a.type === 'block' || a.type === 'stalled' ? a.reason : '';
     const env = a.type === 'accepted' && Array.isArray(a.envUnverified) && a.envUnverified.length
       ? ` (${a.envUnverified.join(', ')} ${locale === 'es' ? 'sin volver a comprobar: entorno' : 'not checked again: environment'})` : '';
-    return [s[i].replace('{t}', String(a.task ?? 'swarm step')).replace('{x}', String(x ?? '')) + env];
+    // FC3: a start whose prep found no validator.
+    const none = (a.type === 'spawnImplementer' || a.type === 'spawnRunner') && typeof a.warning === 'string' && a.warning
+      ? (locale === 'es' ? ' (sin validadores: nada comprobará su cambio)' : ' (no validators: nothing checks its change)') : '';
+    return [s[i].replace('{t}', String(a.task ?? 'swarm step')).replace('{x}', String(x ?? '')) + env + none];
   });
   const head = locale === 'es' ? 'Paso' : 'Step';
   if (parts.length) return `${head}: ${parts.join('; ')}.`;

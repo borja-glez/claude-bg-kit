@@ -21,6 +21,10 @@ const tmp = useTempDirs();
 // CLAUDE_CODE_SESSION_ID: io.env is {} so nothing leaks from it, and the id comes as --session s1 unless a test gives its own.
 const run = (argv: string[], io: Io) =>
   cli(argv[0] === 'infinite' && argv[1] === 'start' && !argv.includes('--session') ? [...argv, '--session', 's1'] : argv, io);
+// The lines of a triage announcement, and the line FC3 adds in a repository without validators, by locale.
+const lines = (announce: string) => announce.split('\n');
+const NO_VALIDATORS_LINE = 'No validators detected: nothing checks the change. Add tests or list validators in .forge/config.yaml.';
+const NO_VALIDATORS_LINE_ES = 'No hay validadores: nada comprobará el cambio. Añade tests o declara validadores en .forge/config.yaml.';
 
 let root: string;
 let io: Io;
@@ -339,16 +343,17 @@ describe('forge CLI', () => {
   });
   it('triage hands over the announcement line and the gate, in English by default', () => {
     io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
+    // This repository has no validator: the line saying so follows each announcement (FC3).
     const trivial = JSON.parse(run(['triage', 'fix the typo in src/a.ts'], io).stdout);
-    expect(trivial.announce).toBe('Trivial: one named file, short task; I do it myself. You can correct it.');
+    expect(lines(trivial.announce)).toEqual(['Trivial: one named file, short task; I do it myself. You can correct it.', NO_VALIDATORS_LINE]);
     expect(trivial.gate).toBeNull();
     const small = JSON.parse(run(['triage', 'add a dark mode toggle'], io).stdout);
-    expect(small.announce).toBe('Small → forge-impl-light: no files located: the session should judge the scope. You can correct it.');
+    expect(lines(small.announce)).toEqual(['Small → forge-impl-light: no files located: the session should judge the scope. You can correct it.', NO_VALIDATORS_LINE]);
     const medium = JSON.parse(run(['triage', 'change the password check in src/a.ts'], io).stdout);
-    expect(medium.announce).toBe('Medium → forge-impl-high: one named file, short task; sensitive zone: auth. I show you a short plan before launching it; you can correct it.');
+    expect(lines(medium.announce)).toEqual(['Medium → forge-impl-high: one named file, short task; sensitive zone: auth. I show you a short plan before launching it; you can correct it.', NO_VALIDATORS_LINE]);
     expect(medium.gate).toBe('plan');
     const large = JSON.parse(run(['triage', 'redesign the plugin architecture'], io).stdout);
-    expect(large.announce).toBe('Large: architecture-scale wording; design and plan first. You can correct it.');
+    expect(lines(large.announce)).toEqual(['Large: architecture-scale wording; design and plan first. You can correct it.', NO_VALIDATORS_LINE]);
     expect(large.gate).toBeNull();
     // Output only: the ledger event keeps its shape.
     expect(readEvents(root).at(-1)).not.toHaveProperty('announce');
@@ -387,14 +392,14 @@ describe('forge CLI', () => {
   });
   it('triage --locale es announces in Spanish, with the reasons translated', () => {
     io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
-    expect(JSON.parse(run(['triage', '--locale', 'es', 'fix the typo in src/a.ts'], io).stdout).announce)
-      .toBe('Trivial: un fichero nombrado, tarea corta; lo hago yo. Puedes corregirlo.');
-    expect(JSON.parse(run(['triage', '--locale', 'es', 'añade un modo oscuro'], io).stdout).announce)
-      .toBe('Small → forge-impl-light: no localizo ficheros: decide la sesión. Puedes corregirlo.');
-    expect(JSON.parse(run(['triage', '--locale', 'es', 'cambia el mensaje de error del login a «Credenciales incorrectas»'], io).stdout).announce)
-      .toBe('Medium → forge-impl-high: un cambio de texto entre comillas; zona sensible: auth. Antes de lanzarlo te enseño un plan corto; puedes corregirlo.');
-    expect(JSON.parse(run(['triage', '--locale', 'es', 'Rediseña la arquitectura del plugin'], io).stdout).announce)
-      .toBe('Large: la tarea habla de arquitectura; primero diseño y plan. Puedes corregirlo.');
+    expect(lines(JSON.parse(run(['triage', '--locale', 'es', 'fix the typo in src/a.ts'], io).stdout).announce))
+      .toEqual(['Trivial: un fichero nombrado, tarea corta; lo hago yo. Puedes corregirlo.', NO_VALIDATORS_LINE_ES]);
+    expect(lines(JSON.parse(run(['triage', '--locale', 'es', 'añade un modo oscuro'], io).stdout).announce))
+      .toEqual(['Small → forge-impl-light: no localizo ficheros: decide la sesión. Puedes corregirlo.', NO_VALIDATORS_LINE_ES]);
+    expect(lines(JSON.parse(run(['triage', '--locale', 'es', 'cambia el mensaje de error del login a «Credenciales incorrectas»'], io).stdout).announce))
+      .toEqual(['Medium → forge-impl-high: un cambio de texto entre comillas; zona sensible: auth. Antes de lanzarlo te enseño un plan corto; puedes corregirlo.', NO_VALIDATORS_LINE_ES]);
+    expect(lines(JSON.parse(run(['triage', '--locale', 'es', 'Rediseña la arquitectura del plugin'], io).stdout).announce))
+      .toEqual(['Large: la tarea habla de arquitectura; primero diseño y plan. Puedes corregirlo.', NO_VALIDATORS_LINE_ES]);
     // The locale flag is not part of the task text.
     expect(readEvents(root).at(-1)!.reasons).not.toContain('es');
     expect(run(['triage', '--locale', 'fr', 'add a toggle'], io).code).toBe(2);
@@ -418,6 +423,23 @@ describe('forge CLI', () => {
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'x', lint: 'y', typecheck: 'z' } }));
     expect(JSON.parse(run(['triage', 'fix a typo in a.ts'], { ...io, git }).stdout).announce.split('\n')[1]).toBe('New validators: typecheck (`npm run typecheck`).');
   });
+  it('FC3: triage in a repository with no validator, detected or listed, says so in the announcement', () => {
+    const git = (args: string[]) => (args.includes('ls-files') ? 'a.ts\nb.ts\nc.ts\nd.ts\ne.ts\n' : args[0] === 'rev-list' ? '5\n' : '');
+    expect(lines(JSON.parse(run(['triage', 'fix a typo in a.ts'], { ...io, git }).stdout).announce)).toEqual([
+      'Trivial: one named file, short task; I do it myself. You can correct it.', NO_VALIDATORS_LINE,
+    ]);
+    expect(lines(JSON.parse(run(['triage', '--locale', 'es', 'añade un modo oscuro'], { ...io, git }).stdout).announce))
+      .toEqual(['Small → forge-impl-light: no localizo ficheros: decide la sesión. Puedes corregirlo.', NO_VALIDATORS_LINE_ES]);
+    // A validator listed by hand is one: the announcement is its line and the new validator's, never the warning.
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "0"\n');
+    expect(lines(JSON.parse(run(['triage', 'fix a typo in a.ts'], { ...io, git }).stdout).announce)).toEqual([
+      'Trivial: one named file, short task; I do it myself. You can correct it.', 'New validators: check (`node -e "0"`).',
+    ]);
+    expect(lines(JSON.parse(run(['triage', 'fix a typo in a.ts'], { ...io, git }).stdout).announce)).toEqual([
+      'Trivial: one named file, short task; I do it myself. You can correct it.',
+    ]);
+  });
   it('a logged triage raise carries its why into the announcement of the next triage', () => {
     io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
     writeFileSync(path.join(root, 'raise.json'), JSON.stringify({ path: 'medium', why: '  touches the cart totals and its tests  ' }));
@@ -425,7 +447,7 @@ describe('forge CLI', () => {
     expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', task: 'rw', path: 'medium', why: 'touches the cart totals and its tests' });
     const out = JSON.parse(run(['triage', '--task', 'rw', '--locale', 'es', 'add a dark mode toggle'], io).stdout);
     expect(out.path).toBe('medium');
-    expect(out.announce).toBe('Medium → forge-impl: touches the cart totals and its tests. Antes de lanzarlo te enseño un plan corto; puedes corregirlo.');
+    expect(lines(out.announce)).toEqual(['Medium → forge-impl: touches the cart totals and its tests. Antes de lanzarlo te enseño un plan corto; puedes corregirlo.', NO_VALIDATORS_LINE_ES]);
     // The triage it just logged has no why: the raise's why still wins the next time.
     expect(JSON.parse(run(['triage', '--task', 'rw', 'add a dark mode toggle'], io).stdout).announce).toMatch(/^Medium → forge-impl: touches the cart totals and its tests\./);
     // Another task keeps the CLI reasons.
@@ -1068,6 +1090,14 @@ it("brief adds the threat model of the project's config (K4-02)", () => {
   expect(r.code).toBe(0);
   expect(r.stdout).toContain("## Threat model\n\n- Protects: the person's files\n");
 });
+it('FC6: the brief of a plan task that names a report .md says how the implementer delivers it, and that it says so', () => {
+  writeFileSync(path.join(root, 'plan.yaml'), PLAN_YAML.replace('done_when: users can log in', 'done_when: docs/REPORT.md lists the login errors'));
+  const out = run(['brief', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout;
+  const line = out.split('\n').find(l => l.startsWith('Files named `docs/REPORT.md`:'))!;
+  for (const w of ['refuses to Write', 'REPORT, SUMMARY, FINDINGS or ANALYSIS', '`git mv`', '`git mv -f`', 'return its text in your reply', 'say which in your report', 'never in silence']) expect(line, w).toContain(w);
+  writeFileSync(path.join(root, 'plan.yaml'), PLAN_YAML);
+  expect(run(['brief', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout).not.toContain('Files named');
+});
 it('triage --plan without a value is a usage error, not free text', () => {
   expect(run(['triage', '--plan'], io).code).toBe(2);
   expect(run(['triage', '--plan', '--task', 'T001'], io).code).toBe(2);
@@ -1154,7 +1184,8 @@ describe('triage --base', () => {
     expect(out.diff).toEqual({ base: 'abc123', files: ['src/ui/footer.ts', 'src/ui/footer.test.ts'], lines: 16, path: 'small' });
     expect(out.review).toEqual({ light: true, flags: [], reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium', agent: 'forge-review-correctness' }] });
     expect(out.gate).toBeNull();
-    expect(out.announce).toMatch(/^Real size: 2 file\(s\), 16 line\(s\) → Small: one light review/);
+    // FC3: the line that says no validator checks the change stays after the review line.
+    expect(lines(out.announce)).toEqual(['Real size: 2 file(s), 16 line(s) → Small: one light review (correctness on sonnet).', NO_VALIDATORS_LINE]);
     expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', task: 'T001', path: 'small', diff: { base: 'abc123', files: 2, lines: 16 } });
   });
   it('five changed files raise a plain task to medium, reviewed by correctness alone', () => {

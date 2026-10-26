@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { triage, implementerFor, isMechanical, announce, parseNumstat, isBookkeeping, diffPath, DIFF_MEDIUM_LINES, isPerfTask, reviewFor, announceReview, stripMentions, zonesFromText, diffZones, type RepoFacts } from '../src/forge/triage.js';
+import { triage, implementerFor, isMechanical, announce, announceNotes, parseNumstat, isBookkeeping, diffPath, DIFF_MEDIUM_LINES, isPerfTask, reviewFor, announceReview, stripMentions, zonesFromText, diffZones, type RepoFacts } from '../src/forge/triage.js';
 
 const FILES = ['src/app.ts', 'src/auth/login.ts', 'src/util/format.ts', 'src/db/migrations/001.sql', 'package.json', '.github/workflows/ci.yml',
   ...Array.from({ length: 20 }, (_, i) => `src/feature/f${i}.ts`)];
@@ -380,6 +380,19 @@ describe('real diff sizing', () => {
       .toBe(`Large → forge-impl-heavy: ${why}. Puedes corregirlo.`);
     expect(announce({ ...large, implementer: { self: false, agent: null } }, 'en')).toBe('Large: 12 files located; design and plan first. You can correct it.');
     expect(announce({ ...large, implementer: { self: false, agent: null } }, 'es')).toBe('Large: 12 ficheros; primero diseño y plan. Puedes corregirlo.');
+  });
+  it('FC3: with no validator detected nor listed, the announcement says nothing will check the change, after the new validators', () => {
+    const small = { path: 'small' as const, reasons: ['one file, short task'], implementer: { self: false, agent: 'forge-impl-light' }, fresh: [], catalog: [] };
+    expect(announce({ ...small, none: true }, 'en').split('\n')).toEqual([
+      'Small → forge-impl-light: one file, short task. You can correct it.',
+      'No validators detected: nothing checks the change. Add tests or list validators in .forge/config.yaml.',
+    ]);
+    expect(announce({ ...small, none: true }, 'es').split('\n')[1])
+      .toBe('No hay validadores: nada comprobará el cambio. Añade tests o declara validadores en .forge/config.yaml.');
+    expect(announce(small, 'en')).not.toContain('\n');
+    // The lines after the first, as the announcement after an implementation keeps them.
+    expect(announceNotes({ ...small, none: true }, 'en')).toBe('\nNo validators detected: nothing checks the change. Add tests or list validators in .forge/config.yaml.');
+    expect(announceNotes(small, 'en')).toBe('');
   });
 });
 

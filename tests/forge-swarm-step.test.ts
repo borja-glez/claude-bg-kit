@@ -318,6 +318,16 @@ describe('forge swarm step (D-12)', () => {
       }
     }
   });
+  it('FC3: a task whose prep found no validator starts with its warning, and the step says it to the person', () => {
+    // This repository has no validator (validators: [], nothing to detect): prep warns.
+    const s = step('--locale', 'en');
+    const t1 = s.actions.find(a => a.type === 'spawnImplementer' && a.task === 'T1')!;
+    expect(t1.warning).toBe('no validators detected: add tests or list validators in .forge/config.yaml');
+    expect(s.say).toContain(`T1 starts with ${String(t1.agent)} (no validators: nothing checks its change)`);
+    expect(stepSay([{ type: 'spawnImplementer', task: 'T1', agent: 'forge-impl', warning: 'x' }], null, 'es')).toBe('Paso: T1 empieza con forge-impl (sin validadores: nada comprobará su cambio).');
+    expect(stepSay([{ type: 'spawnRunner', task: 'T1', implementer: { agent: 'forge-impl' }, warning: 'x' }], null, 'en')).toBe('Step: T1 starts with its runner (forge-impl) (no validators: nothing checks its change).');
+    expect(stepSay([{ type: 'spawnImplementer', task: 'T1', agent: 'forge-impl' }], null, 'en')).toBe('Step: T1 starts with forge-impl.');
+  });
   it('an accepted task with findings verify could not check again says so (H1)', () => {
     expect(stepSay([{ type: 'accepted', task: 'T1', envUnverified: ['F1', 'F3'] }], null, 'en')).toBe('Step: T1 accepted (F1, F3 not checked again: environment).');
     expect(stepSay([{ type: 'accepted', task: 'T1', envUnverified: ['F1'] }], null, 'es')).toBe('Paso: T1 aceptada (F1 sin volver a comprobar: entorno).');

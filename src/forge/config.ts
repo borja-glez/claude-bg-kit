@@ -170,6 +170,31 @@ export function configValue(config: ForgeConfig, key: string): unknown {
   return at;
 }
 
+// The schema under its optional, default and transform wrappers.
+function bareSchema(s: z.ZodType): z.ZodType {
+  for (;;) {
+    if (s instanceof z.ZodOptional || s instanceof z.ZodDefault || s instanceof z.ZodPrefault) s = s.unwrap() as z.ZodType;
+    else if (s instanceof z.ZodPipe) s = s.in as z.ZodType;
+    else return s;
+  }
+}
+
+/**
+ * FC4: what a known key of the config holds when the file gives it no value: its default (a key in a section that is
+ * not set gets the default that section's schema gives it), or undefined when it has none. Null when `key` (a dotted
+ * path) is no key of the config's schema.
+ */
+export function configDefault(key: string): { value: unknown } | null {
+  let s: z.ZodType = Schema;
+  for (const part of key.split('.')) {
+    const o = bareSchema(s);
+    if (!(o instanceof z.ZodObject) || !Object.hasOwn(o.shape, part)) return null;
+    s = o.shape[part] as z.ZodType;
+  }
+  const d = s.safeParse(undefined);
+  return { value: d.success ? d.data : undefined };
+}
+
 export function loadConfig(root: string): ForgeConfig {
   const file = path.join(root, '.forge', 'config.yaml');
   return parseConfig(existsSync(file) ? readFileSync(file, 'utf8') : null);
