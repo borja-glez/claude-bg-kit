@@ -2484,7 +2484,7 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     };
     const inf = { active: false, cycle: 4, budget: { cycles: 4 }, startedAt: '2026-10-22T02:00:00.000Z', lastCycleAt: null, stopReason: 'budget-cycles', profile: 'product' as const, saturation };
     const c = autoCard(renderApp({ ...base(), infinite: inf }, ui()));
-    expect(c).toContain('Parada: agotó los ciclos');
+    expect(c).toContain('Detenida: agotó los ciclos');
     expect(c).toContain('Sin saturar:');
     expect(c).not.toContain('Saturada');
     for (const s of ['<li><b>1</b> de 3 rondas sin novedades</li>', 'Tareas pendientes: <b>2</b> <span class="aids">T004 &lt;img', 'Validadores en rojo: <b>1</b> <span class="aids">(no validators)</span>',
@@ -2502,7 +2502,7 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
       '<li class="ainfo">Hallazgos de tareas retiradas (solo información): <b>1</b> <span class="aids">T099</span></li>']) expect(c, s).toContain(s);
     clean(c);
     // An unknown stop reason is shown as written (escaped); English labels.
-    expect(autoCard(renderApp({ ...base(), infinite: { ...inf, stopReason: '<b>x</b>' } }, ui()))).toContain('Parada: &lt;b&gt;x&lt;/b&gt;');
+    expect(autoCard(renderApp({ ...base(), infinite: { ...inf, stopReason: '<b>x</b>' } }, ui()))).toContain('Detenida: &lt;b&gt;x&lt;/b&gt;');
     const en = autoCard(renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, infinite: inf }, ui()));
     for (const s of ['Autonomous run · product', 'Stopped: ran out of cycles', 'Not saturated:', '<li><b>1</b> of 3 dry rounds</li>', 'Pending tasks: <b>2</b>',
       'Validators failing: <b>1</b>', 'Open review findings: <b>2</b>', 'Open defects: <b>1</b>', 'Approvals or proposals still open (to judge, or approved without a task): <b>25</b>',
@@ -2523,20 +2523,22 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     // Every reason forge writes (src/forge/run.ts stopReason, cli/commands/stop.ts): one colon at most (the command's own
     // aside), and the stop word once.
     for (const reason of ['saturated', 'budget-cycles', 'budget-hours', 'budget-usd', 'stop-file', 'stopped', 'no-progress', 'repeated-error', 'no-cycle', 'queue-full']) {
-      for (const [locale, word] of [['es', 'parada'], ['en', 'stopped']] as const) {
+      for (const [locale, word] of [['es', 'detenida'], ['en', 'stopped']] as const) {
         const line = stopLine(card({ stopReason: reason }, locale));
         expect(line, `${locale} ${reason}`).not.toBe('');
         expect(line.replace('/forge:stop', '').split(':').length, `${locale} ${reason}: ${line}`).toBeLessThanOrEqual(2);
         expect(line.toLowerCase().split(word).length, `${locale} ${reason}: ${line}`).toBeLessThanOrEqual(2);
+        // w8 integration: «parada» is an active run without a heartbeat (W1); a run that ended is «detenida».
+        expect(line.toLowerCase(), `${locale} ${reason}: ${line}`).not.toContain('parada');
       }
     }
-    expect(stopLine(card({ stopReason: 'stopped' }))).toBe('Parada: con /forge:stop');
-    expect(stopLine(card({ stopReason: 'stop-file' }))).toBe('Parada: con /forge:stop');
+    expect(stopLine(card({ stopReason: 'stopped' }))).toBe('Detenida: con /forge:stop');
+    expect(stopLine(card({ stopReason: 'stop-file' }))).toBe('Detenida: con /forge:stop');
     // FX2: the spending cap of --max-usd
-    expect(stopLine(card({ stopReason: 'budget-usd' }))).toBe('Parada: llegó a su tope de gasto');
+    expect(stopLine(card({ stopReason: 'budget-usd' }))).toBe('Detenida: llegó a su tope de gasto');
     expect(stopLine(card({ stopReason: 'budget-usd' }, 'en'))).toBe('Stopped: reached its spending cap');
     // A stopped run without a reason.
-    for (const stopReason of [null, undefined]) expect(stopLine(card({ stopReason })), String(stopReason)).toBe('Parada');
+    for (const stopReason of [null, undefined]) expect(stopLine(card({ stopReason })), String(stopReason)).toBe('Detenida');
     expect(stopLine(card({ stopReason: null }, 'en'))).toBe('Stopped');
     // Every count at 0: nothing waits; the findings of retired tasks are still told, as information only.
     const c = card({ stopReason: 'budget-cycles' });

@@ -404,10 +404,11 @@ const es: Dict = {
   auto: {
     title: (p: string) => `Ejecución autónoma · ${p}`,
     active: 'En marcha',
-    stopped: (r: string) => (r ? `Parada: ${r}` : 'Parada'),
-    stop: { saturated: 'Saturada', 'budget-cycles': 'Parada: agotó los ciclos', 'budget-hours': 'Parada: agotó el tiempo', 'budget-usd': 'Parada: llegó a su tope de gasto', 'stop-file': 'Parada: con /forge:stop',
-      stopped: 'Parada: con /forge:stop', 'no-progress': 'Parada: sin avances', 'repeated-error': 'Parada: el mismo error dos veces seguidas', 'no-cycle': 'Parada: sin ciclos registrados',
-      'queue-full': 'Parada: demasiadas propuestas esperando' },
+    // w8 integration: «parada» is an active run without a heartbeat (W1); an autonomous run that ended is «detenida».
+    stopped: (r: string) => (r ? `Detenida: ${r}` : 'Detenida'),
+    stop: { saturated: 'Saturada', 'budget-cycles': 'Detenida: agotó los ciclos', 'budget-hours': 'Detenida: agotó el tiempo', 'budget-usd': 'Detenida: llegó a su tope de gasto', 'stop-file': 'Detenida: con /forge:stop',
+      stopped: 'Detenida: con /forge:stop', 'no-progress': 'Detenida: sin avances', 'repeated-error': 'Detenida: el mismo error dos veces seguidas', 'no-cycle': 'Detenida: sin ciclos registrados',
+      'queue-full': 'Detenida: demasiadas propuestas esperando' },
     saturated: 'Saturada',
     notYet: 'Sin saturar:',
     noRound: 'Falta una ronda de exploración',
