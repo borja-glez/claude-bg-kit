@@ -6,7 +6,7 @@ import { run, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/
 import { swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
 import { readExecution } from '../src/forge/execution.js';
 import { readLocal } from '../src/forge/local.js';
-import { appendEvent, readEvents } from '../src/forge/ledger.js';
+import { appendEvent, readEvents, FORGE_EXCLUDE } from '../src/forge/ledger.js';
 import { loadConfig } from '../src/forge/config.js';
 import { SLOT_MAX_WAIT_MS } from '../src/forge/jobs.js';
 import { mergingFile, readMerging, readMergingFile, removeMergingIf, takeMerging, MERGING_UNREADABLE_MS } from '../src/forge/merging.js';
@@ -496,7 +496,8 @@ describe('forge swarm integrate (into the run branch)', () => {
       accept('T2', 'b.txt', 'b\n');
       expect(out(run(['swarm', 'integrate', 'T2'], io))).toMatchObject({ result: 'integrated', setup: { ok: true } });
       expect(installs()).toBe(2);
-      expect(exclude().filter(Boolean)).toEqual(['# mine', '*.log', 'node_modules/']);
+      // w8 FR5: forge's own exclusions sit there too.
+      expect(exclude().filter(l => l && !FORGE_EXCLUDE.includes(l))).toEqual(['# mine', '*.log', 'node_modules/']);
     });
     it('a failing install rolls the merge back with its last line, lists what it left and deletes nothing', () => {
       setupConfig(`node -e "const f=require('fs');f.mkdirSync('partial');f.writeFileSync('partial/x','1');console.log('npm ERR! boom');process.exit(3)"`);

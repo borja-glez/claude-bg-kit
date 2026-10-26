@@ -450,7 +450,7 @@ describe('forge CLI', () => {
     expect(sp).toMatchObject({ path: 'medium', gate: 'plan' });
     expect(sp.announce).toMatch(/^Medium → forge-impl: .*superpowers plan: the Medium path, its tasks in order\. I show you a short plan/);
   });
-  it('triage names .forge/.gitignore as untracked until it is committed', () => {
+  it('triage leaves nothing of forge to commit, and names an untracked .forge/.gitignore an older forge left until it is committed (w8 FR5)', () => {
     const dir = tmp('forge-untracked-');
     const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' });
     git('init', '-q');
@@ -458,8 +458,11 @@ describe('forge CLI', () => {
     git('add', '.');
     git('commit', '-q', '-m', 'init');
     const dio: Io = { cwd: dir, now: io.now };
+    expect(JSON.parse(run(['triage', 'fix the typo in a.ts'], dio).stdout)).not.toHaveProperty('untracked');
+    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(false);
+    expect(git('status', '--porcelain')).toBe('');
+    writeFileSync(path.join(dir, '.forge', '.gitignore'), '*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n');
     const before = JSON.parse(run(['triage', 'fix the typo in a.ts'], dio).stdout);
-    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(true);
     expect(before.untracked).toEqual(['.forge/.gitignore']);
     expect(readEvents(dir).at(-1)).not.toHaveProperty('untracked');
     git('add', '.forge/.gitignore');
@@ -477,7 +480,7 @@ describe('forge CLI', () => {
     git('add', '.');
     git('commit', '-q', '-m', 'init');
     const out = JSON.parse(run(['triage', 'fix the typo in a.ts'], { cwd: dir, now: io.now }).stdout);
-    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(true);
+    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(false);
     expect(out).not.toHaveProperty('untracked');
   });
   it('triage needs the task text', () => {
@@ -2943,7 +2946,9 @@ describe('forge begin (J-12)', () => {
     expect(existsSync(path.join(root, '.forge', 'work', 'cart', 'tree-start.json'))).toBe(true);
     expect(out.tdd.mode).toBe('superpowers');
     expect(out.tdd.line).toMatch(/^TDD: required/);
-    expect(out).toMatchObject({ autonomy: 'ask', workflow: 'ask', untracked: ['.forge/.gitignore'] });
+    // w8 FR5: forge's exclusions go to info/exclude, so there is no .forge/.gitignore to commit.
+    expect(out).toMatchObject({ autonomy: 'ask', workflow: 'ask', untracked: [] });
+    expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(false);
     expect(JSON.parse(run(['begin', '--task', 'cart', '--autonomy', 'auto'], withTdd()).stdout).autonomy).toBe('auto');
   });
   it("with only forge's files there is nothing foreign and no question; a bad flag exits 2", () => {

@@ -126,7 +126,9 @@ describe('forge hook live', () => {
     run(['hook', 'live'], { ...io, cwd: wt, git: defaultGit(wt), stdin: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart' }) });
     expect(existsSync(liveFile(root, 's1'))).toBe(true);
     expect(existsSync(path.join(wt, '.forge', 'live', 's1.json'))).toBe(false);
-    expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(true);
+    // w8 FR5: ignored through the repository's info/exclude, with no .forge/.gitignore to commit.
+    expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(false);
+    expect(git('status', '--porcelain', '--', '.forge')).toBe('');
   });
   it('records executor and manual members of the run with their role and task', () => {
     exec();

@@ -86,8 +86,8 @@ export function liveJobs(main: string, now: Date, alive: (pid: number) => boolea
 }
 
 /** Runs `fn` as a job: its file is written first and removed in a finally. A file that cannot be written only costs a
- *  Stop-hook block (the session is stepped again). .forge comes with its .gitignore (forgeDir), so a job file of a
- *  repo's first forge command is never untracked. */
+ *  Stop-hook block (the session is stepped again). .forge comes with its exclusions (forgeDir: info/exclude, or its
+ *  .gitignore outside git), so a job file of a repo's first forge command is never untracked. */
 export function withJob<T>(main: string, spec: { cmd: string; task: string | null; out: string; session: string | null; startedAt: string }, fn: (job: JobDoc) => T): T {
   const job: JobDoc = { name: jobName(spec.cmd, spec.task, process.pid), cmd: spec.cmd, task: spec.task, pid: process.pid, startedAt: spec.startedAt, out: spec.out, session: spec.session };
   let file: string | null = null;

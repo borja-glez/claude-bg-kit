@@ -293,9 +293,11 @@ describe('plugin layout', () => {
   });
   it('skills print the lines the CLI hands over (campaign fixes)', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
-    for (const s of ['Print `announce` exactly as printed', '`untracked`', 'git commit -m "forge: track .forge/.gitignore" -- .forge/.gitignore']) {
+    for (const s of ['Print `announce` exactly as printed', '`untracked`', '`.git/info/exclude`', 'never commit it']) {
       expect(run).toContain(s);
     }
+    // w8 FR5: forge makes no commit of its own on the person's branch.
+    expect(run).not.toContain('forge: track .forge/.gitignore');
     expect(runText()).toContain('When the triage\'s `gate` is `plan`');
     for (const s of ['its `diff` verbatim', '`ask.question` with exactly the three `ask.options`', '`missing` and `unknown` tools',
       'allowed --expect <the surface\'s hash from verify-plan>', 'When `diffTruncated` is true', 'FORGE verify-close --task <id> --dir <WORK>/reviews-1-1 --evidence <WORK>/evidence/1-1/']) expect(runRef('verify')).toContain(s);

@@ -17,8 +17,9 @@ export const command: Command = (args, ctx) => {
   appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(t.task ? { task: t.task } : {}), ...(t.project !== null ? { project: t.project } : {}), ...t.result, ...t.auto,
     ...(t.diff ? { diff: { base: t.diff.base, files: t.diff.stat.files.length, lines: t.diff.stat.lines } } : {}), review: t.review,
     ...(t.kind === 'bug' ? { bug: true } : {}) });
-  // forgeDir has just created .forge/.gitignore and no step commits it: say so while git lists it as untracked and
-  // not ignored (a repository that ignores .forge/ has opted out). Asked after the writes, which may have made it.
+  // w8 FR5: forgeDir keeps forge's files out of git through info/exclude; a .forge/.gitignore an earlier forge left
+  // (or forgeDir outside git) is named while git lists it as untracked and not ignored (a repository that ignores
+  // .forge/ has opted out), so the session can tell the person. Asked after the writes.
   const git = io.git ?? defaultGit(io.cwd);
   const untracked = (git(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore']) ?? '').trim() ? { untracked: ['.forge/.gitignore'] } : {};
   // D-08: the task's work folder, by project for a plan task (.forge/work/<project>/<id>).

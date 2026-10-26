@@ -17,9 +17,55 @@ let root: string;
 beforeEach(() => { root = tmp('forge-'); });
 
 describe('ledger', () => {
-  it('creates .forge with a gitignore that keeps config.yaml and verify/*.md', () => {
+  it('outside git, creates .forge with a gitignore that keeps config.yaml and verify/*.md', () => {
     const dir = forgeDir(root);
     expect(readFileSync(path.join(dir, '.gitignore'), 'utf8')).toBe('*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n');
+  });
+  describe("in a git repository, forge's exclusions go to info/exclude, never to a file to commit (w8 FR5)", () => {
+    const g = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' });
+    const exclude = (repo: string) => readFileSync(path.join(repo, '.git', 'info', 'exclude'), 'utf8');
+    const put = (dir: string, rel: string, text = 'x\n') => { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), text); };
+    const status = (cwd: string) => g(cwd, 'status', '--porcelain', '-uall').split('\n').filter(Boolean).map(l => l.slice(3)).sort();
+    it('writes no .forge/.gitignore and adds its lines once, after what the file held; config.yaml and verify/*.md stay visible to git', () => {
+      g(root, 'init', '-q');
+      appendFileSync(path.join(root, '.git', 'info', 'exclude'), '# mine\n*.log');
+      forgeDir(root);
+      forgeDir(root);
+      expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(false);
+      const text = exclude(root);
+      expect(text).toContain('# mine\n*.log\n# forge: its own files under .forge/');
+      expect(text.split('\n').filter(l => l === '**/.forge/*')).toHaveLength(1);
+      for (const f of ['.forge/ledger.jsonl', '.forge/work/t1/brief-1.md', '.forge/route/S1.json', '.forge/config.yaml', '.forge/verify/web.md', '.forge/verify/shots/a.png', 'sub/.forge/status.json', 'a.ts']) put(root, f);
+      expect(status(root)).toEqual(['.forge/config.yaml', '.forge/verify/web.md', 'a.ts']);
+      g(root, 'add', '.forge/config.yaml');
+      expect(g(root, 'diff', '--cached', '--name-only').trim()).toBe('.forge/config.yaml');
+    });
+    it("a linked worktree's .forge is excluded through the common git directory, shared by every worktree", () => {
+      g(root, 'init', '-q', '-b', 'main');
+      put(root, 'a.ts');
+      g(root, 'add', '.');
+      g(root, 'commit', '-qm', 'init');
+      const wt = path.join(tmp('forge-wt-'), 'task-t1');
+      g(root, 'worktree', 'add', '-q', '-b', 'task/t1', wt);
+      forgeDir(wt);
+      expect(existsSync(path.join(wt, '.forge', '.gitignore'))).toBe(false);
+      expect(exclude(root)).toContain('**/.forge/*');
+      put(wt, '.forge/ledger.jsonl');
+      put(root, '.forge/status.json');
+      expect(status(wt)).toEqual([]);
+      expect(status(root)).toEqual([]);
+    });
+    it('respects a .forge/.gitignore that is already there and writes no exclusion then', () => {
+      g(root, 'init', '-q');
+      put(root, '.forge/.gitignore', '*\n!.gitignore\n');
+      forgeDir(root);
+      expect(readFileSync(path.join(root, '.forge', '.gitignore'), 'utf8')).toBe('*\n!.gitignore\n');
+      expect(existsSync(path.join(root, '.git', 'info', 'exclude')) ? exclude(root) : '').not.toContain('.forge');
+      // forge 0.5's own file is still brought up to date in place.
+      writeFileSync(path.join(root, '.forge', '.gitignore'), '*\n!.gitignore\n!config.yaml\n');
+      forgeDir(root);
+      expect(readFileSync(path.join(root, '.forge', '.gitignore'), 'utf8')).toBe('*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n');
+    });
   });
   it('appends and reads events in order', () => {
     appendEvent(root, { ts: '2026-10-11T10:00:00.000Z', kind: 'triage', task: 't1', path: 'small' });

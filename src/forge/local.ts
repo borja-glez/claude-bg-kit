@@ -1,7 +1,7 @@
 // .forge/local.yaml: what forge knows about this machine (surface permissions, validators already announced, drafts
 // already proposed, workflow, autonomy), and .forge/learned.jsonl: the lines `surfaces learn` appended to a surface.
 // Both live in the main checkout, so every worktree of the repository shares them (outside git: the directory itself).
-// .forge/.gitignore keeps them out of git; one committed anyway grants no surface (localTracked). local.yaml is read
+// forge's exclusions (forgeDir) keep them out of git; one committed anyway grants no surface (localTracked). local.yaml is read
 // leniently, written atomically, unknown keys kept.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
