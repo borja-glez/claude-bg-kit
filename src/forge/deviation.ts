@@ -25,6 +25,16 @@ export function deviationsOf(events: readonly LedgerEvent[], keep: (e: LedgerEve
     ? [{ task: e.task, agent: e.agent, expected: e.expected, at: e.ts }] : []));
 }
 
+/** Round 2: an implementer `agents --role --task` named for a brief, as the closing report lists it. */
+export interface Naming { task: string; agent: string; role: string; at: string }
+
+/** The `agent` events `agents --role --task` wrote among `events` that `keep` takes: the closing report shows them next to
+ *  the deviations, since each one changes who forge named. */
+export function namingsOf(events: readonly LedgerEvent[], keep: (e: LedgerEvent) => boolean = () => true): Naming[] {
+  return events.flatMap(e => (e.kind === 'agent' && e.by === 'agents' && typeof e.task === 'string' && typeof e.agent === 'string' && keep(e)
+    ? [{ task: e.task, agent: e.agent, role: typeof e.role === 'string' ? e.role : '', at: e.ts }] : []));
+}
+
 /** The line the person reads (their language: es, else English); '' with none. */
 export function deviationSay(list: readonly Deviation[], locale: string | undefined): string {
   if (!list.length) return '';
@@ -157,12 +167,16 @@ function candidatesFor(root: string, main: string, sessionId: string): { ledger:
   return implementingBrief(events, ref) === null ? { ledger: root, candidates: [], live: null } : of(root, events, [ref], null);
 }
 
-/** m2: the ids of the agents of type `forge:<agent>` the live signal lists as running (hook live wrote this one first). */
-function runningOf(live: string | null, agent: string): string[] {
+/**
+ * m2: the ids of the agents of type `forge:<agent>` the live signal lists as running (hook live wrote this one first),
+ * started at `from` or later. Round 2: an agent listed from before forge named the briefs' implementers cannot be one of
+ * theirs (one whose SubagentStop was lost stays listed for up to AGENT_STALE_MS of live.ts).
+ */
+function runningOf(live: string | null, agent: string, from: number): string[] {
   if (!live) return [];
   try {
     const doc = normalizeLive(JSON.parse(readFileSync(live, 'utf8')));
-    return (doc?.agents ?? []).filter(a => a.type === `forge:${agent}`).map(a => a.id);
+    return (doc?.agents ?? []).filter(a => a.type === `forge:${agent}` && !(Date.parse(a.since) < from)).map(a => a.id);
   } catch { return []; }
 }
 
@@ -187,7 +201,9 @@ function checkAndRecord(io: Io, root: string, main: string, sessionId: string, a
   if (agentId && logged.some(e => e.agentId === agentId)) return;
   const named = candidates.filter(c => c.expected.agent === agent).length;
   if (named > 0) {
-    const running = new Set([...runningOf(live, agent), ...(agentId ? [agentId] : [])]);
+    const handedAt = candidates.map(c => Date.parse(c.expected.ts)).filter(Number.isFinite);
+    const from = handedAt.length ? Math.min(...handedAt) : -Infinity;
+    const running = new Set([...runningOf(live, agent, from), ...(agentId ? [agentId] : [])]);
     const flagged = logged.filter(e => e.agent === agent && typeof e.agentId === 'string' && e.agentId !== agentId && running.has(e.agentId)).length;
     if (running.size - flagged <= named) return;
   }

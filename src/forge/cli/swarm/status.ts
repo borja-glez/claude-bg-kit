@@ -8,7 +8,7 @@ import { readWorkDir, workDir, workRel } from '../../task-ref.js';
 import { gitRun, predictMerge, type MergePrediction } from '../../merge-predict.js';
 import { runDocOf } from '../../run-doc.js';
 import { boundLiveness, releaseWrites, openTasks } from './shared.js';
-import { deviationsOf } from '../../deviation.js';
+import { deviationsOf, namingsOf } from '../../deviation.js';
 
 /**
  * D-08: each task's work folder, relative to the main checkout, as `swarm status` prints it (`work`): the project's
@@ -61,5 +61,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     publish: state ? { run: runDocOf(main, state), ...(!state.active ? { release: releaseWrites(state, openTasks(state)) } : {}) } : null,
     // FX1: the run's implementers that were not the ones forge named, for the report that closes it.
     ...(state ? { deviations: deviationsOf(readEvents(main), e => e.runId === state.runId) } : {}),
+    // Round 2: and the implementers `agents --role --task` named in the run, which change who forge named.
+    ...(state ? { named: namingsOf(readEvents(main), e => e.runId === state.runId) } : {}),
   });
 };

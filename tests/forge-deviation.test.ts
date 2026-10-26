@@ -163,6 +163,7 @@ describe('forge hook live: a deviation from the triage (FX1)', () => {
     expect(deviations()).toEqual([expect.objectContaining({ task: 'fix-a-1', agent: 'forge-impl-heavy', expected: 'forge-impl' })]);
   });
   it('agents --role without --task only prints; a bad role or brief is refused; an agent logged by hand never names one', () => {
+    appendEvent(root, cliTriage(4, 'fix-a', 'forge-mech'));
     expect(JSON.parse(run(['agents', '--role', 'impl-high'], io).stdout)).toMatchObject({ role: 'impl-high', agent: 'forge-impl-high' });
     expect(readEvents(root).filter(e => e.kind === 'agent')).toEqual([]);
     expect(run(['agents', '--role', 'boss'], io).code).toBe(2);
@@ -194,6 +195,43 @@ describe('forge hook live: a deviation from the triage (FX1)', () => {
     run(['hook', 'live'], { ...io, stdin: JSON.stringify({ session_id: 's1', hook_event_name: 'SubagentStop', agent_id: 'a2', agent_type: 'forge:forge-impl', cwd: root }) });
     start('s1', 'a4', 'forge:forge-impl');
     expect(deviations()).toHaveLength(1);
+  });
+  it('round 2: an agent the live signal kept from before the briefs were handed out (a lost SubagentStop) is not counted', () => {
+    execution({ T1: task('implement'), T2: task('implement') });
+    // a forge-impl of an earlier round whose SubagentStop never came: still listed as running
+    run(['hook', 'live'], { ...io, now: () => new Date(at(1)), stdin: JSON.stringify({ session_id: 's1', hook_event_name: 'SubagentStart', agent_id: 'ghost', agent_type: 'forge:forge-impl', cwd: root }) });
+    handOut('T1', 'forge-impl-light');
+    handOut('T2', 'forge-impl');
+    start('s1', 'a1', 'forge:forge-impl');
+    expect(deviations()).toEqual([]);
+    // a second one started after the hand-out still counts
+    start('s1', 'a2', 'forge:forge-impl');
+    expect(deviations()).toEqual([expect.objectContaining({ task: 'T1-1', agentId: 'a2' })]);
+  });
+  it('round 2: `agents --task` names only a brief forge knows: a triage or a phase of its task, and, in an execution, a task being implemented', () => {
+    const named = (t: string) => run(['agents', '--role', 'impl', '--task', t], io);
+    const none = named('ghost-1');
+    expect(none.code).toBe(2);
+    expect(none.stderr).toContain('FORGE triage --task ghost');
+    appendEvent(root, cliTriage(4, 'fix-a', 'forge-mech'));
+    expect(named('fix-a-1').code).toBe(0);
+    // in an execution, only while the task is at implement or validate
+    ephemeral({ 'fix-b': task('review') });
+    appendEvent(root, cliTriage(4, 'fix-b', 'forge-mech'));
+    const late = named('fix-b-1');
+    expect(late.code).toBe(2);
+    expect(late.stderr).toContain('forge swarm status');
+    ephemeral({ 'fix-b': task('validate') });
+    expect(named('fix-b-1').code).toBe(0);
+    expect(readEvents(root).filter(e => e.kind === 'agent' && e.by === 'agents').map(e => e.task)).toEqual(['fix-a-1', 'fix-b-1']);
+  });
+  it('round 2: the closing report lists the implementers `agents --task` named, next to the deviations', () => {
+    ephemeral({ 'fix-a': task('implement') });
+    appendEvent(root, cliTriage(4, 'fix-a', 'forge-mech'));
+    implementing('fix-a');
+    run(['agents', '--role', 'impl', '--task', 'fix-a-1'], io);
+    expect(JSON.parse(run(['last', '--task', 'fix-a'], io).stdout).named).toEqual([{ task: 'fix-a-1', agent: 'forge-impl', role: 'impl', at: at(7) }]);
+    expect(JSON.parse(run(['swarm', 'status'], io).stdout).named).toEqual([{ task: 'fix-a-1', agent: 'forge-impl', role: 'impl', at: at(7) }]);
   });
   it('fails open: an execution or a ledger that does not read costs neither the hook nor its live signal', () => {
     writeFileSync(path.join(root, '.forge', 'execution.json'), '{not json');
