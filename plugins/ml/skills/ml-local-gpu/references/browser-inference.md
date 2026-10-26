@@ -4,7 +4,7 @@ Three rules. Check versions and options in the onnxruntime-web documentation for
 
 ## 1. One serial chain for sessions
 
-The asyncify/JSEP build of ORT does not support concurrent async calls. Create sessions one after another and route every call through a single promise chain. Never `Promise.all` over `InferenceSession.create`. Symptom: WebGPU hangs and the promise never resolves.
+The asyncify/JSEP build of ORT (the WebGPU build as of 2026-10; check the version the project pins) does not support concurrent async calls. Create sessions one after another and route every call through a single promise chain. Never `Promise.all` over `InferenceSession.create`. Symptom: WebGPU hangs and the promise never resolves.
 
 Downloads go through the same chain, so the browser never has a download racing a session in flight:
 
