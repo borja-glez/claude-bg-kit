@@ -4,7 +4,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { liveFile, liveLock, LIVE_LOCK_WAIT_MS } from '../src/forge/live.js';
+import { liveFile, liveLock, LIVE_LOCK_STALE_MS, LIVE_LOCK_WAIT_MS } from '../src/forge/live.js';
 import { seedExecution } from './helpers/execution.js';
 import { useTempDirs } from './helpers/tmp.js';
 
@@ -77,6 +77,15 @@ describe('FC2: the live signal with real processes at once', () => {
     expect(r.ms).toBeLessThan(LIVE_LOCK_WAIT_MS);
     expect(agents()).toEqual(['d1']);
     expect(existsSync(liveLock(liveFile(root, 's1')))).toBe(false);
+  }, 60_000);
+  it('a lock a live process has held past LIVE_LOCK_STALE_MS is taken over at once, and removed', async () => {
+    mkdirSync(liveDir(), { recursive: true });
+    writeFileSync(liveLock(liveFile(root, 's1')), JSON.stringify({ pid: process.pid, at: new Date(Date.now() - LIVE_LOCK_STALE_MS - 1000).toISOString() }));
+    const r = await hook({ hook_event_name: 'SubagentStart', agent_id: 'o1', agent_type: 'x' });
+    expect(r.code).toBe(0);
+    expect(r.ms).toBeLessThan(LIVE_LOCK_WAIT_MS);
+    expect(agents()).toEqual(['o1']);
+    expect(readdirSync(liveDir())).toEqual(['s1.json']);
   }, 60_000);
   it('a lock a live process holds never holds the hook past its wait: it writes without the lock (fail-open)', async () => {
     mkdirSync(liveDir(), { recursive: true });
