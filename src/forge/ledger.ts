@@ -66,6 +66,21 @@ function excludeForge(root: string): boolean {
   } catch { return false; }
 }
 
+/**
+ * w8 fix round 1: a `.forge/.gitignore` git does not track (the caller asked git) whose content is exactly what forge
+ * wrote (this one or 0.5's) is forge's: its rules move to info/exclude and the file goes, so no forge file is left to
+ * commit. Any other content is the person's and stays. True when the file went.
+ */
+export function retireForgeIgnore(root: string): boolean {
+  const ignore = path.join(forgePath(root), '.gitignore');
+  try {
+    const text = readFileSync(ignore, 'utf8').replace(/\r\n/g, '\n');
+    if ((text !== GITIGNORE && text !== GITIGNORE_05) || !excludeForge(root)) return false;
+    rmSync(ignore);
+    return true;
+  } catch { return false; }
+}
+
 export function forgeDir(root: string): string {
   const dir = forgePath(root);
   mkdirSync(dir, { recursive: true });

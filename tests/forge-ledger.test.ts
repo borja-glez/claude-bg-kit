@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { buildSync } from 'esbuild';
 import { samePath } from '../src/lib/worktree.js';
 import { appendEvent, appendPhase, readEvents, readStatus, readStatuses, forgeDir, ledgerRoot, ledgerReads } from '../src/forge/ledger.js';
+import { commonDirOf } from '../src/lib/git-info.js';
 import { deriveStatuses, type StatusMap } from '../src/lib/forge-status.js';
 import { INTERLEAVED } from './fixtures/interleaved-ledger.js';
 import { parseConfig, agentFor, ConfigError } from '../src/forge/config.js';
@@ -54,6 +55,26 @@ describe('ledger', () => {
       put(root, '.forge/status.json');
       expect(status(wt)).toEqual([]);
       expect(status(root)).toEqual([]);
+    });
+    it('a submodule (a .git file and no commondir): its own git directory under the superproject takes the exclusions (fix round 1)', () => {
+      const base = tmp('forge-sub-');
+      const mk = (dir: string) => { mkdirSync(dir, { recursive: true }); g(dir, 'init', '-q', '-b', 'main'); put(dir, 'a.txt'); g(dir, 'add', '.'); g(dir, 'commit', '-qm', 'init'); return dir; };
+      const lib = mk(path.join(base, 'lib'));
+      const app = mk(path.join(base, 'app'));
+      g(app, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', lib, 'vendor/lib');
+      g(app, 'commit', '-qm', 'sub');
+      const sub = path.join(app, 'vendor', 'lib');
+      expect(readFileSync(path.join(sub, '.git'), 'utf8')).toMatch(/^gitdir: /);
+      const common = commonDirOf(sub);
+      expect(common !== null && samePath(common, g(sub, 'rev-parse', '--path-format=absolute', '--git-common-dir').trim())).toBe(true);
+      forgeDir(sub);
+      expect(existsSync(path.join(sub, '.forge', '.gitignore'))).toBe(false);
+      expect(readFileSync(path.join(common!, 'info', 'exclude'), 'utf8')).toContain('**/.forge/*');
+      put(sub, '.forge/ledger.jsonl');
+      put(sub, '.forge/config.yaml');
+      expect(status(sub)).toEqual(['.forge/config.yaml']);
+      // The superproject's own exclude is not the submodule's.
+      expect(exclude(app)).not.toContain('**/.forge/*');
     });
     it('respects a .forge/.gitignore that is already there and writes no exclusion then', () => {
       g(root, 'init', '-q');

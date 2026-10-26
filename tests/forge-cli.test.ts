@@ -461,9 +461,18 @@ describe('forge CLI', () => {
     expect(JSON.parse(run(['triage', 'fix the typo in a.ts'], dio).stdout)).not.toHaveProperty('untracked');
     expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(false);
     expect(git('status', '--porcelain')).toBe('');
-    writeFileSync(path.join(dir, '.forge', '.gitignore'), '*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n');
+    // Fix round 1: an untracked one with exactly forge's own rules is forge's: it moves to info/exclude and goes.
+    for (const own of ['*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n', '*\r\n!.gitignore\r\n!config.yaml\r\n!verify/\r\n!verify/*.md\r\n']) {
+      writeFileSync(path.join(dir, '.forge', '.gitignore'), own);
+      expect(JSON.parse(run(['triage', 'fix the typo in a.ts'], dio).stdout)).not.toHaveProperty('untracked');
+      expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(false);
+      expect(git('status', '--porcelain')).toBe('');
+    }
+    // Any other content is the person's: it stays, and triage names it while it is untracked.
+    writeFileSync(path.join(dir, '.forge', '.gitignore'), '*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n!notes.md\n');
     const before = JSON.parse(run(['triage', 'fix the typo in a.ts'], dio).stdout);
     expect(before.untracked).toEqual(['.forge/.gitignore']);
+    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(true);
     expect(readEvents(dir).at(-1)).not.toHaveProperty('untracked');
     git('add', '.forge/.gitignore');
     git('commit', '-q', '-m', 'forge');
@@ -2950,6 +2959,13 @@ describe('forge begin (J-12)', () => {
     expect(out).toMatchObject({ autonomy: 'ask', workflow: 'ask', untracked: [] });
     expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(false);
     expect(JSON.parse(run(['begin', '--task', 'cart', '--autonomy', 'auto'], withTdd()).stdout).autonomy).toBe('auto');
+    // Fix round 1: an untracked .forge/.gitignore with exactly forge's rules goes to info/exclude; another one stays named.
+    put('.forge/.gitignore', '*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n');
+    expect(JSON.parse(run(['begin', '--task', 'cart'], withTdd()).stdout).untracked).toEqual([]);
+    expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(false);
+    put('.forge/.gitignore', '*\n!.gitignore\n');
+    expect(JSON.parse(run(['begin', '--task', 'cart'], withTdd()).stdout).untracked).toEqual(['.forge/.gitignore']);
+    expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(true);
   });
   it("with only forge's files there is nothing foreign and no question; a bad flag exits 2", () => {
     repo();
