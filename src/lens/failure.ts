@@ -4,7 +4,7 @@
 
 export const FAILURE_MAX = 200;
 
-export function failureText(t: { outOfTime: string; failedPlain: string }, error: { kind?: unknown; message?: unknown } | undefined): string {
+export function failureText(t: { outOfTime: string; failedPlain: string }, error: { kind?: unknown; message?: unknown; budget?: unknown } | undefined): string {
   const message = typeof error?.message === 'string' ? error.message.replace(/\s+/g, ' ').trim().slice(0, FAILURE_MAX) : '';
   if (error?.kind === 'timeout') return message ? `${t.outOfTime} (${message})` : t.outOfTime;
   return message || t.failedPlain;
