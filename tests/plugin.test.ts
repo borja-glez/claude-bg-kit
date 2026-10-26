@@ -2152,11 +2152,13 @@ describe('plugin layout', () => {
       'Coming straight from §0, §4 or the blocked path, their batch has just renewed your lease: no heartbeat']) expect(pick, w).toContain(w);
     for (const w of ['ArtifactData `get` `meta/project`', '"<WP>" hash <plan>', 'clean-cache <plan> notes', 'clean-cache <plan> state`']) expect(pick, w).not.toContain(w);
     // The commit event of an intermediate commit comes from the CLI, which drops its pending lines.
-    expect(work).toContain('commit-info --event --session <SID> --task <T> --seat-dir <SEAT>');
+    expect(work).toContain('commit-info --event --session <SID> --task <T>` →');
     expect(work).not.toContain('`node "<WP>" commit-info` →');
     // The close: metrics pinned by the CLI, pending commits emptied by it, the % from done itself.
     const complete = workRef('complete');
-    for (const w of ['--seat-dir <SEAT>', '--metrics-version <MV>', '`progress.percent`', 'in a call of its own']) expect(complete, w).toContain(w);
+    // Fix round 1: MV is fetched again when lost (Minor 2), and the pending commits wait for the roadmap to show the task done (Minor 1).
+    for (const w of ['--metrics-version <MV>', '`get` `meta/metrics` first', '`progress.percent`', 'in a call of its own', 'they stay until the roadmap shows the task done']) expect(complete, w).toContain(w);
+    expect(work).toContain('--idle --seat-dir <SEAT> --states DB/state');
     for (const w of ['"<WP>" status <plan>', 'write an empty file', 'List `meta` into `DB` first']) expect(complete, w).not.toContain(w);
     // Only the setup and the close are read again: one reference per task.
     expect(work.match(/Read `references\/[a-z-]+\.md` now, and again every time you get here/g)).toEqual([

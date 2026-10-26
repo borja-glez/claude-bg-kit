@@ -118,59 +118,84 @@ describe('next --check-sync: the main checkout syncs first when the roadmap does
   });
 });
 
-describe('done --metrics-version --seat-dir: the close of a task in fewer calls (w8 W4)', () => {
+describe('done --metrics-version: the close of a task in fewer calls (w8 W4)', () => {
   const git = (...a: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', '-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
   const init = () => { git('init', '-q'); git('add', 'plan.yaml'); git('commit', '-qm', 'T001: esquema'); };
   const done = (...extra: string[]) => cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--summary-file', 'summary.txt', ...extra);
   beforeEach(() => { writeFileSync(path.join(dir, 'summary.txt'), 'El esquema está aplicado.'); });
-  it('pins meta/metrics to the listed version, empties the seat\'s pending commits and gives the plan\'s progress', () => {
+  it('pins meta/metrics to the listed version, gives the plan\'s progress, and leaves the pending commits until the roadmap shows the task done', () => {
     init(); dbOf();
     docsAt('db/state', { T001: { status: 'in_progress', owner: 'be' }, T003: { status: 'done' } });
-    writeFileSync(seatFile('pending-commits.jsonl'), `${JSON.stringify({ sha: git('rev-parse', 'HEAD'), task: 'T001' })}\n`);
-    const r = done('--metrics-version', '5', '--seat-dir', SEAT);
+    const pending = `${JSON.stringify({ sha: git('rev-parse', 'HEAD'), task: 'T001' })}\n`;
+    writeFileSync(seatFile('pending-commits.jsonl'), pending);
+    const r = done('--metrics-version', '5');
     expect(r.code, r.stderr).toBe(0);
     const o = JSON.parse(r.stdout);
     expect(o.metrics).toMatchObject({ op: 'update', collection: 'meta', doc_id: 'metrics', if_version: 5 });
     expect(o.batch).toHaveLength(3);
-    expect(readFileSync(seatFile('pending-commits.jsonl'), 'utf8')).toBe('');
+    // Fix round 1 (Minor 1): done prints before its batch goes out, so it removes nothing: a session that stops now still
+    // gets the Stop hook's reminder.
+    expect(readFileSync(seatFile('pending-commits.jsonl'), 'utf8')).toBe(pending);
     const m = computeMetrics(plan(), { T001: { status: 'done' }, T003: { status: 'done' } } as never, Date.parse(NOW));
     expect(o.progress).toEqual({ percent: m.percent, done: 2, total: m.total });
   });
-  it('without the new flags it prints and touches what it did before: metrics unpinned, pending commits kept', () => {
+  it('without --metrics-version the metrics come unpinned, to create the document', () => {
     init(); dbOf();
-    writeFileSync(seatFile('pending-commits.jsonl'), '{"sha":"abc1234"}\n');
-    const o = JSON.parse(done().stdout);
-    expect(o.metrics).not.toHaveProperty('if_version');
-    expect(readFileSync(seatFile('pending-commits.jsonl'), 'utf8')).toBe('{"sha":"abc1234"}\n');
+    expect(JSON.parse(done().stdout).metrics).not.toHaveProperty('if_version');
     expect(done('--metrics-version', '0').code).toBe(2);
-    expect(done('--seat-dir', '.waypoint/none').code).toBe(2);
   });
 });
 
-describe('commit-info --event: the commit event of an intermediate commit, its pending lines dropped (w8 W4)', () => {
+describe('the pending commits of a task go once the roadmap shows it done (fix round 1, Minor 1)', () => {
+  const line = (task: string, sha: string) => `${JSON.stringify({ ts: NOW, task, sha, command: 'git commit', session: 'c1', seat: 'be' })}\n`;
+  const pending = () => readFileSync(seatFile('pending-commits.jsonl'), 'utf8');
+  beforeEach(() => {
+    dbOf();
+    writeFileSync(seatFile('pending-commits.jsonl'), line('T001', 'a'.repeat(40)) + line('T001', 'b'.repeat(40)) + line('T002', 'c'.repeat(40)));
+  });
+  it('next --seat-dir, after a listing that shows the task done, removes its lines and keeps the others', () => {
+    docsAt('db/state', { T001: { status: 'in_progress', owner: 'be' } });
+    const next = () => cli('next', 'plan.yaml', '--db', 'db', '--states', 'db/state', '--sessions', 'db/sessions', '--session', 'be', '--seat-dir', SEAT);
+    // The batch of done did not go out (the listing still says in progress): nothing is removed.
+    expect(next().code).toBe(0);
+    expect(pending()).toBe(line('T001', 'a'.repeat(40)) + line('T001', 'b'.repeat(40)) + line('T002', 'c'.repeat(40)));
+    docsAt('db/state', { T001: { status: 'done', owner: 'be' } });
+    expect(next().code).toBe(0);
+    expect(pending()).toBe(line('T002', 'c'.repeat(40)));
+  });
+  it('the idle heartbeat of a stop does the same with --seat-dir and --states', () => {
+    docsAt('db/state', { T001: { status: 'done' }, T002: { status: 'in_progress' } });
+    const r = cli('heartbeat', '--session', 'be', '--session-version', '3', '--idle', '--seat-dir', SEAT, '--states', 'db/state');
+    expect(r.code, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout).batch[0]).toMatchObject({ data: { status: 'idle' }, if_version: 3 });
+    expect(pending()).toBe(line('T002', 'c'.repeat(40)));
+    expect(cli('heartbeat', '--session', 'be', '--session-version', '3', '--seat-dir', '.waypoint/none', '--states', 'db/state').code).toBe(2);
+    expect(cli('heartbeat', '--session', 'be', '--session-version', '3', '--seat-dir', SEAT).code).toBe(2);
+  });
+});
+
+describe('commit-info --event: the commit event of an intermediate commit (w8 W4)', () => {
   const git = (...a: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', '-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
-  it('prints the set of events/<EID> as the work skill composed it, and removes every pending line of that sha', () => {
+  it('prints the set of events/<EID> as the work skill composed it, and leaves the pending lines to the end of the task', () => {
     git('init', '-q'); git('add', 'plan.yaml'); git('commit', '-qm', 'T001: primera parte');
     const sha = git('rev-parse', 'HEAD');
-    const line = (s: string) => `${JSON.stringify({ ts: NOW, task: 'T001', sha: s, command: 'git commit', session: 'c1', seat: 'be' })}\n`;
-    writeFileSync(seatFile('pending-commits.jsonl'), line(sha) + line('0123456789abcdef0123456789abcdef01234567') + line(sha));
-    const r = cli('commit-info', '--event', '--session', 'be', '--task', 'T001', '--seat-dir', SEAT);
+    const lines = `${JSON.stringify({ ts: NOW, task: 'T001', sha, command: 'git commit', session: 'c1', seat: 'be' })}\n`;
+    writeFileSync(seatFile('pending-commits.jsonl'), lines);
+    const r = cli('commit-info', '--event', '--session', 'be', '--task', 'T001');
     expect(r.code, r.stderr).toBe(0);
     const o = JSON.parse(r.stdout);
     expect(o).toMatchObject({ sha, title: 'T001: primera parte', del: 0 });
     expect(o.write).toEqual({ op: 'set', collection: 'events', doc_id: '20261011T100000000Z-be-0000',
       data: { ts: NOW, type: 'commit', sessionId: 'be', taskId: 'T001', text: 'T001: primera parte', sha, add: o.add, del: 0 } });
-    expect(readFileSync(seatFile('pending-commits.jsonl'), 'utf8')).toBe(line('0123456789abcdef0123456789abcdef01234567'));
+    expect(readFileSync(seatFile('pending-commits.jsonl'), 'utf8')).toBe(lines);
     // A rev still reads as before, with or without the event.
     expect(JSON.parse(cli('commit-info', sha).stdout)).toEqual({ sha, ts: o.ts, title: o.title, add: o.add, del: 0 });
     expect(JSON.parse(cli('commit-info', 'HEAD', '--event', '--session', 'be', '--task', 'T001').stdout).write.doc_id).toBe('20261011T100000000Z-be-0000');
   });
-  it('--event needs the session and a plan task; --seat-dir needs a seat', () => {
+  it('--event needs the session and a plan task', () => {
     git('init', '-q'); git('add', 'plan.yaml'); git('commit', '-qm', 'x');
-    for (const a of [['--event'], ['--event', '--session', 'be'], ['--event', '--task', 'T001'], ['--event', '--session', 'be', '--task', 'a b'],
-      ['--event', '--session', 'be', '--task', 'T001', '--seat-dir', '.waypoint/none']]) {
+    for (const a of [['--event'], ['--event', '--session', 'be'], ['--event', '--task', 'T001'], ['--event', '--session', 'be', '--task', 'a b']]) {
       expect(cli('commit-info', ...a).code, a.join(' ')).toBe(2);
     }
-    expect(existsSync(seatFile('pending-commits.jsonl'))).toBe(false);
   });
 });

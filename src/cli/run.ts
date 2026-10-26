@@ -489,6 +489,8 @@ export function run(argv: string[], io: Io): Result {
           if (!notes) return fail('next: the notes listing is not a folder — list notes first', 2);
           if (notes.latest !== null && notes.latest !== s.lastNoteTs) writeAtomic(file, `${JSON.stringify({ ...s, lastNoteTs: notes.latest }, null, 2)}\n`);
         }
+        // Fix round 1 (Minor 1): the listing just made says which tasks the roadmap holds as done: their pending commits go.
+        if (seat && flag('states')) settlePending(seat, abs(flag('states')!));
         // unblock is only reported when true, as before
         const { unblock, ...rest } = r;
         return ok(JSON.stringify({ ...(unblock ? r : rest), multi, ...(notes ? { notes } : {}) }));
@@ -637,16 +639,13 @@ export function run(argv: string[], io: Io): Result {
         const rev = args[0] !== undefined && !args[0].startsWith('--') ? args[0] : 'HEAD';
         if (!args.includes('--event')) return ok(JSON.stringify(commitInfo(io.cwd, rev)));
         // w8 W4: --event prints the `set` of the commit's event, as the work skill composed it for an intermediate
-        // commit, and --seat-dir drops every line of that sha from the seat's pending-commits.jsonl.
+        // commit. Its pending line stays until the roadmap shows the task done (fix round 1, Minor 1: settlePending).
         const sid = flag('session'), task = flag('task');
         if (!sid || !SID_RE.test(sid) || !task || !isPlanId(task)) return fail('commit-info --event: --session <SID> and --task <T> are required', 2);
-        const seat = seatDirOf('seat-dir');
-        if (args.includes('--seat-dir') && !seat) return fail('commit-info: --seat-dir needs the seat folder bind printed', 2);
         const c = commitInfo(io.cwd, rev);
         const now = io.now();
         const write: Write = { op: 'set', collection: 'events', doc_id: eventId(now, sid, io.rand),
           data: { ts: now.toISOString(), type: 'commit', sessionId: sid, taskId: task, text: cleanText(c.title, SUMMARY_MAX), sha: c.sha, add: c.add, del: c.del } };
-        if (seat) dropPending(path.join(seat, 'pending-commits.jsonl'), c.sha);
         return ok(JSON.stringify({ ...c, write }));
       }
       case 'claim': {
@@ -678,19 +677,16 @@ export function run(argv: string[], io: Io): Result {
         if (tests !== undefined && !/^\d{1,9}$/.test(tests)) return fail('done: --tests must be a whole number', 2);
         const rev = flag('rev') ?? 'HEAD';
         if (!BRANCH_RE.test(rev)) return fail('done: --rev needs a commit', 2);
-        // w8 W4: --metrics-version pins meta/metrics to its listed version (without it the write creates the document);
-        // --seat-dir empties that seat's pending-commits.jsonl, which the session wrote by hand after the batch.
+        // w8 W4: --metrics-version pins meta/metrics to its listed version (without it the write creates the document).
+        // It removes no pending commit: it prints before its batch goes out (fix round 1, Minor 1: settlePending).
         const mv = args.includes('--metrics-version') ? posInt('metrics-version') : undefined;
         if (mv === null) return fail('done: --metrics-version must be a positive integer', 2);
-        const seat = seatDirOf('seat-dir');
-        if (args.includes('--seat-dir') && !seat) return fail('done: --seat-dir needs the seat folder bind printed', 2);
         const now = io.now();
         const r = doneBatch({
           sid: f.sid, task: f.task, stateVersion: f.v['state-version'], sessionVersion: f.v['session-version'],
           now, eids: eventIds(now, f.sid, 1, io.rand), commit: commitInfo(io.cwd, rev), summary, ...(tests !== undefined ? { tests: Number(tests) } : {}),
         });
         mirror(r.batch);
-        if (seat && existsSync(path.join(seat, 'pending-commits.jsonl'))) writeFileSync(path.join(seat, 'pending-commits.jsonl'), '');
         // w8 W4: with --db, the plan's progress once this task is done (the cache already holds it), for the closing line.
         let progress: { percent: number; done: number; total: number } | undefined;
         const db = flag('db');
@@ -735,6 +731,12 @@ export function run(argv: string[], io: Io): Result {
         }
         const sv = posInt('session-version');
         if (sv === null) return fail('heartbeat: --session-version must be a positive integer', 2);
+        // Fix round 1 (Minor 1): the idle heartbeat of a stop, after the last batch, removes the pending commits of the tasks
+        // the state cache holds as done, as next does.
+        const seat = seatDirOf('seat-dir');
+        const statesDir = flag('states');
+        if ((args.includes('--seat-dir') || args.includes('--states')) && (!seat || !statesDir)) return fail('heartbeat: --seat-dir <the seat folder bind printed> and --states <the state listing> go together', 2);
+        if (seat && statesDir) settlePending(seat, abs(statesDir));
         const idle = args.includes('--idle');
         const busy = flag('busy-until');
         if (busy !== undefined && (idle || !Number.isFinite(Date.parse(busy)))) return fail('heartbeat: --busy-until needs an ISO time, and not with --idle', 2);
@@ -1368,12 +1370,31 @@ function commitInfo(cwd: string, rev: string): Commit {
   return { sha, ts: new Date(ts).toISOString(), title: title.join('\t'), add: num(/(\d+) insertion/), del: num(/(\d+) deletion/) };
 }
 
-/** w8 W4: the lines of a pending-commits.jsonl whose sha is `sha` removed (parallel hooks may have written it twice). */
-function dropPending(file: string, sha: string): void {
+/**
+ * Fix round 1 (Minor 1): the lines of `<seat>/pending-commits.jsonl` whose task the state listing `statesDir` holds as
+ * done are removed: the roadmap has that task's completion, so its commits are recorded. Only the loop's next call does
+ * it (`next` after a fresh listing, the idle heartbeat of a stop), never `done` or `commit-info --event`, which print
+ * before their write goes out: a session that stops before sending it keeps its lines, and the Stop hook its reminder.
+ */
+function settlePending(seat: string, statesDir: string): void {
+  const file = path.join(seat, 'pending-commits.jsonl');
   let text: string;
   try { text = readFileSync(file, 'utf8'); } catch { return; }
+  const done = new Map<string, boolean>();
+  const isDone = (task: string): boolean => {
+    if (!done.has(task)) {
+      let status: unknown;
+      try { status = (JSON.parse(readFileSync(path.join(statesDir, `${task}.json`), 'utf8')) as { status?: unknown }).status; } catch { status = null; }
+      done.set(task, status === 'done');
+    }
+    return done.get(task)!;
+  };
   const lines = text.split('\n').filter(l => l.trim() !== '');
-  const kept = lines.filter(l => { try { return (JSON.parse(l) as { sha?: unknown }).sha !== sha; } catch { return true; } });
+  const kept = lines.filter(l => {
+    let task: unknown;
+    try { task = (JSON.parse(l) as { task?: unknown }).task; } catch { return true; }
+    return !(typeof task === 'string' && isPlanId(task) && isDone(task));
+  });
   if (kept.length !== lines.length) writeAtomic(file, kept.map(l => `${l}\n`).join(''));
 }
 
