@@ -5,6 +5,9 @@ import path from 'node:path';
 import { samePath } from '../lib/worktree.js';
 import { LIVE_MAX_AGE_HOURS, isSafeId, normalizeLive, normalizePublicTask } from '../lib/execution-state.js';
 import { normalizeMember } from '../lib/member-doc.js';
+import { lockFileState } from './execution.js';
+import { pidAlive } from './pid.js';
+import { LIVE_LOCK_STALE_MS } from './live.js';
 
 export interface ForgeWorktree { path: string; name: string; branch: string | null }
 
@@ -88,6 +91,15 @@ export function pruneRunState(main: string, keep: string | null, opts: { now: nu
     const t = Date.parse(d.ts);
     const stale = opts.stale && (d.ended || !Number.isFinite(t) || opts.now - t > LIVE_MAX_AGE_HOURS * 3600_000);
     if (d.runId !== keep || stale) drop(file);
+  }
+  // FC2: the lock of a live signal that a process killed in its hook left (its pid gone, or past LIVE_LOCK_STALE_MS);
+  // the next hook takes it over anyway, this only tidies the folder.
+  let locks: string[] = [];
+  try { locks = readdirSync(path.join(forge, 'live')).filter(n => n.endsWith('.json.lock')).slice(0, MAX_FILES); } catch { locks = []; }
+  for (const n of locks) {
+    const file = path.join(forge, 'live', n);
+    const s = lockFileState(file, new Date(opts.now), pidAlive, LIVE_LOCK_STALE_MS);
+    if (s.held && s.stale) drop(file);
   }
   // The question notes an unattended run left (.forge/execution/asked/<runId>/<surface>.json) go with the run.
   const asked = path.join(forge, 'execution', 'asked');

@@ -107,8 +107,9 @@ export const LOCK_WAIT_MS = 10_000;
  *  (the name is delete-pending until the remove completes), not EEXIST; EACCES and EBUSY likewise: the lock is busy. */
 const LOCK_REFUSED = new Set(['EPERM', 'EACCES', 'EBUSY']);
 /** How updateExecution waits: the CLI passes io.now and io.sleep, so a test never waits for real. `waitMs`: how long a
- *  live lock is waited for (LOCK_WAIT_MS by default; the Stop hook waits less). */
-export interface LockDeps { now?: () => Date; sleep?: (ms: number) => void; alive?: (pid: number) => boolean; waitMs?: number }
+ *  live lock is waited for (LOCK_WAIT_MS by default; the Stop hook waits less). `staleMs`: how old a lock is left
+ *  behind (LOCK_STALE_MS by default; withFileLock's callers with a shorter hold pass less). */
+export interface LockDeps { now?: () => Date; sleep?: (ms: number) => void; alive?: (pid: number) => boolean; waitMs?: number; staleMs?: number }
 type Holder = { pid: number; at: string };
 
 function lockHolder(file: string): Holder | null {
@@ -119,25 +120,30 @@ function lockHolder(file: string): Holder | null {
 }
 
 export type LockState = { held: false } | { held: true; pid: number | null; stale: boolean; startedAt: string | null };
-/** .forge/execution.lock as it is now, without taking or removing it: whether a live process holds it, and whether it is past LOCK_STALE_MS. */
-export function executionLockState(root: string, now: Date, alive: (pid: number) => boolean = pidAlive): LockState {
-  const file = executionLock(root);
+/** A lock file as it is now, without taking or removing it: whether a live process holds it, and whether it is past
+ *  `staleMs` (a file that does not read as a holder, by its mtime). */
+export function lockFileState(file: string, now: Date, alive: (pid: number) => boolean = pidAlive, staleMs = LOCK_STALE_MS): LockState {
   if (!existsSync(file)) return { held: false };
   const h = lockHolder(file);
-  if (h) return { held: true, pid: h.pid, startedAt: h.at, stale: !alive(h.pid) || !(now.getTime() - Date.parse(h.at) < LOCK_STALE_MS) };
+  if (h) return { held: true, pid: h.pid, startedAt: h.at, stale: !alive(h.pid) || !(now.getTime() - Date.parse(h.at) < staleMs) };
   let stale = false;
-  try { stale = now.getTime() - statSync(file).mtimeMs >= LOCK_STALE_MS; } catch { stale = false; }
+  try { stale = now.getTime() - statSync(file).mtimeMs >= staleMs; } catch { stale = false; }
   return { held: true, pid: null, startedAt: null, stale };
 }
 
+/** .forge/execution.lock as it is now, without taking or removing it: whether a live process holds it, and whether it is past LOCK_STALE_MS. */
+export function executionLockState(root: string, now: Date, alive: (pid: number) => boolean = pidAlive): LockState {
+  return lockFileState(executionLock(root), now, alive);
+}
+
 /**
- * The takeover of a stale lock, one process at a time: .forge/execution.lock.takeover, created with 'wx' and held only
- * while the lock is compared and removed. Without it two processes could both find the same stale lock, and the second
- * remove the lock the first had just created. A takeover file left behind (its process died in between) is cleared
- * once LOCK_STALE_MS old, while it is still the file that was read. Null when another process is taking over now.
+ * The takeover of a stale lock, one process at a time: <lock>.takeover, created with 'wx' and held only while the lock
+ * is compared and removed. Without it two processes could both find the same stale lock, and the second remove the lock
+ * the first had just created. A takeover file left behind (its process died in between) is cleared once `staleMs` old,
+ * while it is still the file that was read. Null when another process is taking over now.
  */
-function takeoverGate(root: string, d: Required<LockDeps>): (() => void) | null {
-  const gate = `${executionLock(root)}.takeover`;
+function takeoverGate(lock: string, d: Required<LockDeps>): (() => void) | null {
+  const gate = `${lock}.takeover`;
   const mine = JSON.stringify({ pid: process.pid, at: d.now().toISOString() });
   for (let tries = 0; tries < 2; tries++) {
     try {
@@ -152,22 +158,20 @@ function takeoverGate(root: string, d: Required<LockDeps>): (() => void) | null 
     let at = NaN;
     try { at = Date.parse((JSON.parse(text) as { at?: string }).at ?? ''); } catch { at = NaN; }
     if (!Number.isFinite(at)) { try { at = statSync(gate).mtimeMs; } catch { continue; } }
-    if (d.now().getTime() - at < LOCK_STALE_MS) return null;
+    if (d.now().getTime() - at < d.staleMs) return null;
     removeFileIf(gate, text);
   }
   return null;
 }
 
 /**
- * Takes .forge/execution.lock (created with 'wx', holding this pid and the time) or throws the UsageError
- * `execution.json is locked by <pid>` after `waitMs` (LOCK_WAIT_MS). A holder whose pid died or that holds it past
- * LOCK_STALE_MS left it behind: it is taken over under the takeover gate, unless the file changed since it was read
- * (another process took it over first). A file not written yet (its writer is between open and write) is waited for,
- * and taken over once its mtime is that old.
+ * Takes the lock `file` (created with 'wx', holding this pid and the time) or throws the UsageError
+ * `<label> is locked by <pid>` after `waitMs`. A holder whose pid died or that holds it past `staleMs` left it behind:
+ * it is taken over under the takeover gate, unless the file changed since it was read (another process took it over
+ * first). A file not written yet (its writer is between open and write) is waited for, and taken over once its mtime
+ * is that old.
  */
-function acquireLock(root: string, d: Required<LockDeps>): Holder {
-  forgeDir(root);
-  const file = executionLock(root);
+function acquireLock(file: string, label: string, d: Required<LockDeps>): Holder {
   const attempts = Math.ceil(d.waitMs / LOCK_RETRY_MS);
   let holder: number | null = null;
   let refused: NodeJS.ErrnoException | null = null;
@@ -185,9 +189,9 @@ function acquireLock(root: string, d: Required<LockDeps>): Holder {
     const h = lockHolder(file);
     if (h) holder = h.pid;
     let stale = false;
-    if (h) stale = !d.alive(h.pid) || !(d.now().getTime() - Date.parse(h.at) < LOCK_STALE_MS);
-    else { try { stale = d.now().getTime() - statSync(file).mtimeMs >= LOCK_STALE_MS; } catch { stale = false; } }
-    const release = stale ? takeoverGate(root, d) : null;
+    if (h) stale = !d.alive(h.pid) || !(d.now().getTime() - Date.parse(h.at) < d.staleMs);
+    else { try { stale = d.now().getTime() - statSync(file).mtimeMs >= d.staleMs; } catch { stale = false; } }
+    const release = stale ? takeoverGate(file, d) : null;
     if (release) {
       let removed = false;
       try {
@@ -199,13 +203,27 @@ function acquireLock(root: string, d: Required<LockDeps>): Holder {
     d.sleep(LOCK_RETRY_MS);
   }
   if (refused && holder === null) throw refused;
-  throw new UsageError(`execution.json is locked by ${holder ?? 'another process'}`);
+  throw new UsageError(`${label} is locked by ${holder ?? 'another process'}`);
 }
 
-/** Removes the lock only while it is still the one this call took (a takeover after LOCK_STALE_MS is someone else's). */
-function releaseLock(root: string, mine: Holder): void {
-  const h = lockHolder(executionLock(root));
-  if (h && h.pid === mine.pid && h.at === mine.at) rmSync(executionLock(root), { force: true });
+/** Removes the lock only while it is still the one this call took (a takeover after `staleMs` is someone else's). */
+function releaseLock(file: string, mine: Holder): void {
+  const h = lockHolder(file);
+  if (h && h.pid === mine.pid && h.at === mine.at) rmSync(file, { force: true });
+}
+
+/**
+ * Runs `fn` under the lock `file` (its folder must exist) and returns what it returns; the lock is released in a
+ * finally. A lock a live process holds for less than `staleMs` (LOCK_STALE_MS) is waited for, every LOCK_RETRY_MS for
+ * `waitMs` (LOCK_WAIT_MS); then it throws the UsageError `<label> is locked by <pid>`, and `fn` never ran.
+ */
+export function withFileLock<T>(file: string, label: string, fn: () => T, deps: LockDeps = {}): T {
+  const d: Required<LockDeps> = {
+    now: deps.now ?? (() => new Date()), sleep: deps.sleep ?? sleepSync, alive: deps.alive ?? pidAlive,
+    waitMs: deps.waitMs ?? LOCK_WAIT_MS, staleMs: deps.staleMs ?? LOCK_STALE_MS,
+  };
+  const mine = acquireLock(file, label, d);
+  try { return fn(); } finally { releaseLock(file, mine); }
 }
 
 /**
@@ -216,13 +234,12 @@ function releaseLock(root: string, mine: Holder): void {
  * takes it: the atomic write already gives a whole file.
  */
 export function updateExecution(root: string, fn: (cur: ExecutionState | null) => ExecutionState | null, deps: LockDeps = {}): ExecutionState | null {
-  const d: Required<LockDeps> = { now: deps.now ?? (() => new Date()), sleep: deps.sleep ?? sleepSync, alive: deps.alive ?? pidAlive, waitMs: deps.waitMs ?? LOCK_WAIT_MS };
-  const mine = acquireLock(root, d);
-  try {
+  forgeDir(root);
+  return withFileLock(executionLock(root), 'execution.json', () => {
     const next = fn(readExecution(root));
     if (next) saveExecution(root, next);
     return next;
-  } finally { releaseLock(root, mine); }
+  }, deps);
 }
 
 /**

@@ -101,6 +101,14 @@ describe('forge swarm cleanup (D-03, D-18)', () => {
     for (const f of ['execution/merging.json', 'execution/baseline/fresh.json', 'work/shop/T1/brief-1.md', 'execution.json']) expect(existsSync(forge(f)), f).toBe(true);
     expect(calls.flat().filter(a => a === '-D' || a === '--force' || a === '-f' || a === 'reset')).toEqual([]);
   });
+  it('FC2: removes the lock of a live signal its dead process left, never one a live process holds', () => {
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+    writeFileSync(forge('live', 'h1.json.lock'), JSON.stringify({ pid: dead, at }));
+    writeFileSync(forge('live', 'h2.json.lock'), JSON.stringify({ pid: process.pid, at }));
+    swarmCommand(['cleanup'], io, spyDeps([]));
+    expect(existsSync(forge('live', 'h1.json.lock'))).toBe(false);
+    expect(existsSync(forge('live', 'h2.json.lock'))).toBe(true);
+  });
   it('refuses while the execution is active', () => {
     seedExecution(root, exec({ active: true, stopReason: null, closedAt: null, closedBy: null }));
     const r = run(['swarm', 'cleanup'], io);

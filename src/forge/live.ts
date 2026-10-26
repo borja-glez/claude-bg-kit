@@ -1,11 +1,11 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { FORGE_DOC_MAX_BYTES, isSafeId, LIVE_STOPPED_MINUTES, normalizeLive, type ExecutionState, type LiveDoc } from '../lib/execution-state.js';
 import { coordinatorGone, lastMovedAt, type CoordinatorActivity } from '../lib/execution-view.js';
 import { describeViewer } from '../lib/viewer-role.js';
 import { claudeBindings } from '../lib/bound-fs.js';
 import { endReasonOf } from '../lib/bound.js';
-import { readExecution } from './execution.js';
+import { readExecution, withFileLock, writeAtomic } from './execution.js';
 import { liveJobs } from './jobs.js';
 import { forgeDir } from './ledger.js';
 import { mainCheckout } from './local.js';
@@ -33,12 +33,37 @@ export function nextLive(prev: LiveDoc | null, ev: { event: LiveEvent; agentId?:
   return { sessionId: ctx.sessionId, role: ctx.role, runId: ctx.runId, task: ctx.task, event: ev.event, ts: ctx.now, agents, ended };
 }
 
-/** Writes a live signal file whole (a reader never sees half of one). */
-function writeLive(main: string, file: string, doc: LiveDoc): void {
+/** FC2: the lock of one live signal file. Its readers (lens, the band, forge) list *.json only. */
+export const liveLock = (file: string) => `${file}.lock`;
+/** How long a live hook waits for the lock before it writes without it (fail-open: a hook never holds the session). */
+export const LIVE_LOCK_WAIT_MS = 2000;
+/** The lock is held for one read and one write of a small file: older than this, or with its pid gone, it was left behind. */
+export const LIVE_LOCK_STALE_MS = 5000;
+
+/**
+ * FC2: the one read-modify-write of a live signal: under its lock (liveLock), reads the signal as it is now, applies
+ * `fn` and writes what it returns (null: nothing) whole. Several hooks of one session at once (SubagentStart of three
+ * agents) each add their agent, none lost. A lock a live process holds is waited for LIVE_LOCK_WAIT_MS, then the
+ * signal is written without it, as before the lock; one left by a dead process, or older than LIVE_LOCK_STALE_MS, is
+ * taken over. The signal's format is the same.
+ */
+function updateLive(main: string, file: string, fn: (prev: LiveDoc | null) => LiveDoc | null): void {
   forgeDir(main);
   mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  try { writeFileSync(tmp, JSON.stringify(doc)); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
+  const apply = () => {
+    let prev: LiveDoc | null = null;
+    try { prev = normalizeLive(JSON.parse(readFileSync(file, 'utf8'))); } catch { prev = null; }
+    const next = fn(prev);
+    if (next) writeAtomic(file, JSON.stringify(next));
+  };
+  let ran = false;
+  try {
+    withFileLock(liveLock(file), 'the live signal', () => { ran = true; apply(); }, { waitMs: LIVE_LOCK_WAIT_MS, staleMs: LIVE_LOCK_STALE_MS });
+  } catch (e) {
+    // An error of the write itself is the caller's; a lock that could not be taken is not: write without it.
+    if (ran) throw e;
+  }
+  if (!ran) apply();
 }
 
 /**
@@ -49,9 +74,9 @@ export function clearEnded(main: string, e: ExecutionState, sessionId: string, n
   try {
     if (!isSafeId(sessionId)) return;
     const file = liveFile(main, sessionId);
-    const prev = normalizeLive(JSON.parse(readFileSync(file, 'utf8')));
-    if (!prev?.ended || prev.sessionId !== sessionId) return;
-    writeLive(main, file, nextLive(prev, { event: 'SessionStart' }, { sessionId, role: prev.role, runId: e.runId, task: prev.task, now: now.toISOString() }));
+    if (!existsSync(file)) return;
+    updateLive(main, file, prev => (!prev?.ended || prev.sessionId !== sessionId ? null
+      : nextLive(prev, { event: 'SessionStart' }, { sessionId, role: prev.role, runId: e.runId, task: prev.task, now: now.toISOString() })));
   } catch { /* no signal to clear */ }
 }
 
@@ -164,18 +189,18 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
     // A member's signal is keyed by its waypoint SID, the `by` of its public task; the coordinator's by its hook id.
     const signalId = member ? member.sessionId : sessionId;
     const file = liveFile(main, signalId);
-    let prev: LiveDoc | null = null;
-    try { prev = normalizeLive(JSON.parse(readFileSync(file, 'utf8'))); } catch { prev = null; }
     if (!exec.active) {
       // R4 (M4): the coordinator's conversation ending (SessionEnd, e.g. /clear) is recorded for an ended run that is not
       // closed too: its own ended signal tells swarm retry and /forge:run --resume at once that it is no longer on the
       // run. R7 (I2): its mirror: that same conversation back (SessionStart, claude --resume) clears it, so it never
       // outlives the bound session's return.
       const bound = viewer.coordinator && exec.hookSession === sessionId && !exec.closedAt;
-      if (!bound || !(event === 'SessionEnd' || (event === 'SessionStart' && prev?.ended === true))) return '';
+      if (!bound || !(event === 'SessionEnd' || (event === 'SessionStart' && existsSync(file)))) return '';
     }
-    writeLive(main, file, nextLive(prev, { event, agentId: typeof input.agent_id === 'string' ? input.agent_id : undefined, agentType: typeof input.agent_type === 'string' ? input.agent_type : undefined },
-      { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() }));
+    // FC2: read, applied and written back under the signal's lock (updateLive).
+    updateLive(main, file, prev => (!exec.active && event === 'SessionStart' && prev?.ended !== true ? null
+      : nextLive(prev, { event, agentId: typeof input.agent_id === 'string' ? input.agent_id : undefined, agentType: typeof input.agent_type === 'string' ? input.agent_type : undefined },
+        { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() })));
     // The resume text is for a run that is active; an ended one is taken up with /forge:run --resume.
     if (starting && exec.active) {
       const running = Object.values(exec.tasks).filter(t => t.status === 'running').length;
