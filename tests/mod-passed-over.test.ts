@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import ts from 'typescript';
 
 // w8 M2. Claude Code 2.1.310's built-in cc-plugin-sec-default is seated outermost on a machine with managed settings or a
 // managed MCP file, in Team and Enterprise organizations, and for the rest of a session once it was seated. There it
@@ -17,52 +18,57 @@ const MOD_DIRS = ['src/lens', 'src/mod'];
 
 export interface Registration { file: string; line: number; pattern: string | null; doors: string[] | null }
 
-const IDENT = '[A-Za-z_$][\\w$]*';
+// The calls are read with TypeScript's own parser (review Minor 6): a `/*` in a string such as '.forge/status/*.json', a
+// regex or a template is no comment, and a comment holds no call.
+const typeName = (t: ts.TypeNode | undefined): string | null =>
+  t && ts.isTypeReferenceNode(t) && ts.isIdentifier(t.typeName) ? t.typeName.text : null;
 
-/** The names a file registers through: a `Register` function's parameter and any parameter typed `On`. */
-function registrars(source: string): Set<string> {
+/** The names a file registers through: a `Register` function's first parameter and any parameter typed `On`. */
+function registrars(sf: ts.SourceFile): Set<string> {
   const names = new Set<string>();
-  for (const m of source.matchAll(new RegExp(`:\\s*Register\\s*=\\s*(?:async\\s*)?\\(?\\s*(${IDENT})`, 'g'))) names.add(m[1]);
-  for (const m of source.matchAll(new RegExp(`(${IDENT})\\s*:\\s*On\\b`, 'g'))) names.add(m[1]);
+  const visit = (n: ts.Node): void => {
+    if (ts.isVariableDeclaration(n) && typeName(n.type) === 'Register' && n.initializer
+      && (ts.isArrowFunction(n.initializer) || ts.isFunctionExpression(n.initializer))) {
+      const first = n.initializer.parameters[0];
+      if (first && ts.isIdentifier(first.name)) names.add(first.name.text);
+    }
+    if (ts.isParameter(n) && typeName(n.type) === 'On' && ts.isIdentifier(n.name)) names.add(n.name.text);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
   return names;
 }
 
-/** The text of the object literal starting at `from` (a `{`), braces balanced; null when it does not close. */
-function objectAt(source: string, from: number): string | null {
-  let depth = 0;
-  for (let i = from; i < source.length; i++) {
-    if (source[i] === '{') depth++;
-    else if (source[i] === '}' && --depth === 0) return source.slice(from, i + 1);
+const literalText = (n: ts.Node | undefined): string | null =>
+  n && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) ? n.text : null;
+
+/** The doors a matcher names (`{ door: 'x' }` or `{ door: ['x', 'y'] }`), or null when it names none as literals. */
+function doorsOf(matcher: ts.Expression | undefined): string[] | null {
+  if (!matcher || !ts.isObjectLiteralExpression(matcher)) return null;
+  for (const p of matcher.properties) {
+    if (!ts.isPropertyAssignment(p) || !(ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) || p.name.text !== 'door') continue;
+    const one = literalText(p.initializer);
+    if (one !== null) return [one];
+    if (!ts.isArrayLiteralExpression(p.initializer)) return null;
+    const all = p.initializer.elements.map(literalText);
+    return all.every((d): d is string => d !== null) ? all : null;
   }
   return null;
 }
 
-/** The source with its comments blanked (lines kept): «works on (E-02)» in a comment is no call. */
-const blank = (s: string) => s.replace(/[^\n]/g, ' ');
-const withoutComments = (source: string) =>
-  source.replace(/\/\*[\s\S]*?\*\//g, blank).replace(/(^|[\s;{}(),])\/\/[^\n]*/g, (m, lead: string) => lead + blank(m.slice(lead.length)));
-
-/** Every registration call in `source`: its pattern (null when it is not a plain string literal) and its doors. */
+/** Every registration call in `text`: its pattern (null when it is not a plain string literal) and its doors. */
 export function registrationsIn(file: string, text: string): Registration[] {
-  const source = withoutComments(text);
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const names = registrars(sf);
   const out: Registration[] = [];
-  for (const name of registrars(source)) {
-    for (const m of source.matchAll(new RegExp(`(?<![\\w$.])${name.replace(/\$/g, '\\$')}\\s*\\(`, 'g'))) {
-      const at = m.index! + m[0].length;
-      const line = source.slice(0, m.index).split('\n').length;
-      const literal = /^\s*(['"`])((?:(?!\1)[^\\$]|\\.)*)\1\s*([,)])/.exec(source.slice(at));
-      if (!literal) { out.push({ file, line, pattern: null, doors: null }); continue; }
-      let doors: string[] | null = null;
-      if (literal[3] === ',') {
-        const rest = source.slice(at + literal[0].length);
-        const brace = /^\s*\{/.exec(rest);
-        const matcher = brace ? objectAt(rest, brace[0].length - 1) : null;
-        const door = matcher ? /\bdoor\s*:\s*(\[[^\]]*\]|(['"])[^'"]*\2)/.exec(matcher) : null;
-        if (door) doors = [...door[1].matchAll(/(['"])([^'"]*)\1/g)].map(d => d[2]);
-      }
-      out.push({ file, line, pattern: literal[2], doors });
+  const visit = (n: ts.Node): void => {
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && names.has(n.expression.text)) {
+      const pattern = literalText(n.arguments[0]);
+      out.push({ file, line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1, pattern, doors: pattern === null ? null : doorsOf(n.arguments[1]) });
     }
-  }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
   return out;
 }
 
@@ -137,6 +143,21 @@ describe('the scan itself (w8 M2)', () => {
   it('reads no call in a comment, and keeps the line numbers', () => {
     const source = "const register: Register = on => {\n  // lens keeps which task it works on (E-02)\n  /* on('classic.Stop') */\n  on('turn.start', f);\n};";
     expect(registrationsIn('x.tsx', source)).toEqual([{ file: 'x.tsx', line: 4, pattern: 'turn.start', doors: null }]);
+  });
+  it('is not blinded by comment marks inside strings, regexes or templates (polish, review Minor 6)', () => {
+    const source = [
+      'const register: Register = on => {',
+      "  const glob = '.forge/status/*.json';",
+      "  on('classic.SubagentStop', f);",
+      "  const tail = '*/';",
+      '  const t = `// not a comment ${glob}`; on("prompt.context", h2);',
+      '  const re = /\\/\\*/g;',
+      "  on('session.compact', g);",
+      '  // a comment */ that closes nothing',
+      '};',
+    ].join('\n');
+    expect(registrationsIn('x.tsx', source).map(r => [r.line, r.pattern]))
+      .toEqual([[3, 'classic.SubagentStop'], [5, 'prompt.context'], [7, 'session.compact']]);
   });
   it('cannot be fooled by a computed event name', () => {
     expect(scan('const register: Register = on => { on(EVENT, f); on(`classic.${x}`, g); };').map(r => r[2]))
