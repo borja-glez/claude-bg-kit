@@ -17,9 +17,13 @@ describe('the plan a superpowers ledger names (w8 M4)', () => {
     expect(planFileOf('', ['/repo'])).toBeNull();
   });
   it('an absolute path inside the root, whatever its spelling, is read there', () => {
-    for (const p of ['C:/repo/docs/superpowers/plans/x.md', 'C:\\repo\\docs\\superpowers\\plans\\x.md', '/c/repo/docs/superpowers/plans/x.md', 'c:/Repo/docs/superpowers/plans/x.md']) {
+    for (const p of ['C:/repo/docs/superpowers/plans/x.md', 'C:\\repo\\docs\\superpowers\\plans\\x.md', '/c/repo/docs/superpowers/plans/x.md', 'c:/Repo/docs/superpowers/plans/x.md',
+      '/cygdrive/c/repo/docs/superpowers/plans/x.md']) {
       expect(planFileOf(p, [WIN]), p).toBe('C:\\repo/docs/superpowers/plans/x.md');
     }
+    // w8 integration: Cygwin's /cygdrive/x/… is x:/…, as forge's spMarkerPath reads it; a base spelled so too.
+    expect(planFileOf('C:/repo/docs/superpowers/plans/x.md', ['/cygdrive/c/repo'])).toBe('/cygdrive/c/repo/docs/superpowers/plans/x.md');
+    expect(planFileOf('/cygdrive/d/repo/docs/x.md', [WIN])).toBeNull();
     // A worktree of the root, under .claude/worktrees, is inside it.
     expect(planFileOf('C:\\repo\\.claude\\worktrees\\w1\\docs\\superpowers\\plans\\y.md', [WIN])).toBe('C:\\repo/.claude/worktrees/w1/docs/superpowers/plans/y.md');
     expect(planFileOf('/c/repo/.claude/worktrees/w1/docs/superpowers/plans/y.md', ['/c/repo'])).toBe('/c/repo/.claude/worktrees/w1/docs/superpowers/plans/y.md');

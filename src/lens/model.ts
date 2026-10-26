@@ -70,11 +70,12 @@ export function parseSddLedger(text: string): LedgerSummary {
   return out;
 }
 
-// w8 M4: a path as spelled for comparing: forward slashes, an msys drive (`/e/…`) as its letter (`e:/…`), no trailing
-// slash; `key` is what is compared, without case when there is a drive (as Windows compares).
+// w8 M4: a path as spelled for comparing: forward slashes, an msys drive (`/e/…`, and Cygwin's `/cygdrive/e/…` as forge's
+// spMarkerPath reads it) as its letter (`e:/…`), no trailing slash; `key` is what is compared, without case when there
+// is a drive (as Windows compares).
 function spelled(path: string): { text: string; key: string } {
   let p = path.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
-  const msys = /^\/([A-Za-z])(\/|$)/.exec(p);
+  const msys = /^\/(?:cygdrive\/)?([A-Za-z])(\/|$)/.exec(p);
   if (msys) p = `${msys[1]}:/${p.slice(msys[0].length)}`;
   if (p.length > 1) p = p.replace(/\/+$/, '');
   return { text: p, key: /^[A-Za-z]:/.test(p) ? p.toLowerCase() : p };
@@ -83,7 +84,8 @@ const insideRel = (rel: string): boolean => rel !== '' && !rel.split('/').includ
 
 /**
  * w8 M4: the file a superpowers ledger's plan path names (its header's, or its plan-path file's), or null. A relative
- * `.md` path is read under the first of `bases` (the session root); an absolute one (`X:/…`, `X:\…`, msys `/x/…`) only
+ * `.md` path is read under the first of `bases` (the session root); an absolute one (`X:/…`, `X:\…`, msys `/x/…`,
+ * Cygwin `/cygdrive/x/…`) only
  * when it lies inside one of `bases` (the root, and its main checkout from a worktree), and is read there. A path that
  * climbs out with `..`, or is no `.md`, is none; a header's text after the path (`… design.md §M`) is not part of it.
  */

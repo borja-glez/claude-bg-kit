@@ -564,6 +564,21 @@ async function loadPanelFiles($: Engine, now: number): Promise<PanelFiles> {
 
 // A plan-path file holds one path: one above this is not read.
 const PLAN_PATH_MAX = 4096;
+// w8 integration: where each base lands, every link followed ($.fs.stat's realPath), or null when it is where it says.
+const realBaseCache = new Map<string, string | null>();
+async function realBases($: Engine, bases: readonly string[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const base of bases) {
+    if (!realBaseCache.has(base)) {
+      let real: string | null = null;
+      try { real = (await $.fs.stat(base, { resolve: true })).realPath ?? null; } catch { real = null; }
+      realBaseCache.set(base, real && real.replace(/[\\/]+$/, '') !== base.replace(/[\\/]+$/, '') ? real : null);
+    }
+    const real = realBaseCache.get(base);
+    if (real && !out.includes(real)) out.push(real);
+  }
+  return out;
+}
 // The plan as the card names it: its path under the base it was found in.
 function shownPlanPath(file: string, bases: readonly string[]): string {
   for (const b of bases) {
@@ -590,14 +605,24 @@ async function loadSuperpowersFiles($: Engine, root: string, now: number): Promi
     const marker = join(ledger.path.slice(0, ledger.path.lastIndexOf('/')), 'plan-path');
     let markerText: string | undefined;
     try { if ((await $.fs.stat(marker)).size <= PLAN_PATH_MAX) markerText = await readOpt($, marker); } catch { /* none */ }
-    for (const named of [markerText, parseSddLedger(out.ledger).planPath]) {
-      const file = named ? planFileOf(named, bases) : null;
-      const text = file ? await readOpt($, file) : undefined;
-      if (file && text !== undefined && parsePlanTasks(text).length) {
-        out.ledgerPlan = text;
-        out.ledgerPlanPath = shownPlanPath(file, bases);
-        break;
+    const names = [markerText, parseSddLedger(out.ledger).planPath];
+    const readPlan = async (from: readonly string[]): Promise<boolean> => {
+      for (const named of names) {
+        const file = named ? planFileOf(named, from) : null;
+        const text = file ? await readOpt($, file) : undefined;
+        if (file && text !== undefined && parsePlanTasks(text).length) {
+          out.ledgerPlan = text;
+          out.ledgerPlanPath = shownPlanPath(file, from);
+          return true;
+        }
       }
+      return false;
+    };
+    // w8 integration: sdd-workspace spells the plan with `pwd -P`, so a root under a symbolic link is also tried by
+    // where it lands, asked only when the bases as given name no plan.
+    if (!await readPlan(bases)) {
+      const reals = await realBases($, bases);
+      if (reals.length) await readPlan([...bases, ...reals]);
     }
     return out;
   }
@@ -670,6 +695,7 @@ function resetUsage(): void {
   lastUsageSig = '';
   sessionId = null;
   mainCheckout = null;
+  realBaseCache.clear();
   runInputs = null;
   usageFileCache.clear();
   largeRunsCache = null;

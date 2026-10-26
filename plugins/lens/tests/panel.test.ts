@@ -891,6 +891,44 @@ test("a ledger whose header names a plan in a worktree of the root, with no plan
   await ui.unmount();
 });
 
+// w8 integration: sdd-workspace spells the plan with `pwd -P`, the physical path. A root reached through a symbolic link
+// (here /link/repo, which lands in /real/repo) still counts against that plan: its real path is a base too.
+test('a ledger that names its plan by the real path of a root under a symbolic link counts against that plan (w8 integration)', async ($, on) => {
+  const files: Record<string, string> = {
+    '/link/repo/.superpowers/sdd/s/progress.md': `# SDD ledger — plan: /real/repo/docs/superpowers/plans/sym.md${SP_PROGRESS}`,
+    '/link/repo/.superpowers/sdd/s/plan-path': '/real/repo/docs/superpowers/plans/sym.md\n',
+    '/real/repo/docs/superpowers/plans/sym.md': PLAN,
+  };
+  const resolved: string[] = [];
+  on('session.root', () => ({ value: '/link/repo' }));
+  on('session.id', () => ({ value: SESSION_ID }));
+  on('fs.read', (_$, e) => (norm(e.path) in files ? { value: files[norm(e.path)]! } : { deny: `ENOENT ${e.path}` }));
+  on('fs.exists', (_$, e) => ({ value: norm(e.path) in files }));
+  on('fs.stat', (_$, e) => {
+    const p = norm(e.path);
+    if (p === '/link/repo') { if (e.resolve) resolved.push(p); return { value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: true, ...(e.resolve ? { realPath: '/real/repo' } : {}) } }; }
+    return p in files ? { value: { kind: 'file' as const, size: files[p]!.length, mtimeMs: NOW - 60_000, isLink: false } } : { deny: `ENOENT ${e.path}` };
+  });
+  on('fs.list', (_$, e) => {
+    const prefix = `${norm(e.path)}/`;
+    const names = new Map<string, 'file' | 'dir'>();
+    for (const path of Object.keys(files)) if (path.startsWith(prefix)) { const [head = '', ...rest] = path.slice(prefix.length).split('/'); names.set(head, rest.length ? 'dir' : 'file'); }
+    return names.size ? { value: [...names].map(([name, kind]) => ({ name, kind, size: 0, mtimeMs: NOW - 60_000, isLink: false })) } : { deny: `ENOENT ${e.path}` };
+  });
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: '/link/repo', surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  const text = await said(ui);
+  expect(resolved).toContain('/link/repo');
+  expect(text).toContain('docs/superpowers/plans/sym.md');
+  expect(text).not.toContain('/real/repo');
+  expect(text).toMatch(/22%.*Task 3\/9.*2 done/);
+  await ui.unmount();
+});
+
 test('a ledger whose plan cannot be read shows the tasks done, never a total nor a false 100 % (w8 M4)', async ($, on) => {
   serveWindowsRoot(on, {
     '/repo/.superpowers/sdd/c/progress.md': '# SDD ledger — plan: D:/elsewhere/plan.md\n\n## Progress\nTasks 1-3: complete (abc..def)\n',
