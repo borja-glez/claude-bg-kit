@@ -34,7 +34,7 @@ export const command: Command = (args, ctx) => {
   const snapshot = snap.code === 0 ? true : null;
   const snapshotError = snapshot ? null : snap.stderr.trim() || `tree snapshot exited ${snap.code}`;
   const tdd = tddFor(io, repoDir);
-  const prefs = resolvePrefs(isAutonomy(autonomy) ? { autonomy } : {}, readLocal(io.cwd), loadConfig(repoDir));
+  const prefs = resolvePrefs(isAutonomy(autonomy) ? { autonomy } : {}, readLocal(io.cwd), loadConfig(repoDir), io.env ?? process.env);
   // forge's .gitignore lives with its state, in the caller's checkout, as triage says.
   const stateGit = io.workdir === undefined ? git : defaultGit(io.cwd);
   const ignore = (stateGit(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore']) ?? '').trim();

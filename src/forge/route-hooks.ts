@@ -206,9 +206,10 @@ export function hookRoute(io: Io, which: 'session' | 'prompt'): string {
       if (recall) return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: recall } });
     }
     // With workflow: superpowers forge is optional again, as before routing existed; with off it stays out. The config is
-    // read once, here, for the workflow and the hint; an invalid one throws, and the hook says nothing (fail open).
+    // read once, here, for the workflow and the hint; an invalid one throws, and the hook says nothing (fail open). w8
+    // FR1: below local.yaml and config.yaml, the person's FORGE_WORKFLOW decides it for every project.
     const config = loadConfig(io.cwd);
-    const workflow = resolvePrefs({}, readLocal(io.cwd), config).workflow;
+    const workflow = resolvePrefs({}, readLocal(io.cwd), config, io.env ?? process.env).workflow;
     if (workflow === 'superpowers' || workflow === 'off' || forgeDrives(io, main, sid)) return '';
     if (which === 'session') {
       const sp = locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: main });

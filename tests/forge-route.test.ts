@@ -10,7 +10,7 @@ import { run, cleanProbe, type Io } from '../src/forge/cli/run.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
 
-const PREFS = resolvePrefs({}, {}, {});
+const PREFS = resolvePrefs({}, {}, {}, {});
 const SP = { installed: true, version: '6.4.1' };
 const SPEC = { path: 'docs/superpowers/specs/s.md', title: 'S', modified: '2026-10-12T00:00:00.000Z' };
 const PLAN = { path: 'docs/superpowers/plans/p.md', title: 'P', tasks: 3, done: 1 };
@@ -140,13 +140,13 @@ describe('routeOptions', () => {
     expect(namedOrFirst([OTHER, { ...ES, title: 'Diseño del carrito' }], 'ejecuta el plan «diseño del carrito»')!.path).toBe(ES.path);
   });
   it('in auto mode a Large request without a spec goes to forge, whose design loop never asks', () => {
-    const auto = resolvePrefs({ autonomy: 'auto' }, {}, {});
+    const auto = resolvePrefs({ autonomy: 'auto' }, {}, {}, {});
     expect(routeOptions(input({ path: 'large', prefs: auto })).recommended).toEqual({ option: 'forge', why: expect.stringContaining('auto mode') });
     expect(routeOptions(input({ path: 'large', prefs: auto, specs: [SPEC], buildSpec: true })).recommended).toMatchObject({ option: 'superpowers-design', spec: SPEC.path });
     expect(routeOptions(input({ path: 'large', prefs: auto, plans: [PLAN], runPlan: true })).recommended).toMatchObject({ option: 'superpowers-plan', plan: PLAN.path });
   });
   it('passes the preferences, their sources and the specs and plans through', () => {
-    const r = routeOptions(input({ prefs: resolvePrefs({ autonomy: 'auto' }, { workflow: 'forge' }, {}), specs: [SPEC], plans: [PLAN] }));
+    const r = routeOptions(input({ prefs: resolvePrefs({ autonomy: 'auto' }, { workflow: 'forge' }, {}, {}), specs: [SPEC], plans: [PLAN] }));
     expect(r).toMatchObject({ workflow: 'forge', autonomy: 'auto', sources: { workflow: 'local', autonomy: 'request' }, specs: [SPEC.path], plans: [{ path: PLAN.path, tasks: 3, done: 1 }] });
   });
   it('routeAsk: the method with the recommended option first, and whether to remember it (K1-08)', () => {

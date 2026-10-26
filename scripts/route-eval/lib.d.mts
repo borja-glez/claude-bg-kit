@@ -32,7 +32,7 @@ export function pending(prompts: EvalPrompt[], configs: EvalConfig[], reps: numb
 export function stopReason(trials: EvalResult[], configs?: EvalConfig[]): string | null;
 export function wilson(k: number, n: number, z?: number): { low: number; high: number } | null;
 export function claudeArgs(prompt: string, o: { settings: string; pluginDirs: string[] }): string[];
-export function settingsFor(installedKeys: string[]): { enabledPlugins: Record<string, boolean> };
+export function settingsFor(installedKeys: string[]): { enabledPlugins: Record<string, boolean>; env: { FORGE_WORKFLOW: 'ask' } };
 export function projectSettingsFor(withSuperpowers: boolean, installedKeys: string[]): { enabledPlugins: Record<string, boolean> };
 export function summarize(results: EvalResult[], configs?: EvalConfig[]): Summary[];
 export function passes(summary: Summary[]): boolean;

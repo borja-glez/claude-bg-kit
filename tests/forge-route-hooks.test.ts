@@ -103,6 +103,22 @@ describe('forge hook route-session and route-prompt', () => {
     expect(hook('route-prompt', PROMPT).stdout).toBe('');
     expect(hook('route-session', { session_id: 'S1' }).stdout).toBe('');
   });
+  it('FORGE_WORKFLOW off or superpowers silences both hooks, under what the project says (w8 FR1)', () => {
+    const said = (which: string, env: Record<string, string>) =>
+      run(['hook', which], { cwd: root, now: () => NOW, stdin: JSON.stringify(which === 'route-prompt' ? PROMPT : { session_id: 'S1', source: 'startup' }), env: { CLAUDE_CONFIG_DIR: cfg, ...env } }).stdout;
+    for (const w of ['off', 'superpowers']) {
+      for (const which of ['route-session', 'route-prompt']) expect(said(which, { FORGE_WORKFLOW: w }), `${w} ${which}`).toBe('');
+    }
+    for (const w of ['ask', 'forge', 'superpowers-design', 'superpowers-plan', 'maybe']) {
+      for (const which of ['route-session', 'route-prompt']) expect(said(which, { FORGE_WORKFLOW: w }), `${w} ${which}`).not.toBe('');
+    }
+    // The project's config.yaml wins over the person's default, and local.yaml over both.
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'workflow: forge\n');
+    expect(said('route-prompt', { FORGE_WORKFLOW: 'off' })).not.toBe('');
+    personal('workflow: off\n');
+    expect(said('route-prompt', { FORGE_WORKFLOW: 'forge' })).toBe('');
+  });
   it('stays silent with workflow: superpowers, where forge already drives the session, and on bad input', () => {
     personal('workflow: superpowers\n');
     expect(hook('route-prompt', PROMPT).stdout).toBe('');

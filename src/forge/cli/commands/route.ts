@@ -142,7 +142,7 @@ export const command: Command = (args, ctx) => {
   // A probe that exits 2 (an empty text, a bad --path, --workflow or --autonomy) leaves nothing behind either.
   try { got = inputs(); } catch (e) { if (textFile !== undefined && e instanceof UsageError) cleanProbe(io.cwd, task, textFile); throw e; }
   const { probed, p, wf, au } = got;
-  const prefs = resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir));
+  const prefs = resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir), io.env ?? process.env);
   const sp = superpowersOf(io, repoDir);
   const now = io.now().getTime();
   // K1-07: the request names the plan or spec to recommend; the probe already read the file, so it reads.

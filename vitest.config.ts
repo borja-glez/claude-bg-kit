@@ -62,7 +62,8 @@ export default defineConfig({
     // I-01: one temp root per run; TEMP, TMP and TMPDIR point at it while the workers run, and it is removed at the end.
     globalSetup: ['tests/setup/temp-root.ts'],
     // I-03: every command of a test's .forge/config.yaml counts as trusted (tests/forge-trust.test.ts turns it off).
-    setupFiles: ['tests/setup/trust-commands.ts'],
+    // w8 FR1: the person's FORGE_WORKFLOW and FORGE_ROUTE_HINT are left out of every test.
+    setupFiles: ['tests/setup/trust-commands.ts', 'tests/setup/person-env.ts'],
     // Each project names its own files and the root names none: arrays a project inherits are concatenated.
     projects: [
       { extends: true, test: { name: 'unit', include: ['tests/**/*.test.ts'], exclude: ['**/node_modules/**', ...SLOW] } },
