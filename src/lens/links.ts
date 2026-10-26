@@ -115,11 +115,26 @@ function capped(list: AgentLink[]): AgentLink[] {
   return list.filter(l => !drop.has(l.id));
 }
 
-export interface SpawnSeen { id: string; type: string; description: string; prompt: string; parentId: string | null; workflow: { runId: string; index: number } | null; now: number }
+export interface SpawnSeen {
+  id: string; type: string; description: string; prompt: string; parentId: string | null; workflow: { runId: string; index: number } | null; now: number;
+  /** The spawn continues an agent (agent.spawn's `resume`, as a SendMessage to a finished one): its prompt is the message. */
+  resume?: boolean;
+}
 
-/** agent.spawn: the agent with the task its prompt names, else its parent's (`via: 'parent'`). An id seen again is replaced. */
+/**
+ * agent.spawn: the agent with the task its prompt names, else its parent's (`via: 'parent'`). An id seen again is replaced;
+ * review Minor 4: one resumed keeps its link's task, parent, workflow and words (the resuming message names no task), and
+ * runs again from now.
+ */
 export function linkSpawn(links: readonly AgentLink[], s: SpawnSeen, known: ReadonlySet<string>): AgentLink[] {
   if (!s.id) return [...links];
+  const was = s.resume ? links.find(l => l.id === s.id) : undefined;
+  if (was) {
+    const type = cleanText(String(s.type ?? '')) || was.type;
+    const description = cleanText(String(s.description ?? '')) || was.description;
+    const link: AgentLink = { ...was, type, description, since: s.now, status: 'running', tool: null, endedAt: null };
+    return capped([...links.filter(l => l.id !== s.id), link]);
+  }
   const own = taskOfPrompt(s.prompt, s.description, known);
   const up = own ? null : parentTask(links, s.parentId);
   const link: AgentLink = {

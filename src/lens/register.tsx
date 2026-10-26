@@ -84,6 +84,8 @@ const PENDING_ENDS_MAX = 50;
 // w8 M1: the teammates among the agents lens heard of (agent.spawn's isTeammate, the agents list's teammateId): a
 // teammate's turn.complete leaves it idle, not finished. At most LINKS_MAX are kept.
 const teammates = new Set<string>();
+// Review Minor 4: when each agent lens ended last ended, by id, for LIST_GRACE_MS (settledList); at most LINKS_MAX.
+const endedAt = new Map<string, number>();
 // Whether there is activity worth a band of its own (recent subagents, links agents or forge work; todos alone do not count) when no waypoint band shows.
 let busy = false;
 // The roadmap section, read from the waypoint project's files at the panel's pace while the pane is open.
@@ -237,6 +239,7 @@ function resetPanel(): void {
   agentTools.clear();
   pendingEnds.clear();
   teammates.clear();
+  endedAt.clear();
 }
 
 // E-11: the tool agent `id` shows: the latest of its calls still in flight, or none.
@@ -258,6 +261,7 @@ function applyPendingEnd(id: string, now: number): void {
 // SubagentStart and SubagentStop said the same, but cc-plugin-sec-default passes every classic hook of a plugin the person
 // installed over where it is seated (managed settings, Team and Enterprise), so lens never hangs on them.
 function startSubagent(id: string, type: string, description: string, now: number): void {
+  endedAt.delete(id);
   finished = finished.filter(f => f.id !== id);
   const entry = { id, type: clip(type, LINE_MAX), ...(description ? { description: clip(description, LINE_MAX) } : {}), since: now };
   activity.subagents = pushCapped(activity.subagents.filter(s => s.id !== id), entry);
@@ -269,7 +273,19 @@ function endSubagent(id: string, now: number): void {
   activity.subagents = activity.subagents.filter(s => s.id !== id);
   links = endAgent(links, id, now, { any: true });
   if (ran) recordFinished(ran, now);
+  endedAt.delete(id);
+  endedAt.set(id, now);
+  while (endedAt.size > LINKS_MAX) endedAt.delete(endedAt.keys().next().value!);
 }
+
+// Review Minor 4: an agents list read just after an agent's turn.complete may still name it running. Within LIST_GRACE_MS
+// of its end, and with no spawn resuming it since (startSubagent forgets the end), that is taken as finished, so the list
+// neither brings it back nor starts its time again. Past the grace, the list is the truth again.
+function settledList(list: ListedAgent[], now: number): ListedAgent[] {
+  for (const [id, at] of endedAt) if (now - at > LIST_GRACE_MS) endedAt.delete(id);
+  return list.map(a => (endedAt.has(a.id) && LIVE_STATUSES.has(a.status) ? { ...a, status: 'completed' } : a));
+}
+const LIVE_STATUSES = new Set(['running', 'pending', 'waiting', 'idle']);
 
 function noteTeammate(id: string): void {
   teammates.delete(id);
@@ -921,7 +937,8 @@ function liveSubagents(now: number, list: ListedAgent[] | null): Activity['subag
 
 // What the agents list says, taken in by a refresh or a photo: the subagents and the links it names, and the usage loop
 // of an agent agent.spawn did not label (lens loaded later, another spawn path) gets its type (w8 M1).
-function adoptListed(list: ListedAgent[] | null, now: number): void {
+function adoptListed(listed: ListedAgent[] | null, now: number): void {
+  const list = listed ? settledList(listed, now) : null;
   activity.subagents = liveSubagents(now, list);
   if (list) {
     links = syncListed(links, list, now, knownTasks(bandModel));
@@ -1515,7 +1532,7 @@ export const register: Register = on => {
           id: r.agentId, type: String(e.subagentType ?? ''), description: String(e.description ?? ''), prompt: typeof e.prompt === 'string' ? e.prompt : '',
           parentId: typeof e.parentAgentId === 'string' ? e.parentAgentId : null,
           workflow: wf && typeof wf.runId === 'string' ? { runId: wf.runId, index: Number(wf.agentIndex) || 0 } : null,
-          now,
+          now, resume: !!e.resume,
         }, knownTasks(bandModel));
         applyPendingEnd(r.agentId, now);
         void noteActivity($);

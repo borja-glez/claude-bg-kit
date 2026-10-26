@@ -73,6 +73,15 @@ describe('the agents and their task (E-02, E-09)', () => {
     expect(linkSpawn(deep, spawn('y', 'x', { parentId: 'x4' }), known).at(-1)?.task).toBe('T002');
     expect(linkSpawn(deep, spawn('z', 'x', { parentId: 'x5' }), known).at(-1)?.task).toBeNull();
   });
+  it('a spawn that resumes an agent keeps its link\'s task, parent and words, whatever the resuming message says (review Minor 4)', () => {
+    let links = linkSpawn([], spawn('p', 'forge-task: T002-1'), known);
+    links = linkSpawn(links, spawn('a1', 'forge-task: T001-1 @shop', { description: 'implement T001', parentId: 'p' }), known);
+    links = endAgent(links, 'a1', NOW, { any: true });
+    const resumed = linkSpawn(links, { ...spawn('a1', 'Please also fix the lint', { description: '' }), resume: true, now: NOW + 60_000 }, known).find(l => l.id === 'a1')!;
+    expect(resumed).toMatchObject({ task: 'T001', project: 'shop', via: 'contract', parentId: 'p', description: 'implement T001', status: 'running', endedAt: null, since: NOW + 60_000 });
+    // Without resume, a spawn of the id is a new agent: its own prompt decides.
+    expect(linkSpawn(links, spawn('a1', 'Please also fix the lint'), known).find(l => l.id === 'a1')?.task).toBeNull();
+  });
   it('the list is the truth for what it lists: idle stays, gone is done; a workflow agent lives until its turn ends, at most two hours', () => {
     let links = linkSpawn([], spawn('a1', 'forge-task: T001-1'), known);
     links = linkSpawn(links, spawn('w1', 'forge-task: T002-1', { workflow: { runId: 'wf_1', index: 1 } }), known);

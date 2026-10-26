@@ -353,6 +353,53 @@ test("a teammate's turn.complete leaves it waiting, not finished (w8 M1)", async
   expect(panel.last?.activities).toMatchObject([{ kind: 'adhoc', agents: [{ id: 'tm', status: 'waiting' }] }]);
 });
 
+test('an agents list still saying running just after the turn.complete does not bring the subagent back nor restart its time (review Minor 4)', async ($, on) => {
+  serveFiles(on, {});
+  servePanes(on);
+  const panel = panelWrites(on);
+  const agents = { list: [] as unknown[] };
+  const clock = start(on, agents, ['a1']);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.agent.spawn(spawnArgs('Look around', { subagentType: 'Explore', description: 'look' }));
+  agents.list = [{ id: 'a1', type: 'Explore', description: 'look', status: 'running' }];
+  await clock.advance(10_000);
+  expect(panel.last?.subagents).toMatchObject([{ id: 'a1', status: 'running' }]);
+  await clock.advance(1_000);
+  await $.turn.complete(turnEnd('a1'));
+  // The list has not caught up yet when the next refresh reads it, 9 s after the end.
+  await clock.advance(9_000);
+  expect(panel.last?.subagents).toEqual([]);
+  expect(panel.last?.subagentsDone).toMatchObject([{ id: 'a1', seconds: 11 }]);
+  expect(panel.last?.subagentsDone).toHaveLength(1);
+  expect(panel.last?.activities).toEqual([]);
+});
+
+test('a subagent resumed by a message shows again at once, in the task it worked on, though the message names none (review Minor 4)', async ($, on) => {
+  serveFiles(on, THREE);
+  servePanes(on);
+  const panel = panelWrites(on);
+  const agents = { list: [] as unknown[] };
+  // A resume settles with the id it continues.
+  const clock = start(on, agents, ['a1', 'a1']);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.agent.spawn(spawnArgs('forge-task: T001-1 @shop\nImplement T001.', { description: 'implement T001' }));
+  agents.list = [{ id: 'a1', type: 'forge:forge-impl', description: 'implement T001', status: 'running' }];
+  await clock.advance(10_000);
+  const agentsOf = (task: string) => panel.last?.activities.find((a: { task: string }) => a.task === task)?.agents.map((g: { id: string }) => g.id);
+  expect(agentsOf('T001')).toEqual(['a1']);
+  await $.turn.complete(turnEnd('a1'));
+  await clock.advance(1_000);
+  expect(agentsOf('T001')).toEqual([]);
+  // SendMessage wakes it: a spawn with resume, its prompt the message; the list says running within the grace.
+  await $.agent.spawn(spawnArgs('Please also fix the lint.', { description: 'follow-up', resume: { agentId: 'a1' } }));
+  await clock.advance(9_000);
+  expect(agentsOf('T001')).toEqual(['a1']);
+  expect(panel.last?.subagents).toMatchObject([{ id: 'a1' }]);
+  expect(panel.last?.subagentsDone).toEqual([]);
+});
+
 test('a subagent lens did not see spawn shows from the agents list, and is finished once the list says it completed (w8 M1)', async ($, on) => {
   serveFiles(on, {});
   servePanes(on);
