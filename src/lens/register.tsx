@@ -18,7 +18,7 @@ import { clipWidth } from '../lib/text-width.js';
 import { modeLabels, ownBusy, spinnerText, statusText, surfaceEvents } from './surfaces.js';
 import { PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
-import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
+import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, type UsageState } from './usage.js';
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, totalsOf, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunBaseline, type RunSource, type UsageFile } from './usage-file.js';
 import { addOwnTask, endAgent, endTool, knownTasks, linkSpawn, LINKS_MAX, LIST_GRACE_MS, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
 import { taskCall } from './tasks.js';
@@ -1318,17 +1318,9 @@ export const register: Register = on => {
     return next(e);
   });
 
-  // E-08: after a compaction the tracking gathered so far is no longer in context: it is not re-read from then on. Only
-  // a real compaction of the main conversation counts: a subagent's transcript holds no tracking, a skip compacts
-  // nothing, and a precompute installs nothing (R6).
-  on('session.compact', async ($, e, next) => {
-    const r = await next(e);
-    try {
-      const skipped = !!r && typeof (r as { skip?: unknown }).skip === 'string';
-      if (!e.agentId && e.trigger !== 'precompute' && !skipped) compactUsage(usage);
-    } catch { /* ignore */ }
-    return r;
-  }).catch(($, e, next) => next(e));
+  // E-08: after a compaction the tracking gathered so far is no longer in context: it is not re-read from then on. w8 M1:
+  // no session.compact hook tells it (cc-plugin-sec-default passes that event over where it is seated); the first main
+  // request after it, answered over a context that fell by half, does (recordStep, usage.ts).
 
   // Steps 2 and 3 of §4.6: /lens opens the pane where it docks (fullscreen, 110 columns or more); elsewhere it leaves a
   // photo in the transcript, which keeps the live region small (F-15). /lens live (or pane) opens the pane anyway;

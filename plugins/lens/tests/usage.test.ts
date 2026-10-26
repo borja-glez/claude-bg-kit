@@ -495,40 +495,39 @@ test('a session counts in its run only what it spent once its band names the run
   expect(u.session.costUsd).toBeLessThan(8.01);
 });
 
-test("a compaction of the main conversation stops the re-read of the tracking gathered before it; a subagent's, a precompute's or a skipped one does not (E-08, R6)", async ($, on) => {
+test("a compaction of the main conversation stops the re-read of the tracking gathered before it, told by the context its next request falls to; a subagent's or a small fall is none (E-08, w8 M1: no session.compact hook)", async ($, on) => {
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
   const clock = start(on);
-  serveSteps(on);
+  // The model beneath answers each request over `context` cached tokens (a subagent's, over 1,000).
+  let context = 150_000;
+  on('turn.step', async function* (_$, e) {
+    return stepResult({ cache_read_input_tokens: e.agentId ? 1_000 : context, output_tokens: 100 }, e.model, e.turnId, e.index);
+  });
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ok' } as never, text: 'x'.repeat(400) }));
-  const summary = [{ role: 'user' as const, text: 'summary', toolUses: [] }];
-  const compacted = { messages: summary };
-  let answer: { messages: typeof summary } | { skip: string } = compacted;
-  on('session.compact', () => answer as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
   await $.tool.call({ tool: 'Bash', command: 'node waypoint.cjs status' } as never);
   // Each main step re-reads the tracking gathered since the last compaction of the main conversation.
-  const stepThen = async (index: number) => {
-    await drain($.turn.step({ turnId: 't1', index, model: 'claude-opus-5-5', messageCount: index + 1 }));
+  const stepThen = async (index: number, agentId?: string) => {
+    await drain($.turn.step({ turnId: 't1', index, model: 'claude-opus-5-5', messageCount: index + 1, ...(agentId ? { agentId } : {}) }));
     await clock.advance(1000);
     return panel.last?.usage.tracking.tokens as number;
   };
   const once = await stepThen(0);
   expect(once).toBeGreaterThan(0);
-  await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: summary });
-  expect(await stepThen(1)).toBe(once * 1.5);
-  // A precompute installs nothing: the tracking is still in context and still re-read.
-  await $.session.compact({ trigger: 'precompute', messages: summary });
-  expect(await stepThen(2)).toBe(once * 2);
-  // A skipped compaction leaves the conversation as it is.
-  answer = { skip: 'not now' };
-  await $.session.compact({ trigger: 'manual', messages: summary });
-  expect(await stepThen(3)).toBe(once * 2.5);
-  answer = compacted;
-  await $.session.compact({ trigger: 'manual', messages: summary });
-  expect(await stepThen(4)).toBe(once * 2.5);
+  // A subagent's small context is its own: nothing of the main conversation left.
+  expect(await stepThen(1, 'a1')).toBe(once);
+  expect(await stepThen(2)).toBe(once * 1.5);
+  // A fall to two thirds is no compaction.
+  context = 100_000;
+  expect(await stepThen(3)).toBe(once * 2);
+  // Under half, by 70k tokens: the conversation was compacted, the tracking before it is gone.
+  context = 30_000;
+  expect(await stepThen(4)).toBe(once * 2);
+  context = 32_000;
+  expect(await stepThen(5)).toBe(once * 2);
 });
 
 test('a band read before any run, the pane closed and nothing busy: a run that starts later is named in the next usage write (R2)', async ($, on) => {
