@@ -126,15 +126,17 @@ describe('buildBandModel · work', () => {
   });
   it('run mode: executor, slots with stage and round, progress and the worst liveness, for its coordinator', () => {
     const m = buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), sessionId: 's1', execution: EXEC() });
-    expect(m).toMatchObject({ mode: 'run', executor: 'subagents', running: 1, parallel: 3, integrated: 1, total: 2, slots: [{ task: 'T002', stage: 'review', round: 2 }], worst: 'alive', stalled: false,
+    expect(m).toMatchObject({ mode: 'run', executor: 'subagents', running: 1, parallel: 3, integrated: 1, total: 2, slots: [{ task: 'T002', stage: 'review', round: 2 }], worst: 'alive', ended: null,
       viewer: { role: 'owner', coordinator: true, runId: 'r1' } });
+    expect(m).not.toHaveProperty('stalled');
   });
   it('the coordinator sees its run until it is closed, also once it stopped, with no time limit (C2, B-07)', () => {
     const files = (over: object) => ({ ...empty, plan, session: j({ sessionId: 'main', track: null }), sessionId: 's1', execution: EXEC(over) });
     const ended = (stopReason: string, hoursAgo: number) => ({ active: false, stopReason, stallReason: stopReason === 'stalled' ? 'x' : null,
       lastStepAt: new Date(Date.now() - hoursAgo * 3600000).toISOString(), startedAt: new Date(Date.now() - (hoursAgo + 1) * 3600000).toISOString() });
+    // W1 (w8): the band says why it ended, so a finished run never reads as stopped.
     for (const r of ['stalled', 'stopped', 'budget', 'finished']) {
-      expect(buildBandModel('demo-shop', files(ended(r, 1))), r).toMatchObject({ mode: 'run', stalled: true, viewer: { role: 'owner', coordinator: true, runId: 'r1' } });
+      expect(buildBandModel('demo-shop', files(ended(r, 1))), r).toMatchObject({ mode: 'run', ended: r, viewer: { role: 'owner', coordinator: true, runId: 'r1' } });
       expect(buildBandModel('demo-shop', files(ended(r, 30))).mode, r).toBe('run');
     }
     expect(buildBandModel('demo-shop', files({ ...ended('stopped', 1), closedAt: new Date().toISOString(), closedBy: 'close' })))
@@ -179,7 +181,7 @@ describe('buildBandModel · work', () => {
   });
   it('run mode for an ephemeral execution (project loose) in a project with a plan, slot ids clipped in the line', () => {
     const m = buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), sessionId: 's1', execution: EPHEMERAL() });
-    expect(m).toMatchObject({ mode: 'run', project: 'demo-shop', locale: 'es', roadmapUrl: 'https://claude.ai/artifact/abc', running: 2, integrated: 0, total: 2, stalled: false });
+    expect(m).toMatchObject({ mode: 'run', project: 'demo-shop', locale: 'es', roadmapUrl: 'https://claude.ai/artifact/abc', running: 2, integrated: 0, total: 2, ended: null });
     const line = bandLine(m, 0);
     expect(line).toContain('► EJECUCIÓN · subagentes 2/3 · ');
     expect(line).toContain('fecha-corta-en-la-c… implementar');
@@ -188,7 +190,7 @@ describe('buildBandModel · work', () => {
   });
   it("an ephemeral run that finished stays its coordinator's until it is closed; a seat's owner keeps its work band", () => {
     expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), sessionId: 's1', execution: EPHEMERAL({ active: false, stopReason: 'finished' }) }))
-      .toMatchObject({ mode: 'run', stalled: true });
+      .toMatchObject({ mode: 'run', ended: 'finished' });
     expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'x', track: 'backend' }), ...ownerOf('x'), execution: EPHEMERAL() }).mode).toBe('work');
   });
   it('a plan execution of another project is not drawn: its coordinator bound here sees its work band', () => {
@@ -200,9 +202,15 @@ describe('buildBandModel · work', () => {
     const m = buildBandModel('demo-shop', { ...empty, plan, sessionId: 's1', execution: EXEC(), execTasks: { T002: pub } });
     expect(m).toMatchObject({ mode: 'run', worst: 'stopped' });
   });
-  it('bandLine variants: stalled, stopped, sessions, round 1, en locale, unknown stage', () => {
-    const run = (over: object, locale = 'es') => bandLine({ mode: 'run', project: 'p', locale, executor: 'subagents', running: 1, parallel: 2, integrated: 0, queued: 0, total: 4, slots: [{ task: 'T001', stage: 'implement', round: 1 }], worst: 'alive', stalled: false, roadmapUrl: null, viewer: NO_VIEWER, ...over } as never, 0);
-    expect(run({ stalled: true })).toBe('► EJECUCIÓN · ▲ parada · 0/4 integradas');
+  it('bandLine variants: ended, stopped, sessions, round 1, en locale, unknown stage', () => {
+    const run = (over: object, locale = 'es') => bandLine({ mode: 'run', project: 'p', locale, executor: 'subagents', running: 1, parallel: 2, integrated: 0, queued: 0, total: 4, slots: [{ task: 'T001', stage: 'implement', round: 1 }], worst: 'alive', ended: null, roadmapUrl: null, viewer: NO_VIEWER, ...over } as never, 0);
+    // W1 (w8): an ended run says why, with its count; «parada» is only an active run without heartbeat.
+    expect(run({ ended: 'finished', integrated: 4, running: 0, slots: [], worst: 'stopped' })).toBe('► EJECUCIÓN · ✓ terminada · 4/4 integradas');
+    expect(run({ ended: 'finished', integrated: 4, running: 0, slots: [], worst: 'stopped' }, 'en')).toBe('► EXECUTION · ✓ finished · 4/4 integrated');
+    expect(run({ ended: 'stalled', worst: 'stopped' })).toBe('► EJECUCIÓN · ▲ atascada · 0/4 integradas');
+    expect(run({ ended: 'stopped', worst: 'stopped' })).toBe('► EJECUCIÓN · ■ detenida con /forge:stop · 0/4 integradas');
+    expect(run({ ended: 'budget', worst: 'stopped' }, 'en')).toBe('► EXECUTION · ▲ out of budget · 0/4 integrated');
+    for (const ended of ['finished', 'stalled', 'stopped', 'budget']) expect(run({ ended, worst: 'stopped' }), ended).not.toContain('parada');
     expect(run({ worst: 'stopped' })).toBe('► EJECUCIÓN · subagentes 1/2 · T001 implementar · 0/4 integradas · ▲ parada');
     expect(run({ executor: 'sessions' })).toBe('► EJECUCIÓN · sesiones 1/2 · T001 implementar · 0/4 integradas');
     expect(run({}, 'en')).toBe('► EXECUTION · subagents 1/2 · T001 implement · 0/4 integrated');
@@ -210,7 +218,7 @@ describe('buildBandModel · work', () => {
     expect(run({ slots: [{ task: 'T009', stage: 'weird', round: 1 }] })).toContain('T009 weird');
   });
   it('draws the run band line with stages, rounds and the liveness warning', () => {
-    expect(bandLine({ mode: 'run', project: 'p', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, queued: 0, total: 12, slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false, roadmapUrl: null, sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: NO_VIEWER }, 0))
+    expect(bandLine({ mode: 'run', project: 'p', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, queued: 0, total: 12, slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', ended: null, roadmapUrl: null, sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: NO_VIEWER }, 0))
       .toBe('► EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 integradas · ▲ sin señal');
   });
   it('marks the work band of a member forge launched for one task by its member file (role executor); an old launchedBy is ignored (1c)', () => {
@@ -539,10 +547,17 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     expect(n({ kind: 'previous', subject: 'design', task: null, title: null, project: `a|b ${'x'.repeat(60)}` }))
       .toBe(`◌ diseño a medias: a|b ${'x'.repeat(35)}… · hace 3 min`);
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', since: '2026-10-13T12:00:00.000Z' })).toBe('◌ ejecución parada: 3/12 integradas · hace 2 d');
+    // W1 (w8): a run that finished reads finished, never stopped.
+    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 3, stopReason: 'finished', since: '2026-10-13T12:00:00.000Z' })).toBe('✓ ejecución terminada: 3/3 integradas · hace 2 d');
+    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 3, stopReason: 'finished' }, 'en')).toBe('✓ execution finished: 3/3 integrated · 3 min ago');
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: null }, 'en')).toBe('◌ execution without a coordinator: 3/12 integrated · 3 min ago');
     const openRun = { kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', coordinatorOpen: true };
     expect(n(openRun)).toBe('◌ ejecución parada, abierta en otra conversación: 3/12 integradas · hace 3 min');
     expect(n(openRun, 'en')).toBe('◌ execution stopped, open in another conversation: 3/12 integrated · 3 min ago');
+    // w8 fix round 1 (Important 1): a run that finished reads finished even while its coordinator's conversation is open.
+    const finishedOpen = { ...openRun, stopReason: 'finished', integrated: 3, total: 3 };
+    expect(n(finishedOpen)).toBe('✓ ejecución terminada (abierta en otra conversación): 3/3 integradas · hace 3 min');
+    expect(n(finishedOpen, 'en')).toBe('✓ execution finished (open in another conversation): 3/3 integrated · 3 min ago');
   });
   it('oneLine drops the control and bidi characters, and clip only cuts by width (M1)', () => {
     const c = (...codes: number[]) => String.fromCharCode(...codes);
@@ -685,10 +700,11 @@ describe('buildBandModel · every slot of the run, at most 12, and those waiting
       T010: { ...base, status: 'accepted', worktree: '/w10', branch: 'task/T010' },
       T011: { ...base, status: 'integrated', stage: 'integrate', worktree: '/w11', branch: 'task/T011', finishedAt: ago(5) },
     };
-    expect(buildBandModel('demo-shop', coordinator(tasks))).toMatchObject({ mode: 'run', running: 2, queued: 2, integrated: 1, stalled: false });
+    expect(buildBandModel('demo-shop', coordinator(tasks))).toMatchObject({ mode: 'run', running: 2, queued: 2, integrated: 1, ended: null });
     const stalled = buildBandModel('demo-shop', { ...coordinator(tasks), execution: EXEC({ parallel: 14, tasks, active: false, stopReason: 'stalled' }) });
-    expect(stalled).toMatchObject({ mode: 'run', queued: 2, integrated: 1, stalled: true });
-    expect(bandLine(stalled, Date.now())).toBe('► EJECUCIÓN · ▲ parada · 1/5 integradas · por integrar 2 · » te toca 1');
+    expect(stalled).toMatchObject({ mode: 'run', queued: 2, integrated: 1, ended: 'stalled' });
+    // w8 W1: an inactive run says why it ended («atascada»); «parada» is only an active run without heartbeat.
+    expect(bandLine(stalled, Date.now())).toBe('► EJECUCIÓN · ▲ atascada · 1/5 integradas · por integrar 2 · » te toca 1');
   });
 });
 

@@ -10,6 +10,6 @@ The waypoint skills that send CLI writes follow this page, and it is the only pl
 - On `version_mismatch`, re-read that one document and resend the same printed write pinned to its current version. Never edit the printed data.
 - Never address one document twice in one batch. A second write to the same document goes in its own call after the batch, pinned to the version the batch returned.
 
-This covers `meta/metrics` from `waypoint done`, `meta/page` from `page --publish-info`, and the writes of `sync --db` (which arrive pinned to the versions of `known.json`).
+This covers `meta/metrics` from `waypoint done`, `meta/page` from `page --publish-info`, and the writes of `sync --db` (which arrive pinned to the listed versions you gave it, kept in `known.json`).
 
 **Any other failure.** Say it in one line and go on.

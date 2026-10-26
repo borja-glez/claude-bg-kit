@@ -78,6 +78,11 @@ describe('task batches (A-14)', () => {
     expect(u).toMatchObject({ op: 'update', if_version: 6 });
     expect(u.data).not.toHaveProperty('claude');
   });
+  it('register without a messaging name (w8 W3: no ListAgents): none on a new document, an old one removed on an update', () => {
+    const base = { sid: 'main', now: NOW, name: 'main', agent: null, branch: 'main', worktree: '/repo', track: null, claude: 'c-1' };
+    expect(registerBatch({ ...base, sessionVersion: null }).batch[0].data).not.toHaveProperty('agentName');
+    expect(registerBatch({ ...base, sessionVersion: 6 }).batch[0]).toMatchObject({ op: 'update', data: { agentName: D, status: 'active' }, if_version: 6 });
+  });
   it('free: the task free again, and the seat idle when its version is given', () => {
     expect(freeBatch({ sid: 'main', task: 'T019', stateVersion: 4, sessionVersion: 9 })).toEqual([
       { op: 'update', collection: 'state', doc_id: 'T019', data: { status: 'free', owner: D, claimedAt: D, startedAt: D }, if_version: 4 },

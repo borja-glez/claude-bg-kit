@@ -69,7 +69,8 @@ export type BandModel = (
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
       // every running task, at most twelve, and the accepted ones waiting to integrate.
       integrated: number; queued: number; total: number; slots: { task: string; stage: string; round: number }[];
-      worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null;
+      // ended: why a run that is no longer active ended (a finished run is no stop); null while it is active.
+      worst: 'alive' | 'silent' | 'stopped'; ended: 'finished' | 'stalled' | 'stopped' | 'budget' | null; roadmapUrl: string | null;
       // the seat of the conversation that looks (its own binding, else the run's coordinator), its inbox and pending
       // decision, the plan's progress and its first phase not done.
       sid: string; inbox: number; escalation: boolean; percent: number; phase: { index: number; total: number; name: string } | null;
@@ -463,6 +464,17 @@ const publicTasks = (f: BandFiles): Record<string, PublicTask> => {
 };
 const lives = (f: BandFiles): LiveDoc[] => Object.values(f.live ?? {}).map(t => normalizeLive(json(t))).filter((d): d is LiveDoc => d !== null);
 
+type RunEnd = Extract<BandModel, { mode: 'run' }>['ended'];
+const RUN_ENDS: readonly NonNullable<RunEnd>[] = ['finished', 'stalled', 'stopped', 'budget'];
+/**
+ * w8 W1: why a run that is no longer active ended, so the band never draws a finished run as stopped: its stop reason,
+ * one of those isVisibleRun draws; null while it is active. An inactive run without a known reason reads as stalled.
+ */
+function endedOf(v: { active: boolean; stopReason: string | null }): RunEnd {
+  if (v.active) return null;
+  return (RUN_ENDS as readonly string[]).includes(v.stopReason ?? '') ? v.stopReason as NonNullable<RunEnd> : 'stalled';
+}
+
 // Rule 1, the coordinator's band: this project's plan execution or forge's ephemeral one of this checkout, whole until
 // it is closed, also once it stopped (C2: isVisibleRun for its owner, without the 24-hour limit).
 function runModel(project: string, f: BandFiles, exec: ExecutionState, plan: Plan | null, now: number, viewer: BandViewer, sid: string): BandModel | null {
@@ -472,7 +484,7 @@ function runModel(project: string, f: BandFiles, exec: ExecutionState, plan: Pla
   const worst = [v.coordinator.liveness, ...v.slots.map(s => s.liveness)].reduce((a, b) => (rank[b] > rank[a] ? b : a), 'alive' as 'alive' | 'silent' | 'stopped');
   return {
     mode: 'run', project, locale: plan?.locale ?? 'en', executor: v.mode, running: v.slots.length, parallel: v.parallel, integrated: v.integrated, total: v.total,
-    queued: v.queued.length, slots: v.slots.slice(0, BAND_SLOTS_MAX).map(s => ({ task: s.task, stage: s.stage, round: s.round })), worst, stalled: !v.active, roadmapUrl: plan?.artifacts.roadmap ?? null, viewer,
+    queued: v.queued.length, slots: v.slots.slice(0, BAND_SLOTS_MAX).map(s => ({ task: s.task, stage: s.stage, round: s.round })), worst, ended: endedOf(v), roadmapUrl: plan?.artifacts.roadmap ?? null, viewer,
     // E-10: what the roadmap card shows for a run too: the seat's messages and decision, the plan's progress and phase.
     sid, ...seatSignals(f, sid), ...planProgress(plan, f, now),
   };

@@ -26,6 +26,7 @@ import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
 import { isCommitCommand, runHook } from './hooks.js';
+import { COLLECTION, PlanFileError, addTaskText, backgroundGuard, isWebLink, parseListing, parseVersions, setRoadmapText, type ListedDoc } from './plan-files.js';
 import { launchCommand, launchRun, PLAN_PATH } from '../lib/launcher.js';
 import { PAGE_RULES, declaresAssets, roadmapCapabilities, rulesOf, sharingChange, sharingNotice, syncSummary } from '../lib/publish.js';
 import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
@@ -47,7 +48,7 @@ const nodeSpawn: Spawn = (command, options) => spawn(command, options);
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined>; spawn?: Spawn }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|replan|hash|clean-cache|page|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-comments|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|replan|hash|clean-cache|db-import|page|set-roadmap|add-task|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-comments|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -123,6 +124,29 @@ export function run(argv: string[], io: Io): Result {
     try { text = readFileSync(abs(arg), 'utf8'); } catch (e) { return fail(`${cmd}: cannot read the design ${arg}: ${(e as Error).message}`, 2); }
     try { return parseDesign(text); } catch (e) { return fail(`${cmd}: ${arg} is not a design: ${(e as Error).message}`, 2); }
   };
+  // The notes created or answered since `since`, with the lines to say (the `notes` command, and `next --notes`); null when
+  // `dir` is not a folder. No notes folder yet means nobody has written a note. w8 W4: with `firstJoin`, a session that
+  // never read them (no `since`) gets only the last `firstJoin` notes, the ones it announces.
+  const notesOf = (dir: string, plan: { tasks: { id: string }[] } | null, locale: 'es' | 'en', since: string | null, firstJoin?: number) => {
+    if (!existsSync(abs(dir))) return { notes: [], latest: null, say: [], mentions: [] };
+    if (!statSync(abs(dir)).isDirectory()) return null;
+    // I-14: through docsIn like every listing, so a note that does not read is said on stderr; in file-name order
+    // (an object lists integer-like ids first, so the order is that of the file names again).
+    const byFile = (a: string, b: string) => (`${a}.json` < `${b}.json` ? -1 : `${a}.json` > `${b}.json` ? 1 : 0);
+    const all: (NoteDoc & { id: string })[] = Object.entries(docsIn<NoteDoc>(dir, normalizeNote))
+      .sort(([a], [b]) => byFile(a, b)).map(([id, n]) => ({ ...n, id }));
+    const stamps = all.flatMap(n => [Date.parse(n.ts), Date.parse(n.answeredAt ?? '')]).filter(t => !Number.isNaN(t));
+    const latest = stamps.length ? new Date(Math.max(...stamps)).toISOString() : null;
+    const fresh = notesSince(all, since);
+    const notes = firstJoin !== undefined && since === null ? fresh.slice(-firstJoin) : fresh;
+    const { say, mentions } = noteLines(notes, since, locale, new Set(plan?.tasks.map(t => t.id) ?? []));
+    return { notes, latest, say, mentions };
+  };
+  // A seat directory (bind's seatDir) that holds its session.json, else null.
+  const seatDirOf = (name: string): string | null => {
+    const d = flag(name);
+    return d && existsSync(path.join(abs(d), 'session.json')) ? abs(d) : null;
+  };
   // A task of the runtime plan (the db cache with --db, else the plan file): claim, done and block take no other.
   const planHas = (task: string): boolean => loadView().view.tasks.some(t => t.id === task);
   // With --db the local cache sees the state write at once (the hooks read the seat's task there); a write the
@@ -166,7 +190,10 @@ export function run(argv: string[], io: Io): Result {
             }
           }
         }
-        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}${refs}`);
+        // Fix round 1 (Important 2): the skills run validate first; a background session in the main checkout, which
+        // Claude Code lets write nothing there, learns it from the last line, with the job folder it may write to.
+        const bg = backgroundGuard(io.env ?? {}, io.cwd);
+        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}${refs}${bg ? `\n${JSON.stringify({ bg })}` : ''}`);
       }
       case 'replan': {
         // 6b-3 Task 1: moves, orders, adds, edits and retires phases and tasks, never renumbering, with the why in the plan's
@@ -201,14 +228,79 @@ export function run(argv: string[], io: Io): Result {
         return ok(JSON.stringify({ changes: r.changes, history: parsePlan(r.text).history?.length ?? 0 }));
       }
       case 'clean-cache': {
+        // w8 W4: several collections in one call (`clean-cache <plan> meta plan state`), each checked before any goes.
         const p = loadPlan();
-        const collection = args[1] ?? '';
-        if (!/^[a-z_]{1,32}$/.test(collection)) return fail('clean-cache: <collection> must match ^[a-z_]{1,32}$', 2);
+        const collections = args.slice(1);
+        if (!collections.length || collections.some(c => !COLLECTION.test(c))) return fail('clean-cache: each <collection> must match ^[a-z_]{1,32}$', 2);
         const root = path.join(io.cwd, '.waypoint');
-        const target = path.resolve(root, p.project, 'dbcache', collection);
-        if (!target.startsWith(root + path.sep)) return fail('clean-cache: path escapes .waypoint', 2);
-        rmSync(target, { recursive: true, force: true });
-        return ok(target);
+        const targets = collections.map(c => path.resolve(root, p.project, 'dbcache', c));
+        if (targets.some(t => !t.startsWith(root + path.sep))) return fail('clean-cache: path escapes .waypoint', 2);
+        for (const t of targets) rmSync(t, { recursive: true, force: true });
+        return ok(targets.join('\n'));
+      }
+      case 'db-import': {
+        // w8 W2: a background session that has not entered a worktree cannot list into the checkout (bgIsolation refuses
+        // out_dir there, and outside it no one can approve it): it lists into the conversation, saves each result as it is
+        // in its job folder, and this writes the cache and known.json from them. Every file is read before any is written.
+        const p = loadPlan();
+        const pairs = args.slice(1).filter(a => !a.startsWith('--'));
+        if (!pairs.length) return fail('usage: waypoint db-import <plan.yaml> <collection>=<listing file> …', 2);
+        const read: { collection: string; docs: ListedDoc[] }[] = [];
+        for (const pair of pairs) {
+          const at = pair.indexOf('=');
+          const collection = at > 0 ? pair.slice(0, at) : '';
+          if (!COLLECTION.test(collection)) return fail(`db-import: ${JSON.stringify(pair.slice(0, 80))} is not <collection>=<listing file>`, 2);
+          let text: string;
+          try { text = readFileSync(abs(pair.slice(at + 1)), 'utf8'); } catch { return fail(`db-import: cannot read ${pair.slice(at + 1)}`, 2); }
+          let listing: ReturnType<typeof parseListing>;
+          try { listing = parseListing(text, collection); } catch (e) {
+            if (e instanceof PlanFileError) return fail(`db-import: ${pair.slice(at + 1)}: ${e.message}`, 2);
+            throw e;
+          }
+          for (const id of listing.skipped) listingWarnings.push(`warning: skipped ${collection}/${id} (an id that names no file)\n`);
+          read.push({ collection, docs: listing.docs });
+        }
+        const wpDir = path.join(io.cwd, '.waypoint', p.project);
+        const db = path.join(wpDir, 'dbcache');
+        const knownFile = path.join(wpDir, 'known.json');
+        let known: Known = {};
+        try { const v: unknown = JSON.parse(readFileSync(knownFile, 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) known = v as Known; } catch { known = {}; }
+        const imported: Record<string, number> = {};
+        for (const { collection, docs } of read) {
+          const target = path.join(db, collection);
+          rmSync(target, { recursive: true, force: true });
+          mkdirSync(target, { recursive: true });
+          for (const d of docs) writeFileSync(path.join(target, `${d.id}.json`), JSON.stringify(d.data, null, 2));
+          known[collection] = Object.fromEntries(docs.map(d => [d.id, d.version]));
+          imported[collection] = docs.length;
+        }
+        writeAtomic(knownFile, `${JSON.stringify(known)}\n`);
+        return ok(JSON.stringify({ db, known: knownFile, imported }));
+      }
+      case 'set-roadmap': {
+        // w8 W2: the roadmap's URL into plan.yaml, written by the CLI (a background session may not edit the checkout).
+        const url = args[1];
+        if (!args[0] || args[0].startsWith('--') || !isWebLink(url)) return fail('usage: waypoint set-roadmap <plan.yaml> <https URL of the roadmap>', 2);
+        const file = abs(args[0]);
+        const r = setRoadmapText(readFileSync(file, 'utf8'), url);
+        if (r.changed) writeAtomic(file, r.text);
+        return ok(JSON.stringify({ plan: file, roadmap: url, changed: r.changed }));
+      }
+      case 'add-task': {
+        // w8 W2: a task delegated from a track worktree goes into the main checkout's plan through the CLI, never by an
+        // edit of the session outside its worktree. The plan is written only when the result validates.
+        const taskFile = flag('task-file');
+        if (!args[0] || args[0].startsWith('--') || !taskFile) return fail('usage: waypoint add-task <plan.yaml> --task-file <task.json>', 2);
+        let raw: unknown;
+        try { const s = readFileSync(abs(taskFile), 'utf8'); raw = JSON.parse(s.charCodeAt(0) === 0xfeff ? s.slice(1) : s); } catch { return fail(`add-task: cannot read ${taskFile} as JSON`, 2); }
+        const file = abs(args[0]);
+        let r: ReturnType<typeof addTaskText>;
+        try { r = addTaskText(readFileSync(file, 'utf8'), raw); } catch (e) {
+          if (e instanceof PlanFileError) return fail(`add-task: refused, the plan is unchanged: ${e.message}`, 2);
+          throw e;
+        }
+        writeAtomic(file, r.text);
+        return ok(JSON.stringify({ plan: file, task: r.id }));
       }
       case 'hash':
         return ok(planHash(loadPlan()));
@@ -217,18 +309,36 @@ export function run(argv: string[], io: Io): Result {
         const noAssets = args.includes('--no-assets');
         if (noAssets && args.includes('--assets')) return fail('page: --assets and --no-assets cannot be combined', 2);
         const p = loadPlan();
-        // Final review I5: meta/page's rules are those of the capabilities actually published, the file the skill passed to
-        // the Artifact publish; read (and refused) before the page is built.
-        let published: unknown;
-        if (args.includes('--publish-info')) {
-          const capsArg = flag('capabilities');
-          if (!capsArg || capsArg.startsWith('--')) return fail('page: --publish-info needs --capabilities <file>, the capabilities JSON passed to the Artifact publish', 2);
-          try { published = JSON.parse(readFileSync(abs(capsArg), 'utf8')); } catch { return fail(`page: cannot read --capabilities ${capsArg} as JSON`, 2); }
-          if (!published || typeof published !== 'object' || Array.isArray(published)) return fail(`page: --capabilities ${capsArg} must be a JSON object`, 2);
-        }
         // Re-review I1: --page, the listed meta/page.json, to compare who can see the roadmap now with what this publish gives.
         const pageArg = flag('page');
         if (args.includes('--page') && (!pageArg || pageArg.startsWith('--'))) return fail('page: --page needs the listed meta/page.json', 2);
+        // Re-review I1: --page, the listed meta/page.json, says whether the published roadmap declared `assets`.
+        let listed: unknown = null;
+        if (pageArg) { try { listed = JSON.parse(readFileSync(abs(pageArg), 'utf8')); } catch { listed = null; } }
+        const before = listed && typeof listed === 'object' && typeof (listed as { assets?: unknown }).assets === 'boolean' ? (listed as { assets: boolean }).assets : undefined;
+        // A-19: the roadmap carries forge's screenshots (the assets capability) only when its caller says so: forge asks
+        // for it from its own config; waypoint reads none. A roadmap already published with assets keeps them: forge's
+        // sync-only /waypoint:plan calls pass no `assets`, and a republish without them would ask to change who can see the page.
+        // R6b: --no-assets (/waypoint:plan no-assets) drops them all the same, so the republish asks to make it shareable again.
+        const internal = !noAssets && (args.includes('--assets') || before === true);
+        // Final review I5: meta/page's rules are those of the capabilities actually published, the file the skill passed to
+        // the Artifact publish; read (and refused) before the page is built. w8 W2: with --write-capabilities the CLI first
+        // writes that file with what this checkout publishes, so the session never writes it (a background session may not).
+        let published: unknown;
+        let capabilitiesWritten: boolean | undefined;
+        if (args.includes('--publish-info')) {
+          const capsArg = flag('capabilities');
+          if (!capsArg || capsArg.startsWith('--')) return fail('page: --publish-info needs --capabilities <file>, the capabilities JSON passed to the Artifact publish', 2);
+          if (args.includes('--write-capabilities')) {
+            const want = roadmapCapabilities(internal);
+            let cur: unknown;
+            try { cur = JSON.parse(readFileSync(abs(capsArg), 'utf8')); } catch { cur = undefined; }
+            capabilitiesWritten = JSON.stringify(cur) !== JSON.stringify(want);
+            if (capabilitiesWritten) writeAtomic(abs(capsArg), `${JSON.stringify(want)}\n`);
+          }
+          try { published = JSON.parse(readFileSync(abs(capsArg), 'utf8')); } catch { return fail(`page: cannot read --capabilities ${capsArg} as JSON`, 2); }
+          if (!published || typeof published !== 'object' || Array.isArray(published)) return fail(`page: --capabilities ${capsArg} must be a JSON object`, 2);
+        }
         const out = abs(flag('out') ?? '.waypoint/roadmap.html');
         const now = io.now().toISOString();
         // G-13, G-14: the snapshot says which waypoint built the page and, with --states, the states the last listing saw
@@ -242,15 +352,6 @@ export function run(argv: string[], io: Io): Result {
         mkdirSync(path.dirname(out), { recursive: true });
         writeFileSync(out, html);
         if (!args.includes('--publish-info')) return ok(out);
-        // Re-review I1: --page, the listed meta/page.json, says whether the published roadmap declared `assets`.
-        let listed: unknown = null;
-        if (pageArg) { try { listed = JSON.parse(readFileSync(abs(pageArg), 'utf8')); } catch { listed = null; } }
-        const before = listed && typeof listed === 'object' && typeof (listed as { assets?: unknown }).assets === 'boolean' ? (listed as { assets: boolean }).assets : undefined;
-        // A-19: the roadmap carries forge's screenshots (the assets capability) only when its caller says so: forge asks
-        // for it from its own config; waypoint reads none. A roadmap already published with assets keeps them: forge's
-        // sync-only /waypoint:plan calls pass no `assets`, and a republish without them would ask to change who can see the page.
-        // R6b: --no-assets (/waypoint:plan no-assets) drops them all the same, so the republish asks to make it shareable again.
-        const internal = !noAssets && (args.includes('--assets') || before === true);
         // G-13, §4.1: meta/page, the version and the rules of what is published (sync --db compares it; infinite reads rules).
         // `capabilities` is what this checkout should publish; `rules`, what the published file grants (rulesOf).
         // `roadmap` is the plan's project, the id known before the first publish: the approvals warning keys on it.
@@ -262,13 +363,26 @@ export function run(argv: string[], io: Io): Result {
         const changed = pageArg ? sharingChange(p, assets, before) : {};
         return ok(JSON.stringify({
           out, capabilities: roadmapCapabilities(internal), internal, say: sharingNotice(p, internal), pageVersion: WAYPOINT_VERSION, rules, ...changed,
+          ...(capabilitiesWritten !== undefined ? { capabilitiesWritten } : {}),
           write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WAYPOINT_VERSION, rules, assets, roadmap: p.project, publishedAt: now } },
         }));
       }
       case 'sync': {
         const p = loadPlan();
         const knownPath = flag('known');
-        const known: Known = knownPath && existsSync(abs(knownPath)) ? JSON.parse(readFileSync(abs(knownPath), 'utf8')) : {};
+        // w8 W2: --versions gives the listed versions inline, and the CLI keeps them in .waypoint/<project>/known.json
+        // itself, so the session writes no file of the checkout (a background session may not).
+        const versionsArg = flag('versions');
+        if (args.includes('--versions') && versionsArg === undefined) return fail('sync: --versions needs the listed versions as JSON', 2);
+        if (versionsArg !== undefined && args.includes('--known')) return fail('sync: --known and --versions exclude each other', 2);
+        let known: Known;
+        if (versionsArg !== undefined) {
+          try { known = parseVersions(versionsArg); } catch (e) {
+            if (e instanceof PlanFileError) return fail(`sync: ${e.message}`, 2);
+            throw e;
+          }
+          writeAtomic(path.join(io.cwd, '.waypoint', p.project, 'known.json'), `${JSON.stringify(known)}\n`);
+        } else known = knownPath && existsSync(abs(knownPath)) ? JSON.parse(readFileSync(abs(knownPath), 'utf8')) : {};
         const session = flag('session') ?? 'main';
         const now = io.now();
         const outDir = abs(flag('out') ?? '.waypoint/sync');
@@ -343,6 +457,19 @@ export function run(argv: string[], io: Io): Result {
         const hasBase = args.includes('--base');
         const base = flag('base');
         if (hasBase && (!base || !BRANCH_RE.test(base))) return fail('next: --base needs a branch name', 2);
+        // w8 W4: --notes reads the notes listing with the pick (the `notes` command's output, under `notes`), from the
+        // lastNoteTs of the seat's session.json, which it then renews itself.
+        const notesDir = flag('notes');
+        const seat = seatDirOf('seat-dir');
+        if (args.includes('--notes') && (!notesDir || !seat)) return fail('next: --notes needs the notes listing and --seat-dir <the seat folder bind printed>', 2);
+        // w8 W4: --check-sync (the main checkout's session only): when the roadmap does not hold this plan, say so and pick
+        // nothing; the session syncs first (waypoint:plan §4) and lists again.
+        if (args.includes('--check-sync')) {
+          const db = flag('db');
+          if (!db) return fail('next: --check-sync needs --db', 2);
+          const why = syncNeed(loadPlan(), abs(db));
+          if (why) return ok(JSON.stringify({ sync: true, why }));
+        }
         const { view } = loadView();
         const sessions = optSessions();
         const states = optStates();
@@ -355,9 +482,21 @@ export function run(argv: string[], io: Io): Result {
         const leftover = !!sessions && recoverableTasks(view, states, sessions, now)
           .some(t => t.owner !== session && (!track || view.tasks.find(x => x.id === t.taskId)?.track === track));
         const multi = leftover || multiSession({ sessions, messages: optMessages(), sid: session, inTrackWorktree: inTrackWorktree(io.cwd), now });
+        let notes: ReturnType<typeof notesOf> = null;
+        if (notesDir && seat) {
+          const file = path.join(seat, 'session.json');
+          let s: Record<string, unknown> = {};
+          try { const v: unknown = JSON.parse(readFileSync(file, 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) s = v as Record<string, unknown>; } catch { s = {}; }
+          const plan = loadPlan();
+          notes = notesOf(notesDir, view, plan.locale.toLowerCase().startsWith('es') ? 'es' : 'en', typeof s.lastNoteTs === 'string' && s.lastNoteTs ? s.lastNoteTs : null, FIRST_JOIN_NOTES);
+          if (!notes) return fail('next: the notes listing is not a folder — list notes first', 2);
+          if (notes.latest !== null && notes.latest !== s.lastNoteTs) writeAtomic(file, `${JSON.stringify({ ...s, lastNoteTs: notes.latest }, null, 2)}\n`);
+        }
+        // Fix round 1 (Minor 1): the listing just made says which tasks the roadmap holds as done: their pending commits go.
+        if (seat && flag('states')) settlePending(seat, abs(flag('states')!));
         // unblock is only reported when true, as before
         const { unblock, ...rest } = r;
-        return ok(JSON.stringify({ ...(unblock ? r : rest), multi }));
+        return ok(JSON.stringify({ ...(unblock ? r : rest), multi, ...(notes ? { notes } : {}) }));
       }
       case 'conflicts': {
         const session = flag('session');
@@ -390,20 +529,10 @@ export function run(argv: string[], io: Io): Result {
         // The plan, when given, names the task ids a line may mention and the language when --locale is not given.
         const plan = flag('plan') !== undefined ? parsePlan(readFileSync(abs(flag('plan')!), 'utf8')) : null;
         const locale = localeFlag ?? (plan?.locale?.toLowerCase().startsWith('es') ? 'es' : 'en');
-        // No notes directory yet means nobody has written a note: not an error.
-        if (!existsSync(abs(dir))) return ok(JSON.stringify({ notes: [], latest: null, say: [], mentions: [] }));
-        if (!statSync(abs(dir)).isDirectory()) return fail('notes cache missing — list notes first');
-        // I-14: through docsIn like every listing, so a note that does not read is said on stderr; in file-name order
-        // (an object lists integer-like ids first, so the order is that of the file names again).
-        const byFile = (a: string, b: string) => (`${a}.json` < `${b}.json` ? -1 : `${a}.json` > `${b}.json` ? 1 : 0);
-        const all: (NoteDoc & { id: string })[] = Object.entries(docsIn<NoteDoc>(dir, normalizeNote))
-          .sort(([a], [b]) => byFile(a, b)).map(([id, n]) => ({ ...n, id }));
-        const stamps = all.flatMap(n => [Date.parse(n.ts), Date.parse(n.answeredAt ?? '')]).filter(t => !Number.isNaN(t));
-        const latest = stamps.length ? new Date(Math.max(...stamps)).toISOString() : null;
-        const since = flag('since') ?? null;
-        const notes = notesSince(all, since);
-        const { say, mentions } = noteLines(notes, since, locale, new Set(plan?.tasks.map(t => t.id) ?? []));
-        return ok(JSON.stringify({ notes, latest, say, mentions }));
+        // Fix round 1 (Minor 6): a first join (no --since, or an empty one) gets only the last FIRST_JOIN_NOTES notes, here
+        // as in `next --notes`, so every reader of the notes (waypoint, forge) announces the same.
+        const r = notesOf(dir, plan, locale, flag('since') || null, FIRST_JOIN_NOTES);
+        return r ? ok(JSON.stringify(r)) : fail('notes cache missing — list notes first');
       }
       case 'inbox': {
         const session = flag('session');
@@ -509,8 +638,19 @@ export function run(argv: string[], io: Io): Result {
         return ok(eventId(io.now(), args[0] ?? 'main', io.rand));
       case 'now':
         return ok(io.now().toISOString());
-      case 'commit-info':
-        return ok(JSON.stringify(commitInfo(io.cwd, args[0] ?? 'HEAD')));
+      case 'commit-info': {
+        const rev = args[0] !== undefined && !args[0].startsWith('--') ? args[0] : 'HEAD';
+        if (!args.includes('--event')) return ok(JSON.stringify(commitInfo(io.cwd, rev)));
+        // w8 W4: --event prints the `set` of the commit's event, as the work skill composed it for an intermediate
+        // commit. Its pending line stays until the roadmap shows the task done (fix round 1, Minor 1: settlePending).
+        const sid = flag('session'), task = flag('task');
+        if (!sid || !SID_RE.test(sid) || !task || !isPlanId(task)) return fail('commit-info --event: --session <SID> and --task <T> are required', 2);
+        const c = commitInfo(io.cwd, rev);
+        const now = io.now();
+        const write: Write = { op: 'set', collection: 'events', doc_id: eventId(now, sid, io.rand),
+          data: { ts: now.toISOString(), type: 'commit', sessionId: sid, taskId: task, text: cleanText(c.title, SUMMARY_MAX), sha: c.sha, add: c.add, del: c.del } };
+        return ok(JSON.stringify({ ...c, write }));
+      }
       case 'claim': {
         const f = taskFlags('claim', ['state-version', 'session-version']);
         if ('code' in f) return f;
@@ -540,13 +680,24 @@ export function run(argv: string[], io: Io): Result {
         if (tests !== undefined && !/^\d{1,9}$/.test(tests)) return fail('done: --tests must be a whole number', 2);
         const rev = flag('rev') ?? 'HEAD';
         if (!BRANCH_RE.test(rev)) return fail('done: --rev needs a commit', 2);
+        // w8 W4: --metrics-version pins meta/metrics to its listed version (without it the write creates the document).
+        // It removes no pending commit: it prints before its batch goes out (fix round 1, Minor 1: settlePending).
+        const mv = args.includes('--metrics-version') ? posInt('metrics-version') : undefined;
+        if (mv === null) return fail('done: --metrics-version must be a positive integer', 2);
         const now = io.now();
         const r = doneBatch({
           sid: f.sid, task: f.task, stateVersion: f.v['state-version'], sessionVersion: f.v['session-version'],
           now, eids: eventIds(now, f.sid, 1, io.rand), commit: commitInfo(io.cwd, rev), summary, ...(tests !== undefined ? { tests: Number(tests) } : {}),
         });
         mirror(r.batch);
-        return ok(JSON.stringify(r));
+        // w8 W4: with --db, the plan's progress once this task is done (the cache already holds it), for the closing line.
+        let progress: { percent: number; done: number; total: number } | undefined;
+        const db = flag('db');
+        if (db) {
+          const m = computeMetrics(loadView().view, docsIn(path.join(abs(db), 'state'), stateDoc), now.getTime());
+          progress = { percent: m.percent, done: m.done, total: m.total };
+        }
+        return ok(JSON.stringify({ ...r, metrics: mv ? { ...r.metrics, if_version: mv } : r.metrics, ...(progress ? { progress } : {}) }));
       }
       case 'block': {
         const f = taskFlags('block', ['state-version', 'session-version']);
@@ -570,8 +721,9 @@ export function run(argv: string[], io: Io): Result {
         const now = io.now();
         if (args.includes('--register')) {
           const need = (n: string): string | null => { const v = flag(n); return v && !v.startsWith('--') ? v.slice(0, 200) : null; };
+          // w8 W3: --agent is the messaging name ListAgents gives; without that tool the session registers without one.
           const name = need('name'), agent = need('agent'), branch = need('branch'), worktree = need('worktree');
-          if (!name || !agent || !branch || !worktree) return fail('heartbeat --register: --name, --agent, --branch and --worktree are required', 2);
+          if (!name || !branch || !worktree) return fail('heartbeat --register: --name, --branch and --worktree are required (--agent when ListAgents gave a name)', 2);
           const svFlag = flag('session-version');
           const sv = svFlag === undefined ? null : posInt('session-version');
           if (svFlag !== undefined && sv === null) return fail('heartbeat: --session-version must be a positive integer', 2);
@@ -582,6 +734,12 @@ export function run(argv: string[], io: Io): Result {
         }
         const sv = posInt('session-version');
         if (sv === null) return fail('heartbeat: --session-version must be a positive integer', 2);
+        // Fix round 1 (Minor 1): the idle heartbeat of a stop, after the last batch, removes the pending commits of the tasks
+        // the state cache holds as done, as next does.
+        const seat = seatDirOf('seat-dir');
+        const statesDir = flag('states');
+        if ((args.includes('--seat-dir') || args.includes('--states')) && (!seat || !statesDir)) return fail('heartbeat: --seat-dir <the seat folder bind printed> and --states <the state listing> go together', 2);
+        if (seat && statesDir) settlePending(seat, abs(statesDir));
         const idle = args.includes('--idle');
         const busy = flag('busy-until');
         if (busy !== undefined && (idle || !Number.isFinite(Date.parse(busy)))) return fail('heartbeat: --busy-until needs an ISO time, and not with --idle', 2);
@@ -1147,6 +1305,21 @@ function inTrackWorktree(cwd: string): boolean {
 
 class CacheError extends Error {}
 
+/** w8 W4: a session's first join announces at most this many notes (the last ones). */
+const FIRST_JOIN_NOTES = 5;
+
+/**
+ * w8 W4, `next --check-sync`: why the main checkout must sync before it picks: the listed meta/project is missing (or does
+ * not read), the plan listing has no document, or its planHash is not this plan's; null when the roadmap holds the plan.
+ * sync writes meta/project last (A-13), so a hash that matches means every earlier batch went in.
+ */
+function syncNeed(plan: Parameters<typeof planHash>[0], db: string): 'missing' | 'changed' | null {
+  let meta: unknown;
+  try { meta = JSON.parse(readFileSync(path.join(db, 'meta', 'project.json'), 'utf8')); } catch { return 'missing'; }
+  if (!meta || typeof meta !== 'object' || !jsonFiles(path.join(db, 'plan')).length) return 'missing';
+  return (meta as { planHash?: unknown }).planHash === planHash(plan) ? null : 'changed';
+}
+
 const SHA_RE = /^[0-9a-f]{7,64}$/;
 
 // Reasons that only fill the field (EN and ES), compared after reasonKey.
@@ -1198,6 +1371,40 @@ function commitInfo(cwd: string, rev: string): Commit {
   const stat = git('show', '--shortstat', '--format=', rev);
   const num = (re: RegExp) => Number(stat.match(re)?.[1] ?? 0);
   return { sha, ts: new Date(ts).toISOString(), title: title.join('\t'), add: num(/(\d+) insertion/), del: num(/(\d+) deletion/) };
+}
+
+/**
+ * Fix round 1 (Minor 1): the lines of `<seat>/pending-commits.jsonl` whose task the state listing `statesDir` holds as
+ * done are removed: the roadmap has that task's completion, so its commits are recorded. Only the loop's next call does
+ * it (`next` after a fresh listing, the idle heartbeat of a stop), never `done` or `commit-info --event`, which print
+ * before their write goes out: a session that stops before sending it keeps its lines, and the Stop hook its reminder.
+ * Fix round 2: nothing is removed while the seat's queue.jsonl holds a write. `done --db` mirrors its state write into the
+ * cache before the batch goes out, so a done batch that failed and was queued reads done there (the idle heartbeat reads
+ * that cache); its lines stay until the queue is replayed and emptied.
+ */
+function settlePending(seat: string, statesDir: string): void {
+  let queued = '';
+  try { queued = readFileSync(path.join(seat, 'queue.jsonl'), 'utf8'); } catch { queued = ''; }
+  if (queued.trim() !== '') return;
+  const file = path.join(seat, 'pending-commits.jsonl');
+  let text: string;
+  try { text = readFileSync(file, 'utf8'); } catch { return; }
+  const done = new Map<string, boolean>();
+  const isDone = (task: string): boolean => {
+    if (!done.has(task)) {
+      let status: unknown;
+      try { status = (JSON.parse(readFileSync(path.join(statesDir, `${task}.json`), 'utf8')) as { status?: unknown }).status; } catch { status = null; }
+      done.set(task, status === 'done');
+    }
+    return done.get(task)!;
+  };
+  const lines = text.split('\n').filter(l => l.trim() !== '');
+  const kept = lines.filter(l => {
+    let task: unknown;
+    try { task = (JSON.parse(l) as { task?: unknown }).task; } catch { return true; }
+    return !(typeof task === 'string' && isPlanId(task) && isDone(task));
+  });
+  if (kept.length !== lines.length) writeAtomic(file, kept.map(l => `${l}\n`).join(''));
 }
 
 /** A state write applied to the local cache (`<db>/state/<T>.json`): its fields set, `{__delete__: true}` ones removed. */

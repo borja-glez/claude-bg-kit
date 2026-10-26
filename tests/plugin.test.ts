@@ -120,7 +120,8 @@ describe('plugin layout', () => {
   it('work skill reads and writes roadmap notes', () => {
     const md = read('plugins/waypoint/skills/work/SKILL.md');
     for (const w of ['notes/<EID>', 'session:<SID>']) expect(md).toContain(w);
-    for (const w of ['"<WP>" notes', 'lastNoteTs']) expect(workRef('notes'), w).toContain(w);
+    // w8 W4: next --notes reads the notes with the pick and keeps lastNoteTs; their rules sit in SKILL.md §1.4.
+    for (const w of ['--notes DB/notes --seat-dir <SEAT>', 'lastNoteTs']) expect(md, w).toContain(w);
     expect(read('plugins/waypoint/README.md')).toContain('Notes');
   });
   it('work skill clears pending commits and documents the stop guard', () => {
@@ -307,7 +308,7 @@ describe('plugin layout', () => {
     for (const s of ['`round R: rewrite', 'waypoint critique-dismiss DESIGN --round <R> <numbers>']) expect(design).toContain(s);
     expect(read('plugins/waypoint/agents/design-critic.md')).toContain('still open from earlier rounds');
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('--publish-info');
-    expect(workRef('notes')).toContain('print each of its `say` lines as it is');
+    expect(read('plugins/waypoint/skills/work/SKILL.md')).toContain("Print each `say` line of `next`'s `notes` as it is");
     expect(read('plugins/forge/skills/verify/SKILL.md')).toContain('Only the person grants one');
   });
   it('READMEs describe routing and auto mode', () => {
@@ -1646,6 +1647,27 @@ describe('plugin layout', () => {
     const step4 = read('plugins/waypoint/skills/plan/SKILL.md').split('\n').find(l => l.startsWith('4. For each batch'))!;
     expect(step4).toContain('references/roadmap-writes.md');
   });
+  it('waypoint:plan asks the model to write no file of the checkout: the CLI writes them, and a background session lists into the conversation (w8 W2)', () => {
+    const plan = read('plugins/waypoint/skills/plan/SKILL.md');
+    for (const w of ['--write-capabilities', 'set-roadmap <plan> <url>', "--versions '<V>'", 'the three calls in one message', 'clean-cache <plan> meta plan state',
+      '**A background session in the main checkout.**', 'db-import <plan> <collection>=<jobTmp>/waypoint-<collection>.txt', "--known .waypoint/<project>/known.json` instead of `--versions`",
+      'from your own worktree, as the work skill\'s delegation does']) expect(plan, w).toContain(w);
+    for (const w of ['capabilities.json` with the Write tool', 'Write `.waypoint/<project>/known.json`', 'Write the returned URL into', 'write them to the file and run the command again',
+      'with cwd = `MAIN_REPO`']) expect(plan, w).not.toContain(w);
+    // Fix round 1 (Important 2): the CLI says it is a background session (validate's last line), not the prompt's text,
+    // and a refused Write of the job folder ends in the person, never in the shell.
+    for (const w of ['When its last line is `{"bg": {"jobTmp": "<folder>"}}`', 'If that Write is refused too', 'ask the user to run `/waypoint:plan` in an interactive session, and stop']) expect(plan, w).toContain(w);
+    expect(plan).not.toContain('your instructions name');
+    expect(workRef('setup')).toContain('When its last line is `{"bg": {"jobTmp": …}}`, this is a background session in the main checkout');
+    expect(workRef('setup')).toContain('call `EnterWorktree` and start §0 again from that worktree');
+    // Fix round 2: a refused EnterWorktree, and a roadmap to sync from that worktree, end in the person, never in improvising.
+    for (const w of ['If `EnterWorktree` is refused, tell the user to start the session in a worktree', 'ask the user to sync it with `/waypoint:plan` in an interactive session, and stop']) expect(workRef('setup'), w).toContain(w);
+    // The delegation adds the task through the CLI and lists into its own worktree, never into MAIN_REPO.
+    const multi = workRef('multisession');
+    const delegation = multi.slice(multi.indexOf('**Delegation.**'), multi.indexOf('\n## After the task'));
+    for (const w of ['add-task PLAN_MAIN --task-file <SEAT>/delegate.json', 'from this worktree with plan path `PLAN_MAIN`', 'you never write into `MAIN_REPO` yourself']) expect(delegation, w).toContain(w);
+    for (const w of ['out_dir` paths under `MAIN_REPO', 'cd "MAIN_REPO" && node', 'undo the edit']) expect(delegation, w).not.toContain(w);
+  });
   it('waypoint:plan hands page --publish-info the capabilities file it publishes, every time (final review I5)', () => {
     const plan = read('plugins/waypoint/skills/plan/SKILL.md');
     const publish = plan.slice(plan.indexOf('## 3. Publish the roadmap page'), plan.indexOf('## 4. Sync the database'));
@@ -2115,16 +2137,45 @@ describe('plugin layout', () => {
     const pointer = (r: string) => new RegExp(`Read \`references/${r}\\.md\` now, and again every time you get here: your memory of it does not survive compaction\\.`);
     expect(first('## 0. Setup (once per session)')).toMatch(new RegExp(`^${pointer('setup').source}`));
     expect(first('## 4. Commit and complete')).toMatch(new RegExp(`^${pointer('complete').source}`));
-    expect(lines.find(l => l.startsWith('4. **Notes.** '))).toMatch(pointer('notes'));
+    // w8 W4: one short reference per task. The notes come with next (--notes), and §1.4 holds their rules: no reference to read again.
+    const notesLine = lines.find(l => l.startsWith('4. **Notes.** '))!;
+    expect(notesLine).not.toContain('references/notes.md');
+    expect(existsSync(new URL('../plugins/waypoint/skills/work/references/notes.md', import.meta.url))).toBe(false);
     expect(work).toContain('`CSID` = `${CLAUDE_SESSION_ID}`');
     const setup = workRef('setup');
     for (const w of ['bind <plan> --via work --claude <CSID>', '--second-seat', '--takeover', 'heartbeat --register', 'invoke /forge:run --join']) expect(setup, w).toContain(w);
     expect(setup).toMatch(/\n5\. \*\*forge execution\.\*\*/);
-    for (const w of ['"<WP>" notes --notes DB/notes', 'lastNoteTs', 'print each of its `say` lines as it is']) expect(workRef('notes'), w).toContain(w);
+    for (const w of ["`next`'s `notes`", 'lastNoteTs', 'on a first join, gives only the last 5', 'Authority']) expect(notesLine, w).toContain(w);
+    expect(work).toContain('--notes DB/notes --seat-dir <SEAT>');
+    // Fix round 1 (Minor 5): next saves lastNoteTs as it reads, so only the first next of a pick brings the notes.
+    expect(notesLine).toContain('The first `next` of a pick is the one that counts');
     for (const w of ['"<WP>" done <plan> --db DB', '--summary-file <SEAT>/summary.txt', 'meta/metrics', '**Phase close.**', 'the §4 part of `references/multisession.md`']) {
       expect(workRef('complete'), w).toContain(w);
     }
     for (const w of ['heartbeat --register', '"<WP>" notes --notes', '"<WP>" done <plan>']) expect(work, w).not.toContain(w);
+  });
+  it('a task of waypoint:work costs fewer calls and one short reference, and keeps its guarantees (w8 W4)', () => {
+    const work = read('plugins/waypoint/skills/work/SKILL.md');
+    const pick = work.slice(work.indexOf('## 1. Pick a task'), work.indexOf('\n## 2. '));
+    // One clean-cache and the six lists sent together; next brings the notes and says when the main checkout syncs first.
+    for (const w of ['clean-cache <plan> meta plan messages notes state sessions', 'the six calls in one message', '--check-sync', '`{"sync": true}`',
+      'Coming straight from §0, §4 or the blocked path, their batch has just renewed your lease: no heartbeat']) expect(pick, w).toContain(w);
+    for (const w of ['ArtifactData `get` `meta/project`', '"<WP>" hash <plan>', 'clean-cache <plan> notes', 'clean-cache <plan> state`']) expect(pick, w).not.toContain(w);
+    // The commit event of an intermediate commit comes from the CLI, which drops its pending lines.
+    expect(work).toContain('commit-info --event --session <SID> --task <T>` →');
+    expect(work).not.toContain('`node "<WP>" commit-info` →');
+    // The close: metrics pinned by the CLI, pending commits emptied by it, the % from done itself.
+    const complete = workRef('complete');
+    // Fix round 1: MV is fetched again when lost (Minor 2), and the pending commits wait for the roadmap to show the task done (Minor 1).
+    for (const w of ['--metrics-version <MV>', '`get` `meta/metrics` first', '`progress.percent`', 'in a call of its own', 'they stay until the roadmap shows the task done']) expect(complete, w).toContain(w);
+    expect(work).toContain('--idle --seat-dir <SEAT> --states DB/state');
+    for (const w of ['"<WP>" status <plan>', 'write an empty file', 'List `meta` into `DB` first']) expect(complete, w).not.toContain(w);
+    // Only the setup and the close are read again: one reference per task.
+    expect(work.match(/Read `references\/[a-z-]+\.md` now, and again every time you get here/g)).toEqual([
+      'Read `references/setup.md` now, and again every time you get here', 'Read `references/complete.md` now, and again every time you get here']);
+    // The guarantees: pinned writes, whole batches, the heartbeat and recovery.
+    for (const w of ['**A failed batch.**', 'Never edit a batch a command printed, and never send part of it', '"Pinned" always means `if_version`', '--busy-until', '--idle',
+      'heartbeat --session <SID> --session-version <SV>', 'its §1 part (inbox, recovery, conflicts)']) expect(work, w).toContain(w);
   });
   it('waypoint:design keeps round and apply and reads every other subcommand from references/ (w7 A2)', () => {
     const design = read('plugins/waypoint/skills/design/SKILL.md');

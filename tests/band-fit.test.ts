@@ -217,7 +217,7 @@ describe('every band fits its rows at every width (carries 1 and 3)', () => {
       trackDone: 2, trackTotal: 5, percent: 40, inbox: 2, escalation: true, phase: null, cells: '', swarm: false, run: { coordinator: 'main', stage: 'implement' }, viewer: NO_VIEWER,
     } as BandModel;
     const run: BandModel = {
-      mode: 'run', project: 'demo', locale, executor: 'subagents', running: 14, parallel: 14, integrated: 3, queued: 2, total: 20, slots, worst: 'silent', stalled: false,
+      mode: 'run', project: 'demo', locale, executor: 'subagents', running: 14, parallel: 14, integrated: 3, queued: 2, total: 20, slots, worst: 'silent', ended: null,
       roadmapUrl: 'https://claude.ai/artifact/x', sid: 'main', inbox: 1, escalation: true, percent: 25, phase: null, viewer: NO_VIEWER,
     } as BandModel;
     const notice: BandModel = {
@@ -314,7 +314,7 @@ describe('bandParts (F-04, F-09, F-10, F-11, the notice band)', () => {
   const NOW = Date.parse('2026-10-11T10:12:30.000Z');
   const RUN = (over: object = {}): BandModel => ({
     mode: 'run', project: 'demo', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, queued: 0, total: 12,
-    slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'alive', stalled: false, roadmapUrl: null,
+    slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'alive', ended: null, roadmapUrl: null,
     sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: NO_VIEWER, ...over,
   }) as BandModel;
   const WORKM = (over: object = {}): BandModel => ({

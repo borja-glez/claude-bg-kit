@@ -1,0 +1,214 @@
+// w8 W4: the steps of /waypoint:work that the CLI groups, so a task costs fewer calls and the session writes fewer files:
+// `next --notes --seat-dir` reads the notes and keeps lastNoteTs, `next --check-sync` says when the main checkout has to
+// sync first, `done --metrics-version --seat-dir` pins meta/metrics, empties the seat's pending commits and gives the
+// plan's progress, and `commit-info --event` prints the commit event and drops its pending lines. The guarantees stay:
+// every write it prints is pinned (or creates its document), and a batch is sent whole.
+import { describe, it, expect, beforeEach } from 'vitest';
+import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync } from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { run, type Io } from '../src/cli/run.js';
+import { parsePlan } from '../src/lib/plan.js';
+import { buildDocs, planHash } from '../src/lib/sync.js';
+import { computeMetrics } from '../src/lib/metrics.js';
+import { useTempDirs } from './helpers/tmp.js';
+const tmp = useTempDirs();
+
+const FIXTURE = new URL('./fixtures/plan.yaml', import.meta.url);
+let dir: string;
+let io: Io;
+const NOW = '2026-10-11T10:00:00.000Z';
+const cli = (...a: string[]) => run(a, { ...io, env: {} });
+const docsAt = (sub: string, docs: Record<string, unknown>) => {
+  const d = path.join(dir, sub);
+  mkdirSync(d, { recursive: true });
+  for (const [id, body] of Object.entries(docs)) writeFileSync(path.join(d, `${id}.json`), JSON.stringify(body));
+  return sub;
+};
+const plan = () => parsePlan(readFileSync(path.join(dir, 'plan.yaml'), 'utf8'));
+/** The runtime plan as the roadmap holds it (meta and plan listings), synced with plan.yaml unless `hash` says otherwise. */
+const dbOf = (hash?: string) => {
+  const { meta, phases } = buildDocs(plan(), NOW);
+  docsAt('db/meta', { project: { ...meta, ...(hash ? { planHash: hash } : {}) } });
+  docsAt('db/plan', Object.fromEntries(phases.map(p => [p.id, p])));
+  docsAt('db/state', {});
+  docsAt('db/sessions', {});
+  docsAt('db/messages', {});
+  return 'db';
+};
+const SEAT = '.waypoint/demo-shop';
+const seatFile = (name: string) => path.join(dir, SEAT, name);
+const sessionJson = () => JSON.parse(readFileSync(seatFile('session.json'), 'utf8')) as Record<string, unknown>;
+
+beforeEach(() => {
+  dir = tmp('wp-work-');
+  copyFileSync(FIXTURE, path.join(dir, 'plan.yaml'));
+  io = { cwd: dir, now: () => new Date(NOW), rand: () => 0, assetsDir: dir };
+  mkdirSync(path.join(dir, SEAT), { recursive: true });
+  writeFileSync(seatFile('session.json'), JSON.stringify({ plan: 'plan.yaml', sessionId: 'be', track: 'backend' }));
+});
+
+describe('next --notes --seat-dir: the notes of a pick, and lastNoteTs kept by the CLI (w8 W4)', () => {
+  const next = (...extra: string[]) => {
+    const r = cli('next', 'plan.yaml', '--db', 'db', '--states', 'db/state', '--sessions', 'db/sessions', '--messages', 'db/messages', '--session', 'be', '--track', 'backend', ...extra);
+    expect(r.code, r.stderr).toBe(0);
+    return JSON.parse(r.stdout) as Record<string, unknown> & { notes?: { notes: { id: string }[]; latest: string | null; say: string[]; mentions: string[][] } };
+  };
+  const note = (min: number, text: string, author = 'user:u1') => ({ ts: new Date(Date.parse(NOW) - min * 60000).toISOString(), type: 'idea', author, authorName: 'Ana', text });
+  it('gives the notes with the pick, stores latest as lastNoteTs in the seat\'s session.json, and the next pick gives only newer ones', () => {
+    dbOf();
+    docsAt('db/notes', { n1: note(30, 'Mira T001 antes'), n2: note(20, 'una nota de sesión', 'session:ui') });
+    const first = next('--notes', 'db/notes', '--seat-dir', SEAT);
+    expect(first).toMatchObject({ task: { id: 'T001' }, multi: false });
+    expect(first.notes).toMatchObject({ latest: note(20, '').ts, say: ['Nota de Ana en el roadmap: «Mira T001 antes»'], mentions: [['T001']] });
+    expect(sessionJson()).toEqual({ plan: 'plan.yaml', sessionId: 'be', track: 'backend', lastNoteTs: note(20, '').ts });
+    docsAt('db/notes', { n3: note(5, 'Otra más') });
+    expect(next('--notes', 'db/notes', '--seat-dir', SEAT).notes).toMatchObject({ say: ['Nota de Ana en el roadmap: «Otra más»'] });
+    expect(next('--notes', 'db/notes', '--seat-dir', SEAT).notes).toMatchObject({ notes: [], say: [] });
+    expect(sessionJson().lastNoteTs).toBe(note(5, '').ts);
+  });
+  it('on a first join keeps only the five most recent of the notes a person wrote', () => {
+    dbOf();
+    docsAt('db/notes', Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`n${i}`, note(70 - i * 10, `nota ${i}`)])));
+    const r = next('--notes', 'db/notes', '--seat-dir', SEAT);
+    expect(r.notes!.say).toEqual([2, 3, 4, 5, 6].map(i => `Nota de Ana en el roadmap: «nota ${i}»`));
+    expect(r.notes!.notes.map(n => n.id)).toEqual(['n2', 'n3', 'n4', 'n5', 'n6']);
+  });
+  it('the notes command caps a first join at five too, so forge reading notes without lastNoteTs announces the same (fix round 1, Minor 6)', () => {
+    docsAt('db/notes', Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`n${i}`, note(70 - i * 10, `nota ${i}`)])));
+    const notes = (...a: string[]) => JSON.parse(cli('notes', '--notes', 'db/notes', '--plan', 'plan.yaml', ...a).stdout) as { notes: { id: string }[]; say: string[]; latest: string };
+    for (const first of [notes(), notes('--since', '')]) {
+      expect(first.notes.map(n => n.id)).toEqual(['n2', 'n3', 'n4', 'n5', 'n6']);
+      expect(first.say).toHaveLength(5);
+      expect(first.latest).toBe(note(10, '').ts);
+    }
+    // With a lastNoteTs, every newer one, however many.
+    expect(notes('--since', note(80, '').ts).notes).toHaveLength(7);
+  });
+  it('without --notes it prints what it printed before; --notes without --seat-dir, or a seat with no session.json, is exit 2', () => {
+    dbOf();
+    expect(next()).not.toHaveProperty('notes');
+    expect(cli('next', 'plan.yaml', '--db', 'db', '--session', 'be', '--notes', 'db/notes').code).toBe(2);
+    expect(cli('next', 'plan.yaml', '--db', 'db', '--session', 'be', '--notes', 'db/notes', '--seat-dir', '.waypoint/none').code).toBe(2);
+  });
+});
+
+describe('next --check-sync: the main checkout syncs first when the roadmap does not hold this plan (w8 W4)', () => {
+  const next = (...extra: string[]) => cli('next', 'plan.yaml', '--db', 'db', '--states', 'db/state', '--sessions', 'db/sessions', '--session', 'be', ...extra);
+  it('prints sync: true and picks nothing when meta/project is missing, its plan hash differs or the plan listing is empty', () => {
+    dbOf();
+    const synced = next('--check-sync');
+    expect(synced.code, synced.stderr).toBe(0);
+    expect(JSON.parse(synced.stdout)).toMatchObject({ task: { id: 'T001' } });
+    expect(JSON.parse(synced.stdout)).not.toHaveProperty('sync');
+    dbOf('another-hash');
+    expect(JSON.parse(next('--check-sync').stdout)).toEqual({ sync: true, why: 'changed' });
+    dbOf();
+    writeFileSync(path.join(dir, 'db', 'meta', 'project.json'), '');
+    expect(JSON.parse(next('--check-sync').stdout)).toEqual({ sync: true, why: 'missing' });
+    dbOf();
+    rmSync(path.join(dir, 'db', 'plan'), { recursive: true });
+    expect(JSON.parse(next('--check-sync').stdout)).toEqual({ sync: true, why: 'missing' });
+    expect(planHash(plan())).not.toBe('another-hash');
+  });
+  it('without --check-sync a missing plan cache still fails, as a session in a worktree reads it', () => {
+    dbOf();
+    writeFileSync(path.join(dir, 'db', 'meta', 'project.json'), '');
+    expect(next().code).toBe(1);
+  });
+});
+
+describe('done --metrics-version: the close of a task in fewer calls (w8 W4)', () => {
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', '-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+  const init = () => { git('init', '-q'); git('add', 'plan.yaml'); git('commit', '-qm', 'T001: esquema'); };
+  const done = (...extra: string[]) => cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--summary-file', 'summary.txt', ...extra);
+  beforeEach(() => { writeFileSync(path.join(dir, 'summary.txt'), 'El esquema está aplicado.'); });
+  it('pins meta/metrics to the listed version, gives the plan\'s progress, and leaves the pending commits until the roadmap shows the task done', () => {
+    init(); dbOf();
+    docsAt('db/state', { T001: { status: 'in_progress', owner: 'be' }, T003: { status: 'done' } });
+    const pending = `${JSON.stringify({ sha: git('rev-parse', 'HEAD'), task: 'T001' })}\n`;
+    writeFileSync(seatFile('pending-commits.jsonl'), pending);
+    const r = done('--metrics-version', '5');
+    expect(r.code, r.stderr).toBe(0);
+    const o = JSON.parse(r.stdout);
+    expect(o.metrics).toMatchObject({ op: 'update', collection: 'meta', doc_id: 'metrics', if_version: 5 });
+    expect(o.batch).toHaveLength(3);
+    // Fix round 1 (Minor 1): done prints before its batch goes out, so it removes nothing: a session that stops now still
+    // gets the Stop hook's reminder.
+    expect(readFileSync(seatFile('pending-commits.jsonl'), 'utf8')).toBe(pending);
+    const m = computeMetrics(plan(), { T001: { status: 'done' }, T003: { status: 'done' } } as never, Date.parse(NOW));
+    expect(o.progress).toEqual({ percent: m.percent, done: 2, total: m.total });
+  });
+  it('without --metrics-version the metrics come unpinned, to create the document', () => {
+    init(); dbOf();
+    expect(JSON.parse(done().stdout).metrics).not.toHaveProperty('if_version');
+    expect(done('--metrics-version', '0').code).toBe(2);
+  });
+});
+
+describe('the pending commits of a task go once the roadmap shows it done (fix round 1, Minor 1)', () => {
+  const line = (task: string, sha: string) => `${JSON.stringify({ ts: NOW, task, sha, command: 'git commit', session: 'c1', seat: 'be' })}\n`;
+  const pending = () => readFileSync(seatFile('pending-commits.jsonl'), 'utf8');
+  beforeEach(() => {
+    dbOf();
+    writeFileSync(seatFile('pending-commits.jsonl'), line('T001', 'a'.repeat(40)) + line('T001', 'b'.repeat(40)) + line('T002', 'c'.repeat(40)));
+  });
+  it('next --seat-dir, after a listing that shows the task done, removes its lines and keeps the others', () => {
+    docsAt('db/state', { T001: { status: 'in_progress', owner: 'be' } });
+    const next = () => cli('next', 'plan.yaml', '--db', 'db', '--states', 'db/state', '--sessions', 'db/sessions', '--session', 'be', '--seat-dir', SEAT);
+    // The batch of done did not go out (the listing still says in progress): nothing is removed.
+    expect(next().code).toBe(0);
+    expect(pending()).toBe(line('T001', 'a'.repeat(40)) + line('T001', 'b'.repeat(40)) + line('T002', 'c'.repeat(40)));
+    docsAt('db/state', { T001: { status: 'done', owner: 'be' } });
+    expect(next().code).toBe(0);
+    expect(pending()).toBe(line('T002', 'c'.repeat(40)));
+  });
+  it('the idle heartbeat of a stop does the same with --seat-dir and --states', () => {
+    docsAt('db/state', { T001: { status: 'done' }, T002: { status: 'in_progress' } });
+    const r = cli('heartbeat', '--session', 'be', '--session-version', '3', '--idle', '--seat-dir', SEAT, '--states', 'db/state');
+    expect(r.code, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout).batch[0]).toMatchObject({ data: { status: 'idle' }, if_version: 3 });
+    expect(pending()).toBe(line('T002', 'c'.repeat(40)));
+    expect(cli('heartbeat', '--session', 'be', '--session-version', '3', '--seat-dir', '.waypoint/none', '--states', 'db/state').code).toBe(2);
+    expect(cli('heartbeat', '--session', 'be', '--session-version', '3', '--seat-dir', SEAT).code).toBe(2);
+  });
+  it('removes nothing while the seat\'s queue.jsonl holds a write: a failed done batch that was queued keeps its lines (fix round 2)', () => {
+    // done mirrors its state write into DB/state before the batch goes out: done there proves nothing when it was queued.
+    docsAt('db/state', { T001: { status: 'done' } });
+    writeFileSync(seatFile('queue.jsonl'), `${JSON.stringify({ op: 'update', collection: 'state', doc_id: 'T001', data: { status: 'done' }, if_version: 4 })}\n`);
+    const before = pending();
+    expect(cli('heartbeat', '--session', 'be', '--session-version', '3', '--idle', '--seat-dir', SEAT, '--states', 'db/state').code).toBe(0);
+    expect(cli('next', 'plan.yaml', '--db', 'db', '--states', 'db/state', '--sessions', 'db/sessions', '--session', 'be', '--seat-dir', SEAT).code).toBe(0);
+    expect(pending()).toBe(before);
+    // Once the queue is replayed and emptied, the next call removes them.
+    writeFileSync(seatFile('queue.jsonl'), '');
+    expect(cli('heartbeat', '--session', 'be', '--session-version', '3', '--idle', '--seat-dir', SEAT, '--states', 'db/state').code).toBe(0);
+    expect(pending()).toBe(line('T002', 'c'.repeat(40)));
+  });
+});
+
+describe('commit-info --event: the commit event of an intermediate commit (w8 W4)', () => {
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', '-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+  it('prints the set of events/<EID> as the work skill composed it, and leaves the pending lines to the end of the task', () => {
+    git('init', '-q'); git('add', 'plan.yaml'); git('commit', '-qm', 'T001: primera parte');
+    const sha = git('rev-parse', 'HEAD');
+    const lines = `${JSON.stringify({ ts: NOW, task: 'T001', sha, command: 'git commit', session: 'c1', seat: 'be' })}\n`;
+    writeFileSync(seatFile('pending-commits.jsonl'), lines);
+    const r = cli('commit-info', '--event', '--session', 'be', '--task', 'T001');
+    expect(r.code, r.stderr).toBe(0);
+    const o = JSON.parse(r.stdout);
+    expect(o).toMatchObject({ sha, title: 'T001: primera parte', del: 0 });
+    expect(o.write).toEqual({ op: 'set', collection: 'events', doc_id: '20261011T100000000Z-be-0000',
+      data: { ts: NOW, type: 'commit', sessionId: 'be', taskId: 'T001', text: 'T001: primera parte', sha, add: o.add, del: 0 } });
+    expect(readFileSync(seatFile('pending-commits.jsonl'), 'utf8')).toBe(lines);
+    // A rev still reads as before, with or without the event.
+    expect(JSON.parse(cli('commit-info', sha).stdout)).toEqual({ sha, ts: o.ts, title: o.title, add: o.add, del: 0 });
+    expect(JSON.parse(cli('commit-info', 'HEAD', '--event', '--session', 'be', '--task', 'T001').stdout).write.doc_id).toBe('20261011T100000000Z-be-0000');
+  });
+  it('--event needs the session and a plan task', () => {
+    git('init', '-q'); git('add', 'plan.yaml'); git('commit', '-qm', 'x');
+    for (const a of [['--event'], ['--event', '--session', 'be'], ['--event', '--task', 'T001'], ['--event', '--session', 'be', '--task', 'a b']]) {
+      expect(cli('commit-info', ...a).code, a.join(' ')).toBe(2);
+    }
+  });
+});
