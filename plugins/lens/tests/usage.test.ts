@@ -508,13 +508,13 @@ test('a session counts in its run only what it spent once its band names the run
   expect(u.session.costUsd).toBeLessThan(8.01);
 });
 
-test("a compaction of the main conversation stops the re-read of the tracking gathered before it, told by the context its next request falls to; a subagent's or a small fall is none (E-08, w8 M1: no session.compact hook)", async ($, on) => {
+test("a compaction of the main conversation stops the re-read of the tracking gathered before it, told by the fewer messages its next request carries; a subagent's or a fall of context alone is none (E-08, w8 M1, review Minor 2: no session.compact hook)", async ($, on) => {
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
   const clock = start(on);
   // The model beneath answers each request over `context` cached tokens (a subagent's, over 1,000).
-  let context = 150_000;
+  let context = 80_000;
   on('turn.step', async function* (_$, e) {
     return stepResult({ cache_read_input_tokens: e.agentId ? 1_000 : context, output_tokens: 100 }, e.model, e.turnId, e.index);
   });
@@ -523,24 +523,23 @@ test("a compaction of the main conversation stops the re-read of the tracking ga
   await $.command.run(RUN);
   await $.tool.call({ tool: 'Bash', command: 'node waypoint.cjs status' } as never);
   // Each main step re-reads the tracking gathered since the last compaction of the main conversation.
-  const stepThen = async (index: number, agentId?: string) => {
-    await drain($.turn.step({ turnId: 't1', index, model: 'claude-opus-5-5', messageCount: index + 1, ...(agentId ? { agentId } : {}) }));
+  const stepThen = async (index: number, messageCount: number, agentId?: string) => {
+    await drain($.turn.step({ turnId: 't1', index, model: 'claude-opus-5-5', messageCount, ...(agentId ? { agentId } : {}) }));
     await clock.advance(1000);
     return panel.last?.usage.tracking.tokens as number;
   };
-  const once = await stepThen(0);
+  const once = await stepThen(0, 40);
   expect(once).toBeGreaterThan(0);
-  // A subagent's small context is its own: nothing of the main conversation left.
-  expect(await stepThen(1, 'a1')).toBe(once);
-  expect(await stepThen(2)).toBe(once * 1.5);
-  // A fall to two thirds is no compaction.
-  context = 100_000;
-  expect(await stepThen(3)).toBe(once * 2);
-  // Under half, by 70k tokens: the conversation was compacted, the tracking before it is gone.
+  // A subagent's few messages are its own: nothing of the main conversation left.
+  expect(await stepThen(1, 2, 'a1')).toBe(once);
+  expect(await stepThen(2, 42)).toBe(once * 1.5);
+  // The context falls by more than half while the messages grow (a cache that expired, say): no compaction.
   context = 30_000;
-  expect(await stepThen(4)).toBe(once * 2);
-  context = 32_000;
-  expect(await stepThen(5)).toBe(once * 2);
+  expect(await stepThen(3, 43)).toBe(once * 2);
+  // A /compact: three messages now, though the context fell by less than half; the tracking before it is gone.
+  context = 50_000;
+  expect(await stepThen(4, 3)).toBe(once * 2);
+  expect(await stepThen(5, 5)).toBe(once * 2);
 });
 
 test('a band read before any run, the pane closed and nothing busy: a run that starts later is named in the next usage write (R2)', async ($, on) => {

@@ -82,7 +82,30 @@ describe('usage meter', () => {
     recordStep(s, { model: 'claude-opus-5-5', usage: U(1, 1) });
     expect(s.tracking.reread).toBe(3100);
   });
-  it("a main step whose context fell below half the last one's, by 10k tokens or more, is a compaction: the tracking before it is not re-read (w8 M1)", () => {
+  it('a main step that carries fewer messages than the main step before it follows a compaction (or a rewind): the tracking before it is not re-read (review Minor 2)', () => {
+    const s = newUsage(1);
+    recordTracking(s, 'forge', 4000);
+    recordStep(s, { model: 'claude-opus-5-5', messageCount: 40, usage: U(1_000, 100, 70_000, 9_000) });
+    recordStep(s, { model: 'claude-opus-5-5', messageCount: 42, usage: U(1_000, 100, 78_000, 2_000) });
+    expect(s.tracking.reread).toBe(2000);
+    // A /compact at 81k: 35k of system and tools stay, so the context falls by less than half; the messages fall to 3.
+    recordStep(s, { model: 'claude-opus-5-5', messageCount: 3, usage: U(10_000, 100, 35_000, 5_000) });
+    expect(s.tracking.reread).toBe(2000);
+    recordTracking(s, 'waypoint', 400);
+    recordStep(s, { model: 'claude-opus-5-5', messageCount: 5, usage: U(1_000, 100, 50_000, 500) });
+    expect(s.tracking.reread).toBe(2100);
+  });
+  it('with the message count known, a fall of the context alone is no compaction, nor messages that grow or stay, nor a subagent step (review Minor 2)', () => {
+    const s = newUsage(1);
+    recordTracking(s, 'forge', 4000);
+    recordStep(s, { model: 'claude-opus-5-5', messageCount: 10, usage: U(0, 0, 150_000) });
+    recordStep(s, { model: 'claude-opus-5-5', messageCount: 12, usage: U(0, 0, 20_000) });
+    recordStep(s, { model: 'claude-opus-5-5', messageCount: 12, usage: U(0, 0, 21_000) });
+    recordStep(s, { agentId: 'a1', model: 'claude-opus-5-5', messageCount: 2, usage: U(0, 0, 1_000) });
+    recordStep(s, { model: 'claude-opus-5-5', messageCount: 13, usage: null });
+    expect(s.tracking.reread).toBe(4000);
+  });
+  it("without a message count, a main step whose context fell below half the last one's, by 10k tokens or more, is a compaction: the tracking before it is not re-read (w8 M1)", () => {
     const s = newUsage(1);
     recordTracking(s, 'forge', 4000);
     // Context: uncached input, cache reads and cache writes of the request.
@@ -96,7 +119,7 @@ describe('usage meter', () => {
     recordStep(s, { model: 'claude-opus-5-5', usage: U(1_000, 100, 60_000, 500) });
     expect(s.tracking.reread).toBe(2100);
   });
-  it('a small fall, a fall of under 10k tokens, a step without usage and a subagent step are no compaction (w8 M1)', () => {
+  it('without a message count, a small fall, a fall of under 10k tokens, a step without usage and a subagent step are no compaction (w8 M1)', () => {
     const s = newUsage(1);
     recordTracking(s, 'forge', 4000);
     recordStep(s, { model: 'claude-opus-5-5', usage: U(0, 0, 100_000) });

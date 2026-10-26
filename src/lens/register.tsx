@@ -1405,7 +1405,7 @@ export const register: Register = on => {
 
   // E-08: after a compaction the tracking gathered so far is no longer in context: it is not re-read from then on. w8 M1:
   // no session.compact hook tells it (cc-plugin-sec-default passes that event over where it is seated); the first main
-  // request after it, answered over a context that fell by half, does (recordStep, usage.ts).
+  // request after it, carrying fewer messages than the one before, does (turn.step's messageCount; recordStep, usage.ts).
 
   // Steps 2 and 3 of §4.6: /lens opens the pane where it docks (fullscreen, 110 columns or more); elsewhere it leaves a
   // photo in the transcript, which keeps the live region small (F-15). /lens live (or pane) opens the pane anyway;
@@ -1508,7 +1508,7 @@ export const register: Register = on => {
     const r = yield* next(e);
     void touch($);
     try {
-      recordStep(usage, { agentId: e.agentId, model: e.model, effort: e.effort, usage: r?.usage ?? null });
+      recordStep(usage, { agentId: e.agentId, model: e.model, effort: e.effort, messageCount: e.messageCount, usage: r?.usage ?? null });
       void requestPanelWrite($);
     } catch { /* ignore */ }
     return r;
