@@ -680,7 +680,7 @@ test('inline, the pane draws its cards without a frame and says how many rows it
   await docked.unmount();
 });
 
-test('the first /lens, with no model yet, asks for the pane at once with the rows of what lens holds, reads the files once after, and the next /lens asks for the rows its cards take (carry 5, w8 M3)', async ($, on) => {
+test('the first /lens, with no model yet, asks for the pane at once with the rows of what lens holds, reads the files once after, and asks again for the rows its cards take while the pane is inline (carry 5, w8 M3, review Minor 5)', async ($, on) => {
   const reads: string[] = [];
   serveFiles(on, reads);
   const opened: { rows?: number }[] = [];
@@ -700,12 +700,65 @@ test('the first /lens, with no model yet, asks for the pane at once with the row
   const live = { ...RUN, args: 'live', presentation: { isFullscreen: false, columns: 100 } };
   await $.command.run(live);
   // Nothing read yet: the rows of the cards lens holds in memory, here none, so the fewest.
-  expect(opened.at(-1)?.rows).toBe(6);
+  expect(opened).toEqual([{ rows: 6 }]);
   expect(open.has(PANE)).toBe(true);
+  // Once the files are read, the inline pane is asked for again with its cards' rows, with no second /lens.
   await clock.advance(0);
   expect(reads.filter(p => p.endsWith('/new/progress.md'))).toHaveLength(1);
-  await $.command.run(live);
+  expect(opened).toHaveLength(2);
   expect(opened.at(-1)?.rows).toBeGreaterThan(6);
+  // The next /lens asks for those rows at once.
+  await $.command.run(live);
+  expect(opened).toHaveLength(3);
+  expect(opened.at(-1)?.rows).toBe(opened[1]!.rows);
+});
+
+test('a first /lens where the pane docks is not asked for again after its read (review Minor 5)', async ($, on) => {
+  serveFiles(on, []);
+  const opened: { rows?: number }[] = [];
+  const open = new Set<string>();
+  on('ui.open', (_$, e) => { open.add(e.id); opened.push({ rows: e.rows }); return { value: { isPlaced: true as const } }; });
+  on('ui.panes', () => ({ value: [...open].map(id => ({ id, title: 'lens', isShown: true, isFocused: false, isPlaced: true })) }));
+  const clock = start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run({ ...RUN, args: 'live' });
+  await clock.advance(0);
+  expect(opened).toHaveLength(1);
+});
+
+test('a refresh asked while another reads is run again after it only when it was forced: a pane just opened (review Minor 1)', async ($, on) => {
+  serveFiles(on, []);
+  servePanes(on);
+  const clock = mock.clock(on, { now: NOW });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('turn.complete', () => ({ text: '' }));
+  // Each read of the agents list is one refresh; while `held`, it waits.
+  let lists = 0;
+  let held: Promise<void> | null = null;
+  let release = () => {};
+  const hold = () => { held = new Promise(r => { release = () => { held = null; r(); }; }); };
+  on('agent.list', async () => { lists++; if (held) await held; return { value: [] }; });
+  const mainEnd = { turnId: 't', answer: '', durationMs: 1, isAborted: false, reason: 'answer' } as never;
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  hold();
+  await $.command.run({ ...RUN, args: 'live' });
+  await clock.advance(0);
+  expect(lists).toBe(1);
+  // The main turn's end asks for a refresh while that read waits: the read in progress covers it.
+  await $.turn.complete(mainEnd);
+  release();
+  await clock.advance(0);
+  expect(lists).toBe(1);
+  // A /lens while a refresh reads: once it is done, one more read for the pane just asked for.
+  hold();
+  await $.turn.complete(mainEnd);
+  await clock.advance(0);
+  expect(lists).toBe(2);
+  await $.command.run({ ...RUN, args: 'live' });
+  await $.command.run({ ...RUN, args: 'live' });
+  release();
+  await clock.advance(0);
+  expect(lists).toBe(3);
 });
 
 test('/lens asks for the rows its compact cards take, between 6 and a third of the screen, and 56 columns where it docks (F-01)', async ($, on) => {

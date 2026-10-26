@@ -198,8 +198,9 @@ function runLens($: Engine, args: 'live' | 'foto'): void {
 const SAFE_TASK = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/;
 let panelFiles: PanelFiles = {};
 let paneUp = false;
+// Review Minor 5: where the terminal last drew lens's pane, docked or inline; null before any drawing of this opening.
+let panePlacement: 'dock' | 'inline' | null = null;
 let panelTimer: Timer | null = null;
-let panelRefreshing = false;
 let writeTimer: Timer | null = null;
 let writing = false;
 let dirty = false;
@@ -963,7 +964,7 @@ function keepBand($: Engine, model: PanelModel): void {
 function notePane($: Engine, up: boolean): void {
   if (up === paneUp) return;
   paneUp = up;
-  if (!up) focusAgent = null;
+  if (!up) { focusAgent = null; panePlacement = null; }
   if (photos.size) $.ui.invalidate('ui.render');
 }
 
@@ -1010,28 +1011,30 @@ function stopPanelTimer(): void {
   panelTimer = null;
 }
 
-// Reads the files and the agents list, only while the pane is open (or `force`d, by a pane just opened). w8 M3: one asked
-// while another runs is not dropped: that one may have looked before the pane opened, so it runs once more after it.
+// Reads the files and the agents list, only while the pane is open (or `force`d, by a pane just opened); the promise is
+// the read in progress, so a caller asked during one waits for it. w8 M3, review Minor 1: a forced one asked meanwhile is
+// run once more after it (the read in progress may have looked before the pane opened); any other (the 10 s timer, a
+// turn's end) is covered by the read in progress, and repeating it would read without pause while reads are slow.
+let refreshRun: Promise<void> | null = null;
 let refreshAgain = false;
-let refreshAgainForced = false;
-async function refreshPanel($: Engine, force = false): Promise<void> {
-  if (panelRefreshing) {
-    refreshAgain = true;
-    refreshAgainForced ||= force;
-    return;
+function refreshPanel($: Engine, force = false): Promise<void> {
+  if (refreshRun) {
+    if (force) refreshAgain = true;
+    return refreshRun;
   }
-  panelRefreshing = true;
-  try {
-    let forced = force;
-    do {
-      refreshAgain = false;
-      await refreshPanelOnce($, forced);
-      forced = refreshAgainForced;
-      refreshAgainForced = false;
-    } while (refreshAgain);
-  } finally {
-    panelRefreshing = false;
-  }
+  refreshRun = (async () => {
+    try {
+      let forced = force;
+      do {
+        refreshAgain = false;
+        await refreshPanelOnce($, forced);
+        forced = true;
+      } while (refreshAgain);
+    } finally {
+      refreshRun = null;
+    }
+  })();
+  return refreshRun;
 }
 
 async function refreshPanelOnce($: Engine, force: boolean): Promise<void> {
@@ -1146,24 +1149,44 @@ const lensTexts = (): Texts => textsFor(roadmap.locale);
 // third of the screen), docked for 56 columns; both are requests the engine may not grant. Where it is not placed, a
 // toast says why. w8 M3: the pane is asked for first and the command answers at once; the files are read after, so a
 // slow or failing read never leaves /lens unanswered. With no model yet (the pane closed and nothing going on) the rows
-// are those of the cards lens holds in memory. An open that fails fails the command's hook, whose .catch says why.
-async function openPanel($: Engine): Promise<boolean> {
-  const t = lensTexts();
-  // The terminal is where the pane may be seated inline: its view sizes the request.
+// are those of the cards lens holds in memory; once the read is in, a pane still inline is asked for again with its
+// cards' rows (carry 5, review Minor 5). An open that fails fails the command's hook, whose .catch says why. `inline`:
+// whether the pane would sit inline as the command saw the screen (no dock outside fullscreen or under 110 columns).
+async function openPanel($: Engine, inline: boolean): Promise<boolean> {
+  const first = bandModel === null;
+  let model: PanelModel | null = bandModel;
+  try { model ??= await buildPanel($); } catch { model = null; }
+  const rows = panelRowsFor(model);
+  const opened = await $.ui.open({ id: PANE, title: 'lens', rows, columns: DOCK_COLUMNS });
+  if (!opened.isPlaced) {
+    try { $.ui.toast(`${lensTexts().panelWaiting}: ${clip(opened.reason, 200)}`); } catch { /* the answer says it */ }
+  }
+  // The open pane is filled by this read, and gets its timer.
+  const read = refreshPanel($, true);
+  if (first) void read.then(() => askRowsAgain($, rows, inline));
+  return opened.isPlaced;
+}
+
+// The rows an inline pane asks for: those its compact cards take at the terminal's width, between 6 and a third of it.
+function panelRowsFor(model: PanelModel | null): number {
   const view = viewOf('terminal');
   let estimate = 0;
   try {
     const compact = panelLayout({ bodyColumns: view.columns ?? LINE_MAX, placement: 'inline' });
-    const model = bandModel ?? await buildPanel($);
-    estimate = buildCards(model, t, 0).reduce((n, card) => n + cardRows(card, compact), 0);
+    if (model) estimate = buildCards(model, textsFor(model.locale), 0).reduce((n, card) => n + cardRows(card, compact), 0);
   } catch { estimate = 0; }
-  const opened = await $.ui.open({ id: PANE, title: 'lens', rows: paneRows(estimate, view.rows), columns: DOCK_COLUMNS });
-  if (!opened.isPlaced) {
-    try { $.ui.toast(`${t.panelWaiting}: ${clip(opened.reason, 200)}`); } catch { /* the answer says it */ }
-  }
-  // The open pane is filled by this read, and gets its timer.
-  void refreshPanel($, true);
-  return opened.isPlaced;
+  return paneRows(estimate, view.rows);
+}
+
+// Review Minor 5: after the first read, an open pane drawn inline (or, before any drawing, one the command saw would
+// sit inline) asks for its cards' rows when they are more than it asked for. The dock ignores rows, so it is not asked.
+async function askRowsAgain($: Engine, asked: number, inline: boolean): Promise<void> {
+  try {
+    if (!bandModel || !(panePlacement === 'inline' || (panePlacement === null && inline))) return;
+    if (!(await isPaneOpen($))) return;
+    const rows = panelRowsFor(bandModel);
+    if (rows > asked) await $.ui.open({ id: PANE, title: 'lens', rows, columns: DOCK_COLUMNS });
+  } catch { /* the pane keeps its rows */ }
 }
 
 // Step 3 of §4.6: the photos `/lens` took, by number, at most PHOTOS_MAX: the cards as they were, never moving.
@@ -1360,7 +1383,7 @@ export const register: Register = on => {
   on('command.run', { command: 'lens' }, async ($, e) => {
     const t = lensTexts();
     if (lensMode(e.args, e.presentation) === 'photo') return { text: await takePhoto($) };
-    const placed = await openPanel($);
+    const placed = await openPanel($, lensMode('', e.presentation) === 'photo');
     return { text: placed ? t.panelOpened : `${t.panelWaiting}.` };
   }).catch(($, _e, next) => {
     const t = lensTexts();
@@ -1590,6 +1613,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     try {
       noteRender($, e.surface, e.viewport, { docked: e.props.placement === 'dock' });
+      if (e.surface === 'terminal') panePlacement = e.props.placement === 'dock' ? 'dock' : 'inline';
       updateStatus($, bandModel);
       const layout = panelLayout(e.props, e.viewport);
       if (layout.focusAgent !== focusAgent) {
