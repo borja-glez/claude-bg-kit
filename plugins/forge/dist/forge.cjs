@@ -24024,7 +24024,8 @@ function knownBrief(cwd2, brief) {
   const e = executionHolding(cwd2, { project, task: id });
   const t = e?.active ? e.tasks[id] : void 0;
   if (t && !(t.status === "running" && (t.stage === "implement" || t.stage === "validate"))) {
-    throw new UsageError(`agents: --task ${brief}: ${id} is ${t.status} at stage ${t.stage} in the execution; a fresh implementer is named while it runs at implement or validate (check it with forge swarm status)`);
+    const where3 = `${id} is ${t.status} at stage ${t.stage} in the execution`;
+    throw new UsageError(`agents: --task ${brief}: ${where3}; a fresh implementer is named while it runs at implement or validate (check it with forge swarm status)`);
   }
 }
 var command2 = (_args, ctx) => {
@@ -25122,7 +25123,7 @@ function refusedMdNames(text4) {
 }
 function refusedMdLine(names3) {
   if (!names3.length) return null;
-  return `Files named ${names3.map((n) => `\`${n}\``).join(", ")}: in a subagent, Claude Code refuses to Write a \`.md\` file whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS (any case). To create or rewrite one, write it under another name and rename it with git (\`git add\` it, then \`git mv\` it to its name, \`git mv -f\` when that name is already in the repository), or return its text in your reply for the coordinator to write; say which in your report, never in silence.`;
+  return `Files named ${names3.map((n) => `\`${n}\``).join(", ")}: in a subagent, Claude Code refuses to Write a \`.md\` file whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS (any case). To create or rewrite one, write it under another name and rename it with git (\`git add\` it, then \`git mv\` it to its name, \`git mv -f\` when that name is already in the repository), or return its text in your reply, after your two lines, under a line \`--- <its path> ---\`, for the coordinator to write; say which in your report, never in silence.`;
 }
 var LINE_BREAK = new RegExp(`\\r\\n|[\\n\\r${[133, 8232, 8233].map((c) => String.fromCharCode(c)).join("")}]`);
 function includesLines(includes) {
@@ -30639,8 +30640,9 @@ function nextLive(prev, ev, ctx) {
 }
 var liveLock = (file) => `${file}.lock`;
 var LIVE_LOCK_WAIT_MS = 2e3;
+var LIVE_END_LOCK_WAIT_MS = 300;
 var LIVE_LOCK_STALE_MS = 5e3;
-function updateLive(main, file, fn) {
+function updateLive(main, file, fn, waitMs = LIVE_LOCK_WAIT_MS) {
   forgeDir(main);
   (0, import_node_fs43.mkdirSync)(import_node_path47.default.dirname(file), { recursive: true });
   const apply = () => {
@@ -30658,7 +30660,7 @@ function updateLive(main, file, fn) {
     withFileLock(liveLock(file), () => {
       ran = true;
       apply();
-    }, { waitMs: LIVE_LOCK_WAIT_MS, staleMs: LIVE_LOCK_STALE_MS });
+    }, { waitMs, staleMs: LIVE_LOCK_STALE_MS });
   } catch (e) {
     if (ran) throw e;
   }
@@ -30759,11 +30761,16 @@ function hookLive(io, forced) {
       const bound = viewer.coordinator && exec.hookSession === sessionId && !exec.closedAt;
       if (!bound || !(event === "SessionEnd" || event === "SessionStart" && (0, import_node_fs43.existsSync)(file))) return "";
     }
-    updateLive(main, file, (prev) => !exec.active && event === "SessionStart" && prev?.ended !== true ? null : nextLive(
-      prev,
-      { event, agentId: typeof input.agent_id === "string" ? input.agent_id : void 0, agentType: typeof input.agent_type === "string" ? input.agent_type : void 0 },
-      { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() }
-    ));
+    updateLive(
+      main,
+      file,
+      (prev) => !exec.active && event === "SessionStart" && prev?.ended !== true ? null : nextLive(
+        prev,
+        { event, agentId: typeof input.agent_id === "string" ? input.agent_id : void 0, agentType: typeof input.agent_type === "string" ? input.agent_type : void 0 },
+        { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() }
+      ),
+      event === "SessionEnd" ? LIVE_END_LOCK_WAIT_MS : LIVE_LOCK_WAIT_MS
+    );
     if (starting && exec.active) {
       const running = Object.values(exec.tasks).filter((t) => t.status === "running").length;
       const text4 = role === "coordinator" ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run \u2192 Resume: renew your lease, reconcile each task and keep stepping.` : `forge: this session is the ${role} session of ${member?.task ?? "a task"} in the execution ${exec.runId} coordinated by ${exec.coordinator}. Resume it with /forge:member: rejoin with FORGE swarm join, renew your lease and continue from your last reported stage.`;
