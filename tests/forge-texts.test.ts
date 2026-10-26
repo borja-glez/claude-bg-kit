@@ -19,6 +19,16 @@ describe("forge's texts (A7)", () => {
     expect(read('plugins/forge/skills/member/SKILL.md')).toContain(shape);
     expect(read('plugins/forge/skills/decisions/SKILL.md')).toContain('`ifWrong`');
   });
+  it('FC6: the implementers state the real rule on .md files, and how a project file under it is still delivered, never in silence', () => {
+    for (const a of ['forge-impl-heavy', 'forge-impl-high', 'forge-impl', 'forge-impl-light', 'forge-mech', 'forge-fable']) {
+      const md = read(`plugins/forge/agents/${a}.md`);
+      expect(md, a).not.toContain('cannot write `.md` files');
+      const lines = md.split(/\r?\n/);
+      expect(lines.find(l => l.startsWith('5. ')), a).toContain('refuses to Write a `.md` file whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS (any case)');
+      const deliver = lines.find(l => l.startsWith('A project file with such a name'));
+      for (const w of ['`git mv`', 'return its text in your reply', 'say which in your report', 'Never get around the refusal']) expect(deliver, `${a}: ${w}`).toContain(w);
+    }
+  });
   it('forge-planner writes review_focus, which the brief carries to the reviewers (A7)', () => {
     const md = read('plugins/forge/agents/forge-planner.md');
     expect(md).toContain('design_ref?, review_focus?}]');
