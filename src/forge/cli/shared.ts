@@ -8,7 +8,7 @@ import { readExecution } from '../execution.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
 import { samePath } from '../../lib/worktree.js';
 import {
-  triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, isBugTask, reviewFor,
+  triage, implementerFor, zonesFromPaths, announce, announceNotes, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, isBugTask, reviewFor,
   PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult,
 } from '../triage.js';
 import { diffSinks, sinkReason, type Sink } from '../sinks.js';
@@ -511,15 +511,16 @@ export function triageCore(io: Io, args: string[]): TriageCore {
   // Output only, like `implementer`: the exact line the session prints, and whether a short plan comes first.
   // The locale: the flag, else the plan passed with --plan, else the plan under docs/waypoint, else English.
   const locale = localeArg ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en');
-  let line = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh, catalog }, locale as AnnounceLocale);
+  // FC3: no validator detected nor listed: the announcement says nothing will check the change.
+  const none = catalog.length === 0;
+  let line = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh, catalog, none }, locale as AnnounceLocale);
   let gate: 'plan' | null = result.path === 'medium' ? 'plan' : null;
   // After the implementation: who reviews it, by its real size. No short plan comes first any more.
   let reviewed = {};
   if (diff) {
-    // The new-validators line `announce` appends, kept after the review line.
-    const bare = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: [], catalog }, locale as AnnounceLocale);
+    // The lines `announce` appends (new validators, none at all), kept after the review line.
     line = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: reviewPlan }, locale as AnnounceLocale)
-      + line.slice(bare.length);
+      + announceNotes({ fresh, catalog, none }, locale as AnnounceLocale);
     gate = null;
     reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path } };
   }

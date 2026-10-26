@@ -142,6 +142,9 @@ function detected(repo: RepoReader, which: (name: string) => boolean, platform: 
   return out;
 }
 
+/** FC3: what validate and prep say when no validator is detected nor listed. */
+export const NO_VALIDATORS = 'no validators detected: add tests or list validators in .forge/config.yaml';
+
 // Manual validators (the config) and, unless detect is false, detected ones minus `exclude`. A manual validator
 // replaces a detected one of the same name in place; the other manual ones follow. A detected validator that runs
 // the same command as a manual one (whitespace collapsed) is dropped: the manual one already runs it.
