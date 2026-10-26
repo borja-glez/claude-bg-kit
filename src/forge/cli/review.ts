@@ -34,7 +34,7 @@ import { loadTrustedConfig } from '../trust.js';
 import { sayTdd, tddForBrief, tddPending } from '../tdd.js';
 import { defaultExec } from './exec.js';
 import { eventsSince, executionHolding } from '../execution.js';
-import { deviationsOf, tellDeviations, type Deviation } from '../deviation.js';
+import { FIX_NEXT, deviationsOf, tellDeviations, type Deviation } from '../deviation.js';
 import { runWithCache, cacheGit, checkoutPrefix, cleanTree } from '../validate-cache.js';
 import { noSlot, type Slot } from '../jobs.js';
 import { reviewRound, reviewerKey, withSecurity, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type SpawnEntry, type TriageReview } from '../review-round.js';
@@ -922,8 +922,6 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   if (!FIX_NEXT.includes(d.next)) tellDeviations(out, deviationsOf(eventsSince(events, since), e => isTask(e, task)), locale);
   return json(out);
 }
-
-const FIX_NEXT: readonly unknown[] = ['resume', 'fresh-stronger', 'redo'];
 
 /**
  * `FORGE prep --task <id>-<n> --path <p> [--phase <name>] [--dir <dir>] [--cwd <worktree>] [--base <sha>] [--no-baseline] [--no-cache]`: before a brief's work, in

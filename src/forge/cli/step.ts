@@ -60,6 +60,8 @@ const RUNNER_FILE = 'runner.json';
 const RUNNER_AGENT = 'forge-runner';
 const RUNNER_EFFORT = 'medium';
 const RUNNER_SILENT_MINUTES = AGENT_LEASE_MINUTES + LEASE_MINUTES;
+/** FX1 m4: .forge/work/run/<this>: the run and the instant a step last read the deviations it said. */
+const DEVIATIONS_TOLD = 'deviations-told.json';
 interface RunnerDoc { runId: string; attempts: number; state: 'running' | 'back'; at: string; backAt?: string; reason?: 'returned' | 'silent' }
 
 const slash = (p: string) => p.split(path.sep).join('/');
@@ -834,10 +836,16 @@ function stepOnce(c: Ctx, e0: ExecutionState, returned: Set<string>, versions: V
     actions: c.actions, publish: publishOf(io, after, started, versions, io.now()),
     running: Object.values(after.tasks).filter(t => t.status === 'running').length, parallel: after.parallel, wait, say: stepSay(c.actions, wait, c.locale),
   };
-  // FX1: the deviations of the run since the previous step's tick (the hook records them as the coordinator starts its
-  // agents, between steps), said once.
-  const since = e0.lastStepAt ? Date.parse(e0.lastStepAt) : -Infinity;
-  tellDeviations(out, deviationsOf(readEvents(io.cwd), e => e.runId === e0.runId && Date.parse(e.ts) > since), c.locale);
+  // FX1: the deviations of the run the hook recorded since the previous step read them, said once. m4: the instant of this
+  // read is kept (deviations-told.json, the step's last act), not the tick's lastStepAt: a deviation recorded between the
+  // tick and the read would be said again by the next step.
+  const toldFile = path.join(io.cwd, '.forge', 'work', 'run', DEVIATIONS_TOLD);
+  const told = readJson(toldFile);
+  const since = isObject(told) && told.runId === e0.runId && typeof told.at === 'string' && Number.isFinite(Date.parse(told.at)) ? Date.parse(told.at)
+    : e0.lastStepAt ? Date.parse(e0.lastStepAt) : -Infinity;
+  const readAt = io.now();
+  tellDeviations(out, deviationsOf(readEvents(io.cwd), e => e.runId === e0.runId && Date.parse(e.ts) > since && Date.parse(e.ts) <= readAt.getTime()), c.locale);
+  c.after.push(() => { mkdirSync(path.dirname(toldFile), { recursive: true }); writeJson(toldFile, { runId: e0.runId, at: readAt.toISOString() }); });
   // 5. Last, the writes that must not outlive a step that died before its output (respawned.json, asked.json's re-ask).
   for (const write of c.after) write();
   return { code: 0, stdout: JSON.stringify(out, null, 2) + '\n', stderr: warnings };

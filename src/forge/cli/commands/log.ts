@@ -34,6 +34,9 @@ export const command: Command = (args, ctx) => {
     if (why === null || why.length > MAX_WHY) throw new UsageError(`log: a triage why must be a string of at most ${MAX_WHY} characters`);
     data = { ...data, why };
   }
+  // FX1: an agent the session logs is the one it spawned, never one forge named (swarm step's and `agents --task`'s carry
+  // `by`): a `by` it brings is dropped.
+  if (kind === 'agent' && 'by' in data) { const { by: _by, ...rest } = data; data = rest; }
   const task = flag('task');
   // A plan task's triage only counts the events of its plan's project (ids repeat between plans): a raise without
   // one takes the active plan execution's project when the task is one of its tasks (started, or in its plan

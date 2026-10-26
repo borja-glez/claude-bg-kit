@@ -17,7 +17,7 @@ import { loadTrusted } from '../../trust.js';
 import { noSlot } from '../../jobs.js';
 import { defaultExec, defaultGit, repoReader } from '../exec.js';
 import { baseOf, eventsOf, resolveProject } from '../../task-ref.js';
-import { deviationSay, deviationsOf, sinceLastTriage } from '../../deviation.js';
+import { deviationSay, deviationsOf, sinceLastTriage, untold } from '../../deviation.js';
 
 /** FX3: whether `--task <T>[-<n>]` is a task the active execution of this checkout runs, so swarm integrate validates it. */
 function toIntegrate(cwd: string, task: string | undefined): boolean {
@@ -127,12 +127,13 @@ export const command: Command = (args, ctx) => {
       if (names.length) out.stderr += `already failing on the base by name (not yours): ${r.validator}: ${names.slice(0, 10).join('; ')}${names.length > 10 ? ` (+${names.length - 10} more)` : ''}\n`;
     }
   }
-  // FX1: the Trivial and Small paths close with this pass: it says this run's deviations of the task (from its last triage).
+  // FX1: the Trivial and Small paths close with this pass: it says this run's deviations of the task (from its last
+  // triage), each once (m5: a later pass of the same round says only a new one).
   const task = flag('task');
   if (task && (scope.mode === 'small' || integrated)) {
     const ledger = readEvents(io.cwd);
     const mine = eventsOf(ledger, { project: resolveProject({ task, events: ledger }), task });
-    const line = deviationSay(deviationsOf(sinceLastTriage(mine, task)), 'en');
+    const line = deviationSay(untold(io.cwd, 'small', deviationsOf(sinceLastTriage(mine, task))), 'en');
     if (line) out.stderr += `${line}\n`;
   }
   if (denied) out.stderr += 'configCommands: denied — only the validators forge detects ran\n';

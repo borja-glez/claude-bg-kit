@@ -5,6 +5,8 @@ import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../src/forge/ledger.js';
 import { expectedImplementer, isImplementerAgent } from '../src/forge/deviation.js';
+import { swarmStep } from '../src/forge/cli/step.js';
+import { readExecution } from '../src/forge/execution.js';
 import { useTempDirs } from './helpers/tmp.js';
 import { seedExecution } from './helpers/execution.js';
 const tmp = useTempDirs();
@@ -79,11 +81,13 @@ describe('forge hook live: a deviation from the triage (FX1)', () => {
     run(['hook', 'live'], { ...io, stdin: JSON.stringify({ session_id: session, hook_event_name: 'SubagentStart', agent_id: agentId, agent_type: agentType, cwd: root }) });
   const deviations = () => readEvents(root).filter(e => e.kind === 'deviation');
   const task = (stage: string) => ({ status: 'running', stage, round: 0, worktree: '/w', branch: 'task/T', executor: 'subagents', attempts: 0, agent: 'forge-impl', startedAt: T, stageSince: T, updatedAt: T, detail: null });
-  const execution = (tasks: Record<string, unknown>) => seedExecution(root, {
-    runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'sandbox', base: 'main', branch: 'forge/run-sandbox', mergeOnFinish: false,
+  const execution = (tasks: Record<string, unknown>, over: { kind?: 'plan' | 'ephemeral'; project?: string } = {}) => seedExecution(root, {
+    runId: 'r1', kind: over.kind ?? 'plan', mode: 'subagents', parallel: 3, project: over.project ?? 'sandbox', base: 'main', branch: 'forge/run-sandbox', mergeOnFinish: false,
     coordinator: 'main', hookSession: 's1', active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: null, lastBlockStep: null, sleepUntil: null,
     tasks: tasks as never,
   });
+  const ephemeral = (tasks: Record<string, unknown>) => execution(tasks, { kind: 'ephemeral', project: 'loose' });
+  const implementing = (t: string, min = 5) => appendEvent(root, ev(min, { kind: 'phase', task: t, phase: 'implement', brief: 1, base: 'b' }));
   const handOut = (t: string, agent: string) => {
     appendEvent(root, cliTriage(4, t, agent, { project: 'sandbox' }));
     appendEvent(root, ev(5, { kind: 'phase', task: t, phase: 'implement', brief: 1, base: 'b', project: 'sandbox' }));
@@ -140,6 +144,55 @@ describe('forge hook live: a deviation from the triage (FX1)', () => {
     // once the brief left its implementing phase, an implementer is no longer checked against it
     run(['log', '--kind', 'phase', '--task', 'fix-login', '--data', '{"phase":"done","brief":1,"base":"b"}'], io);
     start('s1', 'a2', 'forge:forge-impl');
+    expect(deviations()).toHaveLength(1);
+  });
+  it('I1: the fresh impl ephemeral.md asks for after two rounds is named by `agents --role impl --task`, so it is no deviation', () => {
+    ephemeral({ 'fix-a': task('implement') });
+    appendEvent(root, cliTriage(4, 'fix-a', 'forge-mech'));
+    implementing('fix-a');
+    start('s1', 'a1', 'forge:forge-mech');
+    expect(deviations()).toEqual([]);
+    // two rounds wrong: the coordinator asks forge for a fresh impl, which prints it and records it as named
+    const named = run(['agents', '--role', 'impl', '--task', 'fix-a-1'], io);
+    expect(named.code).toBe(0);
+    expect(JSON.parse(named.stdout)).toMatchObject({ role: 'impl', agent: 'forge-impl', task: 'fix-a-1' });
+    expect(readEvents(root).filter(e => e.kind === 'agent').at(-1)).toMatchObject({ task: 'fix-a-1', agent: 'forge-impl', role: 'impl', by: 'agents' });
+    start('s1', 'a2', 'forge:forge-impl');
+    expect(deviations()).toEqual([]);
+    start('s1', 'a3', 'forge:forge-impl-heavy');
+    expect(deviations()).toEqual([expect.objectContaining({ task: 'fix-a-1', agent: 'forge-impl-heavy', expected: 'forge-impl' })]);
+  });
+  it('agents --role without --task only prints; a bad role or brief is refused; an agent logged by hand never names one', () => {
+    expect(JSON.parse(run(['agents', '--role', 'impl-high'], io).stdout)).toMatchObject({ role: 'impl-high', agent: 'forge-impl-high' });
+    expect(readEvents(root).filter(e => e.kind === 'agent')).toEqual([]);
+    expect(run(['agents', '--role', 'boss'], io).code).toBe(2);
+    expect(run(['agents', '--role', 'impl', '--task', 'no brief'], io).code).toBe(2);
+    expect(JSON.parse(run(['agents'], io).stdout).agents).toMatchObject({ impl: 'forge-impl' });
+    run(['log', '--kind', 'agent', '--task', 'fix-a-1', '--data', '{"agent":"forge-impl","role":"impl","by":"step"}'], io);
+    expect(readEvents(root).filter(e => e.kind === 'agent').at(-1)).not.toHaveProperty('by');
+  });
+  it("I2: parallel Medium briefs are checked on their first attempt, against the Medium task's triage", () => {
+    ephemeral({ 'feat-1': task('implement'), 'feat-2': task('implement') });
+    appendEvent(root, cliTriage(4, 'feat', 'forge-impl', { path: 'medium' }));
+    implementing('feat-1'); implementing('feat-2');
+    start('s1', 'a1', 'forge:forge-impl');
+    expect(deviations()).toEqual([]);
+    start('s1', 'a2', 'forge:forge-impl-heavy');
+    start('s1', 'a3', 'forge:forge-impl-heavy');
+    expect(deviations().map(e => [e.task, e.agent, e.expected]).sort()).toEqual([['feat-1-1', 'forge-impl-heavy', 'forge-impl'], ['feat-2-1', 'forge-impl-heavy', 'forge-impl']]);
+  });
+  it('m2: more running agents of a type than forge named of it is a deviation, though the type was named', () => {
+    execution({ T1: task('implement'), T2: task('implement') });
+    handOut('T1', 'forge-impl-light');
+    handOut('T2', 'forge-impl');
+    start('s1', 'a1', 'forge:forge-impl');
+    expect(deviations()).toEqual([]);
+    start('s1', 'a2', 'forge:forge-impl');
+    expect(deviations()).toEqual([expect.objectContaining({ task: 'T1-1', agent: 'forge-impl', expected: 'forge-impl-light', agentId: 'a2' })]);
+    // the first one stopped: a forge-impl again is one for one named
+    run(['hook', 'live'], { ...io, stdin: JSON.stringify({ session_id: 's1', hook_event_name: 'SubagentStop', agent_id: 'a1', agent_type: 'forge:forge-impl', cwd: root }) });
+    run(['hook', 'live'], { ...io, stdin: JSON.stringify({ session_id: 's1', hook_event_name: 'SubagentStop', agent_id: 'a2', agent_type: 'forge:forge-impl', cwd: root }) });
+    start('s1', 'a4', 'forge:forge-impl');
     expect(deviations()).toHaveLength(1);
   });
   it('fails open: an execution or a ledger that does not read costs neither the hook nor its live signal', () => {
@@ -204,6 +257,26 @@ tasks:
     expect(step().say).not.toContain('Deviation');
     expect(out(run(['swarm', 'status'], io)).deviations).toEqual([expect.objectContaining({ task: 'T1-1', agent: other, expected: spawn.agent })]);
   });
+  it('m4: a deviation recorded after the tick and before the step reads the ledger is said by that step only', () => {
+    let now = NOW.getTime();
+    io = { ...io, now: () => new Date(now) };
+    const stepAt = (t: number, onTick?: () => void) => {
+      now = t;
+      const r = swarmStep(['--plan', 'plan.yaml', '--db', 'db'], io, {
+        cli: argv => { const x = run(argv, io); if (argv[0] === 'swarm' && argv[1] === 'tick') onTick?.(); return x; },
+        gitAt: dir => defaultGit(dir),
+      });
+      return JSON.parse(r.stdout) as { say: string };
+    };
+    stepAt(NOW.getTime());
+    const late = stepAt(NOW.getTime() + 60_000, () => {
+      // a hook of another agent writes while this step runs, after its tick wrote lastStepAt
+      appendEvent(root, { ts: new Date(NOW.getTime() + 65_000).toISOString(), kind: 'deviation', task: 'T1-1', agent: 'forge-mech', expected: 'forge-impl', agentId: 'z1', project: 'shop', runId: readExecution(root)!.runId });
+      now = NOW.getTime() + 70_000;
+    });
+    expect(late.say).toContain('Deviation from the triage: T1-1 started forge-mech');
+    expect(stepAt(NOW.getTime() + 120_000).say).not.toContain('Deviation');
+  });
 });
 
 describe('a deviation is said where the work goes on, and listed for the closing report', () => {
@@ -250,6 +323,9 @@ describe('a deviation is said where the work goes on, and listed for the closing
     expect(close.say).toContain('Deviation from the triage: T1-1');
     expect(JSON.parse(run(['last', '--task', 'T1'], io).stdout).deviations).toEqual([expect.objectContaining({ task: 'T1-1' })]);
     expect(JSON.parse(run(['last', '--task', 'T3'], io).stdout).deviations).toEqual([]);
+    // m3: the triage of the real diff (--base) that sizes it again is not a new run of the task
+    appendEvent(root, cliTriage(35, 'T1', 'forge-impl', { path: 'medium', diff: { base: 'b', files: 1, lines: 2 } }));
+    expect(JSON.parse(run(['last', '--task', 'T1'], io).stdout).deviations).toEqual([expect.objectContaining({ task: 'T1-1' })]);
   });
   it('the Small path is told by its validate --all, for this run of the task', () => {
     appendEvent(root, cliTriage(20, 'fix-a', 'forge-mech', { path: 'small' }));
@@ -257,6 +333,12 @@ describe('a deviation is said where the work goes on, and listed for the closing
     const r = run(['validate', '--all', '--path', 'small', '--task', 'fix-a', '--cwd', wt], io);
     expect(r.code).toBe(0);
     expect(r.stderr).toContain('Deviation from the triage: fix-a-1 started forge-impl where forge named forge-impl-light.');
+    // m5: said once: the next pass of the same round says only a new one
+    expect(run(['validate', '--all', '--path', 'small', '--task', 'fix-a', '--cwd', wt], io).stderr).not.toContain('Deviation');
+    deviation(26, 'fix-a-1');
+    const again = run(['validate', '--all', '--path', 'small', '--task', 'fix-a', '--cwd', wt], io).stderr;
+    expect(again).toContain('Deviation from the triage: fix-a-1 started forge-impl');
+    expect(again.split('fix-a-1 started').length).toBe(2);
     // an implementer's own --affected pass says nothing
     expect(run(['validate', '--affected', 'a.txt', '--task', 'fix-a-1', '--cwd', wt], io).stderr).not.toContain('Deviation');
     // a deviation of an earlier run of the task (before its last triage) is not this run's
