@@ -106,7 +106,6 @@ function start(on: On, sessionId: () => string = () => SESSION) {
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('agent.list', () => ({ value: [] }));
   on('session.id', () => ({ value: sessionId() }));
-  on('classic.SubagentStart', () => ({}));
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   return clock;
 }

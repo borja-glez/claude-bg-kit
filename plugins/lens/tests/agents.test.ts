@@ -55,7 +55,6 @@ function start(on: On, agents: { list: unknown[] } = { list: [] }, ids: string[]
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('session.id', () => ({ value: SESSION }));
   on('agent.list', () => ({ value: agents.list as never }));
-  on('classic.SubagentStart', () => ({}));
   let n = 0;
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: ids[n++] ?? `x${n}` }));
   on('turn.complete', () => ({ text: '' }));
@@ -309,22 +308,60 @@ test('/clear forgets the agents, the tasks touched with forge.cjs and the wake-u
   expect(panel.last).toMatchObject({ waiting: null, activities: [{ key: 'T009', owner: 'other' }] });
 });
 
-test('SubagentStart shows a subagent lens did not see spawn, and SubagentStop ends it and keeps it as finished', async ($, on) => {
+const turnEnd = (agentId: string) => ({ turnId: `t-${agentId}`, agentId, answer: '', durationMs: 1, isAborted: false, reason: 'answer' }) as never;
+
+test('a subagent shows from its spawn and its own turn.complete ends it, kept as finished: no classic hook (w8 M1)', async ($, on) => {
+  serveFiles(on, {});
+  servePanes(on);
+  const panel = panelWrites(on);
+  const clock = start(on, { list: [] }, ['a9']);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.agent.spawn(spawnArgs('Look around', { subagentType: 'Explore', description: 'look around' }));
+  // Before any refresh reads the agents list (which has not named it yet).
+  await clock.advance(1_000);
+  expect(panel.last?.subagents).toMatchObject([{ id: 'a9', type: 'Explore', description: 'look around' }]);
+  expect(panel.last?.activities).toMatchObject([{ kind: 'adhoc', agents: [{ id: 'a9' }] }]);
+  await clock.advance(1_000);
+  await $.turn.complete(turnEnd('a9'));
+  await clock.advance(1_000);
+  expect(panel.last?.subagents).toEqual([]);
+  expect(panel.last?.subagentsDone).toMatchObject([{ id: 'a9', type: 'Explore', description: 'look around' }]);
+  expect(panel.last?.activities).toEqual([]);
+});
+
+test("a teammate's turn.complete leaves it waiting, not finished (w8 M1)", async ($, on) => {
+  serveFiles(on, {});
+  servePanes(on);
+  const panel = panelWrites(on);
+  const agents = { list: [] as unknown[] };
+  const clock = start(on, agents, ['tm']);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.agent.spawn(spawnArgs('Help out', { subagentType: 'teammate', description: 'Helper mate', isTeammate: true }));
+  await $.turn.complete(turnEnd('tm'));
+  await clock.advance(1_000);
+  expect(panel.last?.subagents).toMatchObject([{ id: 'tm' }]);
+  expect(panel.last?.subagentsDone).toEqual([]);
+  agents.list = [{ id: 'tm', type: 'teammate', description: 'Helper mate', status: 'idle', teammateId: 'helper@team' }];
+  await clock.advance(10_000);
+  expect(panel.last?.subagents).toMatchObject([{ id: 'tm', status: 'idle' }]);
+  expect(panel.last?.activities).toMatchObject([{ kind: 'adhoc', agents: [{ id: 'tm', status: 'waiting' }] }]);
+});
+
+test('a subagent lens did not see spawn shows from the agents list, and is finished once the list says it completed (w8 M1)', async ($, on) => {
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
   const agents = { list: [] as unknown[] };
   const clock = start(on, agents);
-  on('classic.SubagentStop', () => ({}));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
-  await $.classic.SubagentStart({ agent_id: 'a9', agent_type: 'Explore' });
-  agents.list = [{ id: 'a9', type: 'Explore', description: '', status: 'running' }];
+  agents.list = [{ id: 'a9', type: 'Explore', description: 'scan', status: 'running' }];
   await clock.advance(10_000);
   expect(panel.last?.subagents).toMatchObject([{ id: 'a9', type: 'Explore' }]);
   expect(panel.last?.activities).toMatchObject([{ kind: 'adhoc', agents: [{ id: 'a9' }] }]);
-  await $.classic.SubagentStop({ agent_id: 'a9', agent_type: 'Explore' } as never);
-  agents.list = [];
+  agents.list = [{ id: 'a9', type: 'Explore', description: 'scan', status: 'completed' }];
   await clock.advance(10_000);
   expect(panel.last?.subagents).toEqual([]);
   expect(panel.last?.subagentsDone).toMatchObject([{ id: 'a9', type: 'Explore' }]);

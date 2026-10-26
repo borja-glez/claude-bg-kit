@@ -156,11 +156,23 @@ function servePanes(on: On, answer: () => { isPlaced: true } | { isPlaced: false
   return open;
 }
 
+// w8 M1: lens hears a subagent start from its spawn and its end from its own turn.complete, never from the classic hooks.
+// The engine beneath answers a spawn with the call's tool_use_id as the agent's id, and every turn's end.
+function serveSpawns(on: On) {
+  on('agent.spawn', (_$, e) => ({ model: 'claude-sonnet-5-5', agentId: e.tool_use_id }));
+  on('turn.complete', () => ({ text: '' }));
+}
+const spawnOf = (id: string, type = 'Explore', description = '') => ({
+  tool_use_id: id, prompt: 'Look around', description, subagentType: type, provider: { plugin: 'engine', tier: 'core' },
+  parentModel: 'claude-opus-5-5', background: true, fork: false,
+}) as never;
+const endOf = (agentId: string) => ({ turnId: `t-${agentId}`, agentId, answer: '', durationMs: 1, isAborted: false, reason: 'answer' }) as never;
+
 function start(on: On) {
   const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('agent.list', () => ({ value: [] }));
-  on('classic.SubagentStart', () => ({}));
+  serveSpawns(on);
   return clock;
 }
 
@@ -224,7 +236,7 @@ test('with the pane closed no panel state is written, and files are read only wh
   await clock.advance(60000);
   expect(reads).toEqual([]);
   await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.agent.spawn(spawnOf('a1'));
   await clock.advance(60000);
   expect(reads.length).toBeGreaterThan(0);
   expect(written).not.toContain('lens.panel');
@@ -260,7 +272,7 @@ test('without a waypoint project, activity shows the lens minimal band whose Pan
     expect(await ui.find({ key: 'panel' })).toBeUndefined();
     await ui.unmount();
   }
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.agent.spawn(spawnOf('a1'));
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'lens', surface, component: 'AbovePrompt', props: BAND_PROPS });
     expect((await ui.findAll({ type: 'Button' })).map(b => b.key)).toEqual(['panel', 'dismiss']);
@@ -281,9 +293,9 @@ test('a subagent shows until the agents list no longer has it', async ($, on) =>
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   let agents = [{ id: 'a1', description: 'Find the parser', type: 'Explore', status: 'running' as const }];
   on('agent.list', () => ({ value: agents }));
-  on('classic.SubagentStart', () => ({}));
+  serveSpawns(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.agent.spawn(spawnOf('a1', 'Explore', 'Find the parser'));
   await $.command.run(RUN);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
   expect(await said(ui)).toMatch(/Explore.*Find the parser.*\d+s/);
@@ -325,7 +337,7 @@ test('todos alone, open or completed, show no minimal band and keep nothing read
   await clock.advance(30000);
   expect(reads).toEqual([]);
   // Another activity still brings it.
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.agent.spawn(spawnOf('a1'));
   expect(await bandButtons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
 });
 
@@ -335,7 +347,7 @@ test('a subagent heard of more than an hour ago shows no minimal band', async ($
   const clock = start(on);
   engineBand(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.agent.spawn(spawnOf('a1'));
   expect(await bandButtons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
   await clock.advance(3600_000 + 1000);
   expect(await bandButtons($)).toEqual([[], []]);
@@ -348,14 +360,14 @@ test('the cross hides the minimal band until the next session', async ($, on) =>
   engineBand(on);
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.agent.spawn(spawnOf('a1'));
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
   await ui.press({ key: 'dismiss' });
   expect(await ui.find({ key: 'panel' })).toBeUndefined();
   expect(await ui.find({ text: 'engine band' })).toBeDefined();
   await ui.unmount();
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.agent.spawn(spawnOf('a1'));
   expect(await bandButtons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
 });
 
@@ -379,7 +391,7 @@ test('once the pane is closed no panel state is written, and the band reads file
   written.length = 0;
   await clock.advance(30000);
   expect(reads).toEqual([]);
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.agent.spawn(spawnOf('a1'));
   await clock.advance(30000);
   expect(written).not.toContain('lens.panel');
 });
@@ -468,7 +480,6 @@ test("a subagent's turn end leaves the main turn under Now", async ($, on) => {
   servePanes(on);
   const clock = start(on);
   on('turn.start', (_$, e) => ({ turnId: e.turnId }));
-  on('turn.complete', () => ({ text: '' }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
   await $.turn.start({ text: 'go', turnId: 'main-1' });
@@ -493,15 +504,14 @@ test('a finished subagent stays listed with ✓ and its time for five minutes; a
   // The agents list is the truth on each refresh: it holds the subagent while it runs.
   let agents = [{ id: 'a1', description: '', type: 'Explore', status: 'running' as const }];
   on('agent.list', () => ({ value: agents }));
-  on('classic.SubagentStart', () => ({}));
-  on('classic.SubagentStop', () => ({}));
+  serveSpawns(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.agent.spawn(spawnOf('a1'));
   await clock.advance(65_000);
   agents = [];
-  await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'Explore' } as never);
-  await $.classic.SubagentStop({ agent_id: 'ghost', agent_type: 'Plan' } as never);
+  await $.turn.complete(endOf('a1'));
+  await $.turn.complete(endOf('ghost'));
   await clock.advance(1000);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
   expect(await said(ui)).toMatch(/✓ Explore · 1m 05s/);
@@ -520,15 +530,14 @@ test('a subagent the list drops before its stop is kept as finished once; the la
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   let agents = [{ id: 'a1', description: 'Find the parser', type: 'Explore', status: 'running' as const }];
   on('agent.list', () => ({ value: agents }));
-  on('classic.SubagentStart', () => ({}));
-  on('classic.SubagentStop', () => ({}));
+  serveSpawns(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.agent.spawn(spawnOf('a1', 'Explore', 'Find the parser'));
   await clock.advance(30_000);
   agents = [];
   await clock.advance(10_000);
-  await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'Explore' } as never);
+  await $.turn.complete(endOf('a1'));
   await clock.advance(1000);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
   const text = await said(ui);
@@ -566,7 +575,7 @@ test('/clear empties the todos and the subagents of the panel (E-13)', async ($,
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'Write the parser', status: 'in_progress', activeForm: 'Writing the parser' }] });
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.agent.spawn(spawnOf('a1'));
   await $.command.run(RUN);
   const pane = async () => {
     const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });

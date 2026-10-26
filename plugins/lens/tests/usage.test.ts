@@ -65,7 +65,6 @@ function start(on: On, agents: unknown[] = []) {
   const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('agent.list', () => ({ value: agents as never }));
-  on('classic.SubagentStart', () => ({}));
   on('session.id', () => ({ value: SESSION }));
   on('session.usage', () => ({ value: { startedAt: NOW - 60_000, context: {} as never, rateLimits: [], cost: { usd: 4.1 } } }));
   return clock;
@@ -255,14 +254,13 @@ test('a turn.step hands every chunk on unchanged and in order', async ($, on) =>
   expect(x.value).toEqual(stepResult({ input_tokens: 10 }, 'claude-opus-5-5'));
 });
 
-test('classic.SubagentStart labels a loop agent.spawn did not', async ($, on) => {
+test('the agents list labels a loop agent.spawn did not (w8 M1: no classic SubagentStart)', async ($, on) => {
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
   start(on, [{ id: 'a9', type: 'forge:forge-review-security', status: 'running' }]);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.classic.SubagentStart({ agent_id: 'a9', agent_type: 'forge:forge-review-security' });
   await drain($.turn.step({ turnId: 't3', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, agentId: 'a9' }));
   await $.command.run(RUN);
   expect(panel.last?.usage.groups.map((g: { id: string }) => g.id)).toContain('review');

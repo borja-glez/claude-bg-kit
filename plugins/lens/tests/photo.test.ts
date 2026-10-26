@@ -51,10 +51,10 @@ function servePanes(on: On) {
 // (forgeHeardAt), and draws nothing of its own while that task has no status.
 const FORGE_CALL = { tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T009-1 --path medium', tool_use_id: 'f1' } as never;
 
-function start(on: On) {
+function start(on: On, agents: unknown[] = []) {
   const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
-  on('agent.list', () => ({ value: [] }));
+  on('agent.list', () => ({ value: agents as never }));
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   return clock;
 }
@@ -205,11 +205,15 @@ test('a photo taken with the pane closed asks the agents list first: a subagent 
   serveFiles(on);
   servePanes(on);
   engineRows(on);
-  start(on);
-  on('classic.SubagentStart', () => ({}));
+  start(on, [{ id: 'a1', type: 'Explore', description: '', status: 'completed' }]);
+  // w8 M1: a subagent starts at its spawn (the engine answers with the call's tool_use_id as its id).
+  on('agent.spawn', (_$, e) => ({ model: 'claude-sonnet-5-5', agentId: e.tool_use_id }));
   await $.session.start(SESSION);
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' } as never);
-  // The agents list (empty) says it ended; nothing asked it while the pane was closed.
+  await $.agent.spawn({
+    tool_use_id: 'a1', prompt: 'Look around', description: '', subagentType: 'Explore', provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'claude-opus-5-5', background: true, fork: false,
+  } as never);
+  // The agents list says it completed; nothing asked it while the pane was closed.
   const shot = (await $.command.run({ ...RUN, args: 'foto' })).text!;
   const row = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: OUTPUT(shot), viewport: MAIN_SCREEN });
   expect(await said(row)).toMatch(/✓ /);

@@ -20,7 +20,7 @@ import { PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, totalsOf, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunBaseline, type RunSource, type UsageFile } from './usage-file.js';
-import { addOwnTask, endAgent, endTool, knownTasks, linkSpawn, LINKS_MAX, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
+import { addOwnTask, endAgent, endTool, knownTasks, linkSpawn, LINKS_MAX, LIST_GRACE_MS, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
 
 const panel = atom({ plugin: 'lens', key: 'panel' } as const, null as PanelModel | null);
 const hidden = atom({ plugin: 'lens', key: 'hidden' } as const, false);
@@ -79,6 +79,9 @@ const agentTools = new Map<string, Map<string, { name: string; since: number }>>
 const pendingEnds = new Map<string, number>();
 const PENDING_END_MS = 2 * 60_000;
 const PENDING_ENDS_MAX = 50;
+// w8 M1: the teammates among the agents lens heard of (agent.spawn's isTeammate, the agents list's teammateId): a
+// teammate's turn.complete leaves it idle, not finished. At most LINKS_MAX are kept.
+const teammates = new Set<string>();
 // Whether there is activity worth a band of its own (recent subagents, links agents or forge work; todos alone do not count) when no waypoint band shows.
 let busy = false;
 // The roadmap section, read from the waypoint project's files at the panel's pace while the pane is open.
@@ -230,6 +233,7 @@ function resetPanel(): void {
   wakeAt = null;
   agentTools.clear();
   pendingEnds.clear();
+  teammates.clear();
 }
 
 // E-11: the tool agent `id` shows: the latest of its calls still in flight, or none.
@@ -238,12 +242,36 @@ function showAgentTool(id: string): void {
   links = setTool(links, id, last ?? null);
 }
 
-// E-09: a link that just appeared whose turn already ended (pendingEnds) is ended at that moment.
+// E-09: a link that just appeared whose turn already ended (pendingEnds) is ended at that moment, with the subagent it is
+// (w8 M1); a teammate's turn end leaves it idle.
 function applyPendingEnd(id: string, now: number): void {
   const at = pendingEnds.get(id);
   if (at === undefined) return;
   pendingEnds.delete(id);
-  if (now - at <= PENDING_END_MS) links = endAgent(links, id, at);
+  if (now - at <= PENDING_END_MS && !teammates.has(id)) endSubagent(id, at);
+}
+
+// w8 M1: a subagent's run starts at its agent.spawn and ends at its own turn.complete, which every hook hears. The classic
+// SubagentStart and SubagentStop said the same, but cc-plugin-sec-default passes every classic hook of a plugin the person
+// installed over where it is seated (managed settings, Team and Enterprise), so lens never hangs on them.
+function startSubagent(id: string, type: string, description: string, now: number): void {
+  finished = finished.filter(f => f.id !== id);
+  const entry = { id, type: clip(type, LINE_MAX), ...(description ? { description: clip(description, LINE_MAX) } : {}), since: now };
+  activity.subagents = pushCapped(activity.subagents.filter(s => s.id !== id), entry);
+}
+
+// The run ended: its link with it, and one lens knew as running is kept as finished.
+function endSubagent(id: string, now: number): void {
+  const ran = activity.subagents.find(s => s.id === id);
+  activity.subagents = activity.subagents.filter(s => s.id !== id);
+  links = endAgent(links, id, now, { any: true });
+  if (ran) recordFinished(ran, now);
+}
+
+function noteTeammate(id: string): void {
+  teammates.delete(id);
+  teammates.add(id);
+  while (teammates.size > LINKS_MAX) teammates.delete(teammates.keys().next().value!);
 }
 
 // A subagent heard of within the hour (older entries are dropped here), an agent of links still alive, or
@@ -839,8 +867,9 @@ async function agentList($: Engine): Promise<ListedAgent[] | null> {
   if (!Array.isArray(list)) return null;
   return list.flatMap((raw): ListedAgent[] => {
     if (!raw || typeof raw !== 'object') return [];
-    const a = raw as { id?: unknown; type?: unknown; description?: unknown; status?: unknown; parentId?: unknown };
+    const a = raw as { id?: unknown; type?: unknown; description?: unknown; status?: unknown; parentId?: unknown; teammateId?: unknown };
     if (typeof a.id !== 'string') return [];
+    if (typeof a.teammateId === 'string' && a.teammateId) noteTeammate(a.id);
     return [{
       id: a.id, type: typeof a.type === 'string' ? a.type : '', description: typeof a.description === 'string' ? a.description : '',
       status: typeof a.status === 'string' ? a.status : '', parentId: typeof a.parentId === 'string' ? a.parentId : null,
@@ -849,22 +878,36 @@ async function agentList($: Engine): Promise<ListedAgent[] | null> {
 }
 
 // $.agent.list() is the truth on each refresh; without it, event entries older than an hour are dropped. A teammate
-// idle between turns waits: it is not gone (E-09).
+// idle between turns waits: it is not gone (E-09). w8 M1: one spawned within LIST_GRACE_MS that no list named yet (it
+// has no status of the list's) stays, as its link does.
 function liveSubagents(now: number, list: ListedAgent[] | null): Activity['subagents'] {
   const fresh = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   if (!list) return fresh;
   const since = new Map(fresh.map(s => [s.id, s.since]));
+  const listed = new Set(list.map(a => a.id));
   const out: Activity['subagents'] = [];
   for (const a of list) {
     if (a.status !== 'running' && a.status !== 'pending' && a.status !== 'waiting' && a.status !== 'idle') continue;
     out.push({ id: a.id, type: a.type, ...(a.description ? { description: a.description } : {}), status: a.status, since: since.get(a.id) ?? now });
   }
-  // One that was running here and is gone from the list has ended: kept as finished (a later Stop finds nothing).
+  for (const s of fresh) if (!listed.has(s.id) && s.status === undefined && now - s.since <= LIST_GRACE_MS) out.push(s);
+  // One that was running here and is gone from the list has ended: kept as finished.
   const live = new Set(out.map(s => s.id));
   for (const s of fresh) if (!live.has(s.id)) recordFinished(s, now);
   // An id that is running again is not also finished.
   finished = withoutRunning(finished, out);
   return out.slice(-MAX_ACTIVITY);
+}
+
+// What the agents list says, taken in by a refresh or a photo: the subagents and the links it names, and the usage loop
+// of an agent agent.spawn did not label (lens loaded later, another spawn path) gets its type (w8 M1).
+function adoptListed(list: ListedAgent[] | null, now: number): void {
+  activity.subagents = liveSubagents(now, list);
+  if (list) {
+    links = syncListed(links, list, now, knownTasks(bandModel));
+    for (const a of list) if (a.type && usage.loops[a.id]?.kind === 'unknown') labelLoop(usage, a.id, a.type, a.description || undefined);
+  }
+  links = pruneLinks(links, now);
 }
 
 async function buildPanel($: Engine): Promise<PanelModel> {
@@ -968,11 +1011,8 @@ async function refreshPanel($: Engine, force = false): Promise<void> {
       try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
     }
     panelFiles = await loadPanelFiles($, now);
-    const list = await agentList($);
-    activity.subagents = liveSubagents(now, list);
     // E-09: the agents list is the truth for what it lists; a workflow's agents live by their own turn.
-    if (list) links = syncListed(links, list, now, knownTasks(bandModel));
-    links = pruneLinks(links, now);
+    adoptListed(await agentList($), now);
     // The tools in flight of an agent that ended go with it.
     for (const id of [...agentTools.keys()]) if (!links.some(l => l.id === id && l.status !== 'done')) agentTools.delete(id);
     await refreshUsage($, true);
@@ -1113,12 +1153,7 @@ async function takePhoto($: Engine): Promise<string> {
   try { panelFiles = await loadPanelFiles($, now); } catch { /* the files read last */ }
   // Carry 7: with the pane closed nothing asked the agents list; the photo asks it once, as a refresh does, so a subagent
   // that ended is not drawn as running.
-  try {
-    const list = await agentList($);
-    activity.subagents = liveSubagents(now, list);
-    if (list) links = syncListed(links, list, now, knownTasks(bandModel));
-    links = pruneLinks(links, now);
-  } catch { /* the agents heard of */ }
+  try { adoptListed(await agentList($), now); } catch { /* the agents heard of */ }
   const model = await buildPanel($);
   keepBand($, model);
   const t = textsFor(model.locale);
@@ -1333,7 +1368,7 @@ export const register: Register = on => {
     }
   });
 
-  // I-11: every hook that gates (ui.close, agent.spawn, tool.call and the classic ones) goes on when it fails.
+  // I-11: every hook that gates (ui.close, agent.spawn, tool.call) goes on when it fails.
   on('ui.close', async ($, e, next) => {
     const closed = await next(e);
     if (e.id === PANE) {
@@ -1360,13 +1395,17 @@ export const register: Register = on => {
       syncTurn();
       void refreshPanel($);
     } else {
-      // E-09: a workflow's agent, which no agents list names, ends with its own turn; one not linked yet (its spawn not
-      // answered) is ended when it is.
+      // w8 M1: an agent's run is one turn, so its end ends it (a workflow's, which no agents list names, too, E-09); a
+      // teammate goes idle instead. One not linked yet (its spawn not answered) is ended when it is.
       try {
         const id = e.agentId;
         const now = await nowMs($);
-        if (links.some(l => l.id === id)) links = endAgent(links, id, now);
-        else {
+        void touch($);
+        if (teammates.has(id)) { /* idle: the agents list says so */ }
+        else if (links.some(l => l.id === id) || activity.subagents.some(s => s.id === id)) {
+          endSubagent(id, now);
+          void noteActivity($);
+        } else {
           for (const [k, at] of pendingEnds) if (now - at > PENDING_END_MS) pendingEnds.delete(k);
           pendingEnds.delete(id);
           pendingEnds.set(id, now);
@@ -1392,7 +1431,8 @@ export const register: Register = on => {
 
   // A subagent's loop gets its type and description when it is spawned, and lens keeps which task it works on (E-02):
   // the task its prompt names, else its parent's; a workflow's agents too, which no agents list names (E-09). It only
-  // observes: the spawn goes on whatever lens makes of it.
+  // observes: the spawn goes on whatever lens makes of it. w8 M1: the spawn is where a subagent starts (a workflow's
+  // agents show under their workflow, not among the subagents, which the agents list keeps).
   on('agent.spawn', async ($, e, next) => {
     const r = await next(e);
     try {
@@ -1400,6 +1440,9 @@ export const register: Register = on => {
         labelLoop(usage, r.agentId, String(e.subagentType ?? 'unknown'), e.description);
         const wf = e.workflow;
         const now = await nowMs($);
+        void touch($);
+        if (e.isTeammate === true || r.teammateId) noteTeammate(r.agentId);
+        if (!wf) startSubagent(r.agentId, String(e.subagentType ?? ''), typeof e.description === 'string' ? e.description : '', now);
         links = linkSpawn(links, {
           id: r.agentId, type: String(e.subagentType ?? ''), description: String(e.description ?? ''), prompt: typeof e.prompt === 'string' ? e.prompt : '',
           parentId: typeof e.parentAgentId === 'string' ? e.parentAgentId : null,
@@ -1503,42 +1546,6 @@ export const register: Register = on => {
         void requestPanelWrite($);
       }
     }
-  }).catch(($, e, next) => next(e));
-
-  on('classic.SubagentStart', async ($, e, next) => {
-    try {
-      const id = String(e.agent_id);
-      finished = finished.filter(f => f.id !== id);
-      activity.subagents = pushCapped(activity.subagents.filter(s => s.id !== id), { id, type: clip(String(e.agent_type ?? ''), LINE_MAX), since: await nowMs($) });
-      // A loop agent.spawn did not label (lens loaded later, another spawn path) takes the hook's type.
-      const kind = usage.loops[id]?.kind;
-      if (!kind || kind === 'unknown') labelLoop(usage, id, String(e.agent_type ?? 'unknown'));
-      // E-09: an agent agent.spawn did not see (lens loaded later) is kept too, without a prompt to read its task from.
-      if (!links.some(l => l.id === id)) {
-        const now = await nowMs($);
-        links = linkSpawn(links, { id, type: String(e.agent_type ?? ''), description: '', prompt: '', parentId: null, workflow: null, now }, knownTasks(bandModel));
-        applyPendingEnd(id, now);
-      }
-      await touch($);
-      await noteActivity($);
-      void requestPanelWrite($);
-    } catch { /* ignore */ }
-    return next(e);
-  }).catch(($, e, next) => next(e));
-
-  on('classic.SubagentStop', async ($, e, next) => {
-    try {
-      void touch($);
-      const id = String(e.agent_id);
-      const ran = activity.subagents.find(s => s.id === id);
-      activity.subagents = activity.subagents.filter(s => s.id !== e.agent_id);
-      links = endAgent(links, id, await nowMs($), { any: true });
-      // Only a subagent still known here is listed (no start, no duration); one a refresh already dropped was recorded then.
-      if (ran) recordFinished(ran, await nowMs($));
-      void noteActivity($);
-      void requestPanelWrite($);
-    } catch { /* ignore */ }
-    return next(e);
   }).catch(($, e, next) => next(e));
 
   on('classic.TaskCreated', ($, e, next) => {

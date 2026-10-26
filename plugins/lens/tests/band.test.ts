@@ -372,10 +372,15 @@ test("lens's × on the subagents holds for those agents, and a new one brings th
   engineBand(on);
   const clock = start(on);
   on('command.list', () => ({ value: [] }));
-  on('classic.SubagentStart', () => ({}));
+  // w8 M1: a subagent starts at its spawn (the engine answers with the call's tool_use_id as its id).
+  on('agent.spawn', (_$, e) => ({ model: 'claude-sonnet-5-5', agentId: e.tool_use_id }));
+  const spawn = (id: string) => $.agent.spawn({
+    tool_use_id: id, prompt: 'Look around', description: '', subagentType: 'Explore', provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'claude-opus-5-5', background: true, fork: false,
+  } as never);
   const mount = () => $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
   await $.session.start(SESSION);
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' } as never);
+  await spawn('a1');
   await clock.advance(30_000);
   let ui = await mount();
   expect(await ui.find({ key: 'panel' })).toBeDefined();
@@ -385,7 +390,7 @@ test("lens's × on the subagents holds for those agents, and a new one brings th
   ui = await mount();
   expect(await ui.find({ key: 'panel' })).toBeUndefined();
   await ui.unmount();
-  await $.classic.SubagentStart({ agent_id: 'a2', agent_type: 'Explore' } as never);
+  await spawn('a2');
   await clock.advance(30_000);
   ui = await mount();
   expect(await ui.find({ key: 'panel' })).toBeDefined();
