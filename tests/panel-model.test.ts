@@ -238,7 +238,7 @@ describe('buildPanelModel', () => {
   });
   it('a run band gives the roadmap section too: progress, messages, decision and phase, without a task (E-10)', () => {
     const run: BandModel = {
-      mode: 'run', project: 'shop', locale: 'es', executor: 'subagents', running: 1, parallel: 3, integrated: 3, queued: 0, total: 12, slots: [], worst: 'alive', stalled: false,
+      mode: 'run', project: 'shop', locale: 'es', executor: 'subagents', running: 1, parallel: 3, integrated: 3, queued: 0, total: 12, slots: [], worst: 'alive', ended: null,
       roadmapUrl: null, sid: 'main-2', inbox: 2, escalation: true, percent: 25, phase: { index: 2, total: 4, name: 'API' }, viewer: { role: 'owner', coordinator: true, runId: 'r1' },
     };
     const m = buildPanelModel({ ...base, band: run });

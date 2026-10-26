@@ -39,6 +39,9 @@ export const TEXT = {
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
     panel: 'Panel', needs: 'te toca',
     run: 'EJECUCIÓN', subagents: 'subagentes', sessions: 'sesiones', silentSfx: 'sin señal', signalShort: 'señal', stoppedSfx: 'parada', stopRun: 'Parar',
+    // w8 W1: why a run that is no longer active ended; «parada» is only an active run without heartbeat.
+    ended: { finished: 'terminada', stalled: 'atascada', stopped: 'detenida con /forge:stop', budget: 'sin presupuesto' },
+    endedShort: { finished: 'terminada', stalled: 'atascada', stopped: 'detenida', budget: 'presupuesto' },
     integratedN: 'integradas', queuedN: 'por integrar', memberOf: 'de la ejecución de {c}',
     otherTrack: 'Otro frente', view: 'Ver', join: 'Unirme', resume: 'Retomar', release: 'Liberar', close: 'Cerrar',
     stopFilled: '/forge:stop está en el prompt: pulsa Enter para parar toda la ejecución',
@@ -57,7 +60,7 @@ export const TEXT = {
     noticeOtherDesign: 'otra sesión ({seat}) trabaja en el diseño',
     noticeOtherRun: 'ejecución de forge en curso, la coordina otra sesión',
     noticePrevTask: 'quedó a medias:', noticePrevDesign: 'diseño a medias:',
-    noticeRunStopped: 'ejecución parada:', noticeRunOrphan: 'ejecución sin coordinadora:',
+    noticeRunStopped: 'ejecución parada:', noticeRunFinished: 'ejecución terminada:', noticeRunOrphan: 'ejecución sin coordinadora:',
     noticeRunOpen: 'ejecución parada, abierta en otra conversación:', openElsewhere: 'en otra conversación',
     stage: { brief: 'brief', implement: 'implementar', validate: 'validar', verify: 'verificar', review: 'revisar', verdict: 'veredicto', integrate: 'integrar', execution: 'ejecución' },
   },
@@ -71,6 +74,8 @@ export const TEXT = {
     pressEnter: 'Command ready in the prompt: press Enter',
     panel: 'Panel', needs: 'waiting for you',
     run: 'EXECUTION', subagents: 'subagents', sessions: 'sessions', silentSfx: 'no signal', signalShort: 'signal', stoppedSfx: 'stopped', stopRun: 'Stop',
+    ended: { finished: 'finished', stalled: 'stalled', stopped: 'stopped with /forge:stop', budget: 'out of budget' },
+    endedShort: { finished: 'finished', stalled: 'stalled', stopped: 'stopped', budget: 'budget' },
     integratedN: 'integrated', queuedN: 'to integrate', memberOf: "in {c}'s execution",
     otherTrack: 'Other track', view: 'View', join: 'Join', resume: 'Resume', release: 'Release', close: 'Close',
     stopFilled: '/forge:stop is in the prompt: press Enter to stop the whole execution',
@@ -89,7 +94,7 @@ export const TEXT = {
     noticeOtherDesign: 'another session ({seat}) is working on the design',
     noticeOtherRun: 'forge execution running, coordinated by another session',
     noticePrevTask: 'left in progress:', noticePrevDesign: 'design left in progress:',
-    noticeRunStopped: 'execution stopped:', noticeRunOrphan: 'execution without a coordinator:',
+    noticeRunStopped: 'execution stopped:', noticeRunFinished: 'execution finished:', noticeRunOrphan: 'execution without a coordinator:',
     noticeRunOpen: 'execution stopped, open in another conversation:', openElsewhere: 'open elsewhere',
     stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', execution: 'execution' },
   },
@@ -168,13 +173,23 @@ function designParts(m: Extract<BandModel, { mode: 'design' }>, t: Texts): BandP
   return [...parts, ...autoPart(m)];
 }
 
+// w8 W1: how an ended run says why: a finished one plain with ✓, one stopped with /forge:stop plain with ■, and one
+// that stalled or ran out of budget in the alert colour with ▲, as it waits for the person.
+const ENDED_MARK = { finished: '✓', stalled: '▲', stopped: '■', budget: '▲' } as const;
+function endedPart(ended: NonNullable<Extract<BandModel, { mode: 'run' }>['ended']>, t: Texts): BandPart {
+  const mark = ENDED_MARK[ended];
+  return { key: 'state', text: `${mark} ${t.ended[ended]}`, short: `${mark} ${t.endedShort[ended]}`, prio: 2, ...(mark === '▲' ? { hue: 'alert' as const } : {}) };
+}
+
 // The coordinator's run band: its head with the mode and the slots running, every slot (E-04), one count of what is
-// integrated (F-10), those waiting to integrate, the liveness warning, the inbox and a pending decision.
+// integrated (F-10), those waiting to integrate, the liveness warning, the inbox and a pending decision. A run that
+// ended (w8 W1) says why instead of its slots and liveness.
 function runParts(m: Extract<BandModel, { mode: 'run' }>, t: Texts): BandPart[] {
-  const parts: BandPart[] = m.stalled
-    ? [{ key: 'head', text: `► ${t.run}`, prio: 9 }, { key: 'state', text: `▲ ${t.stoppedSfx}`, prio: 2, hue: 'alert' }]
+  const ended = m.ended ?? null;
+  const parts: BandPart[] = ended
+    ? [{ key: 'head', text: `► ${t.run}`, prio: 9 }, endedPart(ended, t)]
     : [{ key: 'head', text: `► ${t.run} · ${m.executor === 'sessions' ? t.sessions : t.subagents} ${m.running}/${m.parallel}`, short: `► ${m.running}/${m.parallel}`, prio: 5 }];
-  if (!m.stalled) {
+  if (!ended) {
     for (const s of m.slots) {
       const id = clip(s.task, SLOT_ID_MAX);
       const round = s.round > 1 ? s.round : 0;
@@ -190,7 +205,7 @@ function runParts(m: Extract<BandModel, { mode: 'run' }>, t: Texts): BandPart[] 
   }
   parts.push({ key: 'integrated', text: `${m.integrated}/${m.total} ${t.integratedN}`, short: `${m.integrated}/${m.total}`, prio: 5 });
   if ((m.queued ?? 0) > 0) parts.push({ key: 'queued', text: `${t.queuedN} ${m.queued}`, prio: 8 });
-  if (!m.stalled && m.worst !== 'alive') {
+  if (!ended && m.worst !== 'alive') {
     const silent = m.worst === 'silent';
     parts.push({ key: 'state', text: `▲ ${silent ? t.silentSfx : t.stoppedSfx}`, short: `▲ ${silent ? t.signalShort : t.stoppedSfx}`, prio: 2, hue: 'alert' });
   }
@@ -219,8 +234,10 @@ function noticeParts(m: NoticeBand, nowMs: number, t: Texts): BandPart[] {
     return m.task ? [lead, { key: 'task', text: m.task, prio: 4, hue: dim, glue: ' ' }, ...agoPart] : [lead, ...agoPart];
   }
   if (m.subject === 'run') {
+    // w8 W1: a run that finished reads finished, never stopped.
     const lead = m.coordinatorOpen ? { text: t.noticeRunOpen, short: t.openElsewhere }
-      : m.stopReason ? { text: t.noticeRunStopped, short: t.stoppedSfx } : { text: t.noticeRunOrphan, short: t.noCoordinator };
+      : m.stopReason === 'finished' ? { text: t.noticeRunFinished, short: t.ended.finished }
+        : m.stopReason ? { text: t.noticeRunStopped, short: t.stoppedSfx } : { text: t.noticeRunOrphan, short: t.noCoordinator };
     return [
       { key: 'notice', text: `◌ ${lead.text}`, short: `◌ ${lead.short}`, prio: 2, hue: dim },
       { key: 'count', text: `${count} ${t.integratedN}`, short: count, prio: 5, hue: dim, glue: ' ' },

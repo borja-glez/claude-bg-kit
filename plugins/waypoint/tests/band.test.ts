@@ -96,7 +96,7 @@ const WORK: WaypointBand = {
 };
 const RUN: WaypointBand = {
   mode: 'run', project: 'demo', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, queued: 0, total: 12,
-  slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false,
+  slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', ended: null,
   roadmapUrl: 'https://claude.ai/artifact/roadmap', sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: COORDINATOR,
 };
 type Notice = Extract<WaypointBand, { mode: 'notice' }>;
@@ -203,6 +203,34 @@ test('the run band shows the execution, stops it and offers no per-session work 
     expect(sent.at(-1)).toBe('/forge:stop');
     expect(await ui.find({ type: 'Button', text: 'Siguiente tarea' })).toBeUndefined();
     expect(await ui.find({ type: 'Button', text: 'Lanzar sesión en un frente…' })).toBeUndefined();
+    await ui.unmount();
+  }
+});
+
+// w8 W1: a run that ended is not stopped again. A finished one reads finished, with no Stop and no Close (a merge closes
+// it); one that stalled, was stopped or ran out of budget says why and offers Close (/forge:stop, sent at once).
+test('the run band of an ended run says why, without Stop', async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  recordCommands(on, sent);
+  let band: WaypointBand = RUN;
+  serveBand(on, () => band);
+  const ended = (why: 'finished' | 'stalled' | 'stopped' | 'budget'): WaypointBand => ({ ...RUN, ended: why, running: 0, slots: [], worst: 'stopped', integrated: why === 'finished' ? 12 : 3 } as WaypointBand);
+  band = ended('finished');
+  let ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await lineOf(ui)).toBe('► EJECUCIÓN · ✓ terminada · 12/12 integradas');
+  expect(await ui.find({ key: 'stop-run' })).toBeUndefined();
+  expect(await ui.find({ key: 'close' })).toBeUndefined();
+  expect(await ui.find({ type: 'Button', text: 'Estado' })).toBeDefined();
+  await ui.unmount();
+  for (const [why, line] of [['stalled', '▲ atascada'], ['stopped', '■ detenida con /forge:stop'], ['budget', '▲ sin presupuesto']] as const) {
+    band = ended(why);
+    ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+    expect(await lineOf(ui), why).toBe(`► EJECUCIÓN · ${line} · 3/12 integradas`);
+    expect(await ui.find({ key: 'stop-run' }), why).toBeUndefined();
+    expect(await ui.find({ type: 'Button', text: 'Cerrar' }), why).toBeDefined();
+    await ui.press({ key: 'close' });
+    expect(sent.at(-1), why).toBe('/forge:stop');
     await ui.unmount();
   }
 });
