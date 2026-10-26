@@ -276,7 +276,10 @@ describe('the runner agent and the coordinator text (A10)', () => {
     const line = handing.split('\n').find(l => l.includes('returns as text'))!;
     for (const w of ['<WORK>/deliverable-<n>.txt', 'never under its own name', '`deliverable <path>: text in <WORK>/deliverable-<n>.txt`', 'the coordinator writes it']) expect(line, w).toContain(w);
     const step = doc('plugins/forge/skills/run/references/step.md').split('\n').find(l => l.trimStart().startsWith('- `handback` ('))!;
-    for (const w of ['`deliverable <path>: text in <file>`', 'with the Write tool', 'commit it there']) expect(step, w).toContain(w);
+    for (const w of ['`deliverable <path>: text in <file>`', 'with the Write tool', 'commit it there', 'review the tree without that commit',
+      'makes `integrate` send the task back to review (`unreviewed`)']) expect(step, w).toContain(w);
+    // The step already took the task up: its actions are followed as they are, never held for the deliverable.
+    expect(step).not.toContain('before you follow');
   });
   it('forge-runner hands back a refusal, a refusal an agent got around and a brief left partly undone, and never works around one itself', () => {
     const md = doc('plugins/forge/agents/forge-runner.md');
