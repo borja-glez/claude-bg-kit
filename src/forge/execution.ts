@@ -153,15 +153,60 @@ function takeoverGate(lock: string, d: Required<LockDeps>): (() => void) | null 
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
     }
-    let text: string;
-    try { text = readFileSync(gate, 'utf8'); } catch { continue; }
-    let at = NaN;
-    try { at = Date.parse((JSON.parse(text) as { at?: string }).at ?? ''); } catch { at = NaN; }
-    if (!Number.isFinite(at)) { try { at = statSync(gate).mtimeMs; } catch { continue; } }
-    if (d.now().getTime() - at < d.staleMs) return null;
-    removeFileIf(gate, text);
+    const g = readGate(gate);
+    if (!g) continue;
+    if (d.now().getTime() - g.at < d.staleMs) return null;
+    removeFileIf(gate, g.text);
   }
   return null;
+}
+
+// A takeover gate's text and when it was taken: its `at`, else its mtime. Null when it cannot be read (gone meanwhile).
+function readGate(gate: string): { text: string; at: number } | null {
+  let text: string;
+  try { text = readFileSync(gate, 'utf8'); } catch { return null; }
+  let at = NaN;
+  try { at = Date.parse((JSON.parse(text) as { at?: string }).at ?? ''); } catch { at = NaN; }
+  if (!Number.isFinite(at)) { try { at = statSync(gate).mtimeMs; } catch { return null; } }
+  return { text, at };
+}
+
+const lockDeps = (deps: LockDeps): Required<LockDeps> => ({
+  now: deps.now ?? (() => new Date()), sleep: deps.sleep ?? sleepSync, alive: deps.alive ?? pidAlive,
+  waitMs: deps.waitMs ?? LOCK_WAIT_MS, staleMs: deps.staleMs ?? LOCK_STALE_MS,
+});
+
+/**
+ * FC2: removes the lock `file` when it is stale (lockFileState: its pid gone, or older than `staleMs`), through its
+ * takeover gate as acquireLock does: never while another process takes it over, and never a lock that changed since it
+ * was read. True when it removed it.
+ */
+export function removeStaleLock(file: string, deps: LockDeps = {}): boolean {
+  const d = lockDeps(deps);
+  const s = lockFileState(file, d.now(), d.alive, d.staleMs);
+  if (!s.held || !s.stale) return false;
+  const h = lockHolder(file);
+  const release = takeoverGate(file, d);
+  if (!release) return false;
+  try {
+    if (JSON.stringify(lockHolder(file)) !== JSON.stringify(h)) return false;
+    rmSync(file, { force: true });
+    return true;
+  } finally { release(); }
+}
+
+/** FC2: whether a takeover gate (<lock>.takeover) was left behind: taken `staleMs` ago or more (LOCK_STALE_MS). */
+export function staleGate(gate: string, deps: LockDeps = {}): boolean {
+  const d = lockDeps(deps);
+  const g = readGate(gate);
+  return !!g && d.now().getTime() - g.at >= d.staleMs;
+}
+
+/** FC2: removes a takeover gate left behind (staleGate), only while it is still the file that was read. */
+export function removeStaleGate(gate: string, deps: LockDeps = {}): boolean {
+  const d = lockDeps(deps);
+  const g = readGate(gate);
+  return !!g && d.now().getTime() - g.at >= d.staleMs && removeFileIf(gate, g.text);
 }
 
 /** A lock a live process still held after the wait: `holder` is its pid, null when its file could not be read. */
@@ -222,10 +267,7 @@ function releaseLock(file: string, mine: Holder): void {
  * `waitMs` (LOCK_WAIT_MS); then it throws LockBusyError, and `fn` never ran.
  */
 export function withFileLock<T>(file: string, fn: () => T, deps: LockDeps = {}): T {
-  const d: Required<LockDeps> = {
-    now: deps.now ?? (() => new Date()), sleep: deps.sleep ?? sleepSync, alive: deps.alive ?? pidAlive,
-    waitMs: deps.waitMs ?? LOCK_WAIT_MS, staleMs: deps.staleMs ?? LOCK_STALE_MS,
-  };
+  const d = lockDeps(deps);
   const mine = acquireLock(file, d);
   try { return fn(); } finally { releaseLock(file, mine); }
 }
