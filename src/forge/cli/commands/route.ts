@@ -1,5 +1,5 @@
 import type { Command } from '../context.js';
-import { lstatSync, readFileSync, readdirSync, rmSync, rmdirSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { readExecution } from '../../execution.js';
 import { planLocale } from '../../../lib/locale.js';
@@ -114,7 +114,13 @@ export const command: Command = (args, ctx) => {
     const main = mainCheckout(io.cwd);
     const cur = readRoute(main, session);
     if (!cur || (flag('task') !== undefined && flag('task') !== cur.task)) return json({ updated: false });
-    const next = stagedRoute(cur, stage as RouteStage, ts(), files);
+    // w8 fix round 1: when the spec was written, read where the session runs, else in the main checkout.
+    const specMtime = (rel: string | undefined): number | null => {
+      if (rel === undefined) return null;
+      for (const dir of [io.cwd, main]) { try { return statSync(path.resolve(dir, rel)).mtimeMs; } catch { /* not there */ } }
+      return null;
+    };
+    const next = stagedRoute(cur, stage as RouteStage, ts(), files, specMtime(files.spec));
     writeRoute(main, next);
     return json({ updated: true, ...next });
   }

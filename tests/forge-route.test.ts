@@ -233,6 +233,15 @@ describe('forge route CLI', () => {
   });
   it("a spec handed off from brainstorming on this session's superpowers-design route is recorded as approved; any other is not (w8 FR4)", () => {
     const spec = 'docs/superpowers/specs/2026-10-26-cart-design.md';
+    // Fix round 1: the spec brainstorming wrote on this route, so written after the route was set (io.now()).
+    const write = (rel: string, at: Date) => {
+      mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      writeFileSync(path.join(root, rel), '# Cart\n');
+      utimesSync(path.join(root, rel), at, at);
+    };
+    const later = new Date(io.now().getTime() + 3600_000);
+    write(spec, later);
+    write('docs/superpowers/specs/other-design.md', later);
     const stage = (...extra: string[]) => JSON.parse(run(['route', 'stage', '--stage', 'handed-off', ...extra], io).stdout);
     run(['route', 'set', '--task', 't1', '--chosen', 'superpowers-design', '--by', 'user'], io);
     expect(stage('--spec', spec)).toMatchObject({ updated: true, stage: 'handed-off', spec, specApproved: true });
@@ -252,6 +261,19 @@ describe('forge route CLI', () => {
     // A hand-written route file cannot claim it without its spec.
     writeRoute(root, { task: 't5', chosen: 'superpowers-design', by: 'user', stage: 'handed-off', ts: '2026-10-13T10:00:00.000Z', session: 'sess-0', specApproved: true });
     expect(readRoute(root, 'sess-0')).not.toHaveProperty('specApproved');
+    // Fix round 1: an older draft the person switched to, written before the route, or a spec that is not there, is not
+    // the one brainstorming had approved.
+    const old = 'docs/superpowers/specs/2026-09-01-old-design.md';
+    write(old, new Date(io.now().getTime() - 24 * 3600_000));
+    for (const s of [old, 'docs/superpowers/specs/missing-design.md']) {
+      run(['route', 'set', '--task', 't6', '--chosen', 'superpowers-design', '--by', 'user'], io);
+      expect(stage('--spec', s), s).toMatchObject({ updated: true, spec: s });
+      expect(readRoute(root, 'sess-0'), s).not.toHaveProperty('specApproved');
+    }
+    // Written in the same second as the route (a coarse file clock) still counts.
+    run(['route', 'set', '--task', 't7', '--chosen', 'superpowers-design', '--by', 'user'], io);
+    write(old, new Date(io.now().getTime() + 400));
+    expect(stage('--spec', old)).toMatchObject({ specApproved: true });
   });
   it('stage without a route updates nothing', () => {
     expect(JSON.parse(run(['route', 'stage', '--stage', 'done'], io).stdout)).toEqual({ updated: false });
