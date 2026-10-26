@@ -172,6 +172,8 @@ test('a task this session touched with forge.cjs is its own although its status 
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
+  // w8 M3: /lens answers before the files are read; the read settles right after.
+  await clock.advance(0);
   expect(panel.last?.activities).toEqual([]);
   await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T009-1 --path medium', tool_use_id: 'b1' } as never);
   await clock.advance(10_000);
@@ -215,6 +217,7 @@ test('forge.cjs --task T001-1 makes the T001 row own when its status names no se
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(panel.last?.activities).toMatchObject([{ key: 'T001', owner: 'other' }]);
   await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T001-1 --path medium', tool_use_id: 'b1' } as never);
   await clock.advance(10_000);
@@ -232,6 +235,7 @@ test('with the session id unreadable, a task this session touched stays own and 
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
+  await clock.advance(0);
   // Before any forge.cjs call the status that names another session is another's, dim: ownTasks makes the difference.
   expect(panel.last?.activities).toMatchObject([{ key: 'T005', owner: 'other', dim: true }]);
   await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T005 --path medium', tool_use_id: 'b1' } as never);

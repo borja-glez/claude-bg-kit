@@ -209,6 +209,8 @@ test('once the pane is closed and nothing is going on, nothing under .forge/ is 
   const clock = start(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
+  // w8 M3: /lens answers before the files are read; the read settles right after.
+  await clock.advance(0);
   expect(touched).toContain(`${ROOT}/.forge/status.json`);
   const pane = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
   // The test kit cannot raise ui.close: the engine's own ✕ takes the pane away, and the next refresh sees it gone.
@@ -241,6 +243,7 @@ test('proposal files are re-read only when the proposals listing changes', async
   const clock = start(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
+  await clock.advance(0);
   const file = `${ROOT}/.forge/proposals/${ID}.json`;
   expect(touched).toContain(file);
   touched.length = 0;
@@ -494,6 +497,7 @@ test('lens reads at most the 20 newest statuses, none over 64 KiB, and reads one
   const clock = start(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
+  await clock.advance(0);
   const reads = () => touched.filter(p => /\/\.forge\/status\/[^/]+\.json$/.test(p));
   expect(reads()).toHaveLength(20);
   expect(reads()).not.toContain(`${ROOT}/.forge/status/BIG.json`);

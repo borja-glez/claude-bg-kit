@@ -410,6 +410,8 @@ test('once the pane is closed no panel state is written, and the band reads file
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
+  // w8 M3: /lens answers before the files are read; the read settles right after.
+  await clock.advance(0);
   expect(reads.length).toBeGreaterThan(0);
   expect(written).toContain('lens.panel');
   const pane = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
@@ -644,7 +646,7 @@ test('inline, the pane draws its cards without a frame and says how many rows it
   await docked.unmount();
 });
 
-test('the first /lens, with no model yet, asks for the rows its cards take, reading the files once (carry 5)', async ($, on) => {
+test('the first /lens, with no model yet, asks for the pane at once with the rows of what lens holds, reads the files once after, and the next /lens asks for the rows its cards take (carry 5, w8 M3)', async ($, on) => {
   const reads: string[] = [];
   serveFiles(on, reads);
   const opened: { rows?: number }[] = [];
@@ -655,16 +657,21 @@ test('the first /lens, with no model yet, asks for the rows its cards take, read
     const { Text } = $.ui.resolve(e);
     return h(Text, {}, 'engine band') as RenderElement;
   });
-  start(on);
+  const clock = start(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   // A terminal of 60 rows on the main screen: a third of it is 20.
   const band = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS, viewport: { columns: 100, rows: 60, isFullscreen: false } });
   await band.unmount();
   reads.length = 0;
-  await $.command.run({ ...RUN, args: 'live', presentation: { isFullscreen: false, columns: 100 } });
-  expect(opened.at(-1)?.rows).toBeGreaterThan(6);
-  expect(reads.filter(p => p.endsWith('/new/progress.md'))).toHaveLength(1);
+  const live = { ...RUN, args: 'live', presentation: { isFullscreen: false, columns: 100 } };
+  await $.command.run(live);
+  // Nothing read yet: the rows of the cards lens holds in memory, here none, so the fewest.
+  expect(opened.at(-1)?.rows).toBe(6);
   expect(open.has(PANE)).toBe(true);
+  await clock.advance(0);
+  expect(reads.filter(p => p.endsWith('/new/progress.md'))).toHaveLength(1);
+  await $.command.run(live);
+  expect(opened.at(-1)?.rows).toBeGreaterThan(6);
 });
 
 test('/lens asks for the rows its compact cards take, between 6 and a third of the screen, and 56 columns where it docks (F-01)', async ($, on) => {
@@ -744,4 +751,61 @@ test('inline at one row the pane draws one row: the kept card clipped, its title
   expect(text.endsWith('…')).toBe(true);
   expect(rowsOf(await ui.drawn())).toBe(1);
   await ui.unmount();
+});
+
+// w8 M3: forge's files caught half written (an execution, a live signal, a status, a job) beside a run's own.
+const AT = (min: number) => new Date(NOW + min * 60_000).toISOString();
+const EXEC = JSON.stringify({
+  runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+  coordinator: 'main', hookSession: SESSION_ID, active: true, stopReason: null, stallReason: null, startedAt: AT(-60), lastStepAt: AT(-1), lastBlockStep: null, sleepUntil: null,
+  tasks: Object.fromEntries(['T001', 'T002', 'T003'].map(t => [t, { status: 'running', stage: 'implement', round: 0, worktree: '/w', branch: `task/${t}`, executor: 'subagents', attempts: 0, agent: 'forge-impl', startedAt: AT(-20), stageSince: AT(-3), updatedAt: AT(-1), detail: null, title: `Task ${t}` }])),
+});
+const PARTIAL_FORGE: Record<string, { text: string; mtimeMs: number }> = {
+  [`${ROOT}/.forge/execution.json`]: { text: EXEC.slice(0, Math.floor(EXEC.length / 2)), mtimeMs: NOW },
+  [`${ROOT}/.forge/live/${SESSION_ID}.json`]: { text: `{"sessionId":"${SESSION_ID}","role":"coordinator","ts":"2026-10`, mtimeMs: NOW },
+  [`${ROOT}/.forge/status/shop__T001.json`]: { text: '{"ts":"2026-10-11T10:04:00.000Z","task":"T00', mtimeMs: NOW },
+  [`${ROOT}/.forge/execution/T002.json`]: { text: '{"task":"T002","runId":', mtimeMs: NOW },
+  [`${ROOT}/.forge/jobs/validate-T001-1-42.json`]: { text: '{"name":"validate-T0', mtimeMs: NOW },
+};
+
+test('/lens live answers at once with four agents working and forge files half written: the pane is asked for before any file is read, and filled after (w8 M3)', async ($, on) => {
+  const reads: string[] = [];
+  serveFiles(on, reads, PARTIAL_FORGE);
+  const readBeforeOpen: string[][] = [];
+  servePanes(on, () => { readBeforeOpen.push([...reads]); return { isPlaced: true }; });
+  const clock = mock.clock(on, { now: NOW });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  const ids = ['a1', 'a2', 'a3', 'a4'];
+  on('agent.list', () => ({ value: ids.map(id => ({ id, type: 'forge:forge-impl', description: `implement ${id}`, status: 'running' })) as never }));
+  serveSpawns(on);
+  // Their tools in flight while the person presses Panel.
+  on('tool.call', () => new Promise<never>(() => {}));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  ids.forEach((id, i) => { void $.agent.spawn({ ...(spawnOf(id, 'forge:forge-impl', `implement ${id}`) as object), prompt: `forge-task: T00${i + 1}-1 @shop` } as never); });
+  await clock.advance(10);
+  for (const id of ids) void $.tool.call({ tool: 'Read', agentId: id, tool_use_id: `r-${id}`, file_path: '/repo/x' } as never);
+  reads.length = 0;
+  const ran = await $.command.run({ ...RUN, args: 'live' });
+  expect(ran.text).toBe('Progress panel opened.');
+  expect(readBeforeOpen).toEqual([[]]);
+  await clock.advance(1000);
+  expect(reads).toContain(`${ROOT}/.forge/execution.json`);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  const text = await said(ui);
+  for (const id of ids) expect(text).toContain(`implement ${id}`);
+  await ui.unmount();
+  // The photo reads them first, and answers too.
+  expect((await $.command.run({ ...RUN, args: 'foto' })).text).toMatch(/^lens · \d{2}:\d{2}:\d{2} #1 · /);
+});
+
+test('/lens that fails answers with a readable reason and leaves it in the debug log, never the bare registered command (w8 M3)', async ($, on) => {
+  serveFiles(on, []);
+  const logs: { text: string; to: string }[] = [];
+  on('ui.log', (_$, e) => { logs.push({ text: e.text, to: e.to }); return { value: undefined }; });
+  on('ui.open', () => ({ deny: 'no surface can seat it' }));
+  start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  const ran = await $.command.run({ ...RUN, args: 'live' });
+  expect(ran.text).toMatch(/^lens could not answer \/lens: .*no surface can seat it.*debug log/);
+  expect(logs).toContainEqual({ to: 'debug', text: expect.stringContaining('no surface can seat it') });
 });

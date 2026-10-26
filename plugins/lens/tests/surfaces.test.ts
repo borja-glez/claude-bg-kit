@@ -126,6 +126,8 @@ test('a verdict and a new round make one toast without the score, none on the fi
   const clock = start(on);
   await $.session.start(SESSION);
   await $.command.run(RUN);
+  // w8 M3: /lens answers before the files are read; the read settles right after.
+  await clock.advance(0);
   expect(toasts).toEqual([]);
   files[T2] = status('T002', { phase: 'implement', round: 2, verdict: { action: 'fix', score: 0.4, round: 1, findings: { critical: 1, important: 2, minor: 0 } } });
   await $.turn.complete(MAIN_TURN);
@@ -158,6 +160,7 @@ test('a run this conversation coordinates that stops after 20 minutes is notifie
   const clock = start(on);
   await $.session.start(SESSION);
   await $.command.run(RUN);
+  await clock.advance(0);
   files[`${ROOT}/.forge/execution.json`] = exec(stalled);
   await clock.advance(10_000);
   expect(notes).toEqual(['Ejecución parada: sin señal 12 min']);
@@ -226,6 +229,7 @@ test('an accept written together with doneAt still makes its toast (fix 2)', asy
   const clock = start(on);
   await $.session.start(SESSION);
   await $.command.run(RUN);
+  await clock.advance(0);
   files[T2] = status('T002', { phase: 'stopped', round: 2, doneAt: at(0), lastAt: at(0), verdict: { action: 'accept', score: 0.9, round: 2, findings: null } });
   await $.turn.complete(MAIN_TURN);
   await clock.advance(1000);
@@ -244,6 +248,7 @@ test('a burst keeps the queue and the joined toast short, and one 5 s gap (fix 3
   on('ui.toast', (_$, e) => { toasts.push({ at: elapsed, text: e.text }); return { value: undefined }; });
   await $.session.start(SESSION);
   await $.command.run(RUN);
+  await clock.advance(0);
   for (const id of ids) {
     files[`${ROOT}/.forge/status/${id}.json`] = status(id, { phase: 'implement', round: 2, verdict: { action: 'fix', score: 0.4, round: 1, findings: { critical: 1, important: 2, minor: 0 } } });
   }
@@ -328,11 +333,12 @@ test('/clear takes the status line away (fix 4)', async ($, on) => {
   const lines: (string | undefined)[] = [];
   on('ui.status', (_$, e) => { lines.push(e.text); return { value: undefined }; });
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
-  start(on);
+  const clock = start(on);
   await $.session.start(SESSION);
   const band = await $.ui.mount(BAND_AT({ columns: 105, rows: 30, isFullscreen: false }));
   await band.unmount();
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(lines.at(-1)).toBe('lens · T002 review r2');
   await $.session.end({ reason: 'clear', sessionId: SESSION_ID, resume: {} as never });
   expect(lines.at(-1)).toBeUndefined();
@@ -355,6 +361,7 @@ test('a notification the terminal cannot send falls back to a toast (fix 4)', as
   const clock = start(on);
   await $.session.start(SESSION);
   await $.command.run(RUN);
+  await clock.advance(0);
   files[`${ROOT}/.forge/execution.json`] = exec({ active: false, stopReason: 'stalled', stallReason: 'sin señal 12 min', lastStepAt: at(2) });
   await clock.advance(10_000);
   expect(toasts).toEqual(['Ejecución parada: sin señal 12 min']);

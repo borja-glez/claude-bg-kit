@@ -104,12 +104,13 @@ test('a main-loop turn.step is measured and passed through unchanged', async ($,
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   const r = await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'high', messageCount: 1 }));
   expect(r).toEqual(stepResult({ input_tokens: 1_000_000 }, 'claude-opus-5-5'));
   await $.command.run(RUN);
+  await clock.advance(0);
   const m = panel.last;
   expect(m?.mainModel).toEqual({ model: 'claude-opus-5-5', effort: 'high' });
   expect(m?.usage.costUsd).toBeGreaterThan(3.99);
@@ -120,11 +121,13 @@ test('a main-loop turn.step is measured and passed through unchanged', async ($,
 test('with .forge/ in the root a refresh writes the session usage file', async ($, on) => {
   const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' });
   servePanes(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'high', messageCount: 1 }));
   await $.command.run(RUN);
+  // w8 M3: /lens answers before the files are read; the read settles right after.
+  await clock.advance(0);
   const text = written[`${ROOT}/.forge/usage/${SESSION}.json`];
   expect(text).toBeDefined();
   const file = JSON.parse(text!);
@@ -151,12 +154,13 @@ test('without .forge/ no usage file is written', async ($, on) => {
 test('the session end writes the usage file even within 30 s of the last write', async ($, on) => {
   const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' });
   servePanes(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   const path = `${ROOT}/.forge/usage/${SESSION}.json`;
   expect(JSON.parse(written[path]!).loops.main.steps).toBe(1);
   await drain($.turn.step({ turnId: 't1', index: 1, model: 'claude-opus-5-5', messageCount: 2 }));
@@ -168,7 +172,7 @@ test('a spawned subagent gets its type, and its own turn.step puts its model on 
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
-  start(on, [{ id: 'a1', type: 'forge:forge-impl', description: 'Implement T07', status: 'running' }]);
+  const clock = start(on, [{ id: 'a1', type: 'forge:forge-impl', description: 'Implement T07', status: 'running' }]);
   serveSteps(on);
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
@@ -179,6 +183,7 @@ test('a spawned subagent gets its type, and its own turn.step puts its model on 
   expect(spawned).toEqual({ model: 'claude-sonnet-5-5', agentId: 'a1' });
   await drain($.turn.step({ turnId: 't2', index: 0, model: 'claude-sonnet-5-5', effort: 'medium', messageCount: 1, agentId: 'a1' }));
   await $.command.run(RUN);
+  await clock.advance(0);
   const m = panel.last;
   expect(m?.subagents[0]).toMatchObject({ id: 'a1', model: 'claude-sonnet-5-5', effort: 'medium' });
   expect(m?.usage.groups.map((g: { id: string }) => g.id)).toContain('impl');
@@ -189,7 +194,7 @@ test('a main-loop waypoint call counts as tracking and its result is returned un
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ok' } as never, text: 'x'.repeat(400) }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
@@ -197,6 +202,7 @@ test('a main-loop waypoint call counts as tracking and its result is returned un
   const r = await $.tool.call({ tool: 'Bash', command: 'node waypoint.cjs status' } as never);
   expect(r).toMatchObject({ text: 'x'.repeat(400) });
   await $.command.run(RUN);
+  await clock.advance(0);
   const m = panel.last;
   expect(m?.usage.tracking.tokens).toBeGreaterThanOrEqual(100);
 });
@@ -216,11 +222,12 @@ test('with a forge run, the panel sums every session file updated since the run 
   });
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   const m = panel.last;
   expect(m?.usage.scope).toBe('run');
   expect(m?.usage.costUsd).toBeGreaterThan(7.99);
@@ -258,11 +265,12 @@ test('the agents list labels a loop agent.spawn did not (w8 M1: no classic Subag
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
-  start(on, [{ id: 'a9', type: 'forge:forge-review-security', status: 'running' }]);
+  const clock = start(on, [{ id: 'a9', type: 'forge:forge-review-security', status: 'running' }]);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't3', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, agentId: 'a9' }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(panel.last?.usage.groups.map((g: { id: string }) => g.id)).toContain('review');
 });
 
@@ -280,6 +288,7 @@ test('usage files are re-read one by one only when they change, and not on every
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(reads).toContain(`${ROOT}/.forge/usage/sess-2.json`);
   expect(reads).toContain(`${ROOT}/.forge/usage/sess-3.json`);
   // Panel writes between refreshes read no run file.
@@ -303,11 +312,12 @@ test('a resumed session continues its own usage file when its start matches', as
   const written = serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: usageFile(SESSION) });
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(panel.last?.usage.costUsd).toBeGreaterThan(7.99);
   expect(JSON.parse(written[`${ROOT}/.forge/usage/${SESSION}.json`]!).loops.main.steps).toBe(4);
 });
@@ -316,11 +326,12 @@ test('a session file with another start is not continued', async ($, on) => {
   const old = usageFile(SESSION, { startedAt: new Date(NOW - 7200_000).toISOString() });
   const written = serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: old });
   servePanes(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(JSON.parse(written[`${ROOT}/.forge/usage/${SESSION}.json`]!).loops.main.steps).toBe(1);
 });
 
@@ -333,6 +344,7 @@ test('an unchanged count is not written again on the tick', async ($, on) => {
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(writes).toHaveLength(1);
   await clock.advance(70_000);
   expect(writes).toHaveLength(1);
@@ -487,6 +499,7 @@ test('a session counts in its run only what it spent once its band names the run
   // $4 more within the run.
   await drain($.turn.step({ turnId: 't1', index: 1, model: 'claude-opus-5-5', messageCount: 2 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   const u = panel.last?.usage;
   expect(u).toMatchObject({ scope: 'run', partial: false });
   expect(u.costUsd).toBeGreaterThan(3.99);
@@ -613,11 +626,12 @@ test('a run that is neither active nor touched within 12 hours is over: only thi
   serveFiles(on, files, {}, [], () => undefined, { [`${ROOT}/.forge/run.json`]: NOW - 13 * 3600_000 });
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(panel.last?.usage.scope).toBe('session');
 });
 
@@ -626,11 +640,12 @@ test('a resumed session checks /cost against what it spent since the seed, not a
   serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: usageFile(SESSION, { loops: seeded }) });
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(panel.last?.usage.costUsd).toBeGreaterThan(103.99);
   expect(panel.last?.usage.officialUsd).toBe(4.1);
   expect(panel.last?.usage.drift).toBe(false);

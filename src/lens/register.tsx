@@ -992,10 +992,31 @@ function stopPanelTimer(): void {
   panelTimer = null;
 }
 
-// Reads the files and the agents list, only while the pane is open (or `force`d, by a pane about to open).
+// Reads the files and the agents list, only while the pane is open (or `force`d, by a pane just opened). w8 M3: one asked
+// while another runs is not dropped: that one may have looked before the pane opened, so it runs once more after it.
+let refreshAgain = false;
+let refreshAgainForced = false;
 async function refreshPanel($: Engine, force = false): Promise<void> {
-  if (panelRefreshing) return;
+  if (panelRefreshing) {
+    refreshAgain = true;
+    refreshAgainForced ||= force;
+    return;
+  }
   panelRefreshing = true;
+  try {
+    let forced = force;
+    do {
+      refreshAgain = false;
+      await refreshPanelOnce($, forced);
+      forced = refreshAgainForced;
+      refreshAgainForced = false;
+    } while (refreshAgain);
+  } finally {
+    panelRefreshing = false;
+  }
+}
+
+async function refreshPanelOnce($: Engine, force: boolean): Promise<void> {
   try {
     notePane($, await isPaneOpen($));
     if (!paneUp) stopPanelTimer();
@@ -1021,9 +1042,7 @@ async function refreshPanel($: Engine, force = false): Promise<void> {
     if (!paneUp) { keepBand($, await buildPanel($)); return; }
     // A refresh writes at once when the last write is a second old; else the throttle gathers it.
     await requestPanelWrite($);
-  } catch { /* ignore */ } finally {
-    panelRefreshing = false;
-  }
+  } catch { /* ignore */ }
 }
 
 const TEXT = {
@@ -1058,6 +1077,8 @@ const TEXT = {
     needCoordinator: 'te toca en la conversación de la coordinadora', needConversation: 'en la conversación que preguntó', needRoadmap: 'en el roadmap', needUnverified: 'no se pudo leer',
     needsN: (n: number) => `te toca ${n}`,
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
+    commandFailed: (why: string) => `lens no pudo responder a /lens: ${why}. Vuelve a probar; el motivo queda también en el log de depuración.`,
+    outOfTime: 'se quedó sin tiempo', failedPlain: 'falló',
     briefs: 'briefs', cycle: 'ciclo', task: 'Tarea', proposals: 'Propuestas',
     sUsage: 'Consumo', effort: 'esfuerzo', thisSession: 'esta sesión', active: 'activo', sinceStart: 'desde el inicio', taskTime: 'tarea', run: 'ejecución', gMain: 'Sesión principal', gImpl: 'Implementadores', gReview: 'Revisores', gVerify: 'Verificación', blocked: 'bloqueada', gPlan: 'Planificación y scout', gOther: 'Otros subagentes', tracking: 'Seguimiento', withoutForge: 'Sin forge (estimado)', withoutForgeNote: 'orientativo: en una sola sesión el contexto crecería y costaría más, y no habría revisión; el extremo bajo supone que todo el seguimiento se releía en cada paso', forgeCosts: (usd: string, pct: number) => `forge cuesta +${usd} (+${pct} %)`, forgeSaves: (usd: string) => `forge ahorra −${usd}`, pricesAsOf: 'precios a', drift: 'precios o medición incompletos', various: 'varios', noReview: 'sin revisiones independientes', effortLevel: (e: string) => ({ low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' } as Record<string, string>)[e] ?? e,
   },
@@ -1092,6 +1113,8 @@ const TEXT = {
     needCoordinator: "your turn in the coordinator's conversation", needConversation: 'in the conversation that asked', needRoadmap: 'on the roadmap', needUnverified: 'could not be read',
     needsN: (n: number) => `waiting for you ${n}`,
     pressEnter: 'Command ready in the prompt: press Enter',
+    commandFailed: (why: string) => `lens could not answer /lens: ${why}. Try it again; the reason is in the debug log too.`,
+    outOfTime: 'it ran out of time', failedPlain: 'it failed',
     briefs: 'briefs', cycle: 'cycle', task: 'Task', proposals: 'Proposals',
     sUsage: 'Usage', effort: 'effort', thisSession: 'this session', active: 'active', sinceStart: 'since start', taskTime: 'task', run: 'run', gMain: 'Main session', gImpl: 'Implementers', gReview: 'Reviewers', gVerify: 'Verification', blocked: 'blocked', gPlan: 'Planning and scout', gOther: 'Other subagents', tracking: 'Tracking', withoutForge: 'Without forge (estimate)', withoutForgeNote: 'rough: in one session the context would grow and cost more, with no review; the low end assumes all the tracking was re-read on every step', forgeCosts: (usd: string, pct: number) => `forge costs +${usd} (+${pct}%)`, forgeSaves: (usd: string) => `forge saves −${usd}`, pricesAsOf: 'prices as of', drift: 'prices or measurement incomplete', various: 'mixed', noReview: 'no independent review', effortLevel: (e: string) => e,
   },
@@ -1103,38 +1126,35 @@ const lensTexts = (): Texts => textsFor(roadmap.locale);
 
 // Opens the pane at the person's request (F-01): inline it asks for the rows its compact cards take (between 6 and a
 // third of the screen), docked for 56 columns; both are requests the engine may not grant. Where it is not placed, a
-// toast says why.
+// toast says why. w8 M3: the pane is asked for first and the command answers at once; the files are read after, so a
+// slow or failing read never leaves /lens unanswered. With no model yet (the pane closed and nothing going on) the rows
+// are those of the cards lens holds in memory. An open that fails fails the command's hook, whose .catch says why.
 async function openPanel($: Engine): Promise<boolean> {
-  // Carry 5 (Task 7 minor 3): with no model yet (the pane closed and nothing going on) the files are read before the
-  // pane is asked for, so its rows are the cards' and not the minimum; that is the read the open pane makes, done once.
-  const fresh = bandModel === null;
-  if (fresh) await refreshPanel($, true);
   const t = lensTexts();
-  let placed = false;
+  // The terminal is where the pane may be seated inline: its view sizes the request.
+  const view = viewOf('terminal');
+  let estimate = 0;
   try {
-    // The terminal is where the pane may be seated inline: its view sizes the request.
-    const view = viewOf('terminal');
     const compact = panelLayout({ bodyColumns: view.columns ?? LINE_MAX, placement: 'inline' });
-    let estimate = 0;
-    try { if (bandModel) estimate = buildCards(bandModel, t, 0).reduce((n, card) => n + cardRows(card, compact), 0); } catch { estimate = 0; }
-    const opened = await $.ui.open({ id: PANE, title: 'lens', rows: paneRows(estimate, view.rows), columns: DOCK_COLUMNS });
-    placed = opened.isPlaced;
-    if (!opened.isPlaced) $.ui.toast(`${t.panelWaiting}: ${clip(opened.reason, 200)}`);
-  } catch {
-    return false;
+    const model = bandModel ?? await buildPanel($);
+    estimate = buildCards(model, t, 0).reduce((n, card) => n + cardRows(card, compact), 0);
+  } catch { estimate = 0; }
+  const opened = await $.ui.open({ id: PANE, title: 'lens', rows: paneRows(estimate, view.rows), columns: DOCK_COLUMNS });
+  if (!opened.isPlaced) {
+    try { $.ui.toast(`${t.panelWaiting}: ${clip(opened.reason, 200)}`); } catch { /* the answer says it */ }
   }
-  if (!fresh) {
-    await refreshPanel($);
-    return placed;
-  }
-  // Just read: the open pane gets what was read, and its timer.
-  notePane($, await isPaneOpen($));
-  if (paneUp) {
-    startPanelTimer($);
-    await requestPanelWrite($);
-  }
-  return placed;
+  // The open pane is filled by this read, and gets its timer.
+  void refreshPanel($, true);
+  return opened.isPlaced;
 }
+
+// w8 M3: why /lens failed, in words: its own message, or that it ran out of time.
+function failureText(t: Texts, error: { kind?: unknown; message?: unknown } | undefined): string {
+  const message = typeof error?.message === 'string' && error.message.trim() ? clip(oneLineText(error.message), 200) : '';
+  if (error?.kind === 'timeout') return message ? `${t.outOfTime} (${message})` : t.outOfTime;
+  return message || t.failedPlain;
+}
+const oneLineText = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 // Step 3 of §4.6: the photos `/lens` took, by number, at most PHOTOS_MAX: the cards as they were, never moving.
 // Each keeps its full line: a row is drawn only when its text is that line, so a number reused after a reload never
@@ -1325,11 +1345,18 @@ export const register: Register = on => {
   // Steps 2 and 3 of §4.6: /lens opens the pane where it docks (fullscreen, 110 columns or more); elsewhere it leaves a
   // photo in the transcript, which keeps the live region small (F-15). /lens live (or pane) opens the pane anyway;
   // /lens foto (or photo) always takes the photo.
+  // w8 M3: a hook that throws or outruns its budget is skipped, and then the engine runs /lens as registered, which has
+  // no body («no command.run hook answered it»): the .catch answers instead, with the reason, and logs it for debugging.
   on('command.run', { command: 'lens' }, async ($, e) => {
     const t = lensTexts();
     if (lensMode(e.args, e.presentation) === 'photo') return { text: await takePhoto($) };
     const placed = await openPanel($);
     return { text: placed ? t.panelOpened : `${t.panelWaiting}.` };
+  }).catch(($, _e, next) => {
+    const t = lensTexts();
+    const why = failureText(t, next.error);
+    try { $.ui.log(`/lens failed (${String(next.error?.kind ?? 'throw')}): ${String(next.error?.message ?? '')}`, { to: 'debug' }); } catch { /* the answer says it */ }
+    return { text: t.commandFailed(why) };
   });
 
   // Step 3 of §4.6: the row of a photo /lens took, drawn from module memory, still and compact: its line and its cards.
