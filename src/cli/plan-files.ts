@@ -58,7 +58,9 @@ export function setRoadmapText(text: string, url: string): { text: string; chang
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const q = JSON.stringify(url);
   const splice = (at: number, end: number, s: string) => text.slice(0, at) + s + text.slice(end);
-  const lineEnd = (at: number) => { const i = text.indexOf('\n', at); return i < 0 ? text.length : i + 1; };
+  // Where the line holding a node's end ends: a node written over several lines (a block scalar) ends after its last
+  // line break already.
+  const lineEnd = (at: number) => (text[at - 1] === '\n' ? at : lineEndAfter(text, at));
   const pair = (root.items as AnyPair[]).find(p => keyOf(p) === 'artifacts');
   let out: string;
   if (!pair) {

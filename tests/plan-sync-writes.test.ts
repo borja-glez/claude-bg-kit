@@ -98,6 +98,32 @@ describe('set-roadmap: the roadmap URL goes into plan.yaml through the CLI (w8 W
     expect(run(['set-roadmap', 'plan.yaml', other], io).code).toBe(0);
     expect(planText()).toBe(block.replace('# the design\n', `# the design\n  roadmap: "${other}"\n`));
   });
+  it('keeps a CRLF plan CRLF, and puts the line after a version written over several lines (fix round 1, Minor 8)', () => {
+    const crlf = planText().replace(/\n/g, '\r\n');
+    writeFileSync(path.join(dir, 'plan.yaml'), crlf);
+    expect(run(['set-roadmap', 'plan.yaml', url], io).code).toBe(0);
+    expect(planText()).toBe(crlf.replace('version: "0.1"\r\n', `version: "0.1"\r\nartifacts: { roadmap: "${url}" }\r\n`));
+    const block = planText().replace(/^artifacts: .*\r\n/m, 'artifacts:\r\n  design: https://claude.ai/artifact/d1\r\n');
+    expect(block).toContain('artifacts:\r\n  design:');
+    writeFileSync(path.join(dir, 'plan.yaml'), block);
+    expect(run(['set-roadmap', 'plan.yaml', url], io).code).toBe(0);
+    expect(planText()).toBe(block.replace('/d1\r\n', `/d1\r\n  roadmap: "${url}"\r\n`));
+    const folded = planText().replace(/^artifacts:\r\n.*\r\n.*\r\n/m, '').replace('version: "0.1"\r\n', 'version: >-\r\n  0.1\r\n');
+    writeFileSync(path.join(dir, 'plan.yaml'), folded);
+    expect(run(['set-roadmap', 'plan.yaml', url], io).code).toBe(0);
+    expect(planText()).toBe(folded.replace('version: >-\r\n  0.1\r\n', `version: >-\r\n  0.1\r\nartifacts: { roadmap: "${url}" }\r\n`));
+  });
+  it('refuses when setting the value would change anything else of the plan, and writes nothing (fix round 1, Minor 8)', () => {
+    // An anchor on the old roadmap that a task reuses: the new URL would change that task too.
+    const aliased = planText().replace('version: "0.1"\n', 'version: "0.1"\nartifacts:\n  roadmap: &r https://claude.ai/artifact/old\n')
+      .replace('    title: Esquema de pedidos\n', '    title: Esquema de pedidos\n    includes: *r\n');
+    writeFileSync(path.join(dir, 'plan.yaml'), aliased);
+    expect(parsePlan(aliased).tasks[0].includes).toBe('https://claude.ai/artifact/old');
+    const r = run(['set-roadmap', 'plan.yaml', url], io);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('could not be set without changing the rest of the plan');
+    expect(planText()).toBe(aliased);
+  });
   it('refuses an address that is no web link, or a missing one, and leaves the plan as it was', () => {
     const before = planText();
     for (const a of [['set-roadmap', 'plan.yaml', 'not a url'], ['set-roadmap', 'plan.yaml', 'javascript:alert(1)'], ['set-roadmap', 'plan.yaml']]) {
@@ -184,6 +210,17 @@ describe('add-task: a delegated task goes into the main checkout\'s plan through
     expect(add({ ...task, includes: 'dos\nlíneas' }).code).toBe(0);
     expect(planText()).toMatch(/ {4}includes: "dos\\nlíneas"\n(?:.*\n)*retired: \[T010\]\n$/);
     expect(parsePlan(planText()).tasks.at(-1)?.includes).toBe('dos\nlíneas');
+  });
+  it('keeps a CRLF plan CRLF, and adds to a tasks list written in flow style (fix round 1, Minor 8)', () => {
+    const crlf = planText().replace(/\n/g, '\r\n');
+    writeFileSync(path.join(dir, 'plan.yaml'), crlf);
+    expect(add(task).code).toBe(0);
+    expect(planText()).toBe(`${crlf}  - id: T009\r\n    title: Exportar pedidos\r\n    track: backend\r\n    phase: F2\r\n    done_when: CSV exportado y test en verde\r\n    depends_on: [T002]\r\n    zones: [src/export/**]\r\n`);
+    const flow = 'project: demo-shop\nlocale: es\nversion: "0.1"\ntracks: [{ id: backend, name: Backend, color: blue }]\nphases: [{ id: F1, name: Base }]\n'
+      + 'tasks: [{ id: T001, title: Esquema, track: backend, phase: F1, done_when: hecho }]\n';
+    writeFileSync(path.join(dir, 'plan.yaml'), flow);
+    expect(add({ id: 'T002', title: 'Otra', track: 'backend', phase: 'F1', done_when: 'hecha', depends_on: ['T001'] }).code).toBe(0);
+    expect(parsePlan(planText()).tasks.map(t => [t.id, t.depends_on])).toEqual([['T001', []], ['T002', ['T001']]]);
   });
   it('refuses a taken or retired id, an unknown track, phase or dependency, an unknown field and a file that does not read, and leaves the plan as it was', () => {
     writeFileSync(path.join(dir, 'plan.yaml'), `${planText()}retired: [T010]\n`);
