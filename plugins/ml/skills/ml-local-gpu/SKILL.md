@@ -7,26 +7,27 @@ description: Use when training, fine-tuning, evaluating or exporting models on a
 
 ## Overview
 
-The GPU, the environment and the APIs are facts of this machine and this lock today, not of memory. Measure before loading the GPU, check an API before calling it, and let the machine rest between long jobs.
+The GPU, the environment and the APIs are facts to read from the machine and the project's lock at the time you work, not to recall from memory. Measure before loading the GPU, check an API before calling it, and let the machine rest between long jobs.
 
 ## First, read the project
 
-Read `pyproject.toml`, the lock, the CI config and the README before anything else: the project's versions, extras, formatter and helpers win over this skill, which pins no package version.
+Read `pyproject.toml`, the lock, the CI config and the README before anything else: the project's versions, extras, formatter and helpers win over this skill, which pins no package version (the dated index figures in rule 2 are the one exception).
 
 ## Rules
 
 1. **Environment.** Everything runs in the project's uv environment (`uv sync` with its extra, then `uv run ...`) or in a fresh uv one; check it before training with `uv run python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"`. No exceptions: never the global `python` or `pip`, which often carry a torch without CUDA, and not a `venv` plus `pip` "for speed" either.
-2. **Torch wheel.** Blackwell (sm_120) needs a torch built for CUDA 12.8 or later. Use the highest `cuXXX` index that carries the torch version the project asks for, and confirm it with `uv lock`: the example index is `https://download.pytorch.org/whl/cu128`, but as of 2026-10-26 cu128 stops at torch 2.11.0 while cu130 and cu132 reach 2.14.1, so a newer pin needs a newer index; CI and machines without CUDA use `https://download.pytorch.org/whl/cpu`; an older GPU uses whatever wheel the project pins. On Windows the PyPI wheel is CPU only. Symptoms: `torch.cuda.is_available()` False, "no kernel image is available for execution on the device", an `sm_120` warning. Pattern, versions left to the project (replace `cu128` with the index `uv lock` accepts):
+2. **Torch wheel.** Blackwell (sm_120) needs a torch built for CUDA 12.8 or later. Use the highest `cuXXX` index that carries the torch version the project asks for, and confirm it with `uv lock`: the example index is `https://download.pytorch.org/whl/cu130`, but as of 2026-10-26 cu128 stops at torch 2.11.0 while cu130 and cu132 reach 2.14.1, so a newer pin needs a newer index; CI and machines without CUDA use `https://download.pytorch.org/whl/cpu`; an older GPU uses whatever wheel the project pins. On Windows the PyPI wheel is CPU only. Symptoms: `torch.cuda.is_available()` False, "no kernel image is available for execution on the device", an `sm_120` warning. Pattern, versions left to the project (replace `cu130` with the index `uv lock` accepts):
    ```toml
+   # the highest cuXXX index uv lock accepts for the project's torch (cu130 as of 2026-10)
    [project.optional-dependencies]
    cpu = ["torch"]
-   cu128 = ["torch"]
+   cu130 = ["torch"]
    [tool.uv]
-   conflicts = [[{ extra = "cpu" }, { extra = "cu128" }]]
+   conflicts = [[{ extra = "cpu" }, { extra = "cu130" }]]
    index = [{ name = "pytorch-cpu", url = "https://download.pytorch.org/whl/cpu", explicit = true },
-     { name = "pytorch-cu128", url = "https://download.pytorch.org/whl/cu128", explicit = true }]
+     { name = "pytorch-cu130", url = "https://download.pytorch.org/whl/cu130", explicit = true }]
    [tool.uv.sources]
-   torch = [{ index = "pytorch-cpu", extra = "cpu" }, { index = "pytorch-cu128", extra = "cu128" }]
+   torch = [{ index = "pytorch-cpu", extra = "cpu" }, { index = "pytorch-cu130", extra = "cu130" }]
    ```
 3. **VRAM.** Run `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader` before launching any GPU job (without `nvidia-smi`, `uv run python -c "import torch; print(torch.cuda.mem_get_info())"` prints free and total bytes), and measure each job's peak in a short pass with `torch.cuda.max_memory_reserved()` plus its CUDA context, or as the rise of `memory.used` during the pass: allocated memory leaves out the allocator cache and the context. No exceptions: the peaks of every job that will run together, plus what other processes already hold, stay under the total minus 10 %, and long jobs (rule 4) alone. Do not stack heavy jobs on the GPU. "Sequential is safe" is not a measurement: read the free memory first.
 4. **Rest.** A long job keeps the GPU heavily loaded for 30 minutes or more. Run `nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader` at its start and end. No exceptions: never two long jobs at once or back to back; leave a rest without load between them (15-20 minutes is a sound default, unless the project or the person sets another), spent on free work (docs, notes, reading code). This is general advice for a GPU that runs hot under sustained load, not a policy of one machine. If the temperature cannot be read, say "GPU temperature unavailable" and rest all the same. A deadline, "don't wait for me" or a missing `nvidia-smi` is not a reason to skip it; if two must overlap, say why.
@@ -45,7 +46,7 @@ Read `pyproject.toml`, the lock, the CI config and the README before anything el
 | Starting on a project | read `pyproject.toml`, the lock, the CI config and the README first; the project's versions and tools win |
 | ONNX or transformers.js in a browser | read `references/browser-inference.md` before any worker code |
 | Any Python run | `uv run ...`, never global `python` or `pip` |
-| CUDA False, "no kernel image", `sm_120` | highest cuXXX index the project's torch has (cu128 is the example) for Blackwell, cpu index for CI, project's wheel for older GPUs |
+| CUDA False, "no kernel image", `sm_120` | highest cuXXX index the project's torch has (cu130 is the example as of 2026-10) for Blackwell, cpu index for CI, project's wheel for older GPUs |
 | Before a GPU job | `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader` (or `torch.cuda.mem_get_info()`); peaks from `torch.cuda.max_memory_reserved()` plus context; peaks plus memory in use under total minus 10 % |
 | Job of 30 minutes or more | alone; a rest after (15-20 minutes by default); temperature at start and end, or "GPU temperature unavailable" |
 | trl, transformers, peft call | Context7 plus `inspect.signature` on the installed package |

@@ -37,7 +37,7 @@ Reinicia Claude Code tras instalar o actualizar.
 
 - **Leer antes el proyecto**: mandan el `pyproject.toml`, el lock, la CI y el README, no la skill, que no fija versiones de paquetes.
 - **Entorno**: todo se ejecuta con `uv run`, nunca con el `python` ni el `pip` globales.
-- **Rueda de torch**: el índice que toca para la GPU o la CI: el índice `cuXXX` más alto que tenga el torch que pide el proyecto, comprobado con `uv lock` (`https://download.pytorch.org/whl/cu128` es el ejemplo), o `https://download.pytorch.org/whl/cpu`.
+- **Rueda de torch**: el índice que toca para la GPU o la CI: el índice `cuXXX` más alto que tenga el torch que pide el proyecto, comprobado con `uv lock` (`https://download.pytorch.org/whl/cu130` es el ejemplo a 2026-10), o `https://download.pytorch.org/whl/cpu`.
 - **VRAM**: `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader` antes de cada trabajo (o `torch.cuda.mem_get_info()` sin `nvidia-smi`), y `torch.cuda.max_memory_reserved()` más el contexto de CUDA para cada pico. Los picos de los trabajos que corren juntos, más la memoria ya ocupada, quedan por debajo del total menos un 10 %. No se apilan trabajos pesados en la GPU.
 - **Descanso**: un trabajo de 30 minutos o más va solo, con `nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader` al empezar y al acabar, y un descanso sin carga después (15-20 minutos por defecto).
 - **APIs**: Context7 e `inspect.signature` sobre el trl, transformers o peft instalado antes de escribir una llamada.
