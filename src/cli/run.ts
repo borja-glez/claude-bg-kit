@@ -124,6 +124,29 @@ export function run(argv: string[], io: Io): Result {
     try { text = readFileSync(abs(arg), 'utf8'); } catch (e) { return fail(`${cmd}: cannot read the design ${arg}: ${(e as Error).message}`, 2); }
     try { return parseDesign(text); } catch (e) { return fail(`${cmd}: ${arg} is not a design: ${(e as Error).message}`, 2); }
   };
+  // The notes created or answered since `since`, with the lines to say (the `notes` command, and `next --notes`); null when
+  // `dir` is not a folder. No notes folder yet means nobody has written a note. w8 W4: with `firstJoin`, a session that
+  // never read them (no `since`) gets only the last `firstJoin` notes, the ones it announces.
+  const notesOf = (dir: string, plan: { tasks: { id: string }[] } | null, locale: 'es' | 'en', since: string | null, firstJoin?: number) => {
+    if (!existsSync(abs(dir))) return { notes: [], latest: null, say: [], mentions: [] };
+    if (!statSync(abs(dir)).isDirectory()) return null;
+    // I-14: through docsIn like every listing, so a note that does not read is said on stderr; in file-name order
+    // (an object lists integer-like ids first, so the order is that of the file names again).
+    const byFile = (a: string, b: string) => (`${a}.json` < `${b}.json` ? -1 : `${a}.json` > `${b}.json` ? 1 : 0);
+    const all: (NoteDoc & { id: string })[] = Object.entries(docsIn<NoteDoc>(dir, normalizeNote))
+      .sort(([a], [b]) => byFile(a, b)).map(([id, n]) => ({ ...n, id }));
+    const stamps = all.flatMap(n => [Date.parse(n.ts), Date.parse(n.answeredAt ?? '')]).filter(t => !Number.isNaN(t));
+    const latest = stamps.length ? new Date(Math.max(...stamps)).toISOString() : null;
+    const fresh = notesSince(all, since);
+    const notes = firstJoin !== undefined && since === null ? fresh.slice(-firstJoin) : fresh;
+    const { say, mentions } = noteLines(notes, since, locale, new Set(plan?.tasks.map(t => t.id) ?? []));
+    return { notes, latest, say, mentions };
+  };
+  // A seat directory (bind's seatDir) that holds its session.json, else null.
+  const seatDirOf = (name: string): string | null => {
+    const d = flag(name);
+    return d && existsSync(path.join(abs(d), 'session.json')) ? abs(d) : null;
+  };
   // A task of the runtime plan (the db cache with --db, else the plan file): claim, done and block take no other.
   const planHas = (task: string): boolean => loadView().view.tasks.some(t => t.id === task);
   // With --db the local cache sees the state write at once (the hooks read the seat's task there); a write the
@@ -431,6 +454,19 @@ export function run(argv: string[], io: Io): Result {
         const hasBase = args.includes('--base');
         const base = flag('base');
         if (hasBase && (!base || !BRANCH_RE.test(base))) return fail('next: --base needs a branch name', 2);
+        // w8 W4: --notes reads the notes listing with the pick (the `notes` command's output, under `notes`), from the
+        // lastNoteTs of the seat's session.json, which it then renews itself.
+        const notesDir = flag('notes');
+        const seat = seatDirOf('seat-dir');
+        if (args.includes('--notes') && (!notesDir || !seat)) return fail('next: --notes needs the notes listing and --seat-dir <the seat folder bind printed>', 2);
+        // w8 W4: --check-sync (the main checkout's session only): when the roadmap does not hold this plan, say so and pick
+        // nothing; the session syncs first (waypoint:plan §4) and lists again.
+        if (args.includes('--check-sync')) {
+          const db = flag('db');
+          if (!db) return fail('next: --check-sync needs --db', 2);
+          const why = syncNeed(loadPlan(), abs(db));
+          if (why) return ok(JSON.stringify({ sync: true, why }));
+        }
         const { view } = loadView();
         const sessions = optSessions();
         const states = optStates();
@@ -443,9 +479,19 @@ export function run(argv: string[], io: Io): Result {
         const leftover = !!sessions && recoverableTasks(view, states, sessions, now)
           .some(t => t.owner !== session && (!track || view.tasks.find(x => x.id === t.taskId)?.track === track));
         const multi = leftover || multiSession({ sessions, messages: optMessages(), sid: session, inTrackWorktree: inTrackWorktree(io.cwd), now });
+        let notes: ReturnType<typeof notesOf> = null;
+        if (notesDir && seat) {
+          const file = path.join(seat, 'session.json');
+          let s: Record<string, unknown> = {};
+          try { const v: unknown = JSON.parse(readFileSync(file, 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) s = v as Record<string, unknown>; } catch { s = {}; }
+          const plan = loadPlan();
+          notes = notesOf(notesDir, view, plan.locale.toLowerCase().startsWith('es') ? 'es' : 'en', typeof s.lastNoteTs === 'string' ? s.lastNoteTs : null, FIRST_JOIN_NOTES);
+          if (!notes) return fail('next: the notes listing is not a folder — list notes first', 2);
+          if (notes.latest !== null && notes.latest !== s.lastNoteTs) writeAtomic(file, `${JSON.stringify({ ...s, lastNoteTs: notes.latest }, null, 2)}\n`);
+        }
         // unblock is only reported when true, as before
         const { unblock, ...rest } = r;
-        return ok(JSON.stringify({ ...(unblock ? r : rest), multi }));
+        return ok(JSON.stringify({ ...(unblock ? r : rest), multi, ...(notes ? { notes } : {}) }));
       }
       case 'conflicts': {
         const session = flag('session');
@@ -478,20 +524,8 @@ export function run(argv: string[], io: Io): Result {
         // The plan, when given, names the task ids a line may mention and the language when --locale is not given.
         const plan = flag('plan') !== undefined ? parsePlan(readFileSync(abs(flag('plan')!), 'utf8')) : null;
         const locale = localeFlag ?? (plan?.locale?.toLowerCase().startsWith('es') ? 'es' : 'en');
-        // No notes directory yet means nobody has written a note: not an error.
-        if (!existsSync(abs(dir))) return ok(JSON.stringify({ notes: [], latest: null, say: [], mentions: [] }));
-        if (!statSync(abs(dir)).isDirectory()) return fail('notes cache missing — list notes first');
-        // I-14: through docsIn like every listing, so a note that does not read is said on stderr; in file-name order
-        // (an object lists integer-like ids first, so the order is that of the file names again).
-        const byFile = (a: string, b: string) => (`${a}.json` < `${b}.json` ? -1 : `${a}.json` > `${b}.json` ? 1 : 0);
-        const all: (NoteDoc & { id: string })[] = Object.entries(docsIn<NoteDoc>(dir, normalizeNote))
-          .sort(([a], [b]) => byFile(a, b)).map(([id, n]) => ({ ...n, id }));
-        const stamps = all.flatMap(n => [Date.parse(n.ts), Date.parse(n.answeredAt ?? '')]).filter(t => !Number.isNaN(t));
-        const latest = stamps.length ? new Date(Math.max(...stamps)).toISOString() : null;
-        const since = flag('since') ?? null;
-        const notes = notesSince(all, since);
-        const { say, mentions } = noteLines(notes, since, locale, new Set(plan?.tasks.map(t => t.id) ?? []));
-        return ok(JSON.stringify({ notes, latest, say, mentions }));
+        const r = notesOf(dir, plan, locale, flag('since') ?? null);
+        return r ? ok(JSON.stringify(r)) : fail('notes cache missing — list notes first');
       }
       case 'inbox': {
         const session = flag('session');
@@ -597,8 +631,22 @@ export function run(argv: string[], io: Io): Result {
         return ok(eventId(io.now(), args[0] ?? 'main', io.rand));
       case 'now':
         return ok(io.now().toISOString());
-      case 'commit-info':
-        return ok(JSON.stringify(commitInfo(io.cwd, args[0] ?? 'HEAD')));
+      case 'commit-info': {
+        const rev = args[0] !== undefined && !args[0].startsWith('--') ? args[0] : 'HEAD';
+        if (!args.includes('--event')) return ok(JSON.stringify(commitInfo(io.cwd, rev)));
+        // w8 W4: --event prints the `set` of the commit's event, as the work skill composed it for an intermediate
+        // commit, and --seat-dir drops every line of that sha from the seat's pending-commits.jsonl.
+        const sid = flag('session'), task = flag('task');
+        if (!sid || !SID_RE.test(sid) || !task || !isPlanId(task)) return fail('commit-info --event: --session <SID> and --task <T> are required', 2);
+        const seat = seatDirOf('seat-dir');
+        if (args.includes('--seat-dir') && !seat) return fail('commit-info: --seat-dir needs the seat folder bind printed', 2);
+        const c = commitInfo(io.cwd, rev);
+        const now = io.now();
+        const write: Write = { op: 'set', collection: 'events', doc_id: eventId(now, sid, io.rand),
+          data: { ts: now.toISOString(), type: 'commit', sessionId: sid, taskId: task, text: cleanText(c.title, SUMMARY_MAX), sha: c.sha, add: c.add, del: c.del } };
+        if (seat) dropPending(path.join(seat, 'pending-commits.jsonl'), c.sha);
+        return ok(JSON.stringify({ ...c, write }));
+      }
       case 'claim': {
         const f = taskFlags('claim', ['state-version', 'session-version']);
         if ('code' in f) return f;
@@ -628,13 +676,27 @@ export function run(argv: string[], io: Io): Result {
         if (tests !== undefined && !/^\d{1,9}$/.test(tests)) return fail('done: --tests must be a whole number', 2);
         const rev = flag('rev') ?? 'HEAD';
         if (!BRANCH_RE.test(rev)) return fail('done: --rev needs a commit', 2);
+        // w8 W4: --metrics-version pins meta/metrics to its listed version (without it the write creates the document);
+        // --seat-dir empties that seat's pending-commits.jsonl, which the session wrote by hand after the batch.
+        const mv = args.includes('--metrics-version') ? posInt('metrics-version') : undefined;
+        if (mv === null) return fail('done: --metrics-version must be a positive integer', 2);
+        const seat = seatDirOf('seat-dir');
+        if (args.includes('--seat-dir') && !seat) return fail('done: --seat-dir needs the seat folder bind printed', 2);
         const now = io.now();
         const r = doneBatch({
           sid: f.sid, task: f.task, stateVersion: f.v['state-version'], sessionVersion: f.v['session-version'],
           now, eids: eventIds(now, f.sid, 1, io.rand), commit: commitInfo(io.cwd, rev), summary, ...(tests !== undefined ? { tests: Number(tests) } : {}),
         });
         mirror(r.batch);
-        return ok(JSON.stringify(r));
+        if (seat && existsSync(path.join(seat, 'pending-commits.jsonl'))) writeFileSync(path.join(seat, 'pending-commits.jsonl'), '');
+        // w8 W4: with --db, the plan's progress once this task is done (the cache already holds it), for the closing line.
+        let progress: { percent: number; done: number; total: number } | undefined;
+        const db = flag('db');
+        if (db) {
+          const m = computeMetrics(loadView().view, docsIn(path.join(abs(db), 'state'), stateDoc), now.getTime());
+          progress = { percent: m.percent, done: m.done, total: m.total };
+        }
+        return ok(JSON.stringify({ ...r, metrics: mv ? { ...r.metrics, if_version: mv } : r.metrics, ...(progress ? { progress } : {}) }));
       }
       case 'block': {
         const f = taskFlags('block', ['state-version', 'session-version']);
@@ -1236,6 +1298,21 @@ function inTrackWorktree(cwd: string): boolean {
 
 class CacheError extends Error {}
 
+/** w8 W4: a session's first join announces at most this many notes (the last ones). */
+const FIRST_JOIN_NOTES = 5;
+
+/**
+ * w8 W4, `next --check-sync`: why the main checkout must sync before it picks: the listed meta/project is missing (or does
+ * not read), the plan listing has no document, or its planHash is not this plan's; null when the roadmap holds the plan.
+ * sync writes meta/project last (A-13), so a hash that matches means every earlier batch went in.
+ */
+function syncNeed(plan: Parameters<typeof planHash>[0], db: string): 'missing' | 'changed' | null {
+  let meta: unknown;
+  try { meta = JSON.parse(readFileSync(path.join(db, 'meta', 'project.json'), 'utf8')); } catch { return 'missing'; }
+  if (!meta || typeof meta !== 'object' || !jsonFiles(path.join(db, 'plan')).length) return 'missing';
+  return (meta as { planHash?: unknown }).planHash === planHash(plan) ? null : 'changed';
+}
+
 const SHA_RE = /^[0-9a-f]{7,64}$/;
 
 // Reasons that only fill the field (EN and ES), compared after reasonKey.
@@ -1287,6 +1364,15 @@ function commitInfo(cwd: string, rev: string): Commit {
   const stat = git('show', '--shortstat', '--format=', rev);
   const num = (re: RegExp) => Number(stat.match(re)?.[1] ?? 0);
   return { sha, ts: new Date(ts).toISOString(), title: title.join('\t'), add: num(/(\d+) insertion/), del: num(/(\d+) deletion/) };
+}
+
+/** w8 W4: the lines of a pending-commits.jsonl whose sha is `sha` removed (parallel hooks may have written it twice). */
+function dropPending(file: string, sha: string): void {
+  let text: string;
+  try { text = readFileSync(file, 'utf8'); } catch { return; }
+  const lines = text.split('\n').filter(l => l.trim() !== '');
+  const kept = lines.filter(l => { try { return (JSON.parse(l) as { sha?: unknown }).sha !== sha; } catch { return true; } });
+  if (kept.length !== lines.length) writeAtomic(file, kept.map(l => `${l}\n`).join(''));
 }
 
 /** A state write applied to the local cache (`<db>/state/<T>.json`): its fields set, `{__delete__: true}` ones removed. */
