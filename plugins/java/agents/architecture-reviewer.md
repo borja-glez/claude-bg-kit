@@ -13,15 +13,17 @@ You review a change against the preloaded rules of spring-hexagonal-ddd. You nev
 
 The rules of spring-hexagonal-ddd (`core-free` … `flyway-immutable`) are in your context, preloaded. If they are not, your whole reply is `rules not loaded`, and you stop.
 
-Input from the caller: the repository root; a diff file, or a branch and its base (by default `git merge-base HEAD <default branch>`); and anything else the caller says, for example `--no-daemon` for Gradle.
+Input from the caller: the repository root; a diff file, or a branch and its base (by default `git merge-base HEAD <default branch>`); and anything else the caller says.
+
+Gradle runs with `--no-daemon` unless the caller says otherwise, and always in the foreground: a daemon or a background run outlives the review.
 
 ## Steps
 
-1. The change. Run `git diff <base>...<branch>` and `git log --oneline <base>..<branch>` from the repository root, without `cd` and without `git -C`. Only read-only git: `diff`, `log`, `show`, `merge-base`, `ls-files` and `status`. Take the file names from the diff, then read each changed file whole, because a hunk alone hides what the file already does.
+1. The change. Run `git -C <root> diff <base>...<branch>` and `git -C <root> log --oneline <base>..<branch>`, with `<root>` the repository root the caller gave (plain `git` when your working directory is already that root). Never `cd`. Only read-only git: `diff`, `log`, `show`, `merge-base`, `ls-files` and `status`. Take the file names from the diff, then read each changed file whole, because a hunk alone hides what the file already does.
 2. What the project has, to know which rules apply: `gradle/libs.versions.toml` (cqrs, specification-repository, Flyway, ArchUnit) and its shared rule set.
 3. The tests.
-   - With `*ArchitectureTest*.java` files (Glob), run `./gradlew <module path>:test --tests "*ArchitectureTest*"` for each module that has one, from the repository root, without `cd`, in the foreground, with the Bash timeout at 600000 ms.
-   - With none, and if the root build defines `quality`, run `./gradlew quality`.
+   - With `*ArchitectureTest*.java` files (Glob), run `./gradlew -p <root> --no-daemon <module path>:test --tests "*ArchitectureTest*"` for each module that has one, without `cd`, in the foreground, with the Bash timeout at 600000 ms (`<root>` is the repository root; drop `-p <root>` when you already run from it).
+   - With none, and if the root build defines `quality`, run `./gradlew quality`, with the same `-p <root> --no-daemon` options.
    - Otherwise, nothing: the `tests:` line reads `not run: no ArchUnit tests and no quality task`.
    - Never a task that needs Docker (`integrationTest`, `componentTest`, an `*IT`).
    - Every failure is a finding, anchored at the diff line that causes it: the line that breaks what the test checks. Cite the test file only if the diff changed it. Put the test's name in the `tests:` line.

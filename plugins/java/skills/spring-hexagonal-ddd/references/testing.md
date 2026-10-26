@@ -91,4 +91,4 @@ Where the project turns them on, they are part of `build`:
 | A change that touches the outbox, a consumer or a saga | the integration test of that path, plus a system scenario if the project has one |
 | Release or merge | `./gradlew build` |
 
-Run a suite again with `--rerun` when Gradle says it is up to date and you changed nothing it tracks. Do not claim a Docker-dependent suite passed if Docker was not running.
+Run Gradle with `--no-daemon` by default and always in the foreground: a daemon or a background run outlives the session. Run a suite again with `--rerun` when Gradle says it is up to date and you changed nothing it tracks. Do not claim a Docker-dependent suite passed if Docker was not running.
