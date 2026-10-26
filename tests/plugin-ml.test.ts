@@ -43,7 +43,7 @@ describe('plugin ml (w7 D3)', () => {
   });
   it('ml-local-gpu: every rule lives in SKILL.md, where compaction keeps it, with its command (Review Focus 1, 2, 3, 5)', () => {
     const md = read(SKILL);
-    for (const w of ['pyproject.toml', 'uv run', 'https://download.pytorch.org/whl/cu128', 'https://download.pytorch.org/whl/cpu',
+    for (const w of ['pyproject.toml', 'uv run', 'https://download.pytorch.org/whl/cu130', 'uv lock', 'https://download.pytorch.org/whl/cpu',
       'nvidia-smi --query-gpu=memory.used,memory.total', 'torch.cuda.mem_get_info()', 'torch.cuda.max_memory_reserved()', 'nvidia-smi --query-gpu=temperature.gpu', 'GPU temperature unavailable',
       'Context7', 'inspect.signature', 'HF_TOKEN', 'jupyter nbconvert --to notebook --execute --inplace', "newline='\\n'",
       'ruff format --check', 'GroupShuffleSplit']) expect(md, w).toContain(w);

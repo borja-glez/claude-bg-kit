@@ -39,9 +39,9 @@ It loads when you work on a static Astro site with Preact islands, built by pnpm
 | --- | --- |
 | Build and islands | The `mounted` pattern, `min-height` for islands, the literal Vite worker call, MDX prose with components, pnpm pinned by `packageManager`. |
 | CSP | `security.csp` with hashes per page, `is:inline` scripts hashed in the config, no `<style is:inline>` in figures, `worker-src`. |
-| Checks | Prettier as its own gate, `astro check` with TypeScript 6, Playwright's webServer under Claude Code, Lighthouse on Windows and in CI, real Chrome. |
+| Checks | Prettier as its own gate, `astro check` with the TypeScript range of `@astrojs/check`, Playwright's webServer under Claude Code, Lighthouse on Windows and in CI, real Chrome. |
 | Deploy | The Dockerfile at the root, nginx headers and MIME types, the Dokploy path and context fields. |
-| Repo hygiene | No `CLAUDE.md`, `AGENTS.md` or `.claude/` in a site's repo. |
+| Repo hygiene | No `CLAUDE.md` or `.claude/` in a site's repo, and the skill's rules are not duplicated in `AGENTS.md`. |
 
 The rules live in `SKILL.md`, which stays under 16,000 bytes so a compaction keeps all of it. Four references hold the procedures; each is read when the work reaches its moment, and again every time it comes back.
 
