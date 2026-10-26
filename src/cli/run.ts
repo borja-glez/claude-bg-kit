@@ -1378,8 +1378,14 @@ function commitInfo(cwd: string, rev: string): Commit {
  * done are removed: the roadmap has that task's completion, so its commits are recorded. Only the loop's next call does
  * it (`next` after a fresh listing, the idle heartbeat of a stop), never `done` or `commit-info --event`, which print
  * before their write goes out: a session that stops before sending it keeps its lines, and the Stop hook its reminder.
+ * Fix round 2: nothing is removed while the seat's queue.jsonl holds a write. `done --db` mirrors its state write into the
+ * cache before the batch goes out, so a done batch that failed and was queued reads done there (the idle heartbeat reads
+ * that cache); its lines stay until the queue is replayed and emptied.
  */
 function settlePending(seat: string, statesDir: string): void {
+  let queued = '';
+  try { queued = readFileSync(path.join(seat, 'queue.jsonl'), 'utf8'); } catch { queued = ''; }
+  if (queued.trim() !== '') return;
   const file = path.join(seat, 'pending-commits.jsonl');
   let text: string;
   try { text = readFileSync(file, 'utf8'); } catch { return; }

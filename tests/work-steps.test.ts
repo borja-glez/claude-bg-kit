@@ -172,6 +172,19 @@ describe('the pending commits of a task go once the roadmap shows it done (fix r
     expect(cli('heartbeat', '--session', 'be', '--session-version', '3', '--seat-dir', '.waypoint/none', '--states', 'db/state').code).toBe(2);
     expect(cli('heartbeat', '--session', 'be', '--session-version', '3', '--seat-dir', SEAT).code).toBe(2);
   });
+  it('removes nothing while the seat\'s queue.jsonl holds a write: a failed done batch that was queued keeps its lines (fix round 2)', () => {
+    // done mirrors its state write into DB/state before the batch goes out: done there proves nothing when it was queued.
+    docsAt('db/state', { T001: { status: 'done' } });
+    writeFileSync(seatFile('queue.jsonl'), `${JSON.stringify({ op: 'update', collection: 'state', doc_id: 'T001', data: { status: 'done' }, if_version: 4 })}\n`);
+    const before = pending();
+    expect(cli('heartbeat', '--session', 'be', '--session-version', '3', '--idle', '--seat-dir', SEAT, '--states', 'db/state').code).toBe(0);
+    expect(cli('next', 'plan.yaml', '--db', 'db', '--states', 'db/state', '--sessions', 'db/sessions', '--session', 'be', '--seat-dir', SEAT).code).toBe(0);
+    expect(pending()).toBe(before);
+    // Once the queue is replayed and emptied, the next call removes them.
+    writeFileSync(seatFile('queue.jsonl'), '');
+    expect(cli('heartbeat', '--session', 'be', '--session-version', '3', '--idle', '--seat-dir', SEAT, '--states', 'db/state').code).toBe(0);
+    expect(pending()).toBe(line('T002', 'c'.repeat(40)));
+  });
 });
 
 describe('commit-info --event: the commit event of an intermediate commit (w8 W4)', () => {
