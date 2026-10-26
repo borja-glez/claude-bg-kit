@@ -55,22 +55,48 @@ export function diffZones(names: string[], patch: string): Zone[] {
   read();
   return ZONE_ORDER.filter(z => found.has(z));
 }
-const LARGE = [/\b(architecture|redesign|rewrite|subsystem|new (project|app|service|system)|from scratch|migrat(e|ion) (to|from))\b/i,
-  es('arquitect|rediseñ|reescrib|reescritur|subsistem', 'desde cero|(?:nuev[oa]|otr[oa]) (?:proyecto|aplicaci[oó]n|app|servicio|sistema)|migr(?:ar|aci[oó]n) (?:a|al|desde)')];
+const words = (w: string) => new RegExp(`(?<![\\p{L}\\p{N}_])(?:${w})(?![\\p{L}\\p{N}_])`, 'iu');
+// Large by its wording: an architecture, a redesign, a rewrite, a subsystem, a migration…
+const LARGE_ARCH = [/\b(architecture|redesign|rewrite|subsystem|migrat(e|ion) (to|from))\b/i,
+  es('arquitect|rediseñ|reescrib|reescritur|subsistem', 'migr(?:ar|aci[oó]n) (?:a|al|desde)')];
+// … or a new project. w8 fix round 1: in a young repository a new project is Large only by its pieces.
+const LARGE_NEW = [/\b(new (project|app|service|system)|from scratch)\b/i,
+  words('desde cero|(?:nuev[oa]|otr[oa]) (?:proyecto|aplicaci[oó]n|app|servicio|sistema)')];
 
-// w8 FR3: the pieces a request for a new project names. Two or more of them in a young repository make it Large; a
-// full-stack app is two. A bare «back» or «front» (a back button) is none.
-const piece = (w: string) => new RegExp(`(?<![\\p{L}\\p{N}_])(?:${w})(?![\\p{L}\\p{N}_])`, 'iu');
-const PIECES: [string, RegExp][] = [
-  ['backend', piece('backend|back-end|back end|servidor|server|full-?stack')],
-  ['frontend', piece('frontend|front-end|front end|interfaz web|web ui|full-?stack')],
-  ['api', piece('apis?|graphql')],
-  ['db', piece('bases? de datos|database|db|postgres(?:ql)?|mysql|sqlite|mongo(?:db)?')],
-  ['mobile', piece('app m[oó]vil|aplicaci[oó]n m[oó]vil|m[oó]vil|mobile(?: app)?|ios|android')],
-  ['admin', piece('panel de (?:administraci[oó]n|admin|control)|admin(?: panel)?|backoffice|dashboard')],
+// w8 FR3: the pieces of a new project. In a young repository, a request to create an app or a project (a create verb
+// and app, project, service…) that names two or more of them, one strong, is Large; a full-stack app is two strong
+// ones. A bare «back» or «front» (a back button) is none; a server, a dashboard or a mobile alone are weak.
+const STRONG_PIECES: [string, RegExp][] = [
+  ['backend', words('backend|back-end|back end|full-?stack')],
+  ['frontend', words('frontend|front-end|front end|interfaz web|web ui|full-?stack')],
+  ['api', words('apis?|graphql')],
+  ['db', words('bases? de datos|database|db|postgres(?:ql)?|mysql|sqlite|mongo(?:db)?')],
+  ['mobile', words('apps? m[oó]vil(?:es)?|aplicaci[oó]n(?:es)? m[oó]vil(?:es)?|mobile apps?|ios apps?|android apps?')],
+  ['admin', words('panel de (?:administraci[oó]n|admin)|admin panel|backoffice')],
 ];
-/** w8 FR3: the pieces of a project a text names, in table order. */
-export const piecesOf = (text: string): string[] => PIECES.filter(([, re]) => re.test(text)).map(([name]) => name);
+const WEAK_PIECES: [string, RegExp][] = [
+  ['server', words('servidor|server')],
+  ['dashboard', words('dashboard|panel de control')],
+  ['mobile', words('m[oó]vil|mobile|ios|android')],
+  ['admin', words('admin')],
+];
+const CREATE_PROJECT = new RegExp(`(?<![\\p{L}\\p{N}_])(?:crea|crear|create|build|construye|construir|monta|montar|haz|hacer|make|desarrolla|desarrollar|develop`
+  + `|empieza|empezar|start|inicia|iniciar|scaffold|set\\s+up|arranca|arrancar|write|escribe|implementa|implementar|implement)(?![\\p{L}\\p{N}_])`
+  + `(?:\\s+\\S+){0,3}?\\s+(?:apps?|aplicaci[oó]n(?:es)?|proyectos?|projects?|servicios?|services?)(?![\\p{L}\\p{N}_])`, 'iu');
+const FIX_START = /^\s*(?:arregla|arreglar|corrige|corregir|repara|reparar|soluciona|solucionar|fix|repair|solve)(?![\p{L}\p{N}_])/iu;
+/** w8 FR3: the pieces of the new project a text asks to create, strong first, or none when they do not make it Large
+ *  (fewer than two, or no strong one). Only sentences that create an app or a project count, never one led by a fix. */
+export function projectPieces(text: string): string[] {
+  const strong = new Set<string>();
+  const weak = new Set<string>();
+  for (const s of text.split(/[.;!?\n]+(?=\s|$)/u)) {
+    if (FIX_START.test(s) || !CREATE_PROJECT.test(s)) continue;
+    for (const [name, re] of STRONG_PIECES) if (re.test(s)) strong.add(name);
+    for (const [name, re] of WEAK_PIECES) if (re.test(s)) weak.add(name);
+  }
+  const names = [...strong, ...[...weak].filter(n => !strong.has(n))];
+  return strong.size >= 1 && names.length >= 2 ? names : [];
+}
 
 // A rename spreads past the file it names: never Trivial.
 const RENAME = [/\brenam/i, /(?<![\p{L}\p{N}_])renombr/iu];
@@ -416,8 +442,9 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
   // Files found only through a quoted literal are left out: the copy rule alone may use them.
   const sized = named.size ? named.size : Math.min(files.size, MAX_FILES);
 
+  const young = greenfield && !opts.ignoreGreenfield;
   let path: PathName;
-  if (LARGE.some(re => re.test(headText))) { path = 'large'; reasons.push('architecture-scale wording'); }
+  if (LARGE_ARCH.some(re => re.test(headText)) || (!young && LARGE_NEW.some(re => re.test(headText)))) { path = 'large'; reasons.push('architecture-scale wording'); }
   else if (sized > 10) { path = 'large'; reasons.push(`${sized} files located`); }
   else if (sized > 3) { path = 'medium'; reasons.push(`${sized} files located`); }
   else if (sized === 0 && isCopyChange(text)) { path = 'trivial'; reasons.push(COPY_REASON); }
@@ -429,11 +456,12 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
   else { path = 'small'; reasons.push(`${sized} file(s) located`); }
 
   // w8 FR3: the request decides the size. A young repository lifts it to Medium at most (a Small request that is not
-  // mechanical), and to Large only when the request names several pieces of a project (a backend and a frontend…).
-  if (greenfield && !opts.ignoreGreenfield && path !== 'large') {
+  // mechanical), and to Large only when it asks to create an app or a project with several pieces (a backend and a
+  // frontend…), also when its words say «new app» or «from scratch» (fix round 1).
+  if (young && path !== 'large') {
     // Quotes and prohibitions say nothing about the project; compound words do («full-stack», «back-end»).
-    const pieces = piecesOf(text.replace(SPANS, blank).replace(PROHIBITION, blank));
-    if (pieces.length >= 2) { path = 'large'; reasons.push(`greenfield repository with several pieces: ${pieces.join(', ')}`); }
+    const pieces = projectPieces(text.replace(SPANS, blank).replace(PROHIBITION, blank));
+    if (pieces.length) { path = 'large'; reasons.push(`greenfield repository with several pieces: ${pieces.join(', ')}`); }
     else if (path === 'small' && !isMechanical(text)) { path = 'medium'; reasons.push('greenfield repository'); }
   }
 

@@ -78,7 +78,7 @@ Read `references/superpowers-plan.md` now and follow it with `/forge:run --super
 
 ## Large
 
-Read `references/large.md` now and follow it (subsystem, architecture, much ambiguity or risk, or a greenfield project): design with its mandatory approval, plan, execution, final review.
+Read `references/large.md` now and follow it (subsystem, architecture, much ambiguity or risk, or a new project with several pieces (a backend and a frontend…)): design with its mandatory approval, plan, execution, final review.
 
 ## Execution
 

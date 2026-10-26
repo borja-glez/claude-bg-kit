@@ -90,8 +90,8 @@ describe('triage', () => {
     const booking = triage('crea una app de reservas con backend y frontend', young, []);
     expect(booking).toMatchObject({ greenfield: true, path: 'large' });
     expect(booking.reasons).toContain('greenfield repository with several pieces: backend, frontend');
-    for (const t of ['build a todo app with a React frontend and an Express API', 'crea una API REST con base de datos para las tareas', 'monta una app full-stack de notas',
-      'create a shop with an admin panel and a mobile app']) expect(triage(t, empty, []).path, t).toBe('large');
+    for (const t of ['build a todo app with a React frontend and an Express API', 'crea un servicio con API REST y base de datos para las tareas', 'monta una app full-stack de notas',
+      'create a shop app with an admin panel and a mobile app']) expect(triage(t, empty, []).path, t).toBe('large');
     // The request decides below Medium: a short change to a named file and mechanical work stay where they were.
     expect(triage('fix the typo in README.md', young, []).path).toBe('trivial');
     expect(triage('rename helperOne to helperTwo', young, []).path).toBe('small');
@@ -102,6 +102,36 @@ describe('triage', () => {
     expect(triage('add a password reset flow', young, []).path).toBe('medium');
     // An older repository: the request alone, as before.
     expect(triage('crea una app de reservas con backend y frontend', repo(), []).path).not.toBe('large');
+  });
+  it('fix round 1: in a young repository the wording of a new project goes through the pieces rule, and pieces count only in a request to create an app or project', () => {
+    const young = repo({}, { files: ['package.json', 'src/index.js', 'README.md'], commits: 1 });
+    // `git init` on an existing project: many files, no commit yet.
+    const initd = repo({}, { files: Array.from({ length: 120 }, (_, i) => `src/f${i}.ts`), commits: 0 });
+    const atMostMedium = (t: string) => {
+      for (const [name, r] of [['young', young], ['initd', initd]] as const) expect(triage(t, r, []).path, `${name}: ${t}`).not.toBe('large');
+    };
+    // A new project without pieces: Medium at most, whatever the order of its words.
+    for (const t of ['build a new app to track my expenses', 'crea una nueva aplicación para gestionar reservas', 'create a new project in Rust that converts CSV files to JSON',
+      'empieza la app desde cero con React', 'crea una app nueva para gestionar reservas', 'build a todo app', 'crea un proyecto nuevo con Vite y React']) atMostMedium(t);
+    expect(triage('build a new app to track my expenses', young, []).path).toBe('medium');
+    // Ordinary requests that name pieces, a fix of a new app, and weak pieces alone.
+    for (const t of ['fix the bug where the API returns stale data from the database', 'arregla el error 500 del servidor al guardar en la base de datos',
+      'make the dashboard responsive on mobile', 'add an endpoint to the API that reads the orders from the database', 'conecta el frontend con la API',
+      'añade una vista móvil al dashboard', 'add a health check to the server that pings the db', 'use the GitHub API to list the repos in the dashboard',
+      'add a settings screen to the android and ios apps', 'no toques el backend, solo cambia el frontend del login', 'do not touch the backend; add a dark mode to the frontend',
+      'fix the new app so that the frontend talks to the API', 'crea una app de notas. Arregla antes el backend y la base de datos',
+      'crea una app con dashboard y servidor', 'create an app with a server and a dashboard for mobile']) atMostMedium(t);
+    // A request to create an app or project with several pieces, one of them strong, is Large.
+    for (const t of ['crea una app de reservas con backend y frontend', 'build a new app with a frontend and a backend', 'crea una app con backend y un dashboard',
+      'start a new project from scratch with a React frontend and a Postgres database']) {
+      expect(triage(t, young, []).path, t).toBe('large');
+      expect(triage(t, young, []).reasons.join(' '), t).toMatch(/greenfield repository with several pieces/);
+    }
+    // Architecture wording stays Large in a young repository; outside one, a new app is still Large by its wording.
+    for (const t of ['rediseña la arquitectura del proyecto', 'migrate the project to a modular architecture', 'rewrite the parser subsystem', 'Migración a Postgres']) {
+      expect(triage(t, young, []).path, t).toBe('large');
+    }
+    expect(triage('build a new app to track my expenses', repo(), []).path).toBe('large');
   });
   it('the reasons of a young repository read in Spanish (w8 FR3)', () => {
     const line = (reasons: string[]) => announce({ path: 'large', reasons, implementer: { self: false, agent: null }, fresh: [], catalog: [] }, 'es');
