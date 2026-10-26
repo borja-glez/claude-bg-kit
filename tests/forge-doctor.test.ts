@@ -183,16 +183,23 @@ describe('FC5: the Claude Code version against the one forge was recorded with',
     const win = { platform: 'win32' as NodeJS.Platform, isFile: (f: string) => /claude\.(exe|cmd)$/.test(f), run: (f: string) => (f.endsWith('.exe') ? '2.1.300 (Claude Code)' : null) };
     expect(claudeVersion({ Path: 'C:\\a;C:\\b' }, win)).toEqual({ version: '2.1.300', source: 'path' });
   });
-  it('doctor: the version forge was recorded with is ok, another one warns with what to do, none read is unverified', () => {
+  it('doctor: the version is data, never an alarm: the same, another one or none read are all ok, and the detail says which', () => {
     const root = tmp('doctor-claude-');
     const doctorWith = (env: Record<string, string>) => (JSON.parse(run(['doctor'], { cwd: root, now: () => new Date('2026-10-24T10:00:00.000Z'), env: { CLAUDE_CONFIG_DIR: path.join(root, 'cfg'), ...env }, scriptPath: path.join(root, 'forge.cjs') }).stdout).checks as CheckResult[])
       .find(c => c.id === 'claude-version')!;
     const agent = (v: string) => ({ AI_AGENT: `claude-code_${v.replace(/\./g, '-')}_agent` });
-    expect(doctorWith(agent(OBSERVED_WITH))).toMatchObject({ status: 'ok', data: { version: OBSERVED_WITH, observedWith: OBSERVED_WITH } });
+    const same = doctorWith(agent(OBSERVED_WITH));
+    expect(same).toMatchObject({ status: 'ok', data: { version: OBSERVED_WITH, observedWith: OBSERVED_WITH } });
+    expect(same.fix).toBeUndefined();
     const other = doctorWith(agent('9.9.9'));
-    expect(other).toMatchObject({ status: 'warn', data: { version: '9.9.9', observedWith: OBSERVED_WITH }, fix: { kind: 'manual' } });
-    expect(other.detail).toContain(`recorded with Claude Code ${OBSERVED_WITH}`);
-    expect(doctorWith({}).status).toBe('unverified');
+    expect(other).toMatchObject({ status: 'ok', data: { version: '9.9.9', observedWith: OBSERVED_WITH } });
+    expect(other.fix).toBeUndefined();
+    expect(other.detail).toContain(`Claude Code 9.9.9 runs here, not ${OBSERVED_WITH}`);
+    const none = doctorWith({});
+    expect(none).toMatchObject({ status: 'ok', data: { version: null, observedWith: OBSERVED_WITH } });
+    expect(none.detail).toContain('version unknown');
+    // The version never changes doctor's exit: a different one alone leaves it as the other checks give it.
+    expect(doctorExit([other])).toBe(0);
   });
   it('the e2e harness and forge read one OBSERVED_WITH', () => {
     expect(HARNESS_OBSERVED_WITH).toBe(OBSERVED_WITH);

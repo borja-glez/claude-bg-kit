@@ -204,20 +204,24 @@ const waypointDoctorCheck: DoctorCheck = {
   },
 };
 
-/** FC5: the Claude Code here against OBSERVED_WITH, the version forge's platform facts were recorded with. Another
- *  version is a warning, never a failure: forge may well run on it. */
+/** FC5: the Claude Code here against OBSERVED_WITH, the version forge's platform facts were recorded with. Data, never
+ *  an alarm (status ok, as waiting-calls): another version, or none read, never changes doctor's exit. */
 const claudeVersionCheck: DoctorCheck = {
   id: 'claude-version',
   run(ctx) {
     const id = 'claude-version';
     const found = claudeVersion(ctx.env);
-    if (!found) return { id, status: 'unverified', detail: 'no Claude Code answered --version (CLAUDE_CODE_EXECPATH, claude on PATH) and AI_AGENT names none' };
+    if (!found) {
+      return {
+        id, status: 'ok', data: { version: null, observedWith: OBSERVED_WITH },
+        detail: `Claude Code version unknown (no claude answered --version and this is no Claude Code session); forge's platform facts were recorded with ${OBSERVED_WITH}`,
+      };
+    }
     const data = { version: found.version, source: found.source, observedWith: OBSERVED_WITH };
     if (found.version === OBSERVED_WITH) return { id, status: 'ok', detail: `Claude Code ${found.version}, the version forge's platform facts were recorded with`, data };
     return {
-      id, status: 'warn', data,
-      detail: `Claude Code ${found.version} runs here; forge's platform facts (its hooks, subagents and background agents) were recorded with Claude Code ${OBSERVED_WITH}`,
-      fix: { do: `nothing to repair: if a hook, a subagent or a background agent behaves differently than forge expects, say Claude Code ${found.version} when you report it`, kind: 'manual' },
+      id, status: 'ok', data,
+      detail: `Claude Code ${found.version} runs here, not ${OBSERVED_WITH}, the version forge's platform facts (its hooks, subagents and background agents) were recorded with: if one of them behaves differently than forge expects, it may be a change of Claude Code (data, not an alarm)`,
     };
   },
 };
