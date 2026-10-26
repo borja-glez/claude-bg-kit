@@ -22,6 +22,7 @@ Rules for every path:
 - `forge-fable` is used only when the user explicitly asks for Fable.
 - Change the project's files with the Edit and Write tools, never with `sed -i`, `awk`, `perl -i` or shell redirection: they rewrite whole files and can change line endings (CRLF on Windows) into a whole-file diff. Saving a command's output to forge's own work files (`FORGE validate ... > .forge/work/...`) is fine. This holds on every OS and path, also when you implement yourself.
 - Hand over briefs, diffs and reports as files. No narration, no "shall I continue?".
+- A `warning` in what `FORGE prep` prints (no validators: nothing checks the change) goes to the person in one line, once per task.
 - Record each phase with `FORGE log --kind phase --task <id> --data-file <file>` (file: `{"phase":"<name>","brief":<n>,"base":"<BASE sha>"}`) only for the phases the CLI does not log (`design`, `plan`, `done`; `prep`, `review-prep` and `review-close` log the rest), and each agent you spawn with `--kind agent` (file: `{"agent":"<name>","role":"<role>"}`).
 
 ## Decisions

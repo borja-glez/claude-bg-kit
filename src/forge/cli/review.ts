@@ -7,7 +7,7 @@ import { appendEvent, appendPhase, ledgerRoot, readEvents, type LedgerEvent } fr
 import { loadConfig, agentFor, ConfigError, type Profile, type ForgeConfig } from '../config.js';
 import {
   detectValidators, selectValidators, runValidators, markPreexisting, blocking, baselineFailing, runOptions, validateEvent, failingLabel,
-  type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult,
+  NO_VALIDATORS, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult,
 } from '../validators.js';
 import { PATH_ORDER, diffZones, type PathName, type ReviewRole, type Zone } from '../triage.js';
 import { diffSinks } from '../sinks.js';
@@ -988,27 +988,33 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   // D8: it carries --baseline whenever this prep wrote the baseline, so validate can tell the new failures from the base's.
   const validateCmd = (baselineFile: string | null) => `node "${slash(deps.self ?? 'forge.cjs')}" validate --affected --base ${base} --task ${task}`
     + `${baselineFile ? ` --baseline "${slash(baselineFile)}"` : ''}${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}`;
+  // FC3: no validator detected nor listed: nothing will check the brief's work, which prep says on its output and on
+  // stderr (an invalid config, read only by a baseline run, says nothing here).
+  const catalog = config ? detectValidators(deps.repo, config) : null;
+  const none = catalog !== null && catalog.length === 0;
+  const warned = (r: Result): Result => (none ? { ...r, stderr: `${r.stderr}${NO_VALIDATORS}\n` } : r);
+  const warning = none ? { warning: NO_VALIDATORS } : {};
   // J-13: --no-baseline (the Small path) records BASE and the phase and runs no validator.
   if (noBaseline || !config) {
     const validate = validateCmd(null);
     appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase, brief: Number(n), base, ...started });
-    return json({ base, ...started, baseline: null, failing: [], cached: [], durationMs: 0, validate, threatModel, ...earlier });
+    return warned(json({ base, ...started, baseline: null, failing: [], cached: [], durationMs: 0, validate, threatModel, ...warning, ...earlier }));
   }
 
   // The baseline, as `validate --all --path <p> --base-run` runs it: on BASE nothing changed yet, so a heavy path runs
   // every heavy validator (the review's diff later selects among them).
   const scope: Scope = p === 'trivial' || p === 'small' ? { mode: 'small' } : { mode: 'heavy', changed: null };
   const restored: string[] = [];
-  const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes('--no-cache'), null);
+  const { results, durationMs } = validateList(deps, config, selectValidators(catalog ?? [], scope), restored, args.includes('--no-cache'), null);
   const file = path.join(dir, `baseline-${n}.json`);
   writeFileSync(file, JSON.stringify(results, null, 2) + '\n');
   const ts = deps.now().toISOString();
   appendEvent(deps.cwd, validateEvent(ts, task, results, durationMs, scope.mode, { baseline: true }));
   appendEvent(deps.cwd, { ts, kind: 'phase', task: id, phase, brief: Number(n), base, ...started });
-  return json({
+  return warned(json({
     base, ...started, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results),
-    durationMs, validate: validateCmd(file), threatModel, ...(restored.length ? { restored } : {}), ...earlier,
-  });
+    durationMs, validate: validateCmd(file), threatModel, ...(restored.length ? { restored } : {}), ...warning, ...earlier,
+  }));
 }
 
 /** `review-prep`, `review-close`, `prep` and `shadow` (cli/shadow.ts). */

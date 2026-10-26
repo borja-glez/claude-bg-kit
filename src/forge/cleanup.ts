@@ -5,6 +5,9 @@ import path from 'node:path';
 import { samePath } from '../lib/worktree.js';
 import { LIVE_MAX_AGE_HOURS, isSafeId, normalizeLive, normalizePublicTask } from '../lib/execution-state.js';
 import { normalizeMember } from '../lib/member-doc.js';
+import { lockFileState, removeStaleGate, removeStaleLock, staleGate } from './execution.js';
+import { pidAlive } from './pid.js';
+import { LIVE_LOCK_STALE_MS } from './live.js';
 
 export interface ForgeWorktree { path: string; name: string; branch: string | null }
 
@@ -41,13 +44,16 @@ const MAX_FILES = 2000;
 
 export interface Pruned { files: string[]; bytes: number }
 
-function dropper(dryRun: boolean): { drop: (file: string) => void; out: Pruned } {
+// `remove`: how the file goes when a plain remove would not do (a lock goes through its takeover gate); false: it stays.
+function dropper(dryRun: boolean): { drop: (file: string, remove?: () => boolean) => void; out: Pruned } {
   const out: Pruned = { files: [], bytes: 0 };
-  const drop = (file: string) => {
+  const drop = (file: string, remove?: () => boolean) => {
     try {
       const st = statSync(file);
       if (!st.isFile()) return;
-      if (!dryRun) rmSync(file, { force: true });
+      if (!dryRun) {
+        if (remove) { if (!remove()) return; } else rmSync(file, { force: true });
+      }
       out.files.push(file);
       out.bytes += st.size;
     } catch { /* gone already */ }
@@ -88,6 +94,20 @@ export function pruneRunState(main: string, keep: string | null, opts: { now: nu
     const t = Date.parse(d.ts);
     const stale = opts.stale && (d.ended || !Number.isFinite(t) || opts.now - t > LIVE_MAX_AGE_HOURS * 3600_000);
     if (d.runId !== keep || stale) drop(file);
+  }
+  // FC2: the lock of a live signal that a process killed in its hook left (its pid gone, or past LIVE_LOCK_STALE_MS),
+  // removed through its takeover gate as a hook takes it over (never while another process does); then the takeover
+  // gates left behind. The next hook takes a stale lock over anyway: this only tidies the folder.
+  const lockDeps = { now: () => new Date(opts.now), staleMs: LIVE_LOCK_STALE_MS };
+  const liveNames = (end: string) => { try { return readdirSync(path.join(forge, 'live')).filter(n => n.endsWith(end)).slice(0, MAX_FILES); } catch { return []; } };
+  for (const n of liveNames('.json.lock')) {
+    const file = path.join(forge, 'live', n);
+    const s = lockFileState(file, new Date(opts.now), pidAlive, LIVE_LOCK_STALE_MS);
+    if (s.held && s.stale) drop(file, () => removeStaleLock(file, lockDeps));
+  }
+  for (const n of liveNames('.json.lock.takeover')) {
+    const gate = path.join(forge, 'live', n);
+    if (staleGate(gate, lockDeps)) drop(gate, () => removeStaleGate(gate, lockDeps));
   }
   // The question notes an unattended run left (.forge/execution/asked/<runId>/<surface>.json) go with the run.
   const asked = path.join(forge, 'execution', 'asked');

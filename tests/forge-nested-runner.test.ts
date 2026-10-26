@@ -259,6 +259,28 @@ describe('the runner agent and the coordinator text (A10)', () => {
       'SendMessage', '`<T> accepted`', '`<T> handback: <', '`<T> handback: taken back`', 'validators-head-<n>.json',
       '--out <WORK>/review-prep-<n>.json']) expect(md, w).toContain(w);
   });
+  it('FC6: forge-runner says its agents may run in the background and their reply wakes it, and keeps its commands in the foreground', () => {
+    const md = doc('plugins/forge/agents/forge-runner.md');
+    expect(md).not.toContain('Nothing wakes you');
+    expect(md).not.toContain('Foreground only');
+    const lines = md.split('\n');
+    const head = lines.findIndex(l => l.startsWith('- **Commands in the foreground, agents back by their reply.**'));
+    expect(head).toBeGreaterThan(-1);
+    const section = lines.slice(head, lines.findIndex((l, i) => i > head && l.startsWith('- **'))).join('\n');
+    for (const w of ['never with `run_in_background`', 'timeout: 600000', 'may run in the background', 'its reply comes back to you and wakes you',
+      'end your turn', 'never poll', 'all in one message', 'hand back']) expect(section, w).toContain(w);
+  });
+  it('FC6: forge-runner hands back with the text of a project file the harness refused to its implementer, for the coordinator to write', () => {
+    const md = doc('plugins/forge/agents/forge-runner.md');
+    const handing = md.slice(md.indexOf('## Handing back'), md.indexOf('## Reply'));
+    const line = handing.split('\n').find(l => l.includes('returns as text'))!;
+    for (const w of ['<WORK>/deliverable-<n>.txt', 'never under its own name', '`deliverable <path>: text in <WORK>/deliverable-<n>.txt`', 'the coordinator writes it']) expect(line, w).toContain(w);
+    const step = doc('plugins/forge/skills/run/references/step.md').split('\n').find(l => l.trimStart().startsWith('- `handback` ('))!;
+    for (const w of ['`deliverable <path>: text in <file>`', 'with the Write tool', 'commit it there', 'review the tree without that commit',
+      'makes `integrate` send the task back to review (`unreviewed`)']) expect(step, w).toContain(w);
+    // The step already took the task up: its actions are followed as they are, never held for the deliverable.
+    expect(step).not.toContain('before you follow');
+  });
   it('forge-runner hands back a refusal, a refusal an agent got around and a brief left partly undone, and never works around one itself', () => {
     const md = doc('plugins/forge/agents/forge-runner.md');
     const back = md.split('\n').find(l => l.startsWith('2. **Back.**'))!;

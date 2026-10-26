@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ROUTE_SUPERPOWERS, satisfiesRange, type CheckResult, type DoctorCheck, type DoctorCtx } from './doctor.js';
 import { installedPlugins, locateSuperpowers, type InstalledPlugin } from './superpowers.js';
 import { findWaypointCli } from './cli/commands/waypoint-cli.js';
+import { claudeVersion, OBSERVED_WITH } from './claude-bin.js';
 import { samePath } from '../lib/worktree.js';
 
 /** A4: the checks of the install forge runs from: waypoint and superpowers against their ranges, which copy runs, the permissions and waypoint doctor. */
@@ -203,4 +204,26 @@ const waypointDoctorCheck: DoctorCheck = {
   },
 };
 
-export const INSTALL_CHECKS: readonly DoctorCheck[] = [waypointVersionCheck, runningCopyCheck, superpowersVersionCheck, permissionsCheck, waypointDoctorCheck];
+/** FC5: the Claude Code here against OBSERVED_WITH, the version forge's platform facts were recorded with. Data, never
+ *  an alarm (status ok, as waiting-calls): another version, or none read, never changes doctor's exit. */
+const claudeVersionCheck: DoctorCheck = {
+  id: 'claude-version',
+  run(ctx) {
+    const id = 'claude-version';
+    const found = claudeVersion(ctx.env);
+    if (!found) {
+      return {
+        id, status: 'ok', data: { version: null, observedWith: OBSERVED_WITH },
+        detail: `Claude Code version unknown (no claude answered --version and this is no Claude Code session); forge's platform facts were recorded with ${OBSERVED_WITH}`,
+      };
+    }
+    const data = { version: found.version, source: found.source, observedWith: OBSERVED_WITH };
+    if (found.version === OBSERVED_WITH) return { id, status: 'ok', detail: `Claude Code ${found.version}, the version forge's platform facts were recorded with`, data };
+    return {
+      id, status: 'ok', data,
+      detail: `Claude Code ${found.version} runs here, not ${OBSERVED_WITH}, the version forge's platform facts (its hooks, subagents and background agents) were recorded with: if one of them behaves differently than forge expects, it may be a change of Claude Code (data, not an alarm)`,
+    };
+  },
+};
+
+export const INSTALL_CHECKS: readonly DoctorCheck[] = [waypointVersionCheck, runningCopyCheck, superpowersVersionCheck, claudeVersionCheck, permissionsCheck, waypointDoctorCheck];

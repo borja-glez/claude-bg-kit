@@ -129,6 +129,19 @@ export function spSkillPath(sp: Superpowers, skill: string): string | null {
   return existsSync(f) ? f : null;
 }
 
+/** FC1: a path superpowers wrote (a workspace's plan-path) as an absolute path of this platform with forward slashes, or
+ *  null when it is relative. sdd-workspace spells a plan outside the toplevel it runs in with `pwd -P`: on Windows, Git
+ *  Bash's /e/… (or Cygwin's /cygdrive/e/…) is E:/…, and E:\… is E:/…. */
+export function spMarkerPath(marker: string, platform: NodeJS.Platform = process.platform): string | null {
+  const s = marker.trim().replace(/\\/g, '/');
+  if (platform !== 'win32') return s.startsWith('/') ? s : null;
+  const msys = /^\/(?:cygdrive\/)?([A-Za-z])(?=\/|$)/.exec(s);
+  if (msys) return `${msys[1].toUpperCase()}:${s.slice(msys[0].length) || '/'}`;
+  return /^[A-Za-z]:\//.test(s) ? s : null;
+}
+
+const realOr = (p: string): string => { try { return realpathSync(p); } catch { return path.resolve(p); } };
+
 /** D-17: the first line of forge's record of the plan at `rel`; a record is that plan's only when it starts with it. */
 const recordHeader = (rel: string) => `# SDD ledger — plan: ${rel}`;
 const isRecordOf = (text: string, rel: string) => text.split(/\r?\n/)[0].trim() === recordHeader(rel);
@@ -139,20 +152,34 @@ const isRecordOf = (text: string, rel: string) => text.split(/\r?\n/)[0].trim() 
  * - forge, for a task without checkboxes (D-17, sp-plan check): `<root>/.forge/sp-done/<slug>[-…].md`.
  * A ledger names the plan by its path in the repository (from the first root, which holds the plan) or from its own
  * root: the main checkout's says docs/…/plan.md, not .claude/worktrees/x/docs/… (K1-07). A workspace whose `plan-path`
- * marker names another plan, or a ledger whose first line names another plan, is skipped. forge's record counts only
- * when its first line is exactly the header recordSpDone writes for this plan. Fail-open: nothing readable means none.
+ * marker names another plan, or a ledger whose first line names another plan, is skipped. An absolute marker (FC1:
+ * sdd-workspace writes one for a plan outside the toplevel it ran in, /e/… on Git Bash) names this plan when it is
+ * planAbs, or when its path from one of the roots is one of the plan's. forge's record counts only when its first line
+ * is exactly the header recordSpDone writes for this plan. Fail-open: nothing readable means none.
  */
 export function spLedgerDone(roots: string[], planAbs: string): number[] {
   const done = new Set<number>();
   const slug = path.basename(planAbs).replace(/\.md$/i, '');
   const mine = (name: string) => name === slug || name.startsWith(`${slug}-`);
   const list = (dir: string) => { try { return readdirSync(dir); } catch { return []; } };
-  const relOf = (root: string): string | null => {
-    const r = path.relative(root, planAbs).split(path.sep).join('/');
+  const relFrom = (root: string, file: string): string | null => {
+    const r = path.relative(root, file).split(path.sep).join('/');
     return !r || r.startsWith('..') || path.isAbsolute(r) ? null : r;
   };
+  const relOf = (root: string) => relFrom(root, planAbs);
   const repoRel = roots.length ? relOf(path.resolve(roots[0])) : null;
-  for (const root of [...new Set(roots.map(r => path.resolve(r)))]) {
+  const allRoots = [...new Set(roots.map(r => path.resolve(r)))];
+  // An absolute marker names this plan when it is the plan, or a path of the plan from one of the roots (both as given
+  // and as the file system resolves them: pwd -P spells the physical path).
+  const namesPlan = (abs: string, rels: string[]): boolean => {
+    const files = [...new Set([path.resolve(abs), realOr(abs)])];
+    if (files.some(f => samePath(f, planAbs) || samePath(f, realOr(planAbs)))) return true;
+    return allRoots.some(r => [...new Set([r, realOr(r)])].some(base => files.some(f => {
+      const x = relFrom(base, f);
+      return x !== null && rels.includes(x);
+    })));
+  };
+  for (const root of allRoots) {
     const rel = relOf(root);
     const rels = [...new Set([repoRel, rel].filter((r): r is string => r !== null))];
     const base = path.join(root, '.superpowers', 'sdd');
@@ -160,7 +187,8 @@ export function spLedgerDone(roots: string[], planAbs: string): number[] {
       const dir = path.join(base, name);
       let marker: string | null = null;
       try { marker = readFileSync(path.join(dir, 'plan-path'), 'utf8').trim().replace(/\\/g, '/'); } catch { /* a workspace without a marker */ }
-      if (marker !== null && !rels.includes(marker)) continue;
+      const abs = marker === null ? null : spMarkerPath(marker);
+      if (marker !== null && !(abs === null ? rels.includes(marker) : namesPlan(abs, rels))) continue;
       try {
         const text = readFileSync(path.join(dir, 'progress.md'), 'utf8');
         for (const r of rels) for (const n of sddComplete(text, r)) done.add(n);

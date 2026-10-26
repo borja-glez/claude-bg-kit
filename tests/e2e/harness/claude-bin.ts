@@ -2,12 +2,13 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { OBSERVED_WITH, parseVersion } from '../../../src/forge/claude-bin.js';
 
 export interface ClaudeBin { file: string; prefix: readonly string[]; version: string; viaCmd: boolean }
 
-/** The claude version tests/e2e/README.md was recorded with; whoever re-records its observations raises this, and the
- *  version .github/workflows/ci.yml installs with it (tests/ci-script.test.ts). */
-export const OBSERVED_WITH = '2.1.310';
+/** The claude version tests/e2e/README.md was recorded with, and the x.y.z of a `claude --version`: forge's own
+ *  (src/forge/claude-bin.ts), which forge doctor compares with the Claude Code here. */
+export { OBSERVED_WITH, parseVersion };
 
 /** The claude to run: BGKIT_E2E_CLAUDE when set (that file or none), else the first one on PATH. */
 export function resolveClaude(env: Record<string, string | undefined>, platform: NodeJS.Platform, isFile: (p: string) => boolean): string | null {
@@ -25,12 +26,6 @@ export function resolveClaude(env: Record<string, string | undefined>, platform:
     }
   }
   return null;
-}
-
-/** The x.y.z a `claude --version` output starts with. */
-export function parseVersion(out: string): string | null {
-  const m = /^\s*(\d+\.\d+\.\d+)/.exec(out);
-  return m ? m[1] : null;
 }
 
 /** Spawn arguments for a claude: an .exe runs as it is; a .cmd goes through cmd.exe, which splits what it should not. */

@@ -101,6 +101,34 @@ describe('forge swarm cleanup (D-03, D-18)', () => {
     for (const f of ['execution/merging.json', 'execution/baseline/fresh.json', 'work/shop/T1/brief-1.md', 'execution.json']) expect(existsSync(forge(f)), f).toBe(true);
     expect(calls.flat().filter(a => a === '-D' || a === '--force' || a === '-f' || a === 'reset')).toEqual([]);
   });
+  it('FC2: removes the lock of a live signal its dead process left, never one a live process holds', () => {
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+    writeFileSync(forge('live', 'h1.json.lock'), JSON.stringify({ pid: dead, at }));
+    writeFileSync(forge('live', 'h2.json.lock'), JSON.stringify({ pid: process.pid, at }));
+    swarmCommand(['cleanup'], io, spyDeps([]));
+    expect(existsSync(forge('live', 'h1.json.lock'))).toBe(false);
+    expect(existsSync(forge('live', 'h2.json.lock'))).toBe(true);
+  });
+  it('FC2: a stale live lock goes through its takeover gate: never while another process holds the gate, and a gate left behind goes', () => {
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+    const old = new Date(NOW.getTime() - 60_000).toISOString();
+    // h1: a stale lock whose gate another process holds right now: it stays, and so does the gate.
+    writeFileSync(forge('live', 'h1.json.lock'), JSON.stringify({ pid: dead, at }));
+    writeFileSync(forge('live', 'h1.json.lock.takeover'), JSON.stringify({ pid: process.pid, at }));
+    // h3: a gate a dead process left a minute ago, its lock gone: it goes.
+    writeFileSync(forge('live', 'h3.json.lock.takeover'), JSON.stringify({ pid: dead, at: old }));
+    const dry = JSON.parse(swarmCommand(['cleanup', '--dry-run'], io, spyDeps([])).stdout);
+    expect(dry.removed.files).toBeGreaterThan(0);
+    expect(existsSync(forge('live', 'h3.json.lock.takeover'))).toBe(true);
+    swarmCommand(['cleanup'], io, spyDeps([]));
+    expect(existsSync(forge('live', 'h1.json.lock'))).toBe(true);
+    expect(existsSync(forge('live', 'h1.json.lock.takeover'))).toBe(true);
+    expect(existsSync(forge('live', 'h3.json.lock.takeover'))).toBe(false);
+    // Once the gate is free, the stale lock goes through it, and leaves no gate behind.
+    rmSync(forge('live', 'h1.json.lock.takeover'));
+    swarmCommand(['cleanup'], io, spyDeps([]));
+    expect(readdirSync(forge('live')).filter(n => n.includes('.lock'))).toEqual([]);
+  });
   it('refuses while the execution is active', () => {
     seedExecution(root, exec({ active: true, stopReason: null, closedAt: null, closedBy: null }));
     const r = run(['swarm', 'cleanup'], io);
