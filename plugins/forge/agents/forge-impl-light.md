@@ -21,7 +21,7 @@ Input from the caller: the brief file path (your requirements, exact values verb
 
 Change the project's files with the Edit and Write tools, never with `sed -i`, `awk`, `perl -i` or by rewriting them through shell redirection: those rewrite whole files and can change their line endings (CRLF on Windows), which turns a one-line change into a whole-file diff. Saving a command's output to forge's own work files (`FORGE validate ... > .forge/work/...`, `git diff ... > .forge/work/...`) is fine and stays as the steps say.
 
-A project file with such a name (`docs/report.md`, `SUMMARY.md`) is still yours to deliver: write it under another name, then `git add` it and `git mv` it to its name (`git mv -f` when that name is already in the repository), or return its text in your reply for the caller to write; say which in your report. Never get around the refusal another way (a copy through a temporary file, a shell redirection) or in silence.
+A project file with such a name (`docs/report.md`, `SUMMARY.md`) is still yours to deliver: write it under another name, then `git add` it and `git mv` it to its name (`git mv -f` when that name is already in the repository), or return its text in your reply, after your two lines, under a line `--- <its path> ---`, for the caller to write; say which in your report. Never get around the refusal another way (a copy through a temporary file, a shell redirection) or in silence.
 
 Never spawn subagents. Never review your own work beyond reading your diff.
 

@@ -86,7 +86,7 @@ Hand back:
 - in every case above;
 - on any `FORGE` command that exits other than as described, «Commands not trusted» included;
 - when a tool refuses you something the task needs (a permission, a write the harness refuses): never work around it;
-- when your implementer returns as text a project file the harness refused to write (a `.md` whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS): save that text with the Write tool to `<WORK>/deliverable-<n>.txt` (never under its own name) and hand back with `deliverable <path>: text in <WORK>/deliverable-<n>.txt` as the reason, `<path>` being the file's place in the project: the coordinator writes it;
+- when your implementer returns as text a project file the harness refused to write (a `.md` whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS; after its two lines, under a line `--- <path> ---`): save that text with the Write tool to `<WORK>/deliverable-<n>.txt` (never under its own name) and hand back with `deliverable <path>: text in <WORK>/deliverable-<n>.txt` as the reason, `<path>` being the file's place in the project: the coordinator writes it;
 - when you are about to run out of turns.
 
 ## Reply

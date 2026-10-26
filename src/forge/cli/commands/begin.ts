@@ -14,7 +14,8 @@ import { isSafeId } from '../../../lib/execution-state.js';
  * J-12, forge begin: what forge:run reads before a task, in one call. The changes of the tree that are not forge's
  * (`foreign`, and the question in `say`: forge asks, commits and stashes nothing), the snapshot of `tree snapshot` (the
  * first one stands), the TDD line, the resolved autonomy and workflow, and `.forge/.gitignore` while git does not track
- * it. `--cwd`: the code's directory, as for every command.
+ * it and its rules are not exactly forge's (forge's own retires itself, retireForgeIgnore). `--cwd`: the code's
+ * directory, as for every command.
  */
 export const command: Command = (args, ctx) => {
   const { io, repoDir, flag, has, json, run } = ctx;

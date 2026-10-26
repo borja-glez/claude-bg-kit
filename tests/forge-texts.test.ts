@@ -35,3 +35,67 @@ describe("forge's texts (A7)", () => {
     expect(md.split('\n').find(l => l.trimStart().startsWith('- `review_focus`'))).toMatch(/at most 6/);
   });
 });
+
+// w8 integration, the final review's fixes to forge's texts.
+describe("forge's texts (w8 integration)", () => {
+  const line = (p: string, start: string) => read(p).split(/\r?\n/).find(l => l.startsWith(start)) ?? '';
+  it('a new surface is committed alone: no .forge/.gitignore goes with it (FR5 left none to add)', () => {
+    const draft = line('plugins/forge/skills/run/references/verify.md', '- Each `drafts` entry:');
+    expect(draft).toContain("Commit a new surface with the task's work.");
+    const told = line('plugins/forge/skills/verify/SKILL.md', '- **The user explains how to check something**');
+    expect(told).toContain('commit the surface alone (pathspec) and say');
+    for (const t of [draft, told]) expect(t).not.toContain('.forge/.gitignore');
+  });
+  it('untracked names a .forge/.gitignore git does not track whose rules are not exactly forge\'s, in the skill and both READMEs', () => {
+    const run = line('plugins/forge/skills/run/SKILL.md', '1. **Run it.**');
+    expect(run).toContain("`untracked` (a `.forge/.gitignore` git does not track whose rules are not exactly forge's: item 4)");
+    expect(run).not.toContain('while `.forge/.gitignore` is not in git');
+    const en = read('plugins/forge/README.md'), es = read('plugins/forge/README.es.md');
+    expect(en).not.toContain('an earlier forge left is not in git');
+    expect(es).not.toContain('que dejó un forge anterior no');
+    expect(line('plugins/forge/README.md', '- `triage [')).toContain("`untracked`, a `.forge/.gitignore` git does not track whose rules are not exactly forge's");
+    expect(line('plugins/forge/README.md', '- `begin --task')).toContain("`untracked`, as `triage` prints it");
+    expect(line('plugins/forge/README.es.md', '- `triage [')).toContain('`untracked`, un `.forge/.gitignore` sin seguimiento cuyas reglas no son exactamente las de forge');
+    expect(line('plugins/forge/README.es.md', '- `begin --task')).toContain('`untracked`, como lo imprime `triage`');
+  });
+  it("the coordinator reads the notes with waypoint's notes command and keeps lastNoteTs in its own seat's session.json", () => {
+    const exec = 'plugins/forge/skills/run/references/execution.md';
+    expect(line(exec, '1. **Start (once).**')).toContain('`SEAT` = its `seatDir`');
+    const notes = line(exec, '2. **Read.**');
+    expect(notes).toContain('`node "<WP>" notes --notes DB/notes --plan <plan> --since <lastNoteTs>`');
+    expect(notes).toContain('`lastNoteTs` of `<SEAT>/session.json`');
+    expect(notes).toContain('store its `latest` as `lastNoteTs` in that same file');
+    expect(notes).not.toContain('in `.waypoint/<project>/session.json`');
+    expect(notes).not.toContain('as `/waypoint:work` §1.4 does');
+  });
+  it('an implementer that returns a refused deliverable as text: it says how, and the coordinator writes it, commits it and says so', () => {
+    for (const a of ['forge-impl-heavy', 'forge-impl-high', 'forge-impl', 'forge-impl-light', 'forge-mech', 'forge-fable']) {
+      const deliver = line(`plugins/forge/agents/${a}.md`, 'A project file with such a name');
+      expect(deliver, a).toContain('return its text in your reply, after your two lines, under a line `--- <its path> ---`, for the caller to write');
+    }
+    const ts = line('plugins/forge/skills/run/references/task-steps.md', '2. **implement**');
+    const med = line('plugins/forge/skills/run/references/medium.md', '2. For each task');
+    for (const [name, t] of [['task-steps', ts], ['medium', med]] as const) {
+      for (const w of ['under a line `--- <path> ---`', 'with the Write tool', "brief's `Commit title prefix`", 'tell the person in one line']) expect(t, `${name}: ${w}`).toContain(w);
+    }
+    expect(ts).toContain("in the task's worktree");
+    expect(ts).toContain('before the step that names the task in `--returned`');
+  });
+  it('the README says the live signal is written under a lock, that SubagentStart also checks for deviations, the files they leave in .forge/ and the no-validators warning', () => {
+    for (const [p, live, list, warn] of [
+      ['plugins/forge/README.md', ['`live/<sessionId>.json.lock`', 'the deviation check'], ['`deviation.lock`', '`deviations-told.json`', '`live/<id>.json.lock`', '`work/run/deviations-told.json`'],
+        ['No validators detected', '`announce`', '`prep`']],
+      ['plugins/forge/README.es.md', ['`live/<sessionId>.json.lock`', 'la comprobación de desvíos'], ['`deviation.lock`', '`deviations-told.json`', '`live/<id>.json.lock`', '`work/run/deviations-told.json`'],
+        ['No hay validadores', '`announce`', '`prep`']],
+    ] as const) {
+      const md = read(p).split(/\r?\n/);
+      const at = md.findIndex(l => l === '### Live signal' || l === '### Señal en vivo');
+      const signal = md.slice(at + 1, at + 4).join('\n');
+      for (const w of live) expect(signal, `${p}: ${w}`).toContain(w);
+      const forgeDir = md.find(l => l.startsWith('`.forge/` ')) ?? '';
+      for (const w of list) expect(forgeDir, `${p}: ${w}`).toContain(w);
+      const validators = md.find(l => l.startsWith('**Validators.**') || l.startsWith('**Validadores.**')) ?? '';
+      for (const w of warn) expect(validators, `${p}: ${w}`).toContain(w);
+    }
+  });
+});
