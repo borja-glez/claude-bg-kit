@@ -14,7 +14,8 @@ const waypoint = JSON.parse(readFileSync('plugins/waypoint/.claude-plugin/plugin
 // and forge-trust-delegated, which does the same before each delegated-trust test (about 5 s alone).
 // since w7 A4, forge-doctor, which starts git and reads real state;
 // since w7-a9, forge-tdd-base, whose tests check BASE out in temporary worktrees;
-// since w7 A10, forge-nested-runner, which starts and steps executions on a real repository and its worktrees.
+// since w7 A10, forge-nested-runner, which starts and steps executions on a real repository and its worktrees;
+// since w8 forge-core, forge-live-race, which bundles the CLI and starts eight hooks at once, several times.
 export const SLOW = [
   'tests/forge-doctor.test.ts',
   'tests/forge-blocked.test.ts',
@@ -51,6 +52,7 @@ export const SLOW = [
   'tests/forge-trust-delegated.test.ts',
   'tests/forge-tdd-base.test.ts',
   'tests/forge-nested-runner.test.ts',
+  'tests/forge-live-race.test.ts',
 ];
 
 // I-17: vitest 5 fails a synchronous test that outran its timeout (vitest 2 let it pass), and the slow suites take 5–20 s under load.
