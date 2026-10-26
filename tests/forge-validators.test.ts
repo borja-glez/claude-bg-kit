@@ -122,7 +122,45 @@ describe('detectValidators', () => {
     const sub = { 'android/gradlew': '', 'android/app/build.gradle.kts': 'id("com.android.application")' };
     expect(detectValidators(repo(sub), cfg, () => false, 'linux').map(v => v.cmd)).toEqual(['cd android && ./gradlew lint', 'cd android && ./gradlew testDebugUnitTest']);
     expect(detectValidators(repo({ ...android, 'package.json': pkg({}) }), cfg, () => false, 'linux')).toEqual([]);
-    expect(detectValidators(repo({ gradlew: '', 'app/build.gradle': 'java library' }), cfg, () => false, 'linux')).toEqual([]);
+    // FC3: a gradle build that is not an android app is a JVM one.
+    expect(detectValidators(repo({ gradlew: '', 'app/build.gradle': 'java library' }), cfg, () => false, 'linux').map(v => v.cmd)).toEqual(['./gradlew test']);
+  });
+  const jvm = (files: Record<string, string>, platform: NodeJS.Platform = 'linux') =>
+    detectValidators(repo(files), cfg, () => false, platform).map(v => [v.name, v.cmd, v.kind]);
+  it('FC3: gradle outside android, from the wrapper or a build script at the root; gradlew.bat on Windows, gradle without a wrapper', () => {
+    for (const f of ['gradlew', 'gradlew.bat', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts']) {
+      expect(jvm({ [f]: '' }).map(v => v[0]), f).toEqual(['gradle-test']);
+    }
+    const wrapper = { gradlew: '', 'gradlew.bat': '', 'settings.gradle.kts': 'rootProject.name = "shop"', 'build.gradle.kts': 'plugins { java }' };
+    expect(jvm(wrapper)).toEqual([['gradle-test', './gradlew test', 'test']]);
+    expect(jvm(wrapper, 'win32')).toEqual([['gradle-test', 'gradlew.bat test', 'test']]);
+    expect(jvm({ 'build.gradle': "apply plugin: 'java'" })).toEqual([['gradle-test', 'gradle test', 'test']]);
+    expect(jvm({ 'build.gradle': "apply plugin: 'java'" }, 'win32')).toEqual([['gradle-test', 'gradle test', 'test']]);
+    // A build script below the root is a module of something else (an android/ folder, a sample): nothing.
+    expect(jvm({ 'samples/build.gradle': '' })).toEqual([]);
+  });
+  it('FC3: gradle check, without the tests the test validator runs, when the build adds checks to it', () => {
+    const both = (cmd: string) => [['gradle-test', `${cmd} test`, 'test'], ['gradle-check', `${cmd} check -x test`, 'lint']];
+    expect(jvm({ gradlew: '', 'build.gradle.kts': 'plugins {\n  java\n  checkstyle\n}' })).toEqual(both('./gradlew'));
+    expect(jvm({ gradlew: '', 'build.gradle': "plugins { id 'com.diffplug.spotless' version '7.0.2' }" }, 'win32')).toEqual(both('gradlew.bat'));
+    expect(jvm({ gradlew: '', 'build.gradle.kts': 'tasks.named("check") { dependsOn(archTest) }' })).toEqual(both('./gradlew'));
+    // The version catalog or a convention build names the plugin when the root script only applies a convention.
+    expect(jvm({ gradlew: '', 'build.gradle.kts': 'plugins { id("shop.java") }', 'gradle/libs.versions.toml': '[plugins]\nspotbugs = { id = "com.github.spotbugs", version = "6.1.0" }\n' })).toEqual(both('./gradlew'));
+    expect(jvm({ gradlew: '', 'build-logic/build.gradle.kts': 'dependencies { implementation(libs.detekt.gradle) }' })).toEqual(both('./gradlew'));
+    expect(jvm({ gradlew: '', 'build.gradle.kts': 'plugins { java }' })).toEqual([['gradle-test', './gradlew test', 'test']]);
+  });
+  it('FC3: maven, from the wrapper or a pom.xml; mvnw.cmd on Windows, mvn without a wrapper', () => {
+    expect(jvm({ 'pom.xml': '<project/>' })).toEqual([['maven-test', 'mvn -q test', 'test']]);
+    expect(jvm({ 'pom.xml': '<project/>' }, 'win32')).toEqual([['maven-test', 'mvn -q test', 'test']]);
+    expect(jvm({ 'pom.xml': '<project/>', mvnw: '', 'mvnw.cmd': '' })).toEqual([['maven-test', './mvnw -q test', 'test']]);
+    expect(jvm({ mvnw: '' })).toEqual([['maven-test', './mvnw -q test', 'test']]);
+    expect(jvm({ 'pom.xml': '<project/>', mvnw: '', 'mvnw.cmd': '' }, 'win32')).toEqual([['maven-test', 'mvnw.cmd -q test', 'test']]);
+    // A make test target is not added beside them.
+    expect(jvm({ 'pom.xml': '<project/>', Makefile: 'test:\n\tmvn test\n' }).map(v => v[0])).toEqual(['maven-test']);
+  });
+  it('FC3: an android app keeps its own gradle validators, never the JVM ones', () => {
+    const android = { gradlew: '', 'gradlew.bat': '', 'build.gradle': 'plugins { id "checkstyle" }', 'app/build.gradle': "plugins { id 'com.android.application' }" };
+    expect(jvm(android).map(v => v[0])).toEqual(['gradle-lint', 'gradle-test']);
   });
   it('every detected validator says so', () => {
     expect(detectValidators(repo({ 'package.json': pkg({ test: 'x' }) }), cfg).every(v => v.source === 'detected')).toBe(true);

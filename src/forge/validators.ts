@@ -71,6 +71,17 @@ function relatedCmd(body: string, runner: string): { affectedCmd?: string } {
   return {};
 }
 
+// FC3: what makes a root a Gradle build: the wrapper first (with it, the command is the wrapper), then a build or
+// settings script.
+const GRADLE_ROOT = ['gradlew', 'gradlew.bat', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'];
+// Where a build adds checks to `check`: its root scripts, its version catalog and its convention builds.
+const GRADLE_SCRIPTS = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'gradle/libs.versions.toml',
+  'buildSrc/build.gradle', 'buildSrc/build.gradle.kts', 'build-logic/build.gradle', 'build-logic/build.gradle.kts'];
+// A verification plugin that hangs a task on `check`, or the build naming `check` itself (tasks.named("check"), check { … }).
+const GRADLE_CHECK = /\b(?:checkstyle|pmd|spotbugs|spotless|detekt|ktlint|kotlinter|errorprone|codenarc)\b|["']check["']|\btasks\.check\b|^\s*check\s*(?:\{|\.dependsOn)/im;
+/** Whether `gradle check` does more than the tests: one of GRADLE_SCRIPTS names a check. */
+const gradleChecks = (repo: RepoReader): boolean => GRADLE_SCRIPTS.some(f => GRADLE_CHECK.test(repo.read(f) ?? ''));
+
 function detected(repo: RepoReader, which: (name: string) => boolean, platform: NodeJS.Platform): Validator[] {
   const out: Validator[] = [];
   const push = (v: Omit<Validator, 'source'>) => out.push({ ...v, source: 'detected' });
@@ -114,6 +125,17 @@ function detected(repo: RepoReader, which: (name: string) => boolean, platform: 
     const g = `${gw ? 'cd android && ' : ''}${platform === 'win32' ? 'gradlew.bat' : './gradlew'}`;
     push({ name: 'gradle-lint', cmd: `${g} lint`, kind: 'lint' });
     push({ name: 'gradle-test', cmd: `${g} testDebugUnitTest`, kind: 'test' });
+  }
+  // FC3: a JVM build at the root. Gradle (not an android app, which has its own above): its tests, and `check` without
+  // them when the build adds checks to it (gradleChecks). Maven: its tests. The wrapper when there is one.
+  if (!androidApp && GRADLE_ROOT.some(f => repo.exists(f))) {
+    const g = GRADLE_ROOT.slice(0, 2).some(f => repo.exists(f)) ? (platform === 'win32' ? 'gradlew.bat' : './gradlew') : 'gradle';
+    push({ name: 'gradle-test', cmd: `${g} test`, kind: 'test' });
+    if (gradleChecks(repo)) push({ name: 'gradle-check', cmd: `${g} check -x test`, kind: 'lint' });
+  }
+  if (['mvnw', 'mvnw.cmd', 'pom.xml'].some(f => repo.exists(f))) {
+    const m = repo.exists('mvnw') || repo.exists('mvnw.cmd') ? (platform === 'win32' ? 'mvnw.cmd' : './mvnw') : 'mvn';
+    push({ name: 'maven-test', cmd: `${m} -q test`, kind: 'test' });
   }
   const make = repo.read('GNUmakefile') ?? repo.read('makefile') ?? repo.read('Makefile');
   if (make !== null && /^test\s*:(?!=)/m.test(make) && !out.some(v => v.kind === 'test')) push({ name: 'make-test', cmd: 'make test', kind: 'test' });
