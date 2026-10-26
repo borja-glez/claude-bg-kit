@@ -47,7 +47,7 @@ Input from the coordinator:
 ## The loop
 
 1. **implement.** Note `git -C <worktree> rev-parse HEAD`, then spawn `implementer.agent` with the brief, the worktree («work only inside this directory»), the report path and the `validate` command as given. Ask it to commit on `task/<T>` with the brief's `Commit title prefix` and to reply in two lines.
-2. **Back.** When it returns, compare `git -C <worktree> rev-parse HEAD` with the commit you noted before you last sent it work. No new commit: hand back, whatever its report says (NEEDS_CONTEXT, BLOCKED, a finding it calls already fixed or wrong, or no report at all), with the report's first line, or `no report`, as the reason.
+2. **Back.** When it returns, compare `git -C <worktree> rev-parse HEAD` with the commit you noted before you last sent it work. No new commit: hand back, whatever its report says (NEEDS_CONTEXT, BLOCKED, a finding it calls already fixed or wrong, or no report at all), with the report's first line, or `no report`, as the reason. With a new commit, still hand back when its reply says a tool refused something the brief needs (a write the harness refused, a permission denied), that it got around such a refusal another way, or that it left part of the brief undone; its words, shortened, are the reason. Whether a workaround or a missing part is acceptable is the coordinator's call, never yours.
 3. **validate.**
    - Run `FORGE swarm task <T> --stage validate --no-agent`.
    - Then run task-steps step 3 in the foreground: `FORGE triage --plan <plan> --task <T> --cwd <worktree> --base <base> --locale <locale>`, then `FORGE review-prep --task <T>-<n> --path large --base <base> --baseline <WORK>/baseline-<n>.json --dir <WORK> --cwd <worktree> --locale <locale> --out <WORK>/review-prep-<n>.json`.
@@ -85,6 +85,7 @@ Stop where you are. Do not undo anything and do not record another stage: the co
 Hand back:
 - in every case above;
 - on any `FORGE` command that exits other than as described, «Commands not trusted» included;
+- when a tool refuses you something the task needs (a permission, a write the harness refuses): never work around it;
 - when you are about to run out of turns.
 
 ## Reply

@@ -259,6 +259,13 @@ describe('the runner agent and the coordinator text (A10)', () => {
       'SendMessage', '`<T> accepted`', '`<T> handback: <', '`<T> handback: taken back`', 'validators-head-<n>.json',
       '--out <WORK>/review-prep-<n>.json']) expect(md, w).toContain(w);
   });
+  it('forge-runner hands back a refusal, a refusal an agent got around and a brief left partly undone, and never works around one itself', () => {
+    const md = doc('plugins/forge/agents/forge-runner.md');
+    const back = md.split('\n').find(l => l.startsWith('2. **Back.**'))!;
+    for (const w of ['With a new commit', 'a tool refused', 'got around', 'part of the brief undone', 'never yours']) expect(back, w).toContain(w);
+    const handing = md.slice(md.indexOf('## Handing back'), md.indexOf('## Reply'));
+    expect(handing).toContain('never work around it');
+  });
   it('step.md hands the coordinator spawnRunner and handback, and a runner that comes back goes in --returned', () => {
     const lines = doc('plugins/forge/skills/run/references/step.md').split('\n');
     const runner = lines.find(l => l.trimStart().startsWith('- `spawnRunner` ('))!;
