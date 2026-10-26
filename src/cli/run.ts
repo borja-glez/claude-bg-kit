@@ -250,7 +250,7 @@ export function run(argv: string[], io: Io): Result {
           let text: string;
           try { text = readFileSync(abs(pair.slice(at + 1)), 'utf8'); } catch { return fail(`db-import: cannot read ${pair.slice(at + 1)}`, 2); }
           let listing: ReturnType<typeof parseListing>;
-          try { listing = parseListing(text); } catch (e) {
+          try { listing = parseListing(text, collection); } catch (e) {
             if (e instanceof PlanFileError) return fail(`db-import: ${pair.slice(at + 1)}: ${e.message}`, 2);
             throw e;
           }

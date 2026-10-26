@@ -176,9 +176,9 @@ describe('db-import: a listing read into the conversation becomes the cache and 
     expect(s.code, s.stderr).toBe(0);
     expect(JSON.parse(s.stdout).batches.flat().find((w: { doc_id: string }) => w.doc_id === 'project')).toMatchObject({ if_version: 4 });
   });
-  it('reads documents written one per line or as a JSON array, and skips a document whose id names no file', () => {
+  it('reads documents written one per line, and skips a document whose id names no file', () => {
     const odd = { id: '../x', data: {}, version: 2 };
-    const r = run(['db-import', 'plan.yaml', `plan=${listing('plan.txt', JSON.stringify([{ id: 'F1', data: { id: 'F1', tasks: [] }, version: 3 }, odd]))}`], io);
+    const r = run(['db-import', 'plan.yaml', `plan=${listing('plan.txt', wrapped('plan', [{ id: 'F1', data: { id: 'F1', tasks: [] }, version: 3 }, odd]))}`], io);
     expect(r.code, r.stderr).toBe(0);
     expect(r.stderr).toContain('../x');
     expect(readdirSync(path.join(wp(), 'dbcache', 'plan'))).toEqual(['F1.json']);
@@ -187,6 +187,20 @@ describe('db-import: a listing read into the conversation becomes the cache and 
   it('refuses a file with no listing in it, a bad collection or a missing file, and writes nothing', () => {
     const cases = [[`meta=${listing('junk.txt', 'I could not list it')}`], ['meta'], [`../x=${listing('m.txt', wrapped('meta', [page]))}`], [`meta=${path.join(dir, 'none.txt')}`], []];
     for (const c of cases) expect(run(['db-import', 'plan.yaml', ...c], io).code, c.join(' ')).toBe(2);
+    expect(existsSync(wp())).toBe(false);
+  });
+  it('refuses a listing of another collection, one cut short and one without its header, saying why (fix round 1, Minor 4)', () => {
+    const cases: [string, string][] = [
+      [`state=${listing('m1.txt', wrapped('meta', [page, project]))}`, 'the listing is of collection "meta", not "state"'],
+      [`plan=${listing('m2.txt', wrapped('meta', []))}`, 'the listing is of collection "meta", not "plan"'],
+      [`meta=${listing('m3.txt', wrapped('meta', [page, project]).replace(/\n.*$/s, ''))}`, 'the listing says 2 documents and the file holds 1'],
+      [`meta=${listing('m4.txt', [page, project].map(d => JSON.stringify(d)).join('\n'))}`, 'no listing header'],
+    ];
+    for (const [arg, why] of cases) {
+      const r = run(['db-import', 'plan.yaml', arg], io);
+      expect(r.code, arg).toBe(2);
+      expect(r.stderr, arg).toContain(why);
+    }
     expect(existsSync(wp())).toBe(false);
   });
 });

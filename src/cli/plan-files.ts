@@ -186,13 +186,19 @@ export function parseVersions(json: string): Known {
 export interface ListedDoc { id: string; data: Record<string, unknown>; version: number }
 
 /**
- * The documents of an ArtifactData listing read into the conversation (no out_dir), as the session saved it: the tool's
- * text («N documents from collection "x": === BEGIN ARTIFACT DB … === {…} {…} === END … ===»), the documents one per
- * line, or a JSON array of them. Each top-level JSON object with a string `id`, an object `data` and a positive whole
- * `version` is a document; one whose id names no file is skipped and named in `skipped`. A text with no document reads
- * as an empty listing only when it says so («No documents matched», «0 documents»); anything else throws.
+ * The documents of an ArtifactData listing of `collection` read into the conversation (no out_dir), as the session
+ * saved it: the tool's text, «N documents from collection "x": === BEGIN ARTIFACT DB … === {…} {…} === END … ===», or
+ * «No documents matched in collection "x".». Each top-level JSON object with a string `id`, an object `data` and a
+ * positive whole `version` is a document; one whose id names no file is skipped and named in `skipped`. Fix round 1
+ * (Minor 4): the header must be there, name `collection`, and count every document the file holds, so a copy into the
+ * wrong file or one cut short throws instead of passing for the listing.
  */
-export function parseListing(text: string): { docs: ListedDoc[]; skipped: string[] } {
+export function parseListing(text: string, collection: string): { docs: ListedDoc[]; skipped: string[] } {
+  const heads = [...text.matchAll(/\b(\d+) documents? from collection "([^"\n]*)"|\bno documents matched in collection "([^"\n]*)"/gi)]
+    .map(m => ({ count: m[1] !== undefined ? Number(m[1]) : 0, of: m[2] ?? m[3] ?? '' }));
+  if (!heads.length) throw new PlanFileError(['no listing header («N documents from collection …»): save the text ArtifactData list printed, as it is']);
+  const other = heads.find(h => h.of !== collection);
+  if (other) throw new PlanFileError([`the listing is of collection ${JSON.stringify(other.of)}, not ${JSON.stringify(collection)}: save each collection's listing to its own file`]);
   const docs: ListedDoc[] = [];
   const skipped: string[] = [];
   for (const v of topLevelObjects(text)) {
@@ -201,9 +207,9 @@ export function parseListing(text: string): { docs: ListedDoc[]; skipped: string
     if (!fileId(d.id)) { skipped.push(d.id.slice(0, 80)); continue; }
     docs.push({ id: d.id, data: d.data as Record<string, unknown>, version: d.version as number });
   }
-  if (!docs.length && !skipped.length && !/\bno documents matched\b|(^|\D)0 documents\b/i.test(text)) {
-    throw new PlanFileError(['no listing in it: save the text ArtifactData list printed, as it is']);
-  }
+  const said = heads.reduce((n, h) => n + h.count, 0);
+  const held = docs.length + skipped.length;
+  if (said !== held) throw new PlanFileError([`the listing says ${said} document${said === 1 ? '' : 's'} and the file holds ${held}: save the whole result, as it is`]);
   return { docs, skipped };
 }
 
