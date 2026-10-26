@@ -79,7 +79,7 @@ export const command: Command = (args, ctx) => {
     // Without --max-usd, the config's budget.usd: a config that does not load refuses the start (it may hold the cap).
     let usd = maxUsd;
     if (usd === undefined) {
-      try { usd = loadConfig(main).budget?.usd; } catch (e) { throw new UsageError(`infinite start: ${(e as Error).message}`); }
+      try { usd = loadConfig(main).budget?.usd; } catch (e) { throw new UsageError(`infinite start: ${(e as Error).message}; fix it, or give the cap with --max-usd`); }
     }
     const budget = { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}), ...(usd !== undefined ? { usd } : {}) };
     const run: RunState = { ...startRun(io.now(), budget, queueMax, session, locale ?? null), ...(autonomous ? { autonomous } : {}) };

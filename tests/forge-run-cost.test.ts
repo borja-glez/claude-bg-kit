@@ -132,6 +132,12 @@ describe('forge infinite start --max-usd and the cycle that measures it', () => 
     const alone = run(['infinite', 'start', '--max-usd', '20', '--session', 's1'], io);
     expect(alone.code).toBe(2);
     expect(alone.stderr).toContain('--cycles');
+    // a config that does not load may hold the cap: refused, unless the cap comes with --max-usd
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'budget:\n  usd: -1\n');
+    const broken = run(['infinite', 'start', '--cycles', '3', '--session', 's1'], io);
+    expect(broken.code).toBe(2);
+    expect(broken.stderr).toContain('--max-usd');
+    expect(run(['infinite', 'start', '--cycles', '3', '--max-usd', '4', '--session', 's1'], io).code).toBe(0);
   });
   it('each cycle records what the run spent; at the cap the run stops cleanly with budget-usd', () => {
     expect(run(['infinite', 'start', '--cycles', '9', '--max-usd', '5', '--session', 's1'], io).code).toBe(0);
