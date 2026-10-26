@@ -2139,6 +2139,8 @@ describe('plugin layout', () => {
     expect(setup).toMatch(/\n5\. \*\*forge execution\.\*\*/);
     for (const w of ["`next`'s `notes`", 'lastNoteTs', 'on a first join, gives only the last 5', 'Authority']) expect(notesLine, w).toContain(w);
     expect(work).toContain('--notes DB/notes --seat-dir <SEAT>');
+    // Fix round 1 (Minor 5): next saves lastNoteTs as it reads, so only the first next of a pick brings the notes.
+    expect(notesLine).toContain('The first `next` of a pick is the one that counts');
     for (const w of ['"<WP>" done <plan> --db DB', '--summary-file <SEAT>/summary.txt', 'meta/metrics', '**Phase close.**', 'the §4 part of `references/multisession.md`']) {
       expect(workRef('complete'), w).toContain(w);
     }
