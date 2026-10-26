@@ -1,7 +1,8 @@
 // forge's routing hooks. SessionStart (`hook route-session`) puts the routing rule in the session's context;
-// UserPromptSubmit (`hook route-prompt`) reminds a route half done, else hints at forge:route for coding work. Both fail
-// open (any error prints nothing), stay silent outside a git repository, where forge already drives the session or the
-// user chose superpowers (or off: local.yaml, config.yaml or FORGE_WORKFLOW), and run no git beyond mainCheckout's.
+// UserPromptSubmit (`hook route-prompt`) reminds a route half done, else hints at forge:route for coding work (what
+// counts as coding work: route-hint.ts). Both fail open (any error prints nothing), stay silent outside a git
+// repository, where forge already drives the session or the user chose superpowers (or off: local.yaml, config.yaml or
+// FORGE_WORKFLOW), and run no git beyond mainCheckout's.
 // After a compaction (`source: compact`), route-session tells a session the forge task or the infinite run it has in
 // progress.
 import path from 'node:path';
@@ -15,6 +16,7 @@ import type { ForgeStatus } from '../lib/forge-status.js';
 import { planLocale, sessionReply } from '../lib/locale.js';
 import { resolvePrefs } from './prefs.js';
 import { listRoutes, readRoute, ROUTE_REMINDER_MS, type RouteDoc } from './route.js';
+import { looksLikeCoding } from './route-hint.js';
 import { parseRun, readRunText } from './run.js';
 import { claudeConfigDir, locateSuperpowers } from './superpowers.js';
 import type { Io } from './cli/run.js';
@@ -37,105 +39,6 @@ export function routingRule(superpowers: boolean): string {
 }
 
 export const ROUTE_HINT = 'forge: this looks like coding work. If it is more than a trivial edit, invoke forge:route first, before any other skill.';
-
-// Coding verbs in Spanish and English (scripts/route-eval calibrates the list).
-const VERBS = [
-  'crea', 'crear', 'añade', 'añadir', 'agrega', 'agregar', 'implementa', 'implementar', 'arregla', 'arreglar', 'corrige', 'corregir',
-  'refactoriza', 'refactorizar', 'monta', 'montar', 'construye', 'construir', 'migra', 'migrar', 'cambia', 'cambiar', 'desarrolla', 'desarrollar',
-  'build', 'builds', 'add', 'adds', 'implement', 'implements', 'fix', 'fixes', 'refactor', 'create', 'creates', 'migrate', 'change', 'develop',
-];
-const VERB = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${VERBS.join('|')})(?![\\p{L}\\p{N}_])`, 'iu');
-const METHOD = /(?<![\p{L}\p{N}_])(?:forge|superpowers)(?![\p{L}\p{N}_])/iu;
-
-// K1-03: what is not a request to change code. A message from an agent or the harness (it opens with a tag), a question
-// (¿…, …?) that is not a polite request, and a prompt that opens with an interrogative. «Como» without its accent opens a
-// request («Como usuario, quiero…»), so the Spanish interrogatives need theirs.
-// Only the tags of the harness and of agents; a prompt that opens with JSX or HTML («<Button> add a state…») is a request.
-const TAGGED = /^<(?:teammate-message|agent-message|task-notification|system-reminder|command-|local-command-|user-prompt-submit-hook)/i;
-// A polite request, after a short lead («hola,», «please»). Every pattern is anchored and has no nested quantifier.
-const POLITE = /^(?:(?:hola|oye|hi|hello|please|por favor)[,\s]+){0,3}¿?\s*(?:me\s+)?(?:puedes|podrías|podrias|puede|podría|podria|podéis|podeis|podemos|can you|could you|would you|will you|can we|could we)(?![\p{L}\p{N}_])/iu;
-const INTERROGATIVE = /^¿?\s*(?:qué|cómo|por qué|what|how|why)(?![\p{L}\p{N}_])/iu;
-// A first clause that opens with a coding verb is an order, whatever follows it («…, ¿vale?», «…. ¿Por qué falla?»).
-const IMPERATIVE = new RegExp(`^(?:${VERBS.join('|')})(?![\\p{L}\\p{N}_])`, 'iu');
-
-// w8 FR2: the hint is for requests to build (a feature, a fix, a refactor, a new project). A request is read clause by
-// clause (a sentence, or what «y», "and", "then"… join), and gets the hint when one clause has a coding verb and is
-// none of these: a git operation, a typo, a rename or a translation, a text that is not code (an email, a summary, a
-// meeting, a README…), a single value changed, a debug print, an artifact built, or a request for information. Every
-// pattern is bounded; only the first HINT_TEXT characters are read clause by clause.
-const NB = '(?<![\\p{L}\\p{N}_])';
-const NE = '(?![\\p{L}\\p{N}_])';
-const re = (...alts: string[]) => new RegExp(alts.join('|'), 'iu');
-const HINT_TEXT = 4000;
-const CLAUSE_BREAK = /[.;!?]+(?=\s|$)|[¿\n]|,?\s+(?:y\s+luego|y\s+después|and\s+then|y|e|and|then|luego|después|despues)\s+/iu;
-// The lead of a clause: a greeting, a courtesy, «me», «¿puedes…», before its verb.
-const LEAD = '^\\s*(?:(?:hola|oye|hi|hello|hey|please|por\\s+favor|puedes|podr[ií]as|can\\s+you|could\\s+you|would\\s+you|me)[,\\s]+){0,3}';
-const GIT_OP = re(
-  // a commit to make («crea un commit», «añade … a un commit nuevo»), never a commit hook
-  `${NB}(?:crea|crear|haz|hacer|create|make|do|añade|añadir|add|agrega|agregar|mete|meter|put)${NE}(?:\\s+\\S+){0,4}?\\s+commits?${NE}(?!\\s*-?\\s*hooks?${NE})`,
-  `${NB}commit(?:ea|ear|eo)?\\s+(?:the|these|this|those|all|my|your|our|it|them|everything|los|las|estos|estas|esto|eso|todo|el|la|lo)${NE}`, `${NB}commite(?:a|ar|o|ad)${NE}`,
-  `${NB}(?:crea|crear|abre|abrir|haz|hacer|prepara|preparar|create|open|make|raise|submit|send|manda|mandar)${NE}(?:\\s+\\S+){0,3}?\\s+(?:PRs?|pull\\s+requests?|merge\\s+requests?|MRs?)${NE}`,
-  `${NB}(?:haz|hacer|do|make)\\s+(?:un\\s+|el\\s+|a\\s+)?push${NE}`, `${NB}pushe(?:a|ar|o|ad)\\p{L}*`,
-  `${NB}push\\s+(?:it|them|this|that|everything|all|the\\s+(?:changes|branch|commits?|tags?)|los\\s+cambios|la\\s+rama|el\\s+commit|los\\s+commits|to\\s+(?:origin|the\\s+remote|github|gitlab|main|master)|a\\s+(?:origin|main|master|github|gitlab)|al\\s+remoto)${NE}`,
-  `${NB}git\\s+(?:push|commit|merge|rebase|tag|cherry-pick|stash|checkout|switch|branch)${NE}`,
-  `${NB}merge(?:a|ar|ea|ear)?(?:\\s+\\S+){0,3}?\\s+(?:branch|rama|PR|pull\\s+request)${NE}`, `${NB}merge(?:a|ar|ea|ear)?\\s+\\S+\\s+(?:into|in|onto|en|a|con)\\s+(?:main|master|develop|dev|trunk)${NE}`,
-  `${NB}(?:haz|hacer|do)\\s+(?:el\\s+|un\\s+|a\\s+)?merge${NE}`, `${NB}fusiona\\p{L}*\\s+(?:la\\s+|las\\s+|esta\\s+)?ramas?${NE}`,
-  `${NB}(?:rebase|squash|cherry-?pick)\\p{L}*`,
-  `${NB}tag(?:ea|uea)?(?:\\s+\\S+){0,2}?\\s+v?\\d+\\.\\d+`, `${NB}etiqueta\\s+(?:la\\s+)?versi[oó]n${NE}`,
-  `${NB}(?:crea|crear|create|make|haz|abre|open)\\s+(?:a\\s+|an\\s+|una\\s+|the\\s+|la\\s+)?(?:new\\s+|nueva\\s+)?(?:git\\s+)?(?:branch|rama)${NE}`,
-);
-// In a request with a git operation, the conflicts are the merge's or the rebase's.
-const CONFLICTS = re(`${NB}(?:conflicts?|conflictos?)${NE}`);
-const MECHANICAL = re(`${NB}(?:typos?|erratas?|spelling|misspell\\p{L}*|ortograf\\p{L}*)${NE}`, `${NB}(?:renam|renombr)\\p{L}*`,
-  `${NB}(?:change|cambia|cambiar)\\s+(?:the\\s+|el\\s+)?(?:name|nombre)\\s+(?:of|de|del)${NE}`);
-const TRANSLATION = re(`${NB}(?:translat|tradu[cz])\\p{L}*`);
-const I18N = re(`${NB}(?:i18n|l10n|internacionaliz\\p{L}*|internationali[sz]\\p{L}*|soporte|support|idiomas|languages|locales?)${NE}`);
-// A text that is not code: README and CHANGELOG always; an email, a summary, a meeting… when it is written about (a
-// determiner before it), no clause opens with a fix, and the request names no code (a file, a component, a service…).
-const NOTES = re(`${NB}(?:readme|changelog|release\\s+notes|notas\\s+de\\s+(?:la\\s+)?versi[oó]n)${NE}`);
-const PROSE = re(`${NB}(?:el|la|los|las|un|una|unos|unas|este|esta|estos|estas|ese|esa|al|del|mi|tu|su|nuestro|nuestra|the|a|an|this|that|these|those|my|your|our)\\s+`
-  + `(?:correos?|e-?mails?|mails?|resumen|res[uú]menes|summary|summaries|actas?|minutes|reuni[oó]n|reuniones|meetings?|tono|tone|cartas?|letters?|art[ií]culos?|articles?|posts?`
-  + `|informes?|reports?|documentos?|documents?|presentaci[oó]n|presentations?|diapositivas|slides|newsletters?|propuestas?|proposals?|ensayos?|essays?|discursos?|speech(?:es)?|notas|notes)${NE}`);
-const CODE = re(`${NB}(?:endpoints?|apis?|funci[oó]n|funciones|functions?|m[eé]todos?|methods?|clases?|class(?:es)?|componentes?|components?|m[oó]dulos?|modules?|servicios?|services?`
-  + `|bot[oó]n|botones|buttons?|formularios?|forms?|p[aá]ginas?|pages?|pantallas?|screens?|vistas?|views?|rutas?|routes?|tests?|scripts?|hooks?|bugs?|c[oó]digo|code|apps?|aplicaci[oó]n`
-  + `|cli|comandos?|commands?|campos?|fields?|tablas?|tables?|database|query|queries|consultas?|backend|frontend|servidor|server|handlers?|controlador|controllers?|validaci[oó]n|validation`
-  + `|login|plantillas?|templates?|esquemas?|schemas?|css|html|sql|plugins?|widgets?)${NE}`, `[\\w-]+\\.(?:[cm]?[jt]sx?|py|java|kt|go|rs|rb|php|cs|s?css|html|vue|svelte|json|ya?ml|sql|sh)${NE}`);
-const FIX_LED = new RegExp(`${LEAD}(?:arregla|arreglar|corrige|corregir|repara|reparar|soluciona|solucionar|fix|repair|solve)${NE}`, 'iu');
-// One value changed: «cambia el color del botón a azul», "change the timeout from 30 to 60".
-const TWEAK = new RegExp(`${LEAD}(?:cambia|cambiar|change)\\s+(?:the\\s+|el\\s+|la\\s+|los\\s+|las\\s+)?(?:\\S+\\s+){0,2}?`
-  + `(?:colou?rs?|colores|texto|text|t[ií]tulo|title|etiqueta|label|timeout|valor|value|tama[nñ]o|size|margen|margin|padding|fuente|font|icono|icon|puerto|port|l[ií]mite|limit`
-  + `|versi[oó]n|version|delay|retraso|intervalo|interval)${NE}[^\\n]*?\\s(?:to|a|al|por|from)\\s`, 'iu');
-const DEBUG = re(`${NB}console\\.(?:log|debug|warn|error|info)${NE}`, `${NB}print(?:ln|f)?\\s*\\(`, `${NB}print\\s+statements?${NE}`,
-  `${NB}(?:para\\s+(?:poder\\s+)?depurar|to\\s+debug|so\\s+(?:that\\s+)?I\\s+can\\s+debug)${NE}`);
-const ARTIFACT = re(`${NB}(?:build|rebuild|compile|compila|compilar|construye|construir|genera|generar|generate)\\s+(?:the|la|el|las|los)\\s+(?:docker\\s+|production\\s+|release\\s+)?`
-  + `(?:images?|imagen(?:es)?|containers?|contenedor(?:es)?|bundles?|binar(?:y|ies)|binarios?|apks?|jars?|wheels?|artifacts?|artefactos?)${NE}`);
-const INFO = new RegExp(`${LEAD}(?:expl[ií]ca(?:me)?|explicar|explain|describe|descr[ií]beme|describir|dime|decir(?:me)?|tell\\s+me|cu[eé]ntame|contar(?:me)?|res[uú]me(?:me)?|resumir|summari[sz]e`
-  + `|mu[eé]strame|mostrar(?:me)?|show\\s+me|ens[eé][ñn]ame|enseñar(?:me)?|revisa|revisar|review|analiza|analizar|analy[sz]e|compara|comparar|compare|eval[uú]a|evaluar|evaluate`
-  + `|investiga|investigar|investigate|averigua|averiguar)${NE}`, 'iu');
-
-/** w8 FR2: one clause of a request asks to build: a coding verb, and none of the requests the hint leaves out. */
-function builds(clause: string, gitInRequest: boolean, namesCode: boolean): boolean {
-  if (!VERB.test(clause) || GIT_OP.test(clause) || (gitInRequest && CONFLICTS.test(clause))) return false;
-  if (MECHANICAL.test(clause) || (TRANSLATION.test(clause) && !I18N.test(clause)) || NOTES.test(clause)) return false;
-  if (PROSE.test(clause) && !namesCode && !FIX_LED.test(clause)) return false;
-  return !TWEAK.test(clause) && !DEBUG.test(clause) && !ARTIFACT.test(clause) && !INFO.test(clause);
-}
-
-/** A prompt worth the routing hint: not a slash command nor a tagged message, not a question (a polite request still
- *  counts) nor an interrogative, six words or more, a coding verb, no method named, and a clause that asks to build. */
-export function looksLikeCoding(prompt: string): boolean {
-  const p = prompt.trim();
-  if (!p || p.startsWith('/') || TAGGED.test(p)) return false;
-  if (INTERROGATIVE.test(p)) return false;
-  const asks = p.startsWith('¿') || p.endsWith('?') || p.includes('¿');
-  if (asks && !POLITE.test(p) && !IMPERATIVE.test(p.split(/[¿.!?]/, 1)[0].trim())) return false;
-  if (p.split(/\s+/).length < 6 || !VERB.test(p) || METHOD.test(p)) return false;
-  const text = p.slice(0, HINT_TEXT);
-  const clauses = text.split(CLAUSE_BREAK).map(c => (c ?? '').trim()).filter(Boolean);
-  const git = clauses.some(c => GIT_OP.test(c));
-  const namesCode = CODE.test(text);
-  return clauses.some(c => builds(c, git, namesCode));
-}
 
 /** K1-03: route-prompt's hint, unless FORGE_ROUTE_HINT=off (route-eval) or `route.hint: off` in .forge/config.yaml. */
 export function hintOn(env: Record<string, string | undefined>, config: ForgeConfig): boolean {

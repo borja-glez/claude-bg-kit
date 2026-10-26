@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { COMPACT_INFINITE, COMPACT_RUN, hintOn, inForgeWorktree, looksLikeCoding, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
+import { COMPACT_INFINITE, COMPACT_RUN, hintOn, inForgeWorktree, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
+import { looksLikeCoding } from '../src/forge/route-hint.js';
 import { parseConfig } from '../src/forge/config.js';
 import { listRoutes, readRoute, writeRoute } from '../src/forge/route.js';
 import { writeMember } from '../src/forge/members.js';
@@ -42,7 +43,8 @@ const QUIET = false;
 const REVIEW_FORGE: [string, boolean][] = [
   ['añade un botón de exportar a CSV en la tabla de usuarios', HINT],
   ['arregla el typo en el README de la raíz por favor', QUIET],
-  ['cambia el color del botón primario a azul en el css', QUIET],
+  // Fix round 1: a value change counts only when the clause ends in the new value; here it ends in where it goes.
+  ['cambia el color del botón primario a azul en el css', HINT],
   ['fix the failing test in cart.test.ts please and rerun', HINT],
   ['add a console.log in the handler so I can debug it', QUIET],
   ['crea un commit con estos cambios y haz push a origin', QUIET],
@@ -51,9 +53,10 @@ const REVIEW_FORGE: [string, boolean][] = [
   ['¿puedes arreglar el test que falla en cart?', HINT],
   ['revisa este diff y dime si ves bugs', QUIET],
   ['build the docker image and run it locally on port 8080', QUIET],
-  ['actualiza las dependencias de npm a la última versión menor', QUIET],
+  // Fix round 1: «actualiza» is a coding verb, and dependencies are work (the triage's deps zone).
+  ['actualiza las dependencias de npm a la última versión menor', HINT],
   ['renombra la variable foo a bar en utils.ts', QUIET],
-  ['change the timeout from 30 to 60 seconds in config.ts', QUIET],
+  ['change the timeout from 30 to 60 seconds in config.ts', HINT],
   ['add an entry to the CHANGELOG for version 1.2.0 today', QUIET],
   ['migra este proyecto de jest a vitest manteniendo los tests', HINT],
 ];
@@ -145,6 +148,97 @@ describe('the hint only for requests to build (w8 FR2)', () => {
     const prompts = JSON.parse(readFileSync(fileURLToPath(new URL('../scripts/route-eval/prompts.json', import.meta.url)), 'utf8')) as { id: string; expected: string; text: string }[];
     for (const p of prompts.filter(x => x.expected === 'route' && !/superpowers|forge/i.test(x.text))) expect(looksLikeCoding(p.text), p.id).toBe(true);
     for (const p of prompts.filter(x => x.expected === 'none')) expect(looksLikeCoding(p.text), p.id).toBe(false);
+  });
+  // Fix round 1: every prompt of review 1, with what it gets.
+  const ROUND_1: Record<string, [string, boolean][]> = {
+    'a value change only when the clause ends in the new value; a debug print only as the object of add or put': [
+      ['change the text rendering to support right-to-left languages', HINT],
+      ['change the version check to compare semver ranges properly', HINT],
+      ['cambia el límite de peticiones para que se aplique por usuario y no por IP', HINT],
+      ['cambia el valor por defecto del idioma para que use el del navegador', HINT],
+      ['add a debug panel to the app so I can debug the redux state', HINT],
+      ['add a --verbose flag to the CLI to debug the network calls', HINT],
+      ['implement a logger that wraps console.log with log levels and timestamps', HINT],
+      ['fix the print() call that crashes the script on python 3', HINT],
+      ['add structured logging to the payment service to debug failed charges', HINT],
+      ['change the color handling of the chart component to support dark mode', HINT],
+      ['añade logs al servicio de pagos para depurar los fallos de cobro', HINT],
+      ['add print statements to the parser so I can debug the failing case and then fix it', HINT],
+      ['cambia el color del botón primario a azul', QUIET],
+      ['change the title of the landing page to "Shop demo"', QUIET],
+      ['change the default value of the retry option to 3', QUIET],
+      ['add a console.log in the handler so I can debug it', QUIET],
+      ['pon un print en el bucle para ver qué valores llegan', QUIET],
+    ],
+    'code nouns, git and artifacts that are building': [
+      ['implement the notes feature with markdown support and tags', HINT],
+      ['create a meeting scheduler for the team with calendar sync', HINT],
+      ['build a newsletter signup flow with double opt-in confirmation', HINT],
+      ['add a PDF export of the report with the company logo', HINT],
+      ['crea el resumen semanal por email que se envía a los clientes', HINT],
+      ['implementa el informe de ventas mensual en el panel de admin', HINT],
+      ['add the commit hash to the footer of the app at build time', HINT],
+      ['add a commit message linter to the CI pipeline', HINT],
+      ['create a branch selector in the repository settings screen', HINT],
+      ['build the bundle with code splitting so the first load is faster', HINT],
+      ['build the release binary in CI for linux, mac and windows', HINT],
+      ['añade traducciones dinámicas que se carguen desde la API', HINT],
+      ['implementa el rebase de los descuentos cuando cambia el carrito', HINT],
+      ['construye la imagen docker y arregla el Dockerfile que falla', HINT],
+      // A typo that breaks something is a bug; a rename option is a feature.
+      ['arregla la ortografía del validador de NIF que rechaza NIFs válidos', HINT],
+      ['fix the typo in the variable name that breaks the build', HINT],
+      ['add a rename option to the file menu of the editor', HINT],
+      ['añade un botón de renombrar en la lista de ficheros', HINT],
+      ['build the docker image and run it locally on port 8080', QUIET],
+      ['squash the last three commits and rebase this branch onto main', QUIET],
+    ],
+    'texts, trackers and plans that are not code': [
+      ['crea un plan de entrenamiento para correr una maratón en abril', QUIET],
+      ['create a spreadsheet with the budget for next year and the quarters', QUIET],
+      ['create a tweet thread announcing the release of the new version', QUIET],
+      ['add a section about deployment to the docs folder of the project', QUIET],
+      ['crea una issue en GitHub con el bug que hemos encontrado', QUIET],
+      ['crea un ticket en Jira para el bug del login de ayer', QUIET],
+      ['dame ideas para mejorar la arquitectura del proyecto', QUIET],
+      ['mejora la redacción de este correo para el cliente', QUIET],
+      ['update the README with the new install steps', QUIET],
+      ['update the PR description with the list of changes', QUIET],
+      ['add a ticket system to the help desk app with priorities', HINT],
+    ],
+    'short requests with a code noun, and the new coding verbs': [
+      ['arregla el bug del login', HINT],
+      ['añade validación al formulario', HINT],
+      ['add validation to the form', HINT],
+      ['haz que el botón de guardar se desactive mientras se envía', HINT],
+      ['mejora el rendimiento de la consulta de pedidos que tarda mucho', HINT],
+      ['soluciona el problema de memoria en el worker de colas', HINT],
+      ['actualiza el componente de cabecera para que muestre el avatar', HINT],
+      ['improve the error handling of the upload endpoint', HINT],
+      ['solve the race condition in the cache layer of the service', HINT],
+      ['update the header component to show the user avatar', HINT],
+      ['make the login work again on Safari and Firefox', HINT],
+      // Four words without a code noun, or three words, stay out.
+      ['fix the bug', QUIET],
+      ['arregla esto ahora mismo', QUIET],
+      ['crea un commit nuevo', QUIET],
+      ['añade un resumen al informe', QUIET],
+      ['mejora este texto', QUIET],
+    ],
+  };
+  for (const [kind, rows] of Object.entries(ROUND_1)) {
+    it(`fix round 1: ${kind}`, () => { for (const [p, want] of rows) expect(looksLikeCoding(p), p).toBe(want); });
+  }
+  it('fix round 1: a fix asked after a pasted log keeps the hint; the head and the tail of the prompt are read', () => {
+    const log = Array.from({ length: 45 }, (_, i) => `    at Object.<anonymous> (/srv/app/node_modules/pg/lib/client.js:${i}:13) TypeError: Cannot read properties of undefined (reading 'rows')`).join('\n');
+    for (const ask of ['arregla este error en el parser de fechas por favor', 'fix this error in the date parser so the import works']) {
+      expect(log.length, 'the log alone is longer than head and tail').toBeGreaterThan(4000);
+      expect(looksLikeCoding(`${log}\n\n${ask}`), ask).toBe(true);
+      expect(looksLikeCoding(`${ask}:\n${log}`), ask).toBe(true);
+    }
+    // A long log with a question at the end is still a question; a log with no request asks nothing.
+    expect(looksLikeCoding(`${log}\n\n¿por qué falla esto?`)).toBe(false);
+    expect(looksLikeCoding(log)).toBe(false);
   });
   it('stays linear on a long prompt that asks to build', () => {
     const t0 = performance.now();
