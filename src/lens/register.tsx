@@ -21,6 +21,7 @@ import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from 
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, totalsOf, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunBaseline, type RunSource, type UsageFile } from './usage-file.js';
 import { addOwnTask, endAgent, endTool, knownTasks, linkSpawn, LINKS_MAX, LIST_GRACE_MS, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
+import { taskCall } from './tasks.js';
 
 const panel = atom({ plugin: 'lens', key: 'panel' } as const, null as PanelModel | null);
 const hidden = atom({ plugin: 'lens', key: 'hidden' } as const, false);
@@ -1510,6 +1511,11 @@ export const register: Register = on => {
               void noteActivity($);
             }
           }
+          // w8 M1: a TaskCreate or TaskUpdate of any loop that ran moves the Claude Code tasks card.
+          if (answer.isError !== true) {
+            const cc = taskCall(activity.ccTasks, String(e.tool), input, (answer as { result?: unknown }).result);
+            if (cc) { activity.ccTasks = cc; void requestPanelWrite($); }
+          }
           // E-11: the engine clamps the delay to 60-3600 s; stop, or a wake-up that failed, leaves none.
           if (mine && e.tool === 'ScheduleWakeup') {
             const delay = typeof input.delaySeconds === 'number' && Number.isFinite(input.delaySeconds) ? input.delaySeconds : null;
@@ -1546,27 +1552,6 @@ export const register: Register = on => {
         void requestPanelWrite($);
       }
     }
-  }).catch(($, e, next) => next(e));
-
-  on('classic.TaskCreated', ($, e, next) => {
-    try {
-      const id = String(e.task_id);
-      activity.ccTasks = pushCapped(activity.ccTasks.filter(c => c.id !== id), { id, subject: String(e.task_subject ?? ''), done: false });
-      void requestPanelWrite($);
-    } catch { /* ignore */ }
-    return next(e);
-  }).catch(($, e, next) => next(e));
-
-  on('classic.TaskCompleted', ($, e, next) => {
-    try {
-      const id = String(e.task_id);
-      const known = activity.ccTasks.some(c => c.id === id);
-      activity.ccTasks = known
-        ? activity.ccTasks.map(c => (c.id === id ? { ...c, done: true } : c))
-        : pushCapped(activity.ccTasks, { id, subject: String(e.task_subject ?? ''), done: true });
-      void requestPanelWrite($);
-    } catch { /* ignore */ }
-    return next(e);
   }).catch(($, e, next) => next(e));
 
   // The pane, as the engine seats it (F-01, F-08): docked from 56 columns in fullscreen, its cards framed; inline,

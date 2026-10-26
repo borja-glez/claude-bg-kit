@@ -196,6 +196,35 @@ test('the command opens the pane and shows the newest ledger against its plan', 
   expect(reads).not.toContain(`${ROOT}/.superpowers/sdd/old/progress.md`);
 });
 
+test('TaskCreate and TaskUpdate calls of any loop fill the Claude Code tasks card; a refused one adds nothing (w8 M1: no classic hook)', async ($, on) => {
+  serveFiles(on, []);
+  servePanes(on);
+  const clock = start(on);
+  let n = 0;
+  on('tool.call', { tool: 'TaskCreate' }, (_$, e) => (e.subject === 'Refused' ? { deny: 'no' } : { result: { task: { id: String(++n), subject: e.subject } } }));
+  on('tool.call', { tool: 'TaskUpdate' }, (_$, e) => ({ result: { success: true, taskId: e.taskId, updatedFields: ['status'] } }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  const pane = async () => {
+    const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+    const text = await said(ui);
+    await ui.unmount();
+    return text;
+  };
+  expect(await pane()).not.toContain('Claude Code tasks');
+  await $.tool.call({ tool: 'TaskCreate', subject: 'Write the spec', description: 'd', tool_use_id: 'c1' });
+  await $.tool.call({ tool: 'TaskCreate', subject: 'Review it', description: 'd', tool_use_id: 'c2', agentId: 'a1' } as never);
+  await $.tool.call({ tool: 'TaskCreate', subject: 'Refused', description: 'd', tool_use_id: 'c3' });
+  await $.tool.call({ tool: 'TaskUpdate', taskId: '1', status: 'completed', tool_use_id: 'u1' });
+  await clock.advance(1000);
+  const text = await pane();
+  expect(text).toContain('Claude Code tasks');
+  expect(text).toMatch(/1 open.*1 done/);
+  expect(text).toContain('Write the spec');
+  expect(text).toContain('Review it');
+  expect(text).not.toContain('Refused');
+});
+
 test('a TodoWrite call updates the todos section', async ($, on) => {
   serveFiles(on, []);
   servePanes(on);
