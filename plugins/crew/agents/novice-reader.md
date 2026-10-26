@@ -1,6 +1,6 @@
 ---
 name: novice-reader
-description: Use when a document, README, course lesson or web page must work for a newcomer reading it alone, and you want to know where they get lost before a person does. Give it the files or URLs and a persona (full-stack developer with no ML, the default; junior Java developer; recruiter). It reports with exact quotes and severities, and never rewrites.
+description: Use when a document, README, course lesson or web page must work for a newcomer reading it alone, and you want to know where they get lost before a person does. Give it the files or URLs and a persona (full-stack developer with no ML, the default; junior Java developer; recruiter). It reports with exact quotes and severities, and never rewrites. Use only when the user asks for it by name.
 tools: Read, Grep, Glob, WebFetch
 model: opus
 effort: high
