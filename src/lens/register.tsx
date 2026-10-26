@@ -22,6 +22,7 @@ import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recor
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, totalsOf, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunBaseline, type RunSource, type UsageFile } from './usage-file.js';
 import { addOwnTask, endAgent, endTool, knownTasks, linkSpawn, LINKS_MAX, LIST_GRACE_MS, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
 import { taskCall } from './tasks.js';
+import { failureText } from './failure.js';
 
 const panel = atom({ plugin: 'lens', key: 'panel' } as const, null as PanelModel | null);
 const hidden = atom({ plugin: 'lens', key: 'hidden' } as const, false);
@@ -1164,14 +1165,6 @@ async function openPanel($: Engine): Promise<boolean> {
   void refreshPanel($, true);
   return opened.isPlaced;
 }
-
-// w8 M3: why /lens failed, in words: its own message, or that it ran out of time.
-function failureText(t: Texts, error: { kind?: unknown; message?: unknown } | undefined): string {
-  const message = typeof error?.message === 'string' && error.message.trim() ? clip(oneLineText(error.message), 200) : '';
-  if (error?.kind === 'timeout') return message ? `${t.outOfTime} (${message})` : t.outOfTime;
-  return message || t.failedPlain;
-}
-const oneLineText = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 // Step 3 of §4.6: the photos `/lens` took, by number, at most PHOTOS_MAX: the cards as they were, never moving.
 // Each keeps its full line: a row is drawn only when its text is that line, so a number reused after a reload never
