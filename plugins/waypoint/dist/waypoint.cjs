@@ -14516,6 +14516,13 @@ function parseForgeDocV2(x2, report) {
 }
 
 // src/lib/forge-run.ts
+function runCostOf(x2) {
+  if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
+  const { usd, partial: partial2, at: at2 } = x2;
+  if (!(usd === null || typeof usd === "number" && Number.isFinite(usd) && usd >= 0) || typeof partial2 !== "boolean") return null;
+  if (typeof at2 !== "string" || Number.isNaN(Date.parse(at2))) return null;
+  return { usd, partial: partial2, at: at2 };
+}
 var SATURATION_BLOCKING = ["rounds", "pending-tasks", "validators", "findings", "defects", "proposals", "inputs"];
 var SATURATION_LISTS = [
   "pendingTasks",
@@ -14637,14 +14644,15 @@ function parseRun(text3) {
   if (autonomous === null) return null;
   const b = o.budget;
   if (!b || typeof b !== "object" || Array.isArray(b)) return null;
-  const { cycles, hours } = b;
+  const { cycles, hours, usd } = b;
   if (cycles !== void 0 && !isPositiveInt(cycles)) return null;
   if (hours !== void 0 && !isPositive(hours)) return null;
+  if (usd !== void 0 && !isPositive(usd)) return null;
   const run2 = {
     mode: "infinite",
     active: o.active,
     startedAt: o.startedAt,
-    budget: { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {} },
+    budget: { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {}, ...usd !== void 0 ? { usd } : {} },
     cycle: o.cycle,
     noProgress: o.noProgress,
     lastError: o.lastError,
@@ -14658,6 +14666,8 @@ function parseRun(text3) {
   if (typeof o.lastErrorDigest === "string" && /^[0-9a-f]{64}$/.test(o.lastErrorDigest)) run2.lastErrorDigest = o.lastErrorDigest;
   if (isLocale(o.locale)) run2.locale = o.locale;
   if (autonomous) run2.autonomous = autonomous;
+  const cost = runCostOf(o.cost);
+  if (cost) run2.cost = cost;
   const explore = exploreOf(o.explore);
   if (explore) run2.explore = explore;
   if (o.saturation === null) run2.saturation = null;
