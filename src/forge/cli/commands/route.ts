@@ -14,7 +14,7 @@ import { addDecision } from '../../decisions.js';
 import { TASK_ID } from '../../../lib/decisions.js';
 import { SP_MAX, spPlanPool, spPlans, spSpecPool, spSpecs, type SpPlanEntry, type SpPool, type SpSpec } from '../../superpowers.js';
 import {
-  ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, needsPools, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute,
+  ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, needsPools, pruneRoutes, readRoute, routeAsk, routeOptions, stagedRoute, writeRoute,
   type RouteDoc, type RouteOption, type RouteStage,
 } from '../../route.js';
 import { superpowersOf, committedAt, declinedSpecs, spContext, triageCore } from '../shared.js';
@@ -114,7 +114,7 @@ export const command: Command = (args, ctx) => {
     const main = mainCheckout(io.cwd);
     const cur = readRoute(main, session);
     if (!cur || (flag('task') !== undefined && flag('task') !== cur.task)) return json({ updated: false });
-    const next: RouteDoc = { ...cur, stage: stage as RouteStage, ts: ts(), ...files };
+    const next = stagedRoute(cur, stage as RouteStage, ts(), files);
     writeRoute(main, next);
     return json({ updated: true, ...next });
   }

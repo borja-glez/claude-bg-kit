@@ -173,6 +173,8 @@ export type RouteEndReason = (typeof ROUTE_END_REASONS)[number];
 export interface RouteDoc {
   task: string; chosen: RouteOption; by: 'user' | 'auto'; stage: RouteStage; ts: string; spec?: string; plan?: string; session?: string;
   endedAt?: string; endReason?: RouteEndReason;
+  /** w8 FR4: `spec` came from brainstorming on this superpowers-design route, which hands off only once the person approved it. */
+  specApproved?: true;
 }
 /** K1-04: each session's route, in the main checkout. */
 export const routeDir = (root: string) => path.join(root, '.forge', 'route');
@@ -199,7 +201,20 @@ export function normalizeRoute(x: unknown): RouteDoc | null {
     ...(isRouteSession(o.session) ? { session: o.session } : {}),
     ...(typeof o.endedAt === 'string' && Number.isFinite(Date.parse(o.endedAt)) ? { endedAt: o.endedAt } : {}),
     ...((ROUTE_END_REASONS as readonly unknown[]).includes(o.endReason) ? { endReason: o.endReason as RouteEndReason } : {}),
+    ...(o.specApproved === true && chosen === 'superpowers-design' && isRoutePath(o.spec) ? { specApproved: true as const } : {}),
   };
+}
+
+/**
+ * w8 FR4: the route `route stage` writes. A hand-off with a spec from a superpowers-design route still designing is the
+ * end of brainstorming, whose gate the person passed by approving that spec: the route records it as approved, and keeps
+ * it while the spec stays the same (forge:run hands off again after a resume). Any other spec is not.
+ */
+export function stagedRoute(cur: RouteDoc, stage: RouteStage, ts: string, files: { spec?: string; plan?: string }): RouteDoc {
+  const { specApproved: _, ...next } = { ...cur, stage, ts, ...files };
+  const fromBrainstorming = cur.chosen === 'superpowers-design' && cur.stage === 'designing' && stage === 'handed-off' && files.spec !== undefined;
+  const kept = cur.specApproved === true && next.spec === cur.spec;
+  return fromBrainstorming || kept ? { ...next, specApproved: true } : next;
 }
 
 /**

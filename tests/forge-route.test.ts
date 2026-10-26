@@ -231,6 +231,28 @@ describe('forge route CLI', () => {
     expect(JSON.parse(run(['route', 'stage', '--stage', 'planning', '--session', 'sess-1'], io).stdout)).toMatchObject({ session: 'sess-1' });
     expect(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user', '--session', 'a b'], io).code).toBe(2);
   });
+  it("a spec handed off from brainstorming on this session's superpowers-design route is recorded as approved; any other is not (w8 FR4)", () => {
+    const spec = 'docs/superpowers/specs/2026-10-26-cart-design.md';
+    const stage = (...extra: string[]) => JSON.parse(run(['route', 'stage', '--stage', 'handed-off', ...extra], io).stdout);
+    run(['route', 'set', '--task', 't1', '--chosen', 'superpowers-design', '--by', 'user'], io);
+    expect(stage('--spec', spec)).toMatchObject({ updated: true, stage: 'handed-off', spec, specApproved: true });
+    expect(readRoute(root, 'sess-0')).toMatchObject({ spec, specApproved: true });
+    // forge:run runs the same command again after a resume: the same spec stays approved, another one is not.
+    expect(stage('--spec', spec)).toMatchObject({ specApproved: true });
+    expect(stage('--spec', 'docs/superpowers/specs/other-design.md')).not.toHaveProperty('specApproved');
+    expect(readRoute(root, 'sess-0')).not.toHaveProperty('specApproved');
+    // A route that named its spec when it was set never went through brainstorming.
+    expect(JSON.parse(run(['route', 'set', '--task', 't2', '--chosen', 'superpowers-design', '--by', 'user', '--spec', spec], io).stdout)).not.toHaveProperty('specApproved');
+    expect(stage('--spec', spec)).not.toHaveProperty('specApproved');
+    // Brainstorming that ends without a file hands off with no spec; superpowers-plan never hands a spec to the design.
+    run(['route', 'set', '--task', 't3', '--chosen', 'superpowers-design', '--by', 'user'], io);
+    expect(stage()).not.toHaveProperty('specApproved');
+    run(['route', 'set', '--task', 't4', '--chosen', 'superpowers-plan', '--by', 'user'], io);
+    expect(stage('--spec', spec)).not.toHaveProperty('specApproved');
+    // A hand-written route file cannot claim it without its spec.
+    writeRoute(root, { task: 't5', chosen: 'superpowers-design', by: 'user', stage: 'handed-off', ts: '2026-10-13T10:00:00.000Z', session: 'sess-0', specApproved: true });
+    expect(readRoute(root, 'sess-0')).not.toHaveProperty('specApproved');
+  });
   it('stage without a route updates nothing', () => {
     expect(JSON.parse(run(['route', 'stage', '--stage', 'done'], io).stdout)).toEqual({ updated: false });
   });
