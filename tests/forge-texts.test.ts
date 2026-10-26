@@ -26,7 +26,7 @@ describe("forge's texts (A7)", () => {
       const lines = md.split(/\r?\n/);
       expect(lines.find(l => l.startsWith('5. ')), a).toContain('refuses to Write a `.md` file whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS (any case)');
       const deliver = lines.find(l => l.startsWith('A project file with such a name'));
-      for (const w of ['`git mv`', 'return its text in your reply', 'say which in your report', 'Never get around the refusal']) expect(deliver, `${a}: ${w}`).toContain(w);
+      for (const w of ['`git mv`', '`git mv -f` when that name is already in the repository', 'return its text in your reply', 'say which in your report', 'Never get around the refusal']) expect(deliver, `${a}: ${w}`).toContain(w);
     }
   });
   it('forge-planner writes review_focus, which the brief carries to the reviewers (A7)', () => {

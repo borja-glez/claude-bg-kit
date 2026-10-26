@@ -35,7 +35,7 @@ describe('FC6: a file Claude Code refuses to Write in a subagent', () => {
     expect(REFUSED_MD.test('Findings.MD')).toBe(true);
   });
   it('refusedMdLine names them and says how they are still delivered, never in silence; none, no line', () => {
-    expect(refusedMdLine(['docs/report.md', 'SUMMARY.md'])).toBe('Files named `docs/report.md`, `SUMMARY.md`: in a subagent, Claude Code refuses to Write a `.md` file whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS (any case). To create or rewrite one, write it under another name and rename it with git (`git add` it, then `git mv` it to its name), or return its text in your reply for the coordinator to write; say which in your report, never in silence.');
+    expect(refusedMdLine(['docs/report.md', 'SUMMARY.md'])).toBe('Files named `docs/report.md`, `SUMMARY.md`: in a subagent, Claude Code refuses to Write a `.md` file whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS (any case). To create or rewrite one, write it under another name and rename it with git (`git add` it, then `git mv` it to its name, `git mv -f` when that name is already in the repository), or return its text in your reply for the coordinator to write; say which in your report, never in silence.');
     expect(refusedMdLine([])).toBeNull();
   });
 });
