@@ -14,8 +14,10 @@ export const command: Command = (args, ctx) => {
   // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
   const known = readLocal(io.cwd).known;
   if (t.fresh.length || known.some(n => !t.names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: t.names }));
+  // FX1: the implementer it names, for the deviation check (deviation.ts); a triage of the real diff (--base) names none.
+  const named = (t.output.implementer as { agent?: unknown } | undefined)?.agent;
   appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(t.task ? { task: t.task } : {}), ...(t.project !== null ? { project: t.project } : {}), ...t.result, ...t.auto,
-    ...(t.diff ? { diff: { base: t.diff.base, files: t.diff.stat.files.length, lines: t.diff.stat.lines } } : {}), review: t.review,
+    ...(t.diff ? { diff: { base: t.diff.base, files: t.diff.stat.files.length, lines: t.diff.stat.lines } } : { implementer: typeof named === 'string' ? named : null }), review: t.review,
     ...(t.kind === 'bug' ? { bug: true } : {}) });
   // forgeDir has just created .forge/.gitignore and no step commits it: say so while git lists it as untracked and
   // not ignored (a repository that ignores .forge/ has opted out). Asked after the writes, which may have made it.

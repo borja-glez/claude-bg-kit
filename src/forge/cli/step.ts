@@ -186,11 +186,12 @@ function lastAgent(c: Ctx, taskN: string): string | null {
 }
 
 /** Logs the implementer handed out for `<T>-<n>` (review-close reads its rung), once: a hand-out a later step retries,
- *  with the same agent and role as the last one logged for that brief, adds nothing. */
+ *  with the same agent and role as the last one logged for that brief, adds nothing. `by: "step"` tells it from an agent
+ *  the session logs by hand: it is who forge named, which the deviation check compares with who started (FX1). */
 function logAgent(c: Ctx, taskN: string, agent: string, role: string): void {
   const last = ledgerOf(c, taskN).filter(e => e.kind === 'agent' && isTask(e, taskN)).at(-1);
   if (last?.agent === agent && last.role === role) return;
-  appendEvent(c.io.cwd, { ts: c.iso(), kind: 'agent', task: taskN, agent, role });
+  appendEvent(c.io.cwd, { ts: c.iso(), kind: 'agent', task: taskN, agent, role, by: 'step' });
 }
 
 /** A reviewer's file that is there and is not a draft (`"complete": false`); one that is not JSON is review-close's to judge. */

@@ -11,6 +11,7 @@ import { UsageError } from '../errors.js';
 import { hookRoot, mainCheckout } from '../../local.js';
 import { memberForHook } from '../../members.js';
 import { hookLive } from '../../live.js';
+import { hookDeviation } from '../../deviation.js';
 import { hookRoute } from '../../route-hooks.js';
 import { hookAnswer } from '../../auth.js';
 import { evaluateGuard, guardOutput, parseGuardInput, shellCommand, targetPath, type GuardCtx, type GuardInput, type GuardVerdict } from '../../guard.js';
@@ -187,7 +188,14 @@ export const command: Command = (args, ctx) => {
   const { io } = ctx;
   const which = args[0];
   if (which === 'guard') return { code: 0, ...hookGuard(io) };
-  const out = which === 'stop' ? hookStop(io) : which === 'answer' ? hookAnswer(io) : which === 'live' ? hookLive(io)
+  const out = which === 'stop' ? hookStop(io) : which === 'answer' ? hookAnswer(io) : which === 'live' ? liveAndDeviation(io)
     : which === 'route-session' ? hookRoute(io, 'session') : which === 'route-prompt' ? hookRoute(io, 'prompt') : '';
   return { code: 0, stdout: out, stderr: '' };
 };
+
+/** `hook live`, and on a SubagentStart the deviation check (FX1), which prints nothing and never throws. */
+function liveAndDeviation(io: Io): string {
+  const out = hookLive(io);
+  hookDeviation(io);
+  return out;
+}
