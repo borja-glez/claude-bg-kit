@@ -1660,6 +1660,8 @@ describe('plugin layout', () => {
     expect(plan).not.toContain('your instructions name');
     expect(workRef('setup')).toContain('When its last line is `{"bg": {"jobTmp": …}}`, this is a background session in the main checkout');
     expect(workRef('setup')).toContain('call `EnterWorktree` and start §0 again from that worktree');
+    // Fix round 2: a refused EnterWorktree, and a roadmap to sync from that worktree, end in the person, never in improvising.
+    for (const w of ['If `EnterWorktree` is refused, tell the user to start the session in a worktree', 'ask the user to sync it with `/waypoint:plan` in an interactive session, and stop']) expect(workRef('setup'), w).toContain(w);
     // The delegation adds the task through the CLI and lists into its own worktree, never into MAIN_REPO.
     const multi = workRef('multisession');
     const delegation = multi.slice(multi.indexOf('**Delegation.**'), multi.indexOf('\n## After the task'));
