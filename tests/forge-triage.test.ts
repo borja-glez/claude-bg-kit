@@ -80,9 +80,33 @@ describe('triage', () => {
     expect(triage('Migración a Postgres', repo(), []).path).toBe('large');
     expect(triage('Añade una migración de la tabla de usuarios', repo(), []).path).not.toBe('large');
   });
-  it('an empty repo is greenfield and large', () => {
-    const r = triage('build a todo app', repo({}, { files: [], commits: 0 }), []);
-    expect(r).toMatchObject({ greenfield: true, path: 'large' });
+  it('a young repository lifts a request to Medium at most; Large only when the request asks for several pieces (w8 FR3)', () => {
+    const young = repo({}, { files: ['package.json', 'src/index.js', 'README.md'], commits: 1 });
+    const empty = repo({}, { files: [], commits: 0 });
+    const checkout = triage('añade un checkout', young, []);
+    expect(checkout).toMatchObject({ greenfield: true, path: 'medium' });
+    expect(checkout.reasons).toContain('greenfield repository');
+    expect(triage('build a todo app', empty, [])).toMatchObject({ greenfield: true, path: 'medium' });
+    const booking = triage('crea una app de reservas con backend y frontend', young, []);
+    expect(booking).toMatchObject({ greenfield: true, path: 'large' });
+    expect(booking.reasons).toContain('greenfield repository with several pieces: backend, frontend');
+    for (const t of ['build a todo app with a React frontend and an Express API', 'crea una API REST con base de datos para las tareas', 'monta una app full-stack de notas',
+      'create a shop with an admin panel and a mobile app']) expect(triage(t, empty, []).path, t).toBe('large');
+    // The request decides below Medium: a short change to a named file and mechanical work stay where they were.
+    expect(triage('fix the typo in README.md', young, []).path).toBe('trivial');
+    expect(triage('rename helperOne to helperTwo', young, []).path).toBe('small');
+    // One piece is not several; a back button is no backend.
+    for (const t of ['add a backend endpoint that lists the todos', 'añade un botón de back en la cabecera', 'add a login page']) expect(triage(t, young, []).path, t).not.toBe('large');
+    // The rest of the rules still apply in a young repository.
+    expect(triage('rediseña la arquitectura del proyecto', young, []).path).toBe('large');
+    expect(triage('add a password reset flow', young, []).path).toBe('medium');
+    // An older repository: the request alone, as before.
+    expect(triage('crea una app de reservas con backend y frontend', repo(), []).path).not.toBe('large');
+  });
+  it('the reasons of a young repository read in Spanish (w8 FR3)', () => {
+    const line = (reasons: string[]) => announce({ path: 'large', reasons, implementer: { self: false, agent: null }, fresh: [], catalog: [] }, 'es');
+    expect(line(['greenfield repository with several pieces: backend, frontend'])).toContain('repositorio nuevo con varias piezas: backend, frontend');
+    expect(line(['greenfield repository'])).toContain('repositorio nuevo');
   });
   it('ignoreGreenfield: a greenfield repo still reports it, but the other rules pick the path', () => {
     const r = triage('add a dark mode toggle', repo({}, { files: ['a.ts', 'b.ts'], commits: 1 }), [], undefined, { ignoreGreenfield: true });

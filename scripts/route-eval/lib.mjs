@@ -34,7 +34,7 @@ export const CONFIGS = [
 ];
 
 /** The files of the throwaway repository the prompts talk about. Six, not four: forge's triage calls a repository with
- *  fewer than five files greenfield and sends every request to Large, which would hide the Trivial and Small prompts. */
+ *  fewer than five files greenfield and lifts its Small requests to Medium, which would hide the Small prompts. */
 export const DEMO_SHOP = {
   'package.json': JSON.stringify({ name: 'demo-shop', version: '1.0.0', type: 'module', scripts: { test: 'node --test' } }, null, 2) + '\n',
   'src/cart.js': 'export const total = items => items.reduce((s, i) => s + i.price * i.qty, 0);\nexport const withTax = (items, rate) => Math.round(total(items) * (1 + rate));\n',

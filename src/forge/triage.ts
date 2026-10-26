@@ -58,6 +58,20 @@ export function diffZones(names: string[], patch: string): Zone[] {
 const LARGE = [/\b(architecture|redesign|rewrite|subsystem|new (project|app|service|system)|from scratch|migrat(e|ion) (to|from))\b/i,
   es('arquitect|rediseñ|reescrib|reescritur|subsistem', 'desde cero|(?:nuev[oa]|otr[oa]) (?:proyecto|aplicaci[oó]n|app|servicio|sistema)|migr(?:ar|aci[oó]n) (?:a|al|desde)')];
 
+// w8 FR3: the pieces a request for a new project names. Two or more of them in a young repository make it Large; a
+// full-stack app is two. A bare «back» or «front» (a back button) is none.
+const piece = (w: string) => new RegExp(`(?<![\\p{L}\\p{N}_])(?:${w})(?![\\p{L}\\p{N}_])`, 'iu');
+const PIECES: [string, RegExp][] = [
+  ['backend', piece('backend|back-end|back end|servidor|server|full-?stack')],
+  ['frontend', piece('frontend|front-end|front end|interfaz web|web ui|full-?stack')],
+  ['api', piece('apis?|graphql')],
+  ['db', piece('bases? de datos|database|db|postgres(?:ql)?|mysql|sqlite|mongo(?:db)?')],
+  ['mobile', piece('app m[oó]vil|aplicaci[oó]n m[oó]vil|m[oó]vil|mobile(?: app)?|ios|android')],
+  ['admin', piece('panel de (?:administraci[oó]n|admin|control)|admin(?: panel)?|backoffice|dashboard')],
+];
+/** w8 FR3: the pieces of a project a text names, in table order. */
+export const piecesOf = (text: string): string[] => PIECES.filter(([, re]) => re.test(text)).map(([name]) => name);
+
 // A rename spreads past the file it names: never Trivial.
 const RENAME = [/\brenam/i, /(?<![\p{L}\p{N}_])renombr/iu];
 
@@ -232,6 +246,7 @@ export type AnnounceLocale = 'es' | 'en';
 const REASONS_ES: [RegExp, string][] = [
   [/^git unavailable$/, 'git no responde'],
   [/^greenfield repository$/, 'repositorio nuevo'],
+  [/^greenfield repository with several pieces: (.+)$/, 'repositorio nuevo con varias piezas: $1'],
   [/^architecture-scale wording$/, 'la tarea habla de arquitectura'],
   [/^(\d+) files located$/, '$1 ficheros'],
   [/^(\d+) file\(s\) located$/, '$1 fichero(s)'],
@@ -360,7 +375,7 @@ const PATH_TOKEN = /[\w.\-/]*[\w-]\.[A-Za-z0-9]{1,8}\b|[\w.-]+\/[\w.\-/]+/g;
 // Symbols worth a grep: camelCase, PascalCase with an inner capital, snake_case, or `backticked`.
 const isSymbol = (w: string) => w.length >= 4 && (/[a-z][A-Z]/.test(w) || /^[A-Za-z]+_[A-Za-z0-9_]+$/.test(w));
 
-// `ignoreGreenfield`: a plan task was already designed and planned, so a young repository does not make it Large.
+// `ignoreGreenfield`: a plan task was already designed and planned, so a young repository does not lift it.
 // `plan`: a plan task takes its zones from paths (its plan zones, the files located) and from its title, and its Large
 // wording from its title; file location and sizing still read the whole text.
 export function triage(task: string, repo: RepoFacts, validators: string[], extra?: { files: string[]; zones: Zone[] },
@@ -402,8 +417,7 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
   const sized = named.size ? named.size : Math.min(files.size, MAX_FILES);
 
   let path: PathName;
-  if (greenfield && !opts.ignoreGreenfield) { path = 'large'; reasons.push('greenfield repository'); }
-  else if (LARGE.some(re => re.test(headText))) { path = 'large'; reasons.push('architecture-scale wording'); }
+  if (LARGE.some(re => re.test(headText))) { path = 'large'; reasons.push('architecture-scale wording'); }
   else if (sized > 10) { path = 'large'; reasons.push(`${sized} files located`); }
   else if (sized > 3) { path = 'medium'; reasons.push(`${sized} files located`); }
   else if (sized === 0 && isCopyChange(text)) { path = 'trivial'; reasons.push(COPY_REASON); }
@@ -413,6 +427,15 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
   else if (sized === 0) { path = 'small'; reasons.push('no files located: the session should judge the scope'); }
   else if (sized === 1 && wordCount <= 25 && !RENAME.some(re => re.test(text))) { path = 'trivial'; reasons.push(named.size ? 'one named file, short task' : 'one file, short task'); }
   else { path = 'small'; reasons.push(`${sized} file(s) located`); }
+
+  // w8 FR3: the request decides the size. A young repository lifts it to Medium at most (a Small request that is not
+  // mechanical), and to Large only when the request names several pieces of a project (a backend and a frontend…).
+  if (greenfield && !opts.ignoreGreenfield && path !== 'large') {
+    // Quotes and prohibitions say nothing about the project; compound words do («full-stack», «back-end»).
+    const pieces = piecesOf(text.replace(SPANS, blank).replace(PROHIBITION, blank));
+    if (pieces.length >= 2) { path = 'large'; reasons.push(`greenfield repository with several pieces: ${pieces.join(', ')}`); }
+    else if (path === 'small' && !isMechanical(text)) { path = 'medium'; reasons.push('greenfield repository'); }
+  }
 
   if (sensitive.length && PATH_ORDER.indexOf(path) < PATH_ORDER.indexOf('medium')) {
     path = 'medium';

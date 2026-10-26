@@ -289,7 +289,7 @@ describe('forge CLI', () => {
   });
   it('triage prints the implementer for the size, resolved through the profile; --batch delegates a trivial task', () => {
     io.git = args => {
-      // Five or more tracked files, or the repository counts as greenfield and every task is Large.
+      // Five or more tracked files, or the repository counts as greenfield and a Small task is Medium.
       if (args.includes('ls-files')) return 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n';
       if (args[0] === 'rev-list') return '12\n';
       return '';
@@ -320,9 +320,10 @@ describe('forge CLI', () => {
     expect(out).toMatchObject({ greenfield: false, path: 'small' });
     expect(out.reasons).toContain('git unavailable');
   });
-  it('triage on a repository without commits (rev-list fails) is greenfield', () => {
+  it('triage on a repository without commits (rev-list fails) is greenfield: Medium at most, unless the request has several pieces (w8 FR3)', () => {
     io.git = args => (args.includes('ls-files') ? '' : null);
-    expect(JSON.parse(run(['triage', 'build a todo app'], io).stdout)).toMatchObject({ greenfield: true, path: 'large' });
+    expect(JSON.parse(run(['triage', 'build a todo app'], io).stdout)).toMatchObject({ greenfield: true, path: 'medium' });
+    expect(JSON.parse(run(['triage', 'build a todo app with a frontend and a backend'], io).stdout)).toMatchObject({ greenfield: true, path: 'large' });
   });
   it('triage lists the catalog, announces validators not yet known, then remembers them', () => {
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'x' } }));
