@@ -4,6 +4,7 @@ node_modules/
 .vitest/
 plugins/waypoint/.claude-plugin/types/
 plugins/lens/.claude-plugin/types/
+plugins/*/tsconfig.json
 /types/
 docs/superpowers/
 scripts/route-eval/results/
