@@ -1,6 +1,6 @@
 {
   "name": "web",
   "description": "Astro sites with Preact islands shipped on Dokploy: the build, CSP hashes, Lighthouse and Playwright under Claude Code, Vite workers, MDX, nginx and the Dokploy fields.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": { "name": "Borja" }
 }

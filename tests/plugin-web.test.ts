@@ -16,8 +16,8 @@ const cp = (n: number) => String.fromCharCode(n);
 const INVISIBLE = new RegExp(`[${cp(0x200b)}-${cp(0x200f)}${cp(0x202a)}-${cp(0x202e)}${cp(0x2060)}-${cp(0x2064)}${cp(0x2066)}-${cp(0x2069)}${cp(0xfeff)}]`);
 
 describe('plugin web (w7 D2)', () => {
-  it('the manifest is web 0.1.0, and the marketplace lists it from plugins/web with the same description', () => {
-    expect(manifest()).toEqual({ name: 'web', description: expect.stringMatching(/^Astro sites with Preact islands/), version: '0.1.0', author: { name: 'Borja' } });
+  it('the manifest is web 0.1.1, and the marketplace lists it from plugins/web with the same description', () => {
+    expect(manifest()).toEqual({ name: 'web', description: expect.stringMatching(/^Astro sites with Preact islands/), version: '0.1.1', author: { name: 'Borja' } });
     expect(JSON.parse(read('.claude-plugin/marketplace.json')).plugins).toContainEqual({ name: 'web', source: './plugins/web', description: manifest().description });
   });
   it('web is text only: a manifest, its READMEs and skills, without hooks, bundles, scripts, sources or agents', () => {

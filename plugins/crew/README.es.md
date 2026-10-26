@@ -7,7 +7,7 @@ Uno lee como una persona novata y dice dónde se pierde; el otro juega un protot
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.1.0](https://img.shields.io/badge/versi%C3%B3n-0.1.0-89dceb?style=flat-square)
+![versión 0.1.1](https://img.shields.io/badge/versi%C3%B3n-0.1.1-89dceb?style=flat-square)
 
 </div>
 

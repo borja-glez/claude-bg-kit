@@ -45,11 +45,11 @@ const AGENT = 'plugins/java/agents/architecture-reviewer.md';
 const OSS = 'plugins/java/skills/java-oss-library';
 
 describe('the java plugin (w7 D1)', () => {
-  it('the marketplace lists java, and its manifest names it at 0.1.0 with the same description', () => {
+  it('the marketplace lists java, and its manifest names it at 0.1.1 with the same description', () => {
     const m = JSON.parse(read('.claude-plugin/marketplace.json'));
     const entry = m.plugins.find((p: { name: string }) => p.name === 'java');
     expect(entry).toEqual({ name: 'java', source: './plugins/java', description: expect.stringContaining('Spring Boot') });
-    expect(JSON.parse(read('plugins/java/.claude-plugin/plugin.json'))).toEqual({ name: 'java', description: entry.description, version: '0.1.0', author: { name: 'Borja' } });
+    expect(JSON.parse(read('plugins/java/.claude-plugin/plugin.json'))).toEqual({ name: 'java', description: entry.description, version: '0.1.1', author: { name: 'Borja' } });
   });
   it('the hygiene patterns find what they look for, and only that', () => {
     for (const s of ['C:\\Users\\ana\\x', 'E:/work/java', 'E:\\work\\java', 'see /Users/ana/repo', '/home/ana/.m2']) expect(PERSONAL.test(s), s).toBe(true);

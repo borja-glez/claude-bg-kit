@@ -7,7 +7,7 @@ Lo que cada sitio Astro con islas de Preact en Dokploy redescubre si no, escrito
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.1.0](https://img.shields.io/badge/versi%C3%B3n-0.1.0-94e2d5?style=flat-square)
+![versión 0.1.1](https://img.shields.io/badge/versi%C3%B3n-0.1.1-94e2d5?style=flat-square)
 
 </div>
 

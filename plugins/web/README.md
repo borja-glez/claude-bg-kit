@@ -7,7 +7,7 @@ What every Astro site with Preact islands on Dokploy otherwise rediscovers, writ
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.1.0](https://img.shields.io/badge/version-0.1.0-94e2d5?style=flat-square)
+![version 0.1.1](https://img.shields.io/badge/version-0.1.1-94e2d5?style=flat-square)
 
 </div>
 

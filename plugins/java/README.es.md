@@ -7,7 +7,7 @@ Las reglas de DDD y hexagonal de un servicio, el mantenimiento de las librerías
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.1.0](https://img.shields.io/badge/versi%C3%B3n-0.1.0-f9e2af?style=flat-square)
+![versión 0.1.1](https://img.shields.io/badge/versi%C3%B3n-0.1.1-f9e2af?style=flat-square)
 
 </div>
 

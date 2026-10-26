@@ -17,6 +17,25 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## waypoint
 
+### 0.37.0 — 2026-10-26
+
+#### Added
+- The CLI writes every local file the roadmap sync needs, so neither a background session nor a worktree is asked to write into the checkout: `page --publish-info --capabilities F --write-capabilities` writes `capabilities.json` when it is missing or differs; `set-roadmap <plan> <url>` sets `artifacts.roadmap` in `plan.yaml` and changes no other byte; `sync --versions '<json>'` takes the listed versions inline and keeps them in `known.json` itself; `clean-cache <plan> <collection>…` cleans several collections in one call; `db-import <plan> <collection>=<file>…` turns a listing read into the conversation into the cache, once it has checked that the listing's header names that collection and that its count matches what the file holds; `add-task <plan> --task-file <f>` adds a delegated task only when the plan still validates and nothing else in it changes. Delegating a task from a worktree goes through `add-task` too.
+- A background session in the main checkout, where Claude Code lets it edit nothing: `validate` ends with `{"bg": {"jobTmp": …}}` there, and the skills act on that line, never on the prompt's text. `/waypoint:work` moves into a worktree with `EnterWorktree` and starts again from there (if that is refused, it tells you to start the session in a worktree or in an interactive session, and stops). `/waypoint:plan` lists into the conversation, writes each listing to the job's own `tmp` folder and imports it with `db-import`; a `plan.yaml` that would have to be written or edited by hand waits for you to run `/waypoint:plan` in an interactive session.
+
+#### Changed
+- A task of `/waypoint:work` takes about half the calls (38 to 20 for one session working in a loop): `next --notes DB/notes --seat-dir <SEAT>` brings the notes with the pick and keeps `lastNoteTs` in the seat's `session.json` itself; `next --check-sync` says when the main checkout has to sync the roadmap first; `done --metrics-version V --seat-dir <SEAT>` pins `meta/metrics` and prints the plan's `progress`; `commit-info --event` prints the write of a commit's event; the six listings go in one message after one `clean-cache`; and each task reads one short reference again (`complete.md`) instead of three. Every write is still pinned to its version and every batch is sent whole or not at all. On a first join, `next --notes` and `notes` give only the last 5 notes.
+- The run band says why an ended run ended, with its count and without **Stop**: `► EXECUTION · ✓ finished · 3/3 integrated`, `▲ stalled`, `■ stopped with /forge:stop` or `▲ out of budget`; `▲ stopped` is left for an active run whose coordinator or a task went quiet. The coordinator's band offers **Close** for any ended run, and the notice of a finished run reads `✓ execution finished: 3/3 integrated` (`(open in another conversation)` while its coordinator's conversation is open).
+- A session without `ListAgents` registers without a messaging name and says in one line that other sessions reach it only through the roadmap's messages; `heartbeat --register` takes `--agent` only when there is one, and drops a name an earlier conversation left.
+- A seat's pending commits go only once the roadmap shows their task done (`next --seat-dir` after its `state` listing, or the idle heartbeat with `--seat-dir` and `--states`), and none while the seat's queue still holds a write; after a compaction, `/waypoint:work` fetches `meta/metrics` again for its version.
+- The roadmap page says «detenida con /forge:stop» for an execution stopped with `/forge:stop`, as the band does, and an autonomous run that ended reads «Detenida: …», since «parada» now means an active run without a heartbeat. Republish the roadmap after updating, as `waypoint:plan` says.
+
+#### Fixed
+- The band after `/clear`, a resume or a fork with Claude Code's built-in `cc-plugin-sec-default` plugin in front, as it is on Team and Enterprise organizations and on managed installations: that plugin sends every `classic.*` hook past the plugins you install, so the band never heard `classic.SessionStart`, kept drawing the conversation that ended and stayed hidden after **×**. It now notices the next conversation from `session.end` and the conversation's id on the next turn, the same with that plugin in front or without it.
+
+#### Known limits
+- The path of a background session in the main checkout (listing into the conversation, writing to `$CLAUDE_JOB_DIR/tmp`, `db-import`) was not tried in a real `--bg` session, and it depends on the shell inheriting `CLAUDE_JOB_DIR`; a plan to write or edit by hand waits for an interactive session.
+
 ### 0.36.0 — 2026-10-26
 
 #### Added
@@ -431,6 +450,42 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.32.0 — 2026-10-26
+
+#### Added
+- `FORGE_WORKFLOW`, your default workflow for every project (`forge`, `superpowers`, `superpowers-design`, `superpowers-plan`, `off` or `ask`), set once in the `env` of `~/.claude/settings.json` instead of answering in each new project. It comes last: the request, then `.forge/local.yaml`, then `.forge/config.yaml`, then `FORGE_WORKFLOW`. With `off` or `superpowers` the routing rule and hint stay quiet in every project that does not say otherwise. `forge prefs` names it as the source `env`, and warns about a value that is not a workflow and lists the valid ones.
+- Deviations from the triage: when a forge implementer starts that is not the one forge named for the task in progress (the triage's, the one `swarm step` hands out, the one `review-close` prints for a fix round), the `SubagentStart` hook records a `deviation` in the ledger and blocks nothing. The next `swarm step`, the brief's `review-prep` or, on the Small path, `validate --all` says it once in one line, `review-close` repeats it when the brief closes, and `last --task` and `swarm status` list them (with the implementers forge named, `named`) for the closing report. `agents --role R --task <T>-<n>` prints a role's agent and records it as the one forge names for that brief, as an ephemeral task's fresh `impl` does.
+- `--max-usd N` for `/forge:infinite` and its profiles, or `budget.usd` in `.forge/config.yaml`: a spending cap in US dollars next to the cycles or hours, never in their place. Each `forge cycle` counts what the run has spent from the transcripts of its sessions and their subagents, keeps it in `run.json` (`cost`) and stops the run cleanly as `budget-usd` once it reaches the cap; the Stop hook's line shows what was spent of it, and a cost forge cannot count is said as unknown, never guessed.
+- Gradle and Maven validators. Gradle at the root outside an Android app (`gradlew`, `gradlew.bat`, `build.gradle(.kts)` or `settings.gradle(.kts)`) gives `gradle-test` (`test`), or `gradle-check` (`check`) when the build adds checks; Maven (`mvnw`, `mvnw.cmd` or `pom.xml`) gives `maven-test` (`-q test`). Each takes the wrapper of the platform when it is there (`gradlew.bat` and `mvnw.cmd` on Windows), else `gradle` or `mvn`.
+- With no validator detected nor listed, forge says that nothing checks the change before any work: `triage`'s `announce` ends with that line, `prep` prints a `warning`, also on stderr, and `swarm step` adds it to its line for the implementer it hands out.
+- `forge doctor` reports the Claude Code that runs here against the version forge's platform facts were recorded with, as data that never changes its exit.
+
+#### Changed
+- forge keeps its files out of git through the repository's `.git/info/exclude` (shared by every worktree) and no longer commits `.forge/.gitignore` on your branch; `config.yaml` and `verify/*.md` can still be committed. A `.forge/.gitignore` git already tracks, or one with rules of your own, is respected as it is; an untracked one with exactly the rules an earlier forge wrote moves to `.git/info/exclude` at the next `triage` or `begin` and goes, and only another untracked one is named in `untracked` for you to commit or delete. Outside git forge writes that file as before.
+- The routing rule and hint only where they make sense: none outside a git repository, and the hint leaves out git work (commit, pull request, push, merge, rebase, tag), typos, renames, translations, texts that are not code (an email, a summary, the tone, a meeting, an issue or a ticket) and questions, while it keeps features, fixes, refactors and new projects.
+- A young repository (no commits, or fewer than five files) no longer sends everything to Large: the request decides. A Small one that is not mechanical becomes Medium, and only a request to create an app, a project or a service with several pieces (a backend and a frontend, an API and a database…) is Large.
+- On the «superpowers designs, forge builds» route, a spec brainstorming wrote and approved on that route is imported as an approved design, without a critic round or a second approval, and forge says so in one line that names `/waypoint:design reopen`.
+- The route reminder names your choice and that `using-superpowers` puts your instructions above its skills, so it wins over brainstorming's «invoke writing-plans and no other skill».
+- forge's implementers state the real rule: in a subagent, Claude Code refuses only the Write of a `.md` file whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS (any case), not every `.md`. A brief that names such a file says how it is still delivered: written under another name and renamed with `git mv` (`git mv -f` when the name is already in the repository), or returned as text after the implementer's two lines, which the coordinator writes in the task's worktree, commits with the brief's prefix and tells you in one line; never in silence. `forge-runner` hands such a text back to the coordinator.
+- `forge-runner` says what happens: its agents may come back in the background and their reply wakes it; its commands stay in the foreground.
+- `infinite start` without a profile reads `.forge/config.yaml` and refuses one that does not load, with or without `--max-usd`: every cycle reads it.
+- Depends on waypoint ^0.37.0.
+
+#### Fixed
+- A superpowers 7 ledger whose `plan-path` is absolute (`/e/…` from Git Bash, `/cygdrive/e/…`, `E:/…` or `E:\…`, also the physical path `pwd -P` gives) counted no task as done: `sp-plan tasks`, `sp-plans` and `/forge:run --superpowers-plan` now count its tasks for the plan it names.
+- The live signal lost agents when several hooks ran at once (three `SubagentStart`s): each hook now reads, changes and writes `.forge/live/<id>.json` under its lock, and `swarm cleanup` removes a lock a dead process left.
+- `forge config get` of a known key with no value exited 2 («is not a config key»); it prints its default, or nothing, and exits 0.
+- An execution's coordinator on a second seat kept the time of the notes it had read in the checkout seat's `session.json`; it keeps it in its own seat's.
+
+#### Known limits
+- The native Android pair of validators (`gradle-lint` and `gradle-test`) still runs two Gradle builds in the same parallel batch.
+- Deviations: a pure swap between two tasks whose named implementers differ is not seen, and a lost `SubagentStop` can give a false deviation for about 3 hours (agents started before the hand-out are not counted).
+- `--max-usd`: the cost is a lower bound read from the transcripts (90–99 % of Claude Code's own figure), checked between cycles, so a run can pass the cap by one cycle, about 10 %.
+- The Small path keeps running the whole suite: running only what a change affects stays a proposal.
+- The live signal: with its lock busy more than 2 s (0.3 s on `SessionEnd`) the hook writes without it, and the old race comes back in that rare case.
+- A spec handed off on the «superpowers designs, forge builds» route counts as approved even if the session handed it off before you approved it; the one-line notice names `/waypoint:design reopen`.
+- Routing: the hint is heuristic, with known misses both ways (issues or tickets, requests under four words); with a failing git, `GIT_DIR` or odd mounts, forge behaves as outside git or writes `.forge/.gitignore` again.
 
 ### 0.31.0 — 2026-10-26
 
@@ -1072,6 +1127,26 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## lens
 
+### 0.15.0 — 2026-10-26
+
+#### Changed
+- The **Todos** and **Claude Code tasks** cards are never drawn empty: not before the first call, nor after an empty TodoWrite or once the only task is deleted.
+- `/lens` opens the pane first and reads the files after, so it answers at once also with several agents working; an inline pane opened before its first read is asked again for the rows its cards take. `/lens foto` waits at most 5 s for its read, then takes the photo from what lens holds.
+- Rebuilt with the code it shares with forge 0.32.0 and waypoint 0.37.0.
+
+#### Fixed
+- lens with Claude Code's built-in `cc-plugin-sec-default` plugin in front, as it is on Team and Enterprise organizations and on managed installations: that plugin sends every `classic.*` hook and `session.compact` past the plugins you install, so lens saw no subagent start or end, no Claude Code task and no compaction. It now follows subagents from `agent.spawn` and their own `turn.complete` (the agents list checks them on each refresh), fills the Claude Code tasks card from the TaskCreate and TaskUpdate calls, and tells a compaction from a main request that carries fewer messages than the one before, the same with that plugin in front or without it. A test keeps lens and waypoint's band off every event that plugin passes over.
+- A `/lens` that failed or ran out of time left only «lens registered /lens but no command.run hook answered it»; it now answers with a readable reason and leaves it in the debug log.
+- The superpowers card of a superpowers 7 run, whose ledger names its plan by an absolute path (`X:/…`, `X:\…`, `/x/…` or `/cygdrive/x/…`): lens reads that plan when it lies inside the project or, from a worktree, its main checkout, also by the real path of a project under a symbolic link. Without a plan it can read, the card shows «N done», with no total and never a false 100 %.
+- A subagent resumed by a message keeps its task, and an agents list that still says it runs just after it ended no longer brings it back.
+
+#### Known limits
+- The real cause of «no command.run hook answered it» (`/lens live`) was not reproduced: `/lens` now answers with the reason and leaves it in the debug log.
+- The inline pane opened again with its cards' rows is untested against a real engine.
+- A `/rewind` counts as a compaction.
+- A subagent continued with SendMessage shows as finished between its runs.
+- If `cc-plugin-sec-default` ever skipped `agent.spawn`, lens would only see subagents through the agents list.
+
 ### 0.14.0 — 2026-10-26
 
 #### Added
@@ -1320,6 +1395,13 @@ Not kept: 0.4.0
 
 ## java
 
+### 0.1.1 — 2026-10-26
+
+#### Changed
+- `architecture-reviewer` runs git as `git -C <root>` and Gradle as `./gradlew -p <root>` from wherever it starts, so «run it from the repository root» and «never `cd`» no longer contradict each other.
+- Gradle runs with `--no-daemon` by default and always in the foreground, in the reviewer and in the testing reference: a daemon or a background run outlives the review or the session.
+- The two Boot starters (Boot 3 with Jackson 2, Boot 4 with Jackson 3) are stated as of 2026-10, and `java-oss-library` asks to confirm in `gradle/libs.versions.toml` that both still exist.
+
 ### 0.1.0 — 2026-10-26
 
 #### Added
@@ -1330,6 +1412,14 @@ Not kept: 0.4.0
 
 ## web
 
+### 0.1.1 — 2026-10-26
+
+#### Changed
+- `astro check` takes the TypeScript range in the `peerDependencies` of `@astrojs/check` (TypeScript 6 as of 2026-10), read there and not from memory, instead of a fixed «TypeScript 6».
+- Rule 10 allows a short `AGENTS.md` with what must travel with a site's repository (commands, layout, conventions); what it forbids is copying the skill's rules into it. `CLAUDE.md` and `.claude/` stay out.
+- Lighthouse's headless Chrome starts on a free port and with the GPU flags (`--enable-gpu --use-angle=d3d11` on Windows).
+- Dokploy's issue 5417 and Vite's `data:video/mp2t` worker URL are dated (seen in 2026-10).
+
 ### 0.1.0 — 2026-10-26
 
 #### Added
@@ -1337,12 +1427,29 @@ Not kept: 0.4.0
 
 ## ml
 
+### 0.1.1 — 2026-10-26
+
+#### Changed
+- Rule 2 no longer pins `cu128`: it takes the highest `cuXXX` index that carries the torch the project asks for, confirmed with `uv lock` (as of 2026-10-26, cu128 stops at torch 2.11.0 while cu130 and cu132 reach 2.14.1), and its `pyproject.toml` pattern is on cu130.
+- The rest between long jobs (15–20 minutes by default) and not stacking heavy jobs on the GPU are general advice for a GPU that runs hot under load, not the policy of one machine; the cap of three GPU jobs at once is gone, and the VRAM budget still decides.
+- The renames of trl 1.x and transformers 5.x, and the JSEP and asyncify notes of in-browser inference, are dated (2026-10).
+
+#### Known limits
+- The cuXXX and torch figures of rule 2 are dated 2026-10-26 and will go stale.
+
 ### 0.1.0 — 2026-10-26
 
 #### Added
 - First version: the `ml-local-gpu` skill, for machine learning on a local NVIDIA GPU. It reads the project's `pyproject.toml`, lock, CI and README first and pins no package version; runs everything through `uv run`, with the torch wheel for the GPU or the CI; sizes jobs from the free VRAM `nvidia-smi` reports, with at most three at once; runs a job of 30 minutes or more alone, with the GPU's temperature at its start and end and 15–20 minutes of rest after it; checks trl, transformers and peft calls against the installed version; splits validation by the unit that leaks, never by row; runs notebooks whole and checks every claim against their outputs; writes text with `newline='\n'`; and runs `ruff format` when the CI checks it. Two references, read when the work gets there, cover inference in the browser with ONNX Runtime Web on WebGPU (one session at a time, the download agreed per model) and publishing on Hugging Face (cards in English, an acceptance criterion written before training, the token from `HF_TOKEN` or the login). It is text only and needs none of the other plugins.
 
 ## crew
+
+### 0.1.1 — 2026-10-26
+
+#### Changed
+- `novice-reader` and `playtest-qa` run only when you ask for them by name: their descriptions say so.
+- `playtest-qa` closes a project server started through npm as a tree on Windows, `taskkill /T /F /PID` by its PID, never by name.
+- The limit of two headless browsers with the GPU at once holds for any headless browser on the machine, not only those of `playtest-qa`.
 
 ### 0.1.0 — 2026-10-26
 

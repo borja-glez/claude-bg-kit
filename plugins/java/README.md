@@ -7,7 +7,7 @@ The DDD and hexagonal rules of a service, the upkeep of the Java libraries, and 
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.1.0](https://img.shields.io/badge/version-0.1.0-f9e2af?style=flat-square)
+![version 0.1.1](https://img.shields.io/badge/version-0.1.1-f9e2af?style=flat-square)
 
 </div>
 
