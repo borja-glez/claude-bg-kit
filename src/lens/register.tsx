@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
 import { noneBand, type BandModel } from '../mod/model.js';
-import { buildPanelModel, bandKey, parseSddLedger, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
+import { buildPanelModel, bandKey, parsePlanTasks, parseSddLedger, planFileOf, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
 import { normalizeStatus, statusKey } from '../lib/forge-status.js';
 import { JOB_FILE_MAX, runRoleOf } from './activities.js';
@@ -18,9 +18,11 @@ import { clipWidth } from '../lib/text-width.js';
 import { modeLabels, ownBusy, spinnerText, statusText, surfaceEvents } from './surfaces.js';
 import { PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
-import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
+import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, type UsageState } from './usage.js';
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, totalsOf, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunBaseline, type RunSource, type UsageFile } from './usage-file.js';
-import { addOwnTask, endAgent, endTool, knownTasks, linkSpawn, LINKS_MAX, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
+import { addOwnTask, endAgent, endTool, knownTasks, linkSpawn, LINKS_MAX, LIST_GRACE_MS, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
+import { taskCall } from './tasks.js';
+import { failureText } from './failure.js';
 
 const panel = atom({ plugin: 'lens', key: 'panel' } as const, null as PanelModel | null);
 const hidden = atom({ plugin: 'lens', key: 'hidden' } as const, false);
@@ -79,6 +81,11 @@ const agentTools = new Map<string, Map<string, { name: string; since: number }>>
 const pendingEnds = new Map<string, number>();
 const PENDING_END_MS = 2 * 60_000;
 const PENDING_ENDS_MAX = 50;
+// w8 M1: the teammates among the agents lens heard of (agent.spawn's isTeammate, the agents list's teammateId): a
+// teammate's turn.complete leaves it idle, not finished. At most LINKS_MAX are kept.
+const teammates = new Set<string>();
+// Review Minor 4: when each agent lens ended last ended, by id, for LIST_GRACE_MS (settledList); at most LINKS_MAX.
+const endedAt = new Map<string, number>();
 // Whether there is activity worth a band of its own (recent subagents, links agents or forge work; todos alone do not count) when no waypoint band shows.
 let busy = false;
 // The roadmap section, read from the waypoint project's files at the panel's pace while the pane is open.
@@ -88,7 +95,7 @@ let roadmap: BandModel = noneBand();
 let bandRead = false;
 
 type PanelFiles = {
-  ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
+  ledger?: string; ledgerPlan?: string; ledgerPlanPath?: string; planFallback?: string; ledgerMtimeMs?: number;
   forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number; forgeDecisions?: string;
   forgeExecution?: string; forgeExecTasks?: Record<string, string>; forgeLive?: Record<string, string>;
   forgeStatuses?: string[]; forgeBriefsBy?: Record<string, number>; forgeJobs?: string[];
@@ -193,8 +200,9 @@ function runLens($: Engine, args: 'live' | 'foto'): void {
 const SAFE_TASK = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/;
 let panelFiles: PanelFiles = {};
 let paneUp = false;
+// Review Minor 5: where the terminal last drew lens's pane, docked or inline; null before any drawing of this opening.
+let panePlacement: 'dock' | 'inline' | null = null;
 let panelTimer: Timer | null = null;
-let panelRefreshing = false;
 let writeTimer: Timer | null = null;
 let writing = false;
 let dirty = false;
@@ -230,6 +238,8 @@ function resetPanel(): void {
   wakeAt = null;
   agentTools.clear();
   pendingEnds.clear();
+  teammates.clear();
+  endedAt.clear();
 }
 
 // E-11: the tool agent `id` shows: the latest of its calls still in flight, or none.
@@ -238,12 +248,49 @@ function showAgentTool(id: string): void {
   links = setTool(links, id, last ?? null);
 }
 
-// E-09: a link that just appeared whose turn already ended (pendingEnds) is ended at that moment.
+// E-09: a link that just appeared whose turn already ended (pendingEnds) is ended at that moment, with the subagent it is
+// (w8 M1); a teammate's turn end leaves it idle.
 function applyPendingEnd(id: string, now: number): void {
   const at = pendingEnds.get(id);
   if (at === undefined) return;
   pendingEnds.delete(id);
-  if (now - at <= PENDING_END_MS) links = endAgent(links, id, at);
+  if (now - at <= PENDING_END_MS && !teammates.has(id)) endSubagent(id, at);
+}
+
+// w8 M1: a subagent's run starts at its agent.spawn and ends at its own turn.complete, which every hook hears. The classic
+// SubagentStart and SubagentStop said the same, but cc-plugin-sec-default passes every classic hook of a plugin the person
+// installed over where it is seated (managed settings, Team and Enterprise), so lens never hangs on them.
+function startSubagent(id: string, type: string, description: string, now: number): void {
+  endedAt.delete(id);
+  finished = finished.filter(f => f.id !== id);
+  const entry = { id, type: clip(type, LINE_MAX), ...(description ? { description: clip(description, LINE_MAX) } : {}), since: now };
+  activity.subagents = pushCapped(activity.subagents.filter(s => s.id !== id), entry);
+}
+
+// The run ended: its link with it, and one lens knew as running is kept as finished.
+function endSubagent(id: string, now: number): void {
+  const ran = activity.subagents.find(s => s.id === id);
+  activity.subagents = activity.subagents.filter(s => s.id !== id);
+  links = endAgent(links, id, now, { any: true });
+  if (ran) recordFinished(ran, now);
+  endedAt.delete(id);
+  endedAt.set(id, now);
+  while (endedAt.size > LINKS_MAX) endedAt.delete(endedAt.keys().next().value!);
+}
+
+// Review Minor 4: an agents list read just after an agent's turn.complete may still name it running. Within LIST_GRACE_MS
+// of its end, and with no spawn resuming it since (startSubagent forgets the end), that is taken as finished, so the list
+// neither brings it back nor starts its time again. Past the grace, the list is the truth again.
+function settledList(list: ListedAgent[], now: number): ListedAgent[] {
+  for (const [id, at] of endedAt) if (now - at > LIST_GRACE_MS) endedAt.delete(id);
+  return list.map(a => (endedAt.has(a.id) && LIVE_STATUSES.has(a.status) ? { ...a, status: 'completed' } : a));
+}
+const LIVE_STATUSES = new Set(['running', 'pending', 'waiting', 'idle']);
+
+function noteTeammate(id: string): void {
+  teammates.delete(id);
+  teammates.add(id);
+  while (teammates.size > LINKS_MAX) teammates.delete(teammates.keys().next().value!);
 }
 
 // A subagent heard of within the hour (older entries are dropped here), an agent of links still alive, or
@@ -327,13 +374,6 @@ function showTool(): void {
 
 async function isPaneOpen($: Engine): Promise<boolean> {
   try { return (await $.ui.panes()).some(p => p.id === PANE); } catch { return false; }
-}
-
-// A plan path from the ledger is read only when it is a relative .md path inside the root.
-function planFile(root: string, path: string): string | null {
-  const p = path.trim().replace(/\\/g, '/');
-  if (!p.toLowerCase().endsWith('.md') || p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.split('/').includes('..')) return null;
-  return join(root, p);
 }
 
 async function newest($: Engine, paths: string[]): Promise<{ path: string; t: number } | null> {
@@ -522,6 +562,17 @@ async function loadPanelFiles($: Engine, now: number): Promise<PanelFiles> {
   return { ...await loadSuperpowersFiles($, root, now), ...forge };
 }
 
+// A plan-path file holds one path: one above this is not read.
+const PLAN_PATH_MAX = 4096;
+// The plan as the card names it: its path under the base it was found in.
+function shownPlanPath(file: string, bases: readonly string[]): string {
+  for (const b of bases) {
+    const base = b.replace(/[\\/]+$/, '');
+    if (file.startsWith(`${base}/`)) return file.slice(base.length + 1);
+  }
+  return file;
+}
+
 async function loadSuperpowersFiles($: Engine, root: string, now: number): Promise<PanelFiles> {
   const out: PanelFiles = {};
   const sdd = join(root, '.superpowers', 'sdd');
@@ -531,10 +582,23 @@ async function loadSuperpowersFiles($: Engine, root: string, now: number): Promi
     out.ledger = await readOpt($, ledger.path);
     if (out.ledger !== undefined) out.ledgerMtimeMs = ledger.t;
   }
-  if (out.ledger !== undefined) {
-    const planPath = parseSddLedger(out.ledger).planPath;
-    const file = planPath ? planFile(root, planPath) : null;
-    if (file) out.ledgerPlan = await readOpt($, file);
+  if (ledger && out.ledger !== undefined) {
+    // w8 M4: superpowers 7 writes the plan's path to plan-path beside the ledger, and absolute (`X:/…`, msys `/x/…`) there
+    // and in the ledger's header: the first that names a plan inside the root, or its main checkout from a worktree.
+    if (mainCheckout === null) mainCheckout = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
+    const bases = mainCheckout !== root ? [root, mainCheckout] : [root];
+    const marker = join(ledger.path.slice(0, ledger.path.lastIndexOf('/')), 'plan-path');
+    let markerText: string | undefined;
+    try { if ((await $.fs.stat(marker)).size <= PLAN_PATH_MAX) markerText = await readOpt($, marker); } catch { /* none */ }
+    for (const named of [markerText, parseSddLedger(out.ledger).planPath]) {
+      const file = named ? planFileOf(named, bases) : null;
+      const text = file ? await readOpt($, file) : undefined;
+      if (file && text !== undefined && parsePlanTasks(text).length) {
+        out.ledgerPlan = text;
+        out.ledgerPlanPath = shownPlanPath(file, bases);
+        break;
+      }
+    }
     return out;
   }
   // No ledger: the newest superpowers plan, if it was touched within the day, shown by its checkboxes.
@@ -839,8 +903,9 @@ async function agentList($: Engine): Promise<ListedAgent[] | null> {
   if (!Array.isArray(list)) return null;
   return list.flatMap((raw): ListedAgent[] => {
     if (!raw || typeof raw !== 'object') return [];
-    const a = raw as { id?: unknown; type?: unknown; description?: unknown; status?: unknown; parentId?: unknown };
+    const a = raw as { id?: unknown; type?: unknown; description?: unknown; status?: unknown; parentId?: unknown; teammateId?: unknown };
     if (typeof a.id !== 'string') return [];
+    if (typeof a.teammateId === 'string' && a.teammateId) noteTeammate(a.id);
     return [{
       id: a.id, type: typeof a.type === 'string' ? a.type : '', description: typeof a.description === 'string' ? a.description : '',
       status: typeof a.status === 'string' ? a.status : '', parentId: typeof a.parentId === 'string' ? a.parentId : null,
@@ -849,22 +914,37 @@ async function agentList($: Engine): Promise<ListedAgent[] | null> {
 }
 
 // $.agent.list() is the truth on each refresh; without it, event entries older than an hour are dropped. A teammate
-// idle between turns waits: it is not gone (E-09).
+// idle between turns waits: it is not gone (E-09). w8 M1: one spawned within LIST_GRACE_MS that no list named yet (it
+// has no status of the list's) stays, as its link does.
 function liveSubagents(now: number, list: ListedAgent[] | null): Activity['subagents'] {
   const fresh = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   if (!list) return fresh;
   const since = new Map(fresh.map(s => [s.id, s.since]));
+  const listed = new Set(list.map(a => a.id));
   const out: Activity['subagents'] = [];
   for (const a of list) {
     if (a.status !== 'running' && a.status !== 'pending' && a.status !== 'waiting' && a.status !== 'idle') continue;
     out.push({ id: a.id, type: a.type, ...(a.description ? { description: a.description } : {}), status: a.status, since: since.get(a.id) ?? now });
   }
-  // One that was running here and is gone from the list has ended: kept as finished (a later Stop finds nothing).
+  for (const s of fresh) if (!listed.has(s.id) && s.status === undefined && now - s.since <= LIST_GRACE_MS) out.push(s);
+  // One that was running here and is gone from the list has ended: kept as finished.
   const live = new Set(out.map(s => s.id));
   for (const s of fresh) if (!live.has(s.id)) recordFinished(s, now);
   // An id that is running again is not also finished.
   finished = withoutRunning(finished, out);
   return out.slice(-MAX_ACTIVITY);
+}
+
+// What the agents list says, taken in by a refresh or a photo: the subagents and the links it names, and the usage loop
+// of an agent agent.spawn did not label (lens loaded later, another spawn path) gets its type (w8 M1).
+function adoptListed(listed: ListedAgent[] | null, now: number): void {
+  const list = listed ? settledList(listed, now) : null;
+  activity.subagents = liveSubagents(now, list);
+  if (list) {
+    links = syncListed(links, list, now, knownTasks(bandModel));
+    for (const a of list) if (a.type && usage.loops[a.id]?.kind === 'unknown') labelLoop(usage, a.id, a.type, a.description || undefined);
+  }
+  links = pruneLinks(links, now);
 }
 
 async function buildPanel($: Engine): Promise<PanelModel> {
@@ -901,7 +981,7 @@ function keepBand($: Engine, model: PanelModel): void {
 function notePane($: Engine, up: boolean): void {
   if (up === paneUp) return;
   paneUp = up;
-  if (!up) focusAgent = null;
+  if (!up) { focusAgent = null; panePlacement = null; }
   if (photos.size) $.ui.invalidate('ui.render');
 }
 
@@ -948,10 +1028,33 @@ function stopPanelTimer(): void {
   panelTimer = null;
 }
 
-// Reads the files and the agents list, only while the pane is open (or `force`d, by a pane about to open).
-async function refreshPanel($: Engine, force = false): Promise<void> {
-  if (panelRefreshing) return;
-  panelRefreshing = true;
+// Reads the files and the agents list, only while the pane is open (or `force`d, by a pane just opened); the promise is
+// the read in progress, so a caller asked during one waits for it. w8 M3, review Minor 1: a forced one asked meanwhile is
+// run once more after it (the read in progress may have looked before the pane opened); any other (the 10 s timer, a
+// turn's end) is covered by the read in progress, and repeating it would read without pause while reads are slow.
+let refreshRun: Promise<void> | null = null;
+let refreshAgain = false;
+function refreshPanel($: Engine, force = false): Promise<void> {
+  if (refreshRun) {
+    if (force) refreshAgain = true;
+    return refreshRun;
+  }
+  refreshRun = (async () => {
+    try {
+      let forced = force;
+      do {
+        refreshAgain = false;
+        await refreshPanelOnce($, forced);
+        forced = true;
+      } while (refreshAgain);
+    } finally {
+      refreshRun = null;
+    }
+  })();
+  return refreshRun;
+}
+
+async function refreshPanelOnce($: Engine, force: boolean): Promise<void> {
   try {
     notePane($, await isPaneOpen($));
     if (!paneUp) stopPanelTimer();
@@ -968,11 +1071,8 @@ async function refreshPanel($: Engine, force = false): Promise<void> {
       try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
     }
     panelFiles = await loadPanelFiles($, now);
-    const list = await agentList($);
-    activity.subagents = liveSubagents(now, list);
     // E-09: the agents list is the truth for what it lists; a workflow's agents live by their own turn.
-    if (list) links = syncListed(links, list, now, knownTasks(bandModel));
-    links = pruneLinks(links, now);
+    adoptListed(await agentList($), now);
     // The tools in flight of an agent that ended go with it.
     for (const id of [...agentTools.keys()]) if (!links.some(l => l.id === id && l.status !== 'done')) agentTools.delete(id);
     await refreshUsage($, true);
@@ -980,9 +1080,7 @@ async function refreshPanel($: Engine, force = false): Promise<void> {
     if (!paneUp) { keepBand($, await buildPanel($)); return; }
     // A refresh writes at once when the last write is a second old; else the throttle gathers it.
     await requestPanelWrite($);
-  } catch { /* ignore */ } finally {
-    panelRefreshing = false;
-  }
+  } catch { /* ignore */ }
 }
 
 const TEXT = {
@@ -1017,6 +1115,8 @@ const TEXT = {
     needCoordinator: 'te toca en la conversación de la coordinadora', needConversation: 'en la conversación que preguntó', needRoadmap: 'en el roadmap', needUnverified: 'no se pudo leer',
     needsN: (n: number) => `te toca ${n}`,
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
+    commandFailed: (why: string) => `lens no pudo responder a /lens: ${why}. Vuelve a probar; el motivo queda también en el log de depuración.`,
+    outOfTime: 'se quedó sin tiempo', failedPlain: 'falló',
     briefs: 'briefs', cycle: 'ciclo', task: 'Tarea', proposals: 'Propuestas',
     sUsage: 'Consumo', effort: 'esfuerzo', thisSession: 'esta sesión', active: 'activo', sinceStart: 'desde el inicio', taskTime: 'tarea', run: 'ejecución', gMain: 'Sesión principal', gImpl: 'Implementadores', gReview: 'Revisores', gVerify: 'Verificación', blocked: 'bloqueada', gPlan: 'Planificación y scout', gOther: 'Otros subagentes', tracking: 'Seguimiento', withoutForge: 'Sin forge (estimado)', withoutForgeNote: 'orientativo: en una sola sesión el contexto crecería y costaría más, y no habría revisión; el extremo bajo supone que todo el seguimiento se releía en cada paso', forgeCosts: (usd: string, pct: number) => `forge cuesta +${usd} (+${pct} %)`, forgeSaves: (usd: string) => `forge ahorra −${usd}`, pricesAsOf: 'precios a', drift: 'precios o medición incompletos', various: 'varios', noReview: 'sin revisiones independientes', effortLevel: (e: string) => ({ low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' } as Record<string, string>)[e] ?? e,
   },
@@ -1051,6 +1151,8 @@ const TEXT = {
     needCoordinator: "your turn in the coordinator's conversation", needConversation: 'in the conversation that asked', needRoadmap: 'on the roadmap', needUnverified: 'could not be read',
     needsN: (n: number) => `waiting for you ${n}`,
     pressEnter: 'Command ready in the prompt: press Enter',
+    commandFailed: (why: string) => `lens could not answer /lens: ${why}. Try it again; the reason is in the debug log too.`,
+    outOfTime: 'it ran out of time', failedPlain: 'it failed',
     briefs: 'briefs', cycle: 'cycle', task: 'Task', proposals: 'Proposals',
     sUsage: 'Usage', effort: 'effort', thisSession: 'this session', active: 'active', sinceStart: 'since start', taskTime: 'task', run: 'run', gMain: 'Main session', gImpl: 'Implementers', gReview: 'Reviewers', gVerify: 'Verification', blocked: 'blocked', gPlan: 'Planning and scout', gOther: 'Other subagents', tracking: 'Tracking', withoutForge: 'Without forge (estimate)', withoutForgeNote: 'rough: in one session the context would grow and cost more, with no review; the low end assumes all the tracking was re-read on every step', forgeCosts: (usd: string, pct: number) => `forge costs +${usd} (+${pct}%)`, forgeSaves: (usd: string) => `forge saves −${usd}`, pricesAsOf: 'prices as of', drift: 'prices or measurement incomplete', various: 'mixed', noReview: 'no independent review', effortLevel: (e: string) => e,
   },
@@ -1062,37 +1164,46 @@ const lensTexts = (): Texts => textsFor(roadmap.locale);
 
 // Opens the pane at the person's request (F-01): inline it asks for the rows its compact cards take (between 6 and a
 // third of the screen), docked for 56 columns; both are requests the engine may not grant. Where it is not placed, a
-// toast says why.
-async function openPanel($: Engine): Promise<boolean> {
-  // Carry 5 (Task 7 minor 3): with no model yet (the pane closed and nothing going on) the files are read before the
-  // pane is asked for, so its rows are the cards' and not the minimum; that is the read the open pane makes, done once.
-  const fresh = bandModel === null;
-  if (fresh) await refreshPanel($, true);
-  const t = lensTexts();
-  let placed = false;
+// toast says why. w8 M3: the pane is asked for first and the command answers at once; the files are read after, so a
+// slow or failing read never leaves /lens unanswered. With no model yet (the pane closed and nothing going on) the rows
+// are those of the cards lens holds in memory; once the read is in, a pane still inline is asked for again with its
+// cards' rows (carry 5, review Minor 5). An open that fails fails the command's hook, whose .catch says why. `inline`:
+// whether the pane would sit inline as the command saw the screen (no dock outside fullscreen or under 110 columns).
+async function openPanel($: Engine, inline: boolean): Promise<boolean> {
+  const first = bandModel === null;
+  let model: PanelModel | null = bandModel;
+  try { model ??= await buildPanel($); } catch { model = null; }
+  const rows = panelRowsFor(model);
+  const opened = await $.ui.open({ id: PANE, title: 'lens', rows, columns: DOCK_COLUMNS });
+  if (!opened.isPlaced) {
+    try { $.ui.toast(`${lensTexts().panelWaiting}: ${clip(opened.reason, 200)}`); } catch { /* the answer says it */ }
+  }
+  // The open pane is filled by this read, and gets its timer.
+  const read = refreshPanel($, true);
+  if (first) void read.then(() => askRowsAgain($, rows, inline));
+  return opened.isPlaced;
+}
+
+// The rows an inline pane asks for: those its compact cards take at the terminal's width, between 6 and a third of it.
+function panelRowsFor(model: PanelModel | null): number {
+  const view = viewOf('terminal');
+  let estimate = 0;
   try {
-    // The terminal is where the pane may be seated inline: its view sizes the request.
-    const view = viewOf('terminal');
     const compact = panelLayout({ bodyColumns: view.columns ?? LINE_MAX, placement: 'inline' });
-    let estimate = 0;
-    try { if (bandModel) estimate = buildCards(bandModel, t, 0).reduce((n, card) => n + cardRows(card, compact), 0); } catch { estimate = 0; }
-    const opened = await $.ui.open({ id: PANE, title: 'lens', rows: paneRows(estimate, view.rows), columns: DOCK_COLUMNS });
-    placed = opened.isPlaced;
-    if (!opened.isPlaced) $.ui.toast(`${t.panelWaiting}: ${clip(opened.reason, 200)}`);
-  } catch {
-    return false;
-  }
-  if (!fresh) {
-    await refreshPanel($);
-    return placed;
-  }
-  // Just read: the open pane gets what was read, and its timer.
-  notePane($, await isPaneOpen($));
-  if (paneUp) {
-    startPanelTimer($);
-    await requestPanelWrite($);
-  }
-  return placed;
+    if (model) estimate = buildCards(model, textsFor(model.locale), 0).reduce((n, card) => n + cardRows(card, compact), 0);
+  } catch { estimate = 0; }
+  return paneRows(estimate, view.rows);
+}
+
+// Review Minor 5: after the first read, an open pane drawn inline (or, before any drawing, one the command saw would
+// sit inline) asks for its cards' rows when they are more than it asked for. The dock ignores rows, so it is not asked.
+async function askRowsAgain($: Engine, asked: number, inline: boolean): Promise<void> {
+  try {
+    if (!bandModel || !(panePlacement === 'inline' || (panePlacement === null && inline))) return;
+    if (!(await isPaneOpen($))) return;
+    const rows = panelRowsFor(bandModel);
+    if (rows > asked) await $.ui.open({ id: PANE, title: 'lens', rows, columns: DOCK_COLUMNS });
+  } catch { /* the pane keeps its rows */ }
 }
 
 // Step 3 of §4.6: the photos `/lens` took, by number, at most PHOTOS_MAX: the cards as they were, never moving.
@@ -1103,22 +1214,32 @@ let photoCount = 0;
 
 // Step 3 of §4.6: the files read once, the model and its cards built and kept under a new number; the command answers
 // one line, so a model that reads command output pays for one line only. Nothing is written to $.state.
-async function takePhoto($: Engine): Promise<string> {
-  const now = await nowMs($);
+// Review Minor 3: how long /lens foto waits for its read; past it the photo is taken from what lens holds, and the read
+// goes on for the next look.
+const PHOTO_READ_MS = 5_000;
+
+// What a photo reads: the band, the files and, carry 7, the agents list (with the pane closed nothing asked it, so a
+// subagent that ended would be drawn as running). It never throws.
+async function readForPhoto($: Engine, now: number): Promise<void> {
   if (sessionId === null) {
     try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
   }
   try { roadmap = await loadBandModel($); bandRead = true; } catch { /* keep the last one */ }
   keepRunBaseline();
   try { panelFiles = await loadPanelFiles($, now); } catch { /* the files read last */ }
-  // Carry 7: with the pane closed nothing asked the agents list; the photo asks it once, as a refresh does, so a subagent
-  // that ended is not drawn as running.
-  try {
-    const list = await agentList($);
-    activity.subagents = liveSubagents(now, list);
-    if (list) links = syncListed(links, list, now, knownTasks(bandModel));
-    links = pruneLinks(links, now);
-  } catch { /* the agents heard of */ }
+  try { adoptListed(await agentList($), now); } catch { /* the agents heard of */ }
+}
+
+// Waits for `work` up to `ms` on the engine's clock; whatever it has not done by then it goes on doing unwaited.
+async function within($: Engine, work: Promise<void>, ms: number): Promise<void> {
+  const wait: { timer: Timer | null } = { timer: null };
+  const expiry = new Promise<void>(resolve => { wait.timer = $.clock.after(ms, () => resolve()); });
+  try { await Promise.race([work.catch(() => undefined), expiry]); } finally { wait.timer?.cancel(); }
+}
+
+async function takePhoto($: Engine): Promise<string> {
+  const now = await nowMs($);
+  await within($, readForPhoto($, now), PHOTO_READ_MS);
   const model = await buildPanel($);
   keepBand($, model);
   const t = textsFor(model.locale);
@@ -1282,26 +1403,25 @@ export const register: Register = on => {
     return next(e);
   });
 
-  // E-08: after a compaction the tracking gathered so far is no longer in context: it is not re-read from then on. Only
-  // a real compaction of the main conversation counts: a subagent's transcript holds no tracking, a skip compacts
-  // nothing, and a precompute installs nothing (R6).
-  on('session.compact', async ($, e, next) => {
-    const r = await next(e);
-    try {
-      const skipped = !!r && typeof (r as { skip?: unknown }).skip === 'string';
-      if (!e.agentId && e.trigger !== 'precompute' && !skipped) compactUsage(usage);
-    } catch { /* ignore */ }
-    return r;
-  }).catch(($, e, next) => next(e));
+  // E-08: after a compaction the tracking gathered so far is no longer in context: it is not re-read from then on. w8 M1:
+  // no session.compact hook tells it (cc-plugin-sec-default passes that event over where it is seated); the first main
+  // request after it, carrying fewer messages than the one before, does (turn.step's messageCount; recordStep, usage.ts).
 
   // Steps 2 and 3 of §4.6: /lens opens the pane where it docks (fullscreen, 110 columns or more); elsewhere it leaves a
   // photo in the transcript, which keeps the live region small (F-15). /lens live (or pane) opens the pane anyway;
   // /lens foto (or photo) always takes the photo.
+  // w8 M3: a hook that throws or outruns its budget is skipped, and then the engine runs /lens as registered, which has
+  // no body («no command.run hook answered it»): the .catch answers instead, with the reason, and logs it for debugging.
   on('command.run', { command: 'lens' }, async ($, e) => {
     const t = lensTexts();
     if (lensMode(e.args, e.presentation) === 'photo') return { text: await takePhoto($) };
-    const placed = await openPanel($);
+    const placed = await openPanel($, lensMode('', e.presentation) === 'photo');
     return { text: placed ? t.panelOpened : `${t.panelWaiting}.` };
+  }).catch(($, _e, next) => {
+    const t = lensTexts();
+    const why = failureText(t, next.error);
+    try { $.ui.log(`/lens failed (${String(next.error?.kind ?? 'throw')}): ${String(next.error?.message ?? '')}`, { to: 'debug' }); } catch { /* the answer says it */ }
+    return { text: t.commandFailed(why) };
   });
 
   // Step 3 of §4.6: the row of a photo /lens took, drawn from module memory, still and compact: its line and its cards.
@@ -1333,7 +1453,7 @@ export const register: Register = on => {
     }
   });
 
-  // I-11: every hook that gates (ui.close, agent.spawn, tool.call and the classic ones) goes on when it fails.
+  // I-11: every hook that gates (ui.close, agent.spawn, tool.call) goes on when it fails.
   on('ui.close', async ($, e, next) => {
     const closed = await next(e);
     if (e.id === PANE) {
@@ -1360,13 +1480,17 @@ export const register: Register = on => {
       syncTurn();
       void refreshPanel($);
     } else {
-      // E-09: a workflow's agent, which no agents list names, ends with its own turn; one not linked yet (its spawn not
-      // answered) is ended when it is.
+      // w8 M1: an agent's run is one turn, so its end ends it (a workflow's, which no agents list names, too, E-09); a
+      // teammate goes idle instead. One not linked yet (its spawn not answered) is ended when it is.
       try {
         const id = e.agentId;
         const now = await nowMs($);
-        if (links.some(l => l.id === id)) links = endAgent(links, id, now);
-        else {
+        void touch($);
+        if (teammates.has(id)) { /* idle: the agents list says so */ }
+        else if (links.some(l => l.id === id) || activity.subagents.some(s => s.id === id)) {
+          endSubagent(id, now);
+          void noteActivity($);
+        } else {
           for (const [k, at] of pendingEnds) if (now - at > PENDING_END_MS) pendingEnds.delete(k);
           pendingEnds.delete(id);
           pendingEnds.set(id, now);
@@ -1384,7 +1508,7 @@ export const register: Register = on => {
     const r = yield* next(e);
     void touch($);
     try {
-      recordStep(usage, { agentId: e.agentId, model: e.model, effort: e.effort, usage: r?.usage ?? null });
+      recordStep(usage, { agentId: e.agentId, model: e.model, effort: e.effort, messageCount: e.messageCount, usage: r?.usage ?? null });
       void requestPanelWrite($);
     } catch { /* ignore */ }
     return r;
@@ -1392,7 +1516,8 @@ export const register: Register = on => {
 
   // A subagent's loop gets its type and description when it is spawned, and lens keeps which task it works on (E-02):
   // the task its prompt names, else its parent's; a workflow's agents too, which no agents list names (E-09). It only
-  // observes: the spawn goes on whatever lens makes of it.
+  // observes: the spawn goes on whatever lens makes of it. w8 M1: the spawn is where a subagent starts (a workflow's
+  // agents show under their workflow, not among the subagents, which the agents list keeps).
   on('agent.spawn', async ($, e, next) => {
     const r = await next(e);
     try {
@@ -1400,11 +1525,14 @@ export const register: Register = on => {
         labelLoop(usage, r.agentId, String(e.subagentType ?? 'unknown'), e.description);
         const wf = e.workflow;
         const now = await nowMs($);
+        void touch($);
+        if (e.isTeammate === true || r.teammateId) noteTeammate(r.agentId);
+        if (!wf) startSubagent(r.agentId, String(e.subagentType ?? ''), typeof e.description === 'string' ? e.description : '', now);
         links = linkSpawn(links, {
           id: r.agentId, type: String(e.subagentType ?? ''), description: String(e.description ?? ''), prompt: typeof e.prompt === 'string' ? e.prompt : '',
           parentId: typeof e.parentAgentId === 'string' ? e.parentAgentId : null,
           workflow: wf && typeof wf.runId === 'string' ? { runId: wf.runId, index: Number(wf.agentIndex) || 0 } : null,
-          now,
+          now, resume: !!e.resume,
         }, knownTasks(bandModel));
         applyPendingEnd(r.agentId, now);
         void noteActivity($);
@@ -1467,6 +1595,11 @@ export const register: Register = on => {
               void noteActivity($);
             }
           }
+          // w8 M1: a TaskCreate or TaskUpdate of any loop that ran moves the Claude Code tasks card.
+          if (answer.isError !== true) {
+            const cc = taskCall(activity.ccTasks, String(e.tool), input, (answer as { result?: unknown }).result);
+            if (cc) { activity.ccTasks = cc; void requestPanelWrite($); }
+          }
           // E-11: the engine clamps the delay to 60-3600 s; stop, or a wake-up that failed, leaves none.
           if (mine && e.tool === 'ScheduleWakeup') {
             const delay = typeof input.delaySeconds === 'number' && Number.isFinite(input.delaySeconds) ? input.delaySeconds : null;
@@ -1505,63 +1638,6 @@ export const register: Register = on => {
     }
   }).catch(($, e, next) => next(e));
 
-  on('classic.SubagentStart', async ($, e, next) => {
-    try {
-      const id = String(e.agent_id);
-      finished = finished.filter(f => f.id !== id);
-      activity.subagents = pushCapped(activity.subagents.filter(s => s.id !== id), { id, type: clip(String(e.agent_type ?? ''), LINE_MAX), since: await nowMs($) });
-      // A loop agent.spawn did not label (lens loaded later, another spawn path) takes the hook's type.
-      const kind = usage.loops[id]?.kind;
-      if (!kind || kind === 'unknown') labelLoop(usage, id, String(e.agent_type ?? 'unknown'));
-      // E-09: an agent agent.spawn did not see (lens loaded later) is kept too, without a prompt to read its task from.
-      if (!links.some(l => l.id === id)) {
-        const now = await nowMs($);
-        links = linkSpawn(links, { id, type: String(e.agent_type ?? ''), description: '', prompt: '', parentId: null, workflow: null, now }, knownTasks(bandModel));
-        applyPendingEnd(id, now);
-      }
-      await touch($);
-      await noteActivity($);
-      void requestPanelWrite($);
-    } catch { /* ignore */ }
-    return next(e);
-  }).catch(($, e, next) => next(e));
-
-  on('classic.SubagentStop', async ($, e, next) => {
-    try {
-      void touch($);
-      const id = String(e.agent_id);
-      const ran = activity.subagents.find(s => s.id === id);
-      activity.subagents = activity.subagents.filter(s => s.id !== e.agent_id);
-      links = endAgent(links, id, await nowMs($), { any: true });
-      // Only a subagent still known here is listed (no start, no duration); one a refresh already dropped was recorded then.
-      if (ran) recordFinished(ran, await nowMs($));
-      void noteActivity($);
-      void requestPanelWrite($);
-    } catch { /* ignore */ }
-    return next(e);
-  }).catch(($, e, next) => next(e));
-
-  on('classic.TaskCreated', ($, e, next) => {
-    try {
-      const id = String(e.task_id);
-      activity.ccTasks = pushCapped(activity.ccTasks.filter(c => c.id !== id), { id, subject: String(e.task_subject ?? ''), done: false });
-      void requestPanelWrite($);
-    } catch { /* ignore */ }
-    return next(e);
-  }).catch(($, e, next) => next(e));
-
-  on('classic.TaskCompleted', ($, e, next) => {
-    try {
-      const id = String(e.task_id);
-      const known = activity.ccTasks.some(c => c.id === id);
-      activity.ccTasks = known
-        ? activity.ccTasks.map(c => (c.id === id ? { ...c, done: true } : c))
-        : pushCapped(activity.ccTasks, { id, subject: String(e.task_subject ?? ''), done: true });
-      void requestPanelWrite($);
-    } catch { /* ignore */ }
-    return next(e);
-  }).catch(($, e, next) => next(e));
-
   // The pane, as the engine seats it (F-01, F-08): docked from 56 columns in fullscreen, its cards framed; inline,
   // narrow or outside fullscreen, without a frame (F-07) and, inline, only what fits in its rows, «↓ N more» last. The
   // engine's own close mark (or ctrl+x x) closes it: ui.close, above, stops the writes. The agent the person looks at
@@ -1569,6 +1645,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     try {
       noteRender($, e.surface, e.viewport, { docked: e.props.placement === 'dock' });
+      if (e.surface === 'terminal') panePlacement = e.props.placement === 'dock' ? 'dock' : 'inline';
       updateStatus($, bandModel);
       const layout = panelLayout(e.props, e.viewport);
       if (layout.focusAgent !== focusAgent) {

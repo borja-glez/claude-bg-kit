@@ -70,6 +70,45 @@ export function parseSddLedger(text: string): LedgerSummary {
   return out;
 }
 
+// w8 M4: a path as spelled for comparing: forward slashes, an msys drive (`/e/…`) as its letter (`e:/…`), no trailing
+// slash; `key` is what is compared, without case when there is a drive (as Windows compares).
+function spelled(path: string): { text: string; key: string } {
+  let p = path.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+  const msys = /^\/([A-Za-z])(\/|$)/.exec(p);
+  if (msys) p = `${msys[1]}:/${p.slice(msys[0].length)}`;
+  if (p.length > 1) p = p.replace(/\/+$/, '');
+  return { text: p, key: /^[A-Za-z]:/.test(p) ? p.toLowerCase() : p };
+}
+const insideRel = (rel: string): boolean => rel !== '' && !rel.split('/').includes('..');
+
+/**
+ * w8 M4: the file a superpowers ledger's plan path names (its header's, or its plan-path file's), or null. A relative
+ * `.md` path is read under the first of `bases` (the session root); an absolute one (`X:/…`, `X:\…`, msys `/x/…`) only
+ * when it lies inside one of `bases` (the root, and its main checkout from a worktree), and is read there. A path that
+ * climbs out with `..`, or is no `.md`, is none; a header's text after the path (`… design.md §M`) is not part of it.
+ */
+export function planFileOf(path: string, bases: readonly string[]): string | null {
+  if (typeof path !== 'string' || !bases.length) return null;
+  const m = /^(.*?\.md)(?:\s+\S.*)?$/i.exec(path.trim());
+  if (!m) return null;
+  const p = m[1].replace(/\\/g, '/');
+  if (!p.startsWith('/') && !/^[A-Za-z]:/.test(p)) {
+    const rel = p.replace(/^(\.\/)+/, '');
+    return insideRel(rel) ? join(bases[0], rel) : null;
+  }
+  const abs = spelled(p);
+  if (abs.key.length !== abs.text.length) return null;
+  for (const base of bases) {
+    const b = spelled(base);
+    if (!abs.key.startsWith(`${b.key}/`)) continue;
+    const tail = abs.text.slice(b.key.length + 1);
+    return insideRel(tail) ? join(base.replace(/[\\/]+$/, ''), tail) : null;
+  }
+  return null;
+}
+
+const join = (...parts: string[]) => parts.join('/');
+
 export interface PlanTask { n: number; title: string; steps: number; checked: number }
 
 export function parsePlanTasks(md: string): PlanTask[] {
@@ -145,7 +184,8 @@ export type PanelModel = {
     run?: boolean;
   } | null;
   superpowers: {
-    plan: string; tasks: number; done: number; current: { task: string; round: number; cap?: number | null } | null; lastLines: string[];
+    // tasks: the plan's task count; null when no plan could be read, and then only the tasks done are known (w8).
+    plan: string; tasks: number | null; done: number; current: { task: string; round: number; cap?: number | null } | null; lastLines: string[];
     // stale: not finished and unchanged for over a day.
     stale?: boolean;
   } | null;
@@ -235,27 +275,31 @@ export function usageTime(session: UsageState, run: UsageState | null, turnSince
 const STALE_LEDGER_MS = 24 * 3600_000;
 
 function superpowers(input: {
-  ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number; now: number;
+  ledger?: string; ledgerPlan?: string; ledgerPlanPath?: string; planFallback?: string; ledgerMtimeMs?: number; now: number;
 }): PanelModel['superpowers'] {
   try {
     if (input.ledger !== undefined) {
       const l = parseSddLedger(input.ledger);
       const plan = input.ledgerPlan !== undefined ? parsePlanTasks(input.ledgerPlan) : [];
-      let tasks: number;
+      let tasks: number | null;
       let done: number;
       if (plan.length) {
         const nums = new Set(plan.map(p => p.n));
         tasks = plan.length;
         done = l.done.filter(n => nums.has(n)).length;
       } else {
-        tasks = Math.max(0, ...l.done, ...(l.current ? [parseInt(l.current.task.split('-').pop() ?? '0', 10) || 0] : []));
+        // w8 M4: without a plan read there is no total: the highest task done is none (it read as a false 100 %).
+        tasks = null;
         done = l.done.length;
       }
-      // A finished run whose ledger has not changed for a day is history, not progress.
+      // A finished run whose ledger has not changed for a day is history, not progress; so is one with no total and no
+      // fix round open, which cannot say it is unfinished.
       const stale = input.ledgerMtimeMs !== undefined && input.now - input.ledgerMtimeMs > STALE_LEDGER_MS;
-      if (stale && !l.current && done === tasks) return null;
-      // E-14: a run left half done, unchanged for a day, is still drawn, dim and out of the band's headline.
-      return { plan: clip(l.planPath ?? ''), tasks, done, current: l.current, lastLines: l.lastLines, ...(stale ? { stale: true } : {}) };
+      if (stale && !l.current && (tasks === null || done === tasks)) return null;
+      // E-14: a run left half done, unchanged for a day, is still drawn, dim and out of the band's headline. The plan
+      // read names it as the root sees it (w8 M4), else the ledger's header.
+      const title = plan.length && input.ledgerPlanPath ? input.ledgerPlanPath : l.planPath ?? '';
+      return { plan: clip(title), tasks, done, current: l.current, lastLines: l.lastLines, ...(stale ? { stale: true } : {}) };
     }
     if (input.planFallback !== undefined) {
       const plan = parsePlanTasks(input.planFallback);
@@ -514,7 +558,7 @@ export function bandKey(model: PanelModel): string {
 }
 
 export function buildPanelModel(input: {
-  band: BandModel; ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
+  band: BandModel; ledger?: string; ledgerPlan?: string; ledgerPlanPath?: string; planFallback?: string; ledgerMtimeMs?: number;
   forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number; forgeDecisions?: string;
   forgeExecution?: string; forgeExecTasks?: Record<string, string>; forgeLive?: Record<string, string>;
   // C5: the texts of .forge/status/*.json (forgeStatus, the alias, stands in for them only without the folder), the

@@ -55,7 +55,6 @@ function start(on: On, agents: { list: unknown[] } = { list: [] }, ids: string[]
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('session.id', () => ({ value: SESSION }));
   on('agent.list', () => ({ value: agents.list as never }));
-  on('classic.SubagentStart', () => ({}));
   let n = 0;
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: ids[n++] ?? `x${n}` }));
   on('turn.complete', () => ({ text: '' }));
@@ -173,6 +172,8 @@ test('a task this session touched with forge.cjs is its own although its status 
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
+  // w8 M3: /lens answers before the files are read; the read settles right after.
+  await clock.advance(0);
   expect(panel.last?.activities).toEqual([]);
   await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T009-1 --path medium', tool_use_id: 'b1' } as never);
   await clock.advance(10_000);
@@ -216,6 +217,7 @@ test('forge.cjs --task T001-1 makes the T001 row own when its status names no se
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(panel.last?.activities).toMatchObject([{ key: 'T001', owner: 'other' }]);
   await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T001-1 --path medium', tool_use_id: 'b1' } as never);
   await clock.advance(10_000);
@@ -233,6 +235,7 @@ test('with the session id unreadable, a task this session touched stays own and 
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
+  await clock.advance(0);
   // Before any forge.cjs call the status that names another session is another's, dim: ownTasks makes the difference.
   expect(panel.last?.activities).toMatchObject([{ key: 'T005', owner: 'other', dim: true }]);
   await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T005 --path medium', tool_use_id: 'b1' } as never);
@@ -309,22 +312,107 @@ test('/clear forgets the agents, the tasks touched with forge.cjs and the wake-u
   expect(panel.last).toMatchObject({ waiting: null, activities: [{ key: 'T009', owner: 'other' }] });
 });
 
-test('SubagentStart shows a subagent lens did not see spawn, and SubagentStop ends it and keeps it as finished', async ($, on) => {
+const turnEnd = (agentId: string) => ({ turnId: `t-${agentId}`, agentId, answer: '', durationMs: 1, isAborted: false, reason: 'answer' }) as never;
+
+test('a subagent shows from its spawn and its own turn.complete ends it, kept as finished: no classic hook (w8 M1)', async ($, on) => {
+  serveFiles(on, {});
+  servePanes(on);
+  const panel = panelWrites(on);
+  const clock = start(on, { list: [] }, ['a9']);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.agent.spawn(spawnArgs('Look around', { subagentType: 'Explore', description: 'look around' }));
+  // Before any refresh reads the agents list (which has not named it yet).
+  await clock.advance(1_000);
+  expect(panel.last?.subagents).toMatchObject([{ id: 'a9', type: 'Explore', description: 'look around' }]);
+  expect(panel.last?.activities).toMatchObject([{ kind: 'adhoc', agents: [{ id: 'a9' }] }]);
+  await clock.advance(1_000);
+  await $.turn.complete(turnEnd('a9'));
+  await clock.advance(1_000);
+  expect(panel.last?.subagents).toEqual([]);
+  expect(panel.last?.subagentsDone).toMatchObject([{ id: 'a9', type: 'Explore', description: 'look around' }]);
+  expect(panel.last?.activities).toEqual([]);
+});
+
+test("a teammate's turn.complete leaves it waiting, not finished (w8 M1)", async ($, on) => {
+  serveFiles(on, {});
+  servePanes(on);
+  const panel = panelWrites(on);
+  const agents = { list: [] as unknown[] };
+  const clock = start(on, agents, ['tm']);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.agent.spawn(spawnArgs('Help out', { subagentType: 'teammate', description: 'Helper mate', isTeammate: true }));
+  await $.turn.complete(turnEnd('tm'));
+  await clock.advance(1_000);
+  expect(panel.last?.subagents).toMatchObject([{ id: 'tm' }]);
+  expect(panel.last?.subagentsDone).toEqual([]);
+  agents.list = [{ id: 'tm', type: 'teammate', description: 'Helper mate', status: 'idle', teammateId: 'helper@team' }];
+  await clock.advance(10_000);
+  expect(panel.last?.subagents).toMatchObject([{ id: 'tm', status: 'idle' }]);
+  expect(panel.last?.activities).toMatchObject([{ kind: 'adhoc', agents: [{ id: 'tm', status: 'waiting' }] }]);
+});
+
+test('an agents list still saying running just after the turn.complete does not bring the subagent back nor restart its time (review Minor 4)', async ($, on) => {
+  serveFiles(on, {});
+  servePanes(on);
+  const panel = panelWrites(on);
+  const agents = { list: [] as unknown[] };
+  const clock = start(on, agents, ['a1']);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.agent.spawn(spawnArgs('Look around', { subagentType: 'Explore', description: 'look' }));
+  agents.list = [{ id: 'a1', type: 'Explore', description: 'look', status: 'running' }];
+  await clock.advance(10_000);
+  expect(panel.last?.subagents).toMatchObject([{ id: 'a1', status: 'running' }]);
+  await clock.advance(1_000);
+  await $.turn.complete(turnEnd('a1'));
+  // The list has not caught up yet when the next refresh reads it, 9 s after the end.
+  await clock.advance(9_000);
+  expect(panel.last?.subagents).toEqual([]);
+  expect(panel.last?.subagentsDone).toMatchObject([{ id: 'a1', seconds: 11 }]);
+  expect(panel.last?.subagentsDone).toHaveLength(1);
+  expect(panel.last?.activities).toEqual([]);
+});
+
+test('a subagent resumed by a message shows again at once, in the task it worked on, though the message names none (review Minor 4)', async ($, on) => {
+  serveFiles(on, THREE);
+  servePanes(on);
+  const panel = panelWrites(on);
+  const agents = { list: [] as unknown[] };
+  // A resume settles with the id it continues.
+  const clock = start(on, agents, ['a1', 'a1']);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.agent.spawn(spawnArgs('forge-task: T001-1 @shop\nImplement T001.', { description: 'implement T001' }));
+  agents.list = [{ id: 'a1', type: 'forge:forge-impl', description: 'implement T001', status: 'running' }];
+  await clock.advance(10_000);
+  const agentsOf = (task: string) => panel.last?.activities.find((a: { task: string }) => a.task === task)?.agents.map((g: { id: string }) => g.id);
+  expect(agentsOf('T001')).toEqual(['a1']);
+  await $.turn.complete(turnEnd('a1'));
+  await clock.advance(1_000);
+  expect(agentsOf('T001')).toEqual([]);
+  // SendMessage wakes it: a spawn with resume, its prompt the message; the list says running within the grace.
+  await $.agent.spawn(spawnArgs('Please also fix the lint.', { description: 'follow-up', resume: { agentId: 'a1' } }));
+  await clock.advance(9_000);
+  expect(agentsOf('T001')).toEqual(['a1']);
+  expect(panel.last?.subagents).toMatchObject([{ id: 'a1' }]);
+  expect(panel.last?.subagentsDone).toEqual([]);
+});
+
+test('a subagent lens did not see spawn shows from the agents list, and is finished once the list says it completed (w8 M1)', async ($, on) => {
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
   const agents = { list: [] as unknown[] };
   const clock = start(on, agents);
-  on('classic.SubagentStop', () => ({}));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
-  await $.classic.SubagentStart({ agent_id: 'a9', agent_type: 'Explore' });
-  agents.list = [{ id: 'a9', type: 'Explore', description: '', status: 'running' }];
+  agents.list = [{ id: 'a9', type: 'Explore', description: 'scan', status: 'running' }];
   await clock.advance(10_000);
   expect(panel.last?.subagents).toMatchObject([{ id: 'a9', type: 'Explore' }]);
   expect(panel.last?.activities).toMatchObject([{ kind: 'adhoc', agents: [{ id: 'a9' }] }]);
-  await $.classic.SubagentStop({ agent_id: 'a9', agent_type: 'Explore' } as never);
-  agents.list = [];
+  agents.list = [{ id: 'a9', type: 'Explore', description: 'scan', status: 'completed' }];
   await clock.advance(10_000);
   expect(panel.last?.subagents).toEqual([]);
   expect(panel.last?.subagentsDone).toMatchObject([{ id: 'a9', type: 'Explore' }]);

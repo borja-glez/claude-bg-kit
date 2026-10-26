@@ -357,16 +357,25 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
 
   if (m.superpowers) {
     const s = m.superpowers;
-    const c = superpowersCells(s);
-    const n = s.current ? s.current.task : String(s.done < s.tasks ? s.done + 1 : s.done);
-    const blocks: Block[] = [
-      { kind: 'bar', ratio: ratio(c.done, c.total), hue: SECTION_HUE.superpowers, moving: s.done < s.tasks, label: `${t.task} ${n}/${s.tasks}`, right: `${s.done} ${t.done}` },
-      { kind: 'cells', cells: c.cells },
-    ];
+    const blocks: Block[] = [];
+    let chip: string;
+    if (s.tasks === null) {
+      // w8 M4: no plan to count against: the tasks done, and the one in a fix round; no bar, no total, no percentage.
+      chip = `${s.done} ${t.done}`;
+      if (s.current) blocks.push({ kind: 'row', dot: SECTION_HUE.superpowers, spinning: !s.stale, text: `${t.task} ${s.current.task}`, right: chip });
+    } else {
+      const c = superpowersCells(s);
+      const n = s.current ? s.current.task : String(s.done < s.tasks ? s.done + 1 : s.done);
+      blocks.push(
+        { kind: 'bar', ratio: ratio(c.done, c.total), hue: SECTION_HUE.superpowers, moving: s.done < s.tasks, label: `${t.task} ${n}/${s.tasks}`, right: `${s.done} ${t.done}` },
+        { kind: 'cells', cells: c.cells },
+      );
+      chip = `${Math.round(ratio(s.done, s.tasks) * 100)}%`;
+    }
     if (s.current) blocks.push({ kind: 'chips', chips: [{ text: `${t.fixRound} ${s.current.round}${s.current.cap ? `/${s.current.cap}` : ''}`, hue: 'yellow' }] });
     if (s.stale) blocks.push({ kind: 'text', text: t.staleLedger, dim: true });
     for (const line of s.lastLines) blocks.push({ kind: 'text', text: line, dim: true });
-    out.push({ id: 'superpowers', icon: SECTION_ICON.superpowers, title: s.plan || t.sSuperpowers, hue: SECTION_HUE.superpowers, chip: { text: `${Math.round(ratio(s.done, s.tasks) * 100)}%`, hue: SECTION_HUE.superpowers }, blocks });
+    out.push({ id: 'superpowers', icon: SECTION_ICON.superpowers, title: s.plan || t.sSuperpowers, hue: SECTION_HUE.superpowers, chip: { text: chip, hue: SECTION_HUE.superpowers }, blocks });
   }
 
   if (m.todos) {

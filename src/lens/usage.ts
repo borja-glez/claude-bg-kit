@@ -13,6 +13,10 @@ export interface UsageState {
   tracking: { waypoint: number; forge: number; reread: number };
   /** E-08: the tracking already gathered when the session was last compacted: it is not re-read after it. */
   rereadBase: number;
+  /** w8 M1: the context the main loop's last measured request was answered over, in tokens (memory only). */
+  mainContext?: number;
+  /** Review Minor 2: how many messages the main loop's last request carried (memory only). */
+  mainMessages?: number;
   /** Milliseconds of closed main-agent turns. */
   activeMs: number;
   /** Set by mergeForRun when some session's file had no activeMs (written before it existed). */
@@ -74,16 +78,40 @@ function loopOf(s: UsageState, id: string): UsageLoop {
   return fresh;
 }
 
-export function recordStep(s: UsageState, step: { agentId?: string; model: string; effort?: string | number; usage: StepUsage | null }): void {
+/**
+ * w8 M1, review Minor 2: lens has no session.compact hook (cc-plugin-sec-default passes that event over where it is
+ * seated). Within a conversation the messages a main-loop request carries only grow; a request that carries fewer than
+ * the one before it comes after a compaction (or a rewind: either way what was gathered before has left the context).
+ * turn.step always says how many (`messageCount`); only without it, a request answered over less than half the context of
+ * the one before, and over at least COMPACT_MIN_DROP fewer tokens, is taken as one.
+ */
+export const COMPACT_FALL = 0.5;
+export const COMPACT_MIN_DROP = 10_000;
+
+export function recordStep(s: UsageState, step: { agentId?: string; model: string; effort?: string | number; messageCount?: number; usage: StepUsage | null }): void {
   const loop = loopOf(s, step.agentId || MAIN);
   const model = (typeof step.usage?.model === 'string' && step.usage.model) || step.model;
   loop.model = model;
   loop.effort = effortText(step.effort);
   loop.steps += 1;
-  // E-08: each step of the main loop re-reads, as cached context, the tracking gathered since the last compaction.
-  if ((step.agentId || MAIN) === MAIN) s.tracking.reread += Math.max(0, s.tracking.waypoint + s.tracking.forge - s.rereadBase);
-  if (!step.usage) return;
-  const t = { input: n(step.usage.input_tokens), output: n(step.usage.output_tokens), cacheRead: n(step.usage.cache_read_input_tokens), cacheWrite: n(step.usage.cache_creation_input_tokens) };
+  const t = step.usage
+    ? { input: n(step.usage.input_tokens), output: n(step.usage.output_tokens), cacheRead: n(step.usage.cache_read_input_tokens), cacheWrite: n(step.usage.cache_creation_input_tokens) }
+    : null;
+  if ((step.agentId || MAIN) === MAIN) {
+    const messages = typeof step.messageCount === 'number' && Number.isFinite(step.messageCount) && step.messageCount > 0 ? step.messageCount : null;
+    const context = t ? t.input + t.cacheRead + t.cacheWrite : 0;
+    if (messages !== null) {
+      if (s.mainMessages !== undefined && messages < s.mainMessages) compactUsage(s);
+      s.mainMessages = messages;
+    } else if (context > 0) {
+      const was = s.mainContext;
+      if (was !== undefined && context < was * COMPACT_FALL && was - context >= COMPACT_MIN_DROP) compactUsage(s);
+    }
+    if (context > 0) s.mainContext = context;
+    // E-08: each step of the main loop re-reads, as cached context, the tracking gathered since the last compaction.
+    s.tracking.reread += Math.max(0, s.tracking.waypoint + s.tracking.forge - s.rereadBase);
+  }
+  if (!step.usage || !t) return;
   loop.input += t.input;
   loop.output += t.output;
   loop.cacheRead += t.cacheRead;

@@ -205,6 +205,61 @@ function startTimer($: Engine): void {
   timer = $.clock.every(30000, () => { void tick($); });
 }
 
+// w8 M1, K5-07: the conversation the band is drawn for, by $.session.id(), and the one a /clear or a resume just ended.
+// The conversation that follows (after /clear, a resume or a fork) starts with no session.start, and the classic
+// SessionStart that said so is passed over by cc-plugin-sec-default where it is seated: the band notices the new id
+// itself, asking it after such an end (the ending chain still answers the old one) and at every main turn's start.
+let conversation: string | null = null;
+let endedConversation: string | null = null;
+let switchWatch: Timer | null = null;
+const SWITCH_POLL_MS = 250;
+const SWITCH_POLLS_MAX = 40;
+
+async function conversationId($: Engine): Promise<string | null> {
+  try {
+    const id = await $.session.id();
+    return typeof id === 'string' && id ? id : null;
+  } catch { return null; }
+}
+
+// Another conversation: its own role at once, its band shown again if × hid the one before, and the timer back if an
+// earlier end stopped it.
+async function newConversation($: Engine, id: string): Promise<void> {
+  conversation = id;
+  endedConversation = null;
+  switchWatch?.cancel();
+  switchWatch = null;
+  try { await update($, hidden, () => false); } catch { /* ignore */ }
+  if (!timer) startTimer($);
+  void refresh($);
+}
+
+// At a main turn's start: a conversation other than the one drawn for is a new one; the first id seen is adopted.
+async function checkConversation($: Engine): Promise<void> {
+  const id = await conversationId($);
+  if (id === null || id === endedConversation) return;
+  if (conversation === null) conversation = id;
+  else if (id !== conversation) await newConversation($, id);
+}
+
+// After a /clear or a resume ends `ended`, the next conversation's id is asked every SWITCH_POLL_MS until it answers,
+// SWITCH_POLLS_MAX times at most (the next main turn's start looks again).
+function watchSwitch($: Engine, ended: string | null): void {
+  endedConversation = ended ?? conversation;
+  switchWatch?.cancel();
+  let polls = 0;
+  const poll = () => {
+    switchWatch = $.clock.after(SWITCH_POLL_MS, () => {
+      switchWatch = null;
+      void conversationId($).then(id => {
+        if (id !== null && id !== endedConversation && id !== conversation) return newConversation($, id);
+        if (endedConversation !== null && ++polls < SWITCH_POLLS_MAX) poll();
+      });
+    });
+  };
+  poll();
+}
+
 /**
  * A control of the band: what the layout measures (band-fit.ts), what a press runs, and a link's address. `confirm`
  * marks one that asks twice: its first press does nothing yet, so it leaves the ⋯ row open.
@@ -258,6 +313,10 @@ export const register: Register = on => {
     // A surface that failed in an earlier session says so again when it draws.
     failedOn.clear();
     try { await update($, hidden, () => false); } catch { /* ignore */ }
+    switchWatch?.cancel();
+    switchWatch = null;
+    endedConversation = null;
+    conversation = await conversationId($);
     await loadDismissals($);
     await checkLens($);
     await refresh($);
@@ -270,30 +329,32 @@ export const register: Register = on => {
 
   on('session.end', ($, e, next) => {
     // K5-07: /clear and an in-process resume go on under another id and without a session.start: the timers keep
-    // running, as lens's do, and classic.SessionStart below draws the band for the new conversation.
-    if (e.reason === 'clear' || e.reason === 'resume') return next(e);
+    // running, as lens's do, and the band watches for the new conversation's id (watchSwitch) to draw for it.
+    if (e.reason === 'clear' || e.reason === 'resume') {
+      try { watchSwitch($, typeof e.sessionId === 'string' && e.sessionId ? e.sessionId : null); } catch { /* the next turn looks */ }
+      return next(e);
+    }
     timer?.cancel();
     timer = null;
     lensRecheck?.cancel();
     lensRecheck = null;
     expiry?.cancel();
     expiry = null;
+    switchWatch?.cancel();
+    switchWatch = null;
     return next(e);
   });
 
-  // K5-07: the conversation that starts (after /clear, a resume or a fork) gets its own role at once: refresh asks
-  // $.session.id() each time. A /clear or a resume is another conversation, so a band hidden with × shows again. A
-  // process whose timer an earlier end stopped gets it back.
-  // I-11, carry 9: like lens's, this gating hook goes on when it fails (the replay-safe next gives what it settled to).
-  on('classic.SessionStart', async ($, e, next) => {
-    const r = await next(e);
-    if (e.source === 'clear' || e.source === 'resume') {
-      try { await update($, hidden, () => false); } catch { /* ignore */ }
+  // K5-07, w8 M1: the conversation that starts (after /clear, a resume or a fork) gets its own role at its first turn at
+  // the latest (checkConversation); a process whose timer an earlier end stopped gets it back. A subagent's turn is not
+  // the conversation's.
+  on('turn.start', ($, e, next) => {
+    if (!e.agentId) {
+      if (!timer) startTimer($);
+      void checkConversation($);
     }
-    if (!timer) startTimer($);
-    void refresh($);
-    return r;
-  }).catch(($, e, next) => next(e));
+    return next(e);
+  });
 
   on('turn.complete', ($, e, next) => {
     void checkLens($);

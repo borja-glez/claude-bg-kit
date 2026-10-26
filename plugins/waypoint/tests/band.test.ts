@@ -706,7 +706,7 @@ test("Stop is the coordinator's: a member's leaves /forge:stop in the prompt wit
   }
 });
 
-test('a /clear or a resume keeps the refresh timer, and the next conversation is drawn with its own role at once (K5-07)', async ($, on) => {
+test('a /clear or a resume keeps the refresh timer, and the next conversation is drawn with its own role at once (K5-07, w8 M1: no classic SessionStart)', async ($, on) => {
   engineBottom(on);
   const listed: string[] = [];
   const files = { ...FILES };
@@ -715,47 +715,78 @@ test('a /clear or a resume keeps the refresh timer, and the next conversation is
   const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
-  on('classic.SessionStart', () => ({}));
   const docsListed = () => listed.filter(p => p === `${ROOT}/docs/waypoint`).length;
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
   expect(await ui.find({ key: 'next-task' })).toBeDefined();
+  // An end whose next conversation never shows (the id stays) costs nothing past the timer's own refresh.
   for (const reason of ['resume', 'clear'] as const) {
     await $.session.end({ reason, sessionId: id, resume: {} as never });
     const before = docsListed();
     await clock.advance(30000);
     expect(docsListed() - before, reason).toBe(1);
   }
-  // SessionEnd closed the binding; the process goes on as the conversation conv-2, with no session.start.
+  // SessionEnd closes the binding; the process goes on as the conversation conv-2, with no session.start.
+  await $.session.end({ reason: 'clear', sessionId: id, resume: {} as never });
   files[`${ROOT}/.waypoint/demo/bound.json`] = BOUND({ seenAt: '2026-10-11T10:05:30.000Z', endedAt: '2026-10-11T10:06:00.000Z', endReason: 'clear' });
   id = 'conv-2';
-  await $.classic.SessionStart({ source: 'clear' });
+  await clock.advance(1000);
   await ui.redraw();
   expect(await ui.find({ key: 'resume' })).toBeDefined();
   expect(await ui.find({ key: 'next-task' })).toBeUndefined();
   await ui.unmount();
 });
 
-test('a conversation that starts in a process whose timer an end stopped gets one timer back (K5-07)', async ($, on) => {
+test('a conversation that starts in a process whose timer an end stopped gets one timer back at its first turn (K5-07, w8 M1)', async ($, on) => {
   const listed: string[] = [];
-  serveFiles(on, { ...FILES }, listed);
+  let id = SESSION_ID;
+  serveFiles(on, { ...FILES }, listed, () => id);
   const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
-  on('classic.SessionStart', () => ({}));
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }));
   const docsListed = () => listed.filter(p => p === `${ROOT}/docs/waypoint`).length;
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.session.end({ reason: 'logout', sessionId: SESSION_ID, resume: {} as never });
   let before = docsListed();
   await clock.advance(30000);
   expect(docsListed() - before).toBe(0);
-  await $.classic.SessionStart({ source: 'startup' });
-  await $.classic.SessionStart({ source: 'compact' });
-  // Let the refreshes the starts launched finish, short of the timer's 30 s.
+  id = 'conv-2';
+  await $.turn.start({ text: 'hello', turnId: 't1' });
+  await $.turn.start({ text: 'again', turnId: 't2' });
+  // A subagent's turn is not the conversation's.
+  await $.turn.start({ text: 'sub', turnId: 't3', agentId: 'a1' });
+  // Let the refreshes the turns launched finish, short of the timer's 30 s.
   await clock.advance(1);
   before = docsListed();
   await clock.advance(30000);
   expect(docsListed() - before).toBe(1);
+});
+
+test('a conversation that changed under the band (a fork) is drawn for at its next turn, and the × of the one before does not hide it (w8 M1)', async ($, on) => {
+  engineBottom(on);
+  const files = { ...FILES };
+  let id = SESSION_ID;
+  serveFiles(on, files, [], () => id);
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await ui.press({ key: 'dismiss' });
+  expect(await ui.find({ key: 'next-task' })).toBeUndefined();
+  // The same conversation's next turn keeps the band hidden.
+  await $.turn.start({ text: 'go on', turnId: 't1' });
+  await clock.advance(1);
+  await ui.redraw();
+  expect(await ui.find({ key: 'next-task' })).toBeUndefined();
+  files[`${ROOT}/.waypoint/demo/bound.json`] = BOUND({ endedAt: '2026-10-11T10:05:00.000Z', endReason: 'other' });
+  id = 'conv-fork';
+  await $.turn.start({ text: 'forked', turnId: 't2' });
+  await clock.advance(1);
+  await ui.redraw();
+  expect(await ui.find({ key: 'resume' })).toBeDefined();
+  await ui.unmount();
 });
 
 test('a /clear while a refresh still runs with the old id gets one more refresh after it, with the new conversation (K5-07)', async ($, on) => {
@@ -774,8 +805,8 @@ test('a /clear while a refresh still runs with the old id gets one more refresh 
   });
   const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
   on('turn.complete', () => ({ text: '' }));
-  on('classic.SessionStart', () => ({}));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
   expect(await ui.find({ key: 'next-task' })).toBeDefined();
@@ -785,9 +816,11 @@ test('a /clear while a refresh still runs with the old id gets one more refresh 
   const turn = $.turn.complete({ answer: '', durationMs: 1, isAborted: false, reason: 'answer', turnId: 't1' });
   await askedOnce;
   held = null;
+  await $.session.end({ reason: 'clear', sessionId: SESSION_ID, resume: {} as never });
   files[`${ROOT}/.waypoint/demo/bound.json`] = BOUND({ endedAt: '2026-10-11T10:05:00.000Z', endReason: 'clear' });
   id = 'conv-2';
-  await $.classic.SessionStart({ source: 'clear' });
+  // The band notices the new conversation (no session.start, no classic SessionStart) while the old refresh still waits.
+  await clock.advance(1000);
   release();
   await turn;
   await clock.advance(1);
@@ -802,10 +835,9 @@ test('a band hidden with × before /clear does not hide what the next conversati
   const files = { ...FILES };
   let id = SESSION_ID;
   serveFiles(on, files, [], () => id);
-  mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
-  on('classic.SessionStart', () => ({}));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
   await ui.press({ key: 'dismiss' });
@@ -813,7 +845,7 @@ test('a band hidden with × before /clear does not hide what the next conversati
   await $.session.end({ reason: 'clear', sessionId: id, resume: {} as never });
   files[`${ROOT}/.waypoint/demo/bound.json`] = BOUND({ endedAt: '2026-10-11T10:05:00.000Z', endReason: 'clear' });
   id = 'conv-2';
-  await $.classic.SessionStart({ source: 'clear' });
+  await clock.advance(1000);
   await ui.redraw();
   expect(await ui.find({ key: 'resume' })).toBeDefined();
   await ui.unmount();

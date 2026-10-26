@@ -16,7 +16,8 @@ const FILES: Record<string, string> = {
 };
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
 
-function serveFiles(on: On, reads: string[] = [], extra: Record<string, string> = {}) {
+// `held`: while it gives a promise, every listing of a folder waits for it.
+function serveFiles(on: On, reads: string[] = [], extra: Record<string, string> = {}, held: () => Promise<void> | null = () => null) {
   const FILES_SERVED: Record<string, string> = { ...FILES, ...extra };
   const entry = (name: string, kind: 'file' | 'dir', size: number) => ({ name, kind, size, mtimeMs: NOW - 60_000, isLink: false });
   on('session.root', () => ({ value: ROOT }));
@@ -27,16 +28,17 @@ function serveFiles(on: On, reads: string[] = [], extra: Record<string, string> 
     const f = FILES_SERVED[norm(e.path)];
     return f !== undefined ? { value: { kind: 'file' as const, size: f.length, mtimeMs: NOW - 60_000, isLink: false } } : { deny: `ENOENT ${e.path}` };
   });
-  on('fs.list', (_$, e) => {
-    const prefix = `${norm(e.path)}/`;
+  const list = (path: string) => {
+    const prefix = `${norm(path)}/`;
     const names = new Map<string, ReturnType<typeof entry>>();
-    for (const [path, text] of Object.entries(FILES_SERVED)) {
-      if (!path.startsWith(prefix)) continue;
-      const [head = '', ...rest] = path.slice(prefix.length).split('/');
+    for (const [p, text] of Object.entries(FILES_SERVED)) {
+      if (!p.startsWith(prefix)) continue;
+      const [head = '', ...rest] = p.slice(prefix.length).split('/');
       names.set(head, entry(head, rest.length ? 'dir' : 'file', rest.length ? 0 : text.length));
     }
-    return names.size ? { value: [...names.values()] } : { deny: `ENOENT ${e.path}` };
-  });
+    return names.size ? { value: [...names.values()] } : { deny: `ENOENT ${path}` };
+  };
+  on('fs.list', (_$, e) => { const wait = held(); return wait ? wait.then(() => list(e.path)) : list(e.path); });
 }
 
 function servePanes(on: On) {
@@ -51,10 +53,10 @@ function servePanes(on: On) {
 // (forgeHeardAt), and draws nothing of its own while that task has no status.
 const FORGE_CALL = { tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T009-1 --path medium', tool_use_id: 'f1' } as never;
 
-function start(on: On) {
+function start(on: On, agents: unknown[] = []) {
   const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
-  on('agent.list', () => ({ value: [] }));
+  on('agent.list', () => ({ value: agents as never }));
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   return clock;
 }
@@ -201,15 +203,47 @@ test('a photo reads the files once, writes no state, starts no timer, and its ro
   }
 });
 
+test('/lens foto bounds its read: files that do not come within 5 s leave the photo to what lens holds (review Minor 3)', async ($, on) => {
+  let held: Promise<void> | null = null;
+  let release = () => {};
+  serveFiles(on, [], {}, () => held);
+  servePanes(on);
+  engineRows(on);
+  const clock = start(on);
+  await $.session.start(SESSION);
+  // A first photo reads the files whole.
+  const first = (await $.command.run({ ...RUN, args: 'foto' })).text!;
+  expect(first).toMatch(/#1 · /);
+  held = new Promise(r => { release = r; });
+  let answered = false;
+  const asked = $.command.run({ ...RUN, args: 'foto' }).then(r => { answered = true; return r; });
+  await clock.advance(4_999);
+  expect(answered).toBe(false);
+  await clock.advance(1);
+  const shot = (await asked).text!;
+  expect(shot).toMatch(/^lens · \d\d:\d\d:\d\d #2 · /);
+  // Its cards are those lens held: the superpowers run the first photo read.
+  const row = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: OUTPUT(shot), viewport: MAIN_SCREEN });
+  expect(await said(row)).toContain('docs/superpowers/plans/run.md');
+  await row.unmount();
+  release();
+  held = null;
+  await clock.advance(0);
+});
+
 test('a photo taken with the pane closed asks the agents list first: a subagent that ended is not drawn as running (carry 7)', async ($, on) => {
   serveFiles(on);
   servePanes(on);
   engineRows(on);
-  start(on);
-  on('classic.SubagentStart', () => ({}));
+  start(on, [{ id: 'a1', type: 'Explore', description: '', status: 'completed' }]);
+  // w8 M1: a subagent starts at its spawn (the engine answers with the call's tool_use_id as its id).
+  on('agent.spawn', (_$, e) => ({ model: 'claude-sonnet-5-5', agentId: e.tool_use_id }));
   await $.session.start(SESSION);
-  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' } as never);
-  // The agents list (empty) says it ended; nothing asked it while the pane was closed.
+  await $.agent.spawn({
+    tool_use_id: 'a1', prompt: 'Look around', description: '', subagentType: 'Explore', provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'claude-opus-5-5', background: true, fork: false,
+  } as never);
+  // The agents list says it completed; nothing asked it while the pane was closed.
   const shot = (await $.command.run({ ...RUN, args: 'foto' })).text!;
   const row = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: OUTPUT(shot), viewport: MAIN_SCREEN });
   expect(await said(row)).toMatch(/✓ /);

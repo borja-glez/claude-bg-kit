@@ -65,7 +65,6 @@ function start(on: On, agents: unknown[] = []) {
   const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('agent.list', () => ({ value: agents as never }));
-  on('classic.SubagentStart', () => ({}));
   on('session.id', () => ({ value: SESSION }));
   on('session.usage', () => ({ value: { startedAt: NOW - 60_000, context: {} as never, rateLimits: [], cost: { usd: 4.1 } } }));
   return clock;
@@ -105,12 +104,13 @@ test('a main-loop turn.step is measured and passed through unchanged', async ($,
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   const r = await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'high', messageCount: 1 }));
   expect(r).toEqual(stepResult({ input_tokens: 1_000_000 }, 'claude-opus-5-5'));
   await $.command.run(RUN);
+  await clock.advance(0);
   const m = panel.last;
   expect(m?.mainModel).toEqual({ model: 'claude-opus-5-5', effort: 'high' });
   expect(m?.usage.costUsd).toBeGreaterThan(3.99);
@@ -121,11 +121,13 @@ test('a main-loop turn.step is measured and passed through unchanged', async ($,
 test('with .forge/ in the root a refresh writes the session usage file', async ($, on) => {
   const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' });
   servePanes(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'high', messageCount: 1 }));
   await $.command.run(RUN);
+  // w8 M3: /lens answers before the files are read; the read settles right after.
+  await clock.advance(0);
   const text = written[`${ROOT}/.forge/usage/${SESSION}.json`];
   expect(text).toBeDefined();
   const file = JSON.parse(text!);
@@ -152,12 +154,13 @@ test('without .forge/ no usage file is written', async ($, on) => {
 test('the session end writes the usage file even within 30 s of the last write', async ($, on) => {
   const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' });
   servePanes(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   const path = `${ROOT}/.forge/usage/${SESSION}.json`;
   expect(JSON.parse(written[path]!).loops.main.steps).toBe(1);
   await drain($.turn.step({ turnId: 't1', index: 1, model: 'claude-opus-5-5', messageCount: 2 }));
@@ -169,7 +172,7 @@ test('a spawned subagent gets its type, and its own turn.step puts its model on 
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
-  start(on, [{ id: 'a1', type: 'forge:forge-impl', description: 'Implement T07', status: 'running' }]);
+  const clock = start(on, [{ id: 'a1', type: 'forge:forge-impl', description: 'Implement T07', status: 'running' }]);
   serveSteps(on);
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
@@ -180,6 +183,7 @@ test('a spawned subagent gets its type, and its own turn.step puts its model on 
   expect(spawned).toEqual({ model: 'claude-sonnet-5-5', agentId: 'a1' });
   await drain($.turn.step({ turnId: 't2', index: 0, model: 'claude-sonnet-5-5', effort: 'medium', messageCount: 1, agentId: 'a1' }));
   await $.command.run(RUN);
+  await clock.advance(0);
   const m = panel.last;
   expect(m?.subagents[0]).toMatchObject({ id: 'a1', model: 'claude-sonnet-5-5', effort: 'medium' });
   expect(m?.usage.groups.map((g: { id: string }) => g.id)).toContain('impl');
@@ -190,7 +194,7 @@ test('a main-loop waypoint call counts as tracking and its result is returned un
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ok' } as never, text: 'x'.repeat(400) }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
@@ -198,6 +202,7 @@ test('a main-loop waypoint call counts as tracking and its result is returned un
   const r = await $.tool.call({ tool: 'Bash', command: 'node waypoint.cjs status' } as never);
   expect(r).toMatchObject({ text: 'x'.repeat(400) });
   await $.command.run(RUN);
+  await clock.advance(0);
   const m = panel.last;
   expect(m?.usage.tracking.tokens).toBeGreaterThanOrEqual(100);
 });
@@ -217,11 +222,12 @@ test('with a forge run, the panel sums every session file updated since the run 
   });
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   const m = panel.last;
   expect(m?.usage.scope).toBe('run');
   expect(m?.usage.costUsd).toBeGreaterThan(7.99);
@@ -255,16 +261,16 @@ test('a turn.step hands every chunk on unchanged and in order', async ($, on) =>
   expect(x.value).toEqual(stepResult({ input_tokens: 10 }, 'claude-opus-5-5'));
 });
 
-test('classic.SubagentStart labels a loop agent.spawn did not', async ($, on) => {
+test('the agents list labels a loop agent.spawn did not (w8 M1: no classic SubagentStart)', async ($, on) => {
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
-  start(on, [{ id: 'a9', type: 'forge:forge-review-security', status: 'running' }]);
+  const clock = start(on, [{ id: 'a9', type: 'forge:forge-review-security', status: 'running' }]);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
-  await $.classic.SubagentStart({ agent_id: 'a9', agent_type: 'forge:forge-review-security' });
   await drain($.turn.step({ turnId: 't3', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, agentId: 'a9' }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(panel.last?.usage.groups.map((g: { id: string }) => g.id)).toContain('review');
 });
 
@@ -282,6 +288,7 @@ test('usage files are re-read one by one only when they change, and not on every
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(reads).toContain(`${ROOT}/.forge/usage/sess-2.json`);
   expect(reads).toContain(`${ROOT}/.forge/usage/sess-3.json`);
   // Panel writes between refreshes read no run file.
@@ -305,11 +312,12 @@ test('a resumed session continues its own usage file when its start matches', as
   const written = serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: usageFile(SESSION) });
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(panel.last?.usage.costUsd).toBeGreaterThan(7.99);
   expect(JSON.parse(written[`${ROOT}/.forge/usage/${SESSION}.json`]!).loops.main.steps).toBe(4);
 });
@@ -318,11 +326,12 @@ test('a session file with another start is not continued', async ($, on) => {
   const old = usageFile(SESSION, { startedAt: new Date(NOW - 7200_000).toISOString() });
   const written = serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: old });
   servePanes(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(JSON.parse(written[`${ROOT}/.forge/usage/${SESSION}.json`]!).loops.main.steps).toBe(1);
 });
 
@@ -335,6 +344,7 @@ test('an unchanged count is not written again on the tick', async ($, on) => {
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(writes).toHaveLength(1);
   await clock.advance(70_000);
   expect(writes).toHaveLength(1);
@@ -489,6 +499,7 @@ test('a session counts in its run only what it spent once its band names the run
   // $4 more within the run.
   await drain($.turn.step({ turnId: 't1', index: 1, model: 'claude-opus-5-5', messageCount: 2 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   const u = panel.last?.usage;
   expect(u).toMatchObject({ scope: 'run', partial: false });
   expect(u.costUsd).toBeGreaterThan(3.99);
@@ -497,40 +508,38 @@ test('a session counts in its run only what it spent once its band names the run
   expect(u.session.costUsd).toBeLessThan(8.01);
 });
 
-test("a compaction of the main conversation stops the re-read of the tracking gathered before it; a subagent's, a precompute's or a skipped one does not (E-08, R6)", async ($, on) => {
+test("a compaction of the main conversation stops the re-read of the tracking gathered before it, told by the fewer messages its next request carries; a subagent's or a fall of context alone is none (E-08, w8 M1, review Minor 2: no session.compact hook)", async ($, on) => {
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
   const clock = start(on);
-  serveSteps(on);
+  // The model beneath answers each request over `context` cached tokens (a subagent's, over 1,000).
+  let context = 80_000;
+  on('turn.step', async function* (_$, e) {
+    return stepResult({ cache_read_input_tokens: e.agentId ? 1_000 : context, output_tokens: 100 }, e.model, e.turnId, e.index);
+  });
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ok' } as never, text: 'x'.repeat(400) }));
-  const summary = [{ role: 'user' as const, text: 'summary', toolUses: [] }];
-  const compacted = { messages: summary };
-  let answer: { messages: typeof summary } | { skip: string } = compacted;
-  on('session.compact', () => answer as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
   await $.tool.call({ tool: 'Bash', command: 'node waypoint.cjs status' } as never);
   // Each main step re-reads the tracking gathered since the last compaction of the main conversation.
-  const stepThen = async (index: number) => {
-    await drain($.turn.step({ turnId: 't1', index, model: 'claude-opus-5-5', messageCount: index + 1 }));
+  const stepThen = async (index: number, messageCount: number, agentId?: string) => {
+    await drain($.turn.step({ turnId: 't1', index, model: 'claude-opus-5-5', messageCount, ...(agentId ? { agentId } : {}) }));
     await clock.advance(1000);
     return panel.last?.usage.tracking.tokens as number;
   };
-  const once = await stepThen(0);
+  const once = await stepThen(0, 40);
   expect(once).toBeGreaterThan(0);
-  await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: summary });
-  expect(await stepThen(1)).toBe(once * 1.5);
-  // A precompute installs nothing: the tracking is still in context and still re-read.
-  await $.session.compact({ trigger: 'precompute', messages: summary });
-  expect(await stepThen(2)).toBe(once * 2);
-  // A skipped compaction leaves the conversation as it is.
-  answer = { skip: 'not now' };
-  await $.session.compact({ trigger: 'manual', messages: summary });
-  expect(await stepThen(3)).toBe(once * 2.5);
-  answer = compacted;
-  await $.session.compact({ trigger: 'manual', messages: summary });
-  expect(await stepThen(4)).toBe(once * 2.5);
+  // A subagent's few messages are its own: nothing of the main conversation left.
+  expect(await stepThen(1, 2, 'a1')).toBe(once);
+  expect(await stepThen(2, 42)).toBe(once * 1.5);
+  // The context falls by more than half while the messages grow (a cache that expired, say): no compaction.
+  context = 30_000;
+  expect(await stepThen(3, 43)).toBe(once * 2);
+  // A /compact: three messages now, though the context fell by less than half; the tracking before it is gone.
+  context = 50_000;
+  expect(await stepThen(4, 3)).toBe(once * 2);
+  expect(await stepThen(5, 5)).toBe(once * 2);
 });
 
 test('a band read before any run, the pane closed and nothing busy: a run that starts later is named in the next usage write (R2)', async ($, on) => {
@@ -616,11 +625,12 @@ test('a run that is neither active nor touched within 12 hours is over: only thi
   serveFiles(on, files, {}, [], () => undefined, { [`${ROOT}/.forge/run.json`]: NOW - 13 * 3600_000 });
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(panel.last?.usage.scope).toBe('session');
 });
 
@@ -629,11 +639,12 @@ test('a resumed session checks /cost against what it spent since the seed, not a
   serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: usageFile(SESSION, { loops: seeded }) });
   servePanes(on);
   const panel = panelWrites(on);
-  start(on);
+  const clock = start(on);
   serveSteps(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await $.command.run(RUN);
+  await clock.advance(0);
   expect(panel.last?.usage.costUsd).toBeGreaterThan(103.99);
   expect(panel.last?.usage.officialUsd).toBe(4.1);
   expect(panel.last?.usage.drift).toBe(false);

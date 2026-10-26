@@ -315,7 +315,7 @@ export function buildActivities(i: ActivityInput): ActivityView {
   const out = built.map(b => b.row);
   if (i.superpowers) {
     const s = i.superpowers;
-    out.push(summary('sp', 'superpowers', { title: s.plan || null, stage: s.current ? 'fix' : null, round: s.current?.round ?? null, cap: s.current?.cap ?? null, done: s.tasks > 0 && s.done >= s.tasks, dim: !!s.stale }));
+    out.push(summary('sp', 'superpowers', { title: s.plan || null, stage: s.current ? 'fix' : null, round: s.current?.round ?? null, cap: s.current?.cap ?? null, done: s.tasks !== null && s.tasks > 0 && s.done >= s.tasks, dim: !!s.stale }));
   }
   if (i.todos && i.todos.total > i.todos.done) out.push(summary('todo', 'todo', { title: i.todos.inProgress, done: false, dim: false }));
   const adhoc = i.links.filter(l => alive(l) && !l.task && !l.workflow);
