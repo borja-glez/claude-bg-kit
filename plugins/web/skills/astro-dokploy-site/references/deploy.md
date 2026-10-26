@@ -48,7 +48,7 @@ In the application's build settings:
 - **Dockerfile path:** `Dockerfile`
 - **Docker Context Path:** `.`
 
-Set both even though they look like defaults. With the context field empty, Dokploy uses the Dockerfile's own folder as the context (Dokploy issue 5417), so a Dockerfile outside the root cannot see the lockfile or the workspace packages, and the build "cannot find its files".
+Set both even though they look like defaults. With the context field empty, Dokploy uses the Dockerfile's own folder as the context (Dokploy issue 5417, seen in 2026-10: check whether it is still open), so a Dockerfile outside the root cannot see the lockfile or the workspace packages, and the build "cannot find its files".
 
 CI proves the image builds before Dokploy does: add a `docker build .` step after `pnpm build` and before Lighthouse.
 

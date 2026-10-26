@@ -21,7 +21,7 @@ Vite bundles a worker only when it sees this literal, whole, at the call site:
 const worker = new Worker(new URL('./decoder.worker.ts', import.meta.url), { type: 'module' });
 ```
 
-Put the `new URL(...)` inside the `new Worker(...)` call. With any indirection (a `spawn(url)` helper that receives the URL) Vite does not process the file, the `.ts` ends up embedded as a `data:video/mp2t` URL, and the CSP blocks it.
+Put the `new URL(...)` inside the `new Worker(...)` call. With any indirection (a `spawn(url)` helper that receives the URL) Vite does not process the file, the `.ts` ends up embedded as a `data:video/mp2t` URL (the `.ts` extension maps to that MIME type; seen with Vite in 2026-10), and the CSP blocks it.
 
 Guard it in `postbuild`: a script (for example `scripts/check-workers.mjs`) reads `dist` and fails if any built file contains an embedded worker (`data:video/mp2t` or another `data:` worker source). Wire it as `"postbuild": "node scripts/check-workers.mjs"` so `pnpm build` fails with it.
 

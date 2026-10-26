@@ -8,7 +8,7 @@ The CI runs, in this order: `format:check`, `lint`, `check`, `test`, `build`, `d
 pnpm format && pnpm format:check && pnpm lint && pnpm check && pnpm test
 ```
 
-Prettier covers everything: `.astro`, `.mdx` and `.json` too. A green `pnpm check` and green tests say nothing about it. `astro check` requires TypeScript 6.x, not 7: keep `"typescript": "^6.0.0"` and do not merge a major bump of it.
+Prettier covers everything: `.astro`, `.mdx` and `.json` too. A green `pnpm check` and green tests say nothing about it. `astro check` requires the TypeScript range in the `peerDependencies` of `@astrojs/check` (TypeScript 6.x as of 2026-10, not 7): read that field, keep `typescript` inside it and do not merge a major bump that leaves it.
 
 ## Playwright under Claude Code
 
@@ -41,7 +41,8 @@ On Windows `lhci` ends with `EPERM` while deleting `...\Temp\lighthouse.*` (the 
 
 1. Start the preview on a free port (see above), in the background.
 2. Launch Chrome on its own, in the background, and note its PID:
-   `<path to chrome.exe> --headless=new --remote-debugging-port=9333 --user-data-dir=<temp dir>`
+   `<path to chrome.exe> --headless=new --enable-gpu --use-angle=d3d11 --remote-debugging-port=9333 --user-data-dir=<temp dir>`
+   (`--enable-gpu --use-angle=d3d11` is for Windows. 9333 is an example: use a port nothing listens on, the same one in step 3.)
    (`chrome` is not on PATH on Windows; chrome.exe usually sits under `C:\Program Files\Google\Chrome\Application\`.)
 3. Run `npx lighthouse <url> --port=9333 [--preset=<config's preset>] --output=json --output-path=<file>`.
 4. Stop Chrome and the preview by those PIDs, never by process name.

@@ -41,7 +41,7 @@ Se carga cuando trabajas en un sitio Astro estático con islas de Preact, constr
 | CSP | `security.csp` con hashes por página, los scripts `is:inline` con su hash en la config, nada de `<style is:inline>` en las figuras, `worker-src`. |
 | Comprobaciones | Prettier como puerta propia, `astro check` con TypeScript 6, el webServer de Playwright bajo Claude Code, Lighthouse en Windows y en CI, Chrome real. |
 | Despliegue | El Dockerfile en la raíz, las cabeceras y los tipos MIME de nginx, los campos de ruta y contexto de Dokploy. |
-| Higiene del repo | Ni `CLAUDE.md`, ni `AGENTS.md`, ni `.claude/` en el repo de un sitio. |
+| Higiene del repo | Ni `CLAUDE.md` ni `.claude/` en el repo de un sitio, y las reglas de la skill no se duplican en `AGENTS.md`. |
 
 Las reglas viven en `SKILL.md`, que no pasa de 16 000 bytes para que una compactación lo conserve entero. Cuatro references guardan los procedimientos; cada una se lee al llegar a su momento y otra vez cada vez que se vuelve.
 

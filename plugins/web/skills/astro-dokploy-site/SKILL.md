@@ -14,15 +14,15 @@ This is for a static Astro site with Preact islands, built by pnpm into a Docker
 3. The CSP comes from `security.csp`, with hashes per page. Every `is:inline` script gets its hash in the config. Never `<style is:inline>` in a figure.
 4. Vite finds a worker only through the literal `new Worker(new URL('./x.worker.ts', import.meta.url), { type: 'module' })`, written at the call site with no helper in between. Behind a helper the `.ts` ships embedded as a `data:` URL, which the CSP blocks. A guard after the build checks it.
 5. In MDX, a prose line never starts with an inline component (`<Term`): Prettier turns it into a block and the sentence breaks. Keep a test for it.
-6. Prettier (`pnpm format:check`) is a CI gate that `astro check` does not cover. `astro check` needs TypeScript 6, not 7.
+6. Prettier (`pnpm format:check`) is a CI gate that `astro check` does not cover. `astro check` needs the TypeScript range in the `peerDependencies` of `@astrojs/check` (TypeScript 6 as of 2026-10): read it there, not from memory.
 7. `astro preview` detects the agent and goes to the background. Playwright's webServer carries `env: { CLAUDECODE: '', … }` and `--ignore-lock`; the port comes from `PORT` (4321 is often taken) and `reuseExistingServer: false` makes a busy port fail instead of testing someone else's server.
 8. Lighthouse:
    - in CI, `lhci` with `numberOfRuns` 3;
-   - on Windows `lhci` ends in `EPERM`: use `npx lighthouse` against a headless Chrome launched on its own;
+   - on Windows `lhci` ends in `EPERM`: use `npx lighthouse` against a headless Chrome launched on its own, on a free port and with the GPU flags (`--enable-gpu --use-angle=d3d11` on Windows);
    - CI numbers are reproduced in the Playwright container with `CHROME_PATH`;
    - the gate is the GitHub run. Never change lhci, the CI or the project to silence a local failure.
 9. Checks in a real browser go through Playwright with `channel: 'chrome'`, not Claude in Chrome, which hides the tab and stops animations.
-10. Never add `CLAUDE.md`, `AGENTS.md` or `.claude/` to a site's repo. If the person asks for one, say this rule in one line and ask; what the next session must know goes to memory. A temporary `.claude/launch.json` is deleted when you finish.
+10. Never add `CLAUDE.md` or `.claude/` to a site's repo, and never copy this skill's rules into an `AGENTS.md`. What must travel with the repo (commands, layout, conventions) goes in a short `AGENTS.md` that points here for the rules; anything else the next session must know goes to memory. If the person asks for a `CLAUDE.md`, say this rule in one line and ask. A temporary `.claude/launch.json` is deleted when you finish.
 
 ## When you get here
 
@@ -36,7 +36,7 @@ This is for a static Astro site with Preact islands, built by pnpm into a Docker
 | Thought | Rule that stops it |
 | --- | --- |
 | "checks are green, push now" | Prettier is a separate gate: `pnpm format && pnpm format:check` first (rule 6). |
-| "a CLAUDE.md would help the next session" | Rule 10: no `CLAUDE.md`, `AGENTS.md` or `.claude/` in the repo; say the rule, ask, or use memory. |
+| "a CLAUDE.md would help the next session" | Rule 10: no `CLAUDE.md` or `.claude/` in the repo, and the skill's rules are not copied into `AGENTS.md`; say the rule, ask, or use memory. |
 | "a `spawnWorker(url)` helper is cleaner" | Rule 4: the literal stays at every call site, or the worker ships embedded and the CSP blocks it. |
 | "I'll point TEMP elsewhere and run lhci" | Rule 8: do not bend lhci or the project around the EPERM; use `npx lighthouse`. |
 
