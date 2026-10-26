@@ -80,17 +80,21 @@ const WEAK_PIECES: [string, RegExp][] = [
   ['mobile', words('m[oó]vil|mobile|ios|android')],
   ['admin', words('admin')],
 ];
-const CREATE_PROJECT = new RegExp(`(?<![\\p{L}\\p{N}_])(?:crea|crear|create|build|construye|construir|monta|montar|haz|hacer|make|desarrolla|desarrollar|develop`
-  + `|empieza|empezar|start|inicia|iniciar|scaffold|set\\s+up|arranca|arrancar|write|escribe|implementa|implementar|implement)(?![\\p{L}\\p{N}_])`
-  + `(?:\\s+\\S+){0,3}?\\s+(?:apps?|aplicaci[oó]n(?:es)?|proyectos?|projects?|servicios?|services?)(?![\\p{L}\\p{N}_])`, 'iu');
+// Fix round 2: a create verb whose direct object is the app, project or service (an article or «new» at most between).
+const CREATE_PROJECT = new RegExp(`(?<![\\p{L}\\p{N}_])(?:crea|crear|create|build|construye|construir|monta|montar|desarrolla|desarrollar|develop|scaffold`
+  + `|implementa|implementar|implement)\\s+(?:(?:a|an|un|una|nuevo|nueva|new)\\s+){0,2}(?:apps?|aplicaci[oó]n(?:es)?|proyectos?|projects?|servicios?|services?)(?![\\p{L}\\p{N}_])`, 'iu');
 const FIX_START = /^\s*(?:arregla|arreglar|corrige|corregir|repara|reparar|soluciona|solucionar|fix|repair|solve)(?![\p{L}\p{N}_])/iu;
+// What the new project only uses («that uses the dashboard API», «que use la API») is no piece of its own.
+const ONLY_USES = /(?<![\p{L}\p{N}_])(?:(?:that|which)\s+(?:uses?|calls?|consumes?|reads?\s+from|talks?\s+to)|que\s+(?:use|usa|usen|usan|utilice|utiliza|llame|llama|consuma|consume|lea\s+de|lee\s+de|hable\s+con|habla\s+con))(?![\p{L}\p{N}_])[\s\S]*$/iu;
 /** w8 FR3: the pieces of the new project a text asks to create, strong first, or none when they do not make it Large
- *  (fewer than two, or no strong one). Only sentences that create an app or a project count, never one led by a fix. */
+ *  (fewer than two, or no strong one). Only sentences that create an app or a project count, never one led by a fix,
+ *  and only up to what the project only uses. */
 export function projectPieces(text: string): string[] {
   const strong = new Set<string>();
   const weak = new Set<string>();
-  for (const s of text.split(/[.;!?\n]+(?=\s|$)/u)) {
-    if (FIX_START.test(s) || !CREATE_PROJECT.test(s)) continue;
+  for (const sentence of text.split(/[.;!?\n]+(?=\s|$)/u)) {
+    if (FIX_START.test(sentence) || !CREATE_PROJECT.test(sentence)) continue;
+    const s = sentence.replace(ONLY_USES, '');
     for (const [name, re] of STRONG_PIECES) if (re.test(s)) strong.add(name);
     for (const [name, re] of WEAK_PIECES) if (re.test(s)) weak.add(name);
   }

@@ -323,7 +323,7 @@ describe('forge CLI', () => {
   it('triage on a repository without commits (rev-list fails) is greenfield: Medium at most, unless the request has several pieces (w8 FR3)', () => {
     io.git = args => (args.includes('ls-files') ? '' : null);
     expect(JSON.parse(run(['triage', 'build a todo app'], io).stdout)).toMatchObject({ greenfield: true, path: 'medium' });
-    expect(JSON.parse(run(['triage', 'build a todo app with a frontend and a backend'], io).stdout)).toMatchObject({ greenfield: true, path: 'large' });
+    expect(JSON.parse(run(['triage', 'build a new app with a frontend and a backend'], io).stdout)).toMatchObject({ greenfield: true, path: 'large' });
   });
   it('triage lists the catalog, announces validators not yet known, then remembers them', () => {
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'x' } }));

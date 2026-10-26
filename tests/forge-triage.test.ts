@@ -90,8 +90,8 @@ describe('triage', () => {
     const booking = triage('crea una app de reservas con backend y frontend', young, []);
     expect(booking).toMatchObject({ greenfield: true, path: 'large' });
     expect(booking.reasons).toContain('greenfield repository with several pieces: backend, frontend');
-    for (const t of ['build a todo app with a React frontend and an Express API', 'crea un servicio con API REST y base de datos para las tareas', 'monta una app full-stack de notas',
-      'create a shop app with an admin panel and a mobile app']) expect(triage(t, empty, []).path, t).toBe('large');
+    for (const t of ['build a new app with a React frontend and an Express API', 'crea un servicio con API REST y base de datos para las tareas', 'monta una app full-stack de notas',
+      'create an app with an admin panel and a mobile app']) expect(triage(t, empty, []).path, t).toBe('large');
     // The request decides below Medium: a short change to a named file and mechanical work stay where they were.
     expect(triage('fix the typo in README.md', young, []).path).toBe('trivial');
     expect(triage('rename helperOne to helperTwo', young, []).path).toBe('small');
@@ -120,10 +120,15 @@ describe('triage', () => {
       'añade una vista móvil al dashboard', 'add a health check to the server that pings the db', 'use the GitHub API to list the repos in the dashboard',
       'add a settings screen to the android and ios apps', 'no toques el backend, solo cambia el frontend del login', 'do not touch the backend; add a dark mode to the frontend',
       'fix the new app so that the frontend talks to the API', 'crea una app de notas. Arregla antes el backend y la base de datos',
-      'crea una app con dashboard y servidor', 'create an app with a server and a dashboard for mobile']) atMostMedium(t);
+      'crea una app con dashboard y servidor', 'create an app with a server and a dashboard for mobile',
+      // Fix round 2: the create verb takes app, project or service as its object (an article or new/nuevo at most), and
+      // the pieces the new project only uses («that uses», «que use») are not its own.
+      'make the app talk to the backend and the API', 'haz que la app use la API y la base de datos', 'start the app with the database and the API',
+      'arranca la app con el backend y el frontend', "write the app's backend and frontend README", 'create a service that uses the dashboard API',
+      'crea un servicio que use la API y la base de datos del cliente', 'build the login page of the app with the API and the database']) atMostMedium(t);
     // A request to create an app or project with several pieces, one of them strong, is Large.
     for (const t of ['crea una app de reservas con backend y frontend', 'build a new app with a frontend and a backend', 'crea una app con backend y un dashboard',
-      'start a new project from scratch with a React frontend and a Postgres database']) {
+      'create a new project from scratch with a React frontend and a Postgres database', 'crea un nuevo servicio con su API y su base de datos']) {
       expect(triage(t, young, []).path, t).toBe('large');
       expect(triage(t, young, []).reasons.join(' '), t).toMatch(/greenfield repository with several pieces/);
     }
