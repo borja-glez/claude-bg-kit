@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { COMPACT_INFINITE, COMPACT_RUN, hintOn, inForgeWorktree, looksLikeCoding, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
 import { parseConfig } from '../src/forge/config.js';
 import { listRoutes, readRoute, writeRoute } from '../src/forge/route.js';
@@ -31,6 +32,124 @@ describe('looksLikeCoding', () => {
     expect(looksLikeCoding('Add coupon support to the cart with forge please')).toBe(false);
     expect(looksLikeCoding('Añade cupones al carrito usando superpowers para el diseño')).toBe(false);
     expect(looksLikeCoding('What does the cart module do with the coupons today')).toBe(false);
+  });
+});
+
+// w8 FR2: the hint only for requests to build. HINT = true: it should get the hint.
+const HINT = true;
+const QUIET = false;
+/** The 16 prompts of the forge reviewer (2026-10-26), with what each should get. */
+const REVIEW_FORGE: [string, boolean][] = [
+  ['añade un botón de exportar a CSV en la tabla de usuarios', HINT],
+  ['arregla el typo en el README de la raíz por favor', QUIET],
+  ['cambia el color del botón primario a azul en el css', QUIET],
+  ['fix the failing test in cart.test.ts please and rerun', HINT],
+  ['add a console.log in the handler so I can debug it', QUIET],
+  ['crea un commit con estos cambios y haz push a origin', QUIET],
+  ['create a PR for this branch with a short description', QUIET],
+  ['por qué falla el build en CI desde ayer?', QUIET],
+  ['¿puedes arreglar el test que falla en cart?', HINT],
+  ['revisa este diff y dime si ves bugs', QUIET],
+  ['build the docker image and run it locally on port 8080', QUIET],
+  ['actualiza las dependencias de npm a la última versión menor', QUIET],
+  ['renombra la variable foo a bar en utils.ts', QUIET],
+  ['change the timeout from 30 to 60 seconds in config.ts', QUIET],
+  ['add an entry to the CHANGELOG for version 1.2.0 today', QUIET],
+  ['migra este proyecto de jest a vitest manteniendo los tests', HINT],
+];
+/** The 7 prompts of the integration reviewer (2026-10-26). */
+const REVIEW_INTEGRATION: [string, boolean][] = [
+  ['crea un resumen de la reunión de ayer en un documento para el equipo', QUIET],
+  ['cambia el tono de este correo para que suene más formal y cercano', QUIET],
+  ['añade una sección de conclusiones al informe del experimento de ayer', QUIET],
+  ['entrena el modelo con el nuevo split y compara las métricas con el anterior', QUIET],
+  ['usa superpowers para añadir el endpoint de login con sus tests', QUIET],
+  ['arregla el test que falla en el módulo de rutas del servidor', HINT],
+  ['sí, sigue con la siguiente tarea del plan por favor ahora', QUIET],
+];
+const BY_KIND: Record<string, [string, boolean][]> = {
+  'git operations': [
+    ['añade estos cambios a un commit nuevo con un mensaje claro', QUIET],
+    ['commit the changes and push them to origin main', QUIET],
+    ['merge the feature branch into main and fix the conflicts', QUIET],
+    ['rebase this branch onto main and fix any conflicts you find', QUIET],
+    ['create a tag v1.2.0 on the last commit and push it', QUIET],
+    ['crea una pull request hacia main con los cambios de hoy', QUIET],
+    ['crea una rama nueva para el trabajo del carrito de la compra', QUIET],
+    ['make a commit with the cart changes and a short message', QUIET],
+    // A request that also builds keeps the hint, and so does code about commits or pushes.
+    ['fix the failing cart test and then commit and push the fix', HINT],
+    ['add a pre-commit hook that runs the linter before each commit', HINT],
+    ['añade notificaciones push a la app de pedidos de la tienda', HINT],
+    ['fix the conflict between the two date libraries in the build', HINT],
+  ],
+  'typos, renames and translations': [
+    ['fix the typo in the error message of the login form', QUIET],
+    ['corrige las erratas del manual de usuario de la aplicación', QUIET],
+    ['fix the spelling mistakes in the onboarding screen texts', QUIET],
+    ['change the name of the variable foo to bar in utils.ts', QUIET],
+    ['cambia el nombre de la función getUser a fetchUser en todo el código', QUIET],
+    ['add the Spanish translation of the onboarding texts please', QUIET],
+    ['añade la traducción al inglés de los textos de la pantalla de inicio', QUIET],
+    ['add i18n support to the app with Spanish and French translations', HINT],
+  ],
+  'texts that are not code': [
+    ['write an email to the team about the release changes of today', QUIET],
+    ['crea un correo para el cliente explicando el retraso del proyecto', QUIET],
+    ['add a summary of the meeting notes to the shared document', QUIET],
+    ['add a section to the README explaining how to install it', QUIET],
+    ['crea el acta de la reunión de planificación del lunes pasado', QUIET],
+    // Code that sends or handles one of those texts is code.
+    ['crea un endpoint que envía un correo de bienvenida al registrarse', HINT],
+    ['add email notifications to the order service when an order ships', HINT],
+    ['añade validación de email y contraseña al formulario de registro', HINT],
+    ['arregla el informe de ventas que sale vacío desde el lunes', HINT],
+  ],
+  questions: [
+    ['explícame cómo se añade un cupón al carrito en el código actual', QUIET],
+    ['dime si hace falta añadir un índice a la tabla de pedidos', QUIET],
+    ['Is there a way to add coupons to the cart without a new table?', QUIET],
+    ['¿me puedes explicar cómo se crea un pedido en el backend?', QUIET],
+    ['explain how coupons work in the cart and add a test for the expiry', HINT],
+  ],
+  'features, fixes, refactors and new projects': [
+    ['añade un descuento por cupón al carrito de la tienda', HINT],
+    ['fix the bug where the cart total ignores the coupon discount', HINT],
+    ['refactoriza el módulo de pagos para separar la validación del cobro', HINT],
+    ['refactor the auth middleware to read the token from a cookie', HINT],
+    ['crea una app de reservas con backend y frontend en Node', HINT],
+    ['create a new CLI project in Rust that converts CSV files to JSON', HINT],
+    ['monta un proyecto nuevo con Vite y React para el panel de control', HINT],
+    ['cambia el sistema de login para usar OAuth con la cuenta de Google', HINT],
+    ['change the color handling of the chart component for dark mode', HINT],
+    ['añade una sección de precios a la landing page con tres planes', HINT],
+  ],
+};
+
+describe('the hint only for requests to build (w8 FR2)', () => {
+  it("the forge reviewer's 16 prompts and the integration reviewer's 7", () => {
+    for (const [p, want] of [...REVIEW_FORGE, ...REVIEW_INTEGRATION]) expect(looksLikeCoding(p), p).toBe(want);
+  });
+  for (const [kind, rows] of Object.entries(BY_KIND)) {
+    it(kind, () => { for (const [p, want] of rows) expect(looksLikeCoding(p), p).toBe(want); });
+  }
+  it('the hook gives the hint as the table says, in a git repository', () => {
+    const root = repo('forge-hint-table-');
+    const cfg = tmp('forge-hint-table-cfg-');
+    for (const [p, want] of [...REVIEW_FORGE, ...REVIEW_INTEGRATION]) {
+      const r = run(['hook', 'route-prompt'], { cwd: root, now: () => NOW, env: { CLAUDE_CONFIG_DIR: cfg }, stdin: JSON.stringify({ session_id: 'S1', prompt: p }) });
+      expect(r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : null, p).toBe(want ? ROUTE_HINT : null);
+    }
+  });
+  it("keeps the hint of route-eval's Medium and Large prompts that name no method, and leaves out its Trivial, question and agent ones", () => {
+    const prompts = JSON.parse(readFileSync(fileURLToPath(new URL('../scripts/route-eval/prompts.json', import.meta.url)), 'utf8')) as { id: string; expected: string; text: string }[];
+    for (const p of prompts.filter(x => x.expected === 'route' && !/superpowers|forge/i.test(x.text))) expect(looksLikeCoding(p.text), p.id).toBe(true);
+    for (const p of prompts.filter(x => x.expected === 'none')) expect(looksLikeCoding(p.text), p.id).toBe(false);
+  });
+  it('stays linear on a long prompt that asks to build', () => {
+    const t0 = performance.now();
+    for (const p of ['añade un botón y '.repeat(20000), 'fix the cart '.repeat(30000) + 'and commit', `cambia el color ${'a '.repeat(50000)}`]) looksLikeCoding(p);
+    expect(performance.now() - t0).toBeLessThan(300);
   });
 });
 
