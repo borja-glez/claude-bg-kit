@@ -753,6 +753,75 @@ test('inline at one row the pane draws one row: the kept card clipped, its title
   await ui.unmount();
 });
 
+// w8 M4: superpowers 7's ledgers, as this repository's own hold them: the plan's path absolute in the header (`X:/…`,
+// `X:\…`, a worktree's too) and in plan-path (msys `/x/…`, or relative), on a Windows root.
+function serveWindowsRoot(on: On, files: Record<string, string>) {
+  on('session.root', () => ({ value: 'E:\\repo' }));
+  on('session.id', () => ({ value: SESSION_ID }));
+  on('fs.read', (_$, e) => (norm(e.path) in files ? { value: files[norm(e.path)]! } : { deny: `ENOENT ${e.path}` }));
+  on('fs.exists', (_$, e) => ({ value: norm(e.path) in files }));
+  on('fs.stat', (_$, e) => (norm(e.path) in files ? { value: { kind: 'file' as const, size: files[norm(e.path)]!.length, mtimeMs: NOW - 60_000, isLink: false } } : { deny: `ENOENT ${e.path}` }));
+  on('fs.list', (_$, e) => {
+    const prefix = `${norm(e.path)}/`;
+    const names = new Map<string, 'file' | 'dir'>();
+    for (const path of Object.keys(files)) if (path.startsWith(prefix)) { const [head = '', ...rest] = path.slice(prefix.length).split('/'); names.set(head, rest.length ? 'dir' : 'file'); }
+    return names.size ? { value: [...names].map(([name, kind]) => ({ name, kind, size: 0, mtimeMs: NOW - 60_000, isLink: false })) } : { deny: `ENOENT ${e.path}` };
+  });
+}
+const SP_PROGRESS = '\n## Progress\nTasks 1-2: complete (abc..def)\nTask 3: fix round 1/5 (flaky test)\n';
+
+test('a superpowers ledger whose plan path is absolute, in plan-path or in its header, counts against that plan (w8 M4)', async ($, on) => {
+  serveWindowsRoot(on, {
+    '/repo/.superpowers/sdd/a/progress.md': `# SDD ledger — plan: E:\\repo\\docs\\superpowers\\plans\\abs.md${SP_PROGRESS}`,
+    '/repo/.superpowers/sdd/a/plan-path': '/e/repo/docs/superpowers/plans/abs.md\n',
+    '/repo/docs/superpowers/plans/abs.md': PLAN,
+  });
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: 'E:\\repo', surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  const text = await said(ui);
+  expect(text).toContain('docs/superpowers/plans/abs.md');
+  expect(text).not.toContain('E:');
+  expect(text).toMatch(/22%.*Task 3\/9.*2 done/);
+  await ui.unmount();
+});
+
+test("a ledger whose header names a plan in a worktree of the root, with no plan-path, reads it there (w8 M4)", async ($, on) => {
+  serveWindowsRoot(on, {
+    '/repo/.superpowers/sdd/b/progress.md': `# SDD ledger — plan: /e/repo/.claude/worktrees/w1/docs/superpowers/plans/wt.md${SP_PROGRESS}`,
+    '/repo/.claude/worktrees/w1/docs/superpowers/plans/wt.md': PLAN,
+  });
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: 'E:\\repo', surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  expect(await said(ui)).toMatch(/\.claude\/worktrees\/w1\/docs\/superpowers\/plans\/wt\.md.*Task 3\/9/);
+  await ui.unmount();
+});
+
+test('a ledger whose plan cannot be read shows the tasks done, never a total nor a false 100 % (w8 M4)', async ($, on) => {
+  serveWindowsRoot(on, {
+    '/repo/.superpowers/sdd/c/progress.md': '# SDD ledger — plan: D:/elsewhere/plan.md\n\n## Progress\nTasks 1-3: complete (abc..def)\n',
+    '/repo/.superpowers/sdd/c/plan-path': 'docs/superpowers/plans/gone.md',
+  });
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: 'E:\\repo', surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  const text = await said(ui);
+  expect(text).toContain('3 done');
+  expect(text).not.toMatch(/\d+%/);
+  expect(text).not.toMatch(/\/3\b/);
+  await ui.unmount();
+});
+
 // w8 M3: forge's files caught half written (an execution, a live signal, a status, a job) beside a run's own.
 const AT = (min: number) => new Date(NOW + min * 60_000).toISOString();
 const EXEC = JSON.stringify({

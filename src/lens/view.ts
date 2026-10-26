@@ -171,11 +171,12 @@ export function todoCells(t: NonNullable<PanelModel['todos']>): Cells {
   return { cells, done: t.done, total: t.total };
 }
 
+// w8 M4: a run with no plan read has no total, so no cells and no count.
 export function superpowersCells(s: NonNullable<PanelModel['superpowers']>): Cells {
   const cells: CellState[] = [];
-  const total = Math.min(s.tasks, 60);
-  for (let i = 0; i < total; i++) cells.push(i < s.done ? 'done' : i === s.done ? (s.current ? 'failed' : 'active') : 'pending');
-  return { cells, done: s.done, total: s.tasks };
+  const total = s.tasks ?? 0;
+  for (let i = 0; i < Math.min(total, 60); i++) cells.push(i < s.done ? 'done' : i === s.done ? (s.current ? 'failed' : 'active') : 'pending');
+  return { cells, done: s.done, total };
 }
 
 export const ratio = (done: number, total: number): number => (total > 0 ? Math.max(0, Math.min(1, done / total)) : 0);

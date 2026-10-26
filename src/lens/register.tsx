@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
 import { noneBand, type BandModel } from '../mod/model.js';
-import { buildPanelModel, bandKey, parseSddLedger, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
+import { buildPanelModel, bandKey, parsePlanTasks, parseSddLedger, planFileOf, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
 import { normalizeStatus, statusKey } from '../lib/forge-status.js';
 import { JOB_FILE_MAX, runRoleOf } from './activities.js';
@@ -92,7 +92,7 @@ let roadmap: BandModel = noneBand();
 let bandRead = false;
 
 type PanelFiles = {
-  ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
+  ledger?: string; ledgerPlan?: string; ledgerPlanPath?: string; planFallback?: string; ledgerMtimeMs?: number;
   forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number; forgeDecisions?: string;
   forgeExecution?: string; forgeExecTasks?: Record<string, string>; forgeLive?: Record<string, string>;
   forgeStatuses?: string[]; forgeBriefsBy?: Record<string, number>; forgeJobs?: string[];
@@ -358,13 +358,6 @@ async function isPaneOpen($: Engine): Promise<boolean> {
   try { return (await $.ui.panes()).some(p => p.id === PANE); } catch { return false; }
 }
 
-// A plan path from the ledger is read only when it is a relative .md path inside the root.
-function planFile(root: string, path: string): string | null {
-  const p = path.trim().replace(/\\/g, '/');
-  if (!p.toLowerCase().endsWith('.md') || p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.split('/').includes('..')) return null;
-  return join(root, p);
-}
-
 async function newest($: Engine, paths: string[]): Promise<{ path: string; t: number } | null> {
   let best: { path: string; t: number } | null = null;
   for (const path of paths) {
@@ -551,6 +544,17 @@ async function loadPanelFiles($: Engine, now: number): Promise<PanelFiles> {
   return { ...await loadSuperpowersFiles($, root, now), ...forge };
 }
 
+// A plan-path file holds one path: one above this is not read.
+const PLAN_PATH_MAX = 4096;
+// The plan as the card names it: its path under the base it was found in.
+function shownPlanPath(file: string, bases: readonly string[]): string {
+  for (const b of bases) {
+    const base = b.replace(/[\\/]+$/, '');
+    if (file.startsWith(`${base}/`)) return file.slice(base.length + 1);
+  }
+  return file;
+}
+
 async function loadSuperpowersFiles($: Engine, root: string, now: number): Promise<PanelFiles> {
   const out: PanelFiles = {};
   const sdd = join(root, '.superpowers', 'sdd');
@@ -560,10 +564,23 @@ async function loadSuperpowersFiles($: Engine, root: string, now: number): Promi
     out.ledger = await readOpt($, ledger.path);
     if (out.ledger !== undefined) out.ledgerMtimeMs = ledger.t;
   }
-  if (out.ledger !== undefined) {
-    const planPath = parseSddLedger(out.ledger).planPath;
-    const file = planPath ? planFile(root, planPath) : null;
-    if (file) out.ledgerPlan = await readOpt($, file);
+  if (ledger && out.ledger !== undefined) {
+    // w8 M4: superpowers 7 writes the plan's path to plan-path beside the ledger, and absolute (`X:/…`, msys `/x/…`) there
+    // and in the ledger's header: the first that names a plan inside the root, or its main checkout from a worktree.
+    if (mainCheckout === null) mainCheckout = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
+    const bases = mainCheckout !== root ? [root, mainCheckout] : [root];
+    const marker = join(ledger.path.slice(0, ledger.path.lastIndexOf('/')), 'plan-path');
+    let markerText: string | undefined;
+    try { if ((await $.fs.stat(marker)).size <= PLAN_PATH_MAX) markerText = await readOpt($, marker); } catch { /* none */ }
+    for (const named of [markerText, parseSddLedger(out.ledger).planPath]) {
+      const file = named ? planFileOf(named, bases) : null;
+      const text = file ? await readOpt($, file) : undefined;
+      if (file && text !== undefined && parsePlanTasks(text).length) {
+        out.ledgerPlan = text;
+        out.ledgerPlanPath = shownPlanPath(file, bases);
+        break;
+      }
+    }
     return out;
   }
   // No ledger: the newest superpowers plan, if it was touched within the day, shown by its checkboxes.

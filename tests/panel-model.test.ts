@@ -206,8 +206,8 @@ describe('buildPanelModel', () => {
     expect(m.subagents[0].seconds).toBeNull();
     expect(buildPanelModel({ ...base, activity: act({ turnSince: NaN }) }).turnSeconds).toBeNull();
   });
-  it('ledger without plan text still reports done count', () => {
-    expect(buildPanelModel({ ...base, ledger: LEDGER }).superpowers).toMatchObject({ tasks: 5, done: 4 });
+  it('ledger without plan text still reports done count, and no total (w8 M4: the highest task seen is none)', () => {
+    expect(buildPanelModel({ ...base, ledger: LEDGER }).superpowers).toMatchObject({ tasks: null, done: 4 });
   });
   it('maps activity', () => {
     const m = buildPanelModel({
