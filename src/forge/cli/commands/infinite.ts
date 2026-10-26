@@ -15,7 +15,7 @@ import { activeProfileAt, prepareProfile, profileArgs, profileBlock, readableRun
 import { autonomousFor, recordSessions } from '../../autonomous.js';
 import { loadConfig, type ForgeConfig } from '../../config.js';
 import { resetDelegation, trustFor, type TrustState } from '../../trust.js';
-import { costNote } from '../../run-cost.js';
+import { capNote, costNote } from '../../run-cost.js';
 import { activeProductRun, planOf, stopContext, unownedOf, runRootOf, runReply } from '../shared.js';
 
 export const command: Command = (args, ctx) => {
@@ -76,10 +76,16 @@ export const command: Command = (args, ctx) => {
       && stopReason(current, stopContext(runRoot, io.now())) === null) throw new UsageError('infinite start: a run is already active (forge stop, or forge infinite status)');
     const main = mainCheckout(io.cwd);
     const autonomous = profiled ? profileBlock(main, io.cwd, profiled.profile, profiled.name) : null;
-    // Without --max-usd, the config's budget.usd: a config that does not load refuses the start (it may hold the cap).
+    // Without --max-usd, the config's budget.usd. m9: a profile's is its worktree's config, the one its run trusts (below),
+    // read as the trust reads it: one that does not load gives no cap. Any other run's is the main checkout's, whose
+    // triage every cycle loads: one that does not load refuses the start, with or without the cap (cycle 1 would fail on it).
     let usd = maxUsd;
-    if (usd === undefined) {
-      try { usd = loadConfig(main).budget?.usd; } catch (e) { throw new UsageError(`infinite start: ${(e as Error).message}; fix it, or give the cap with --max-usd`); }
+    if (autonomous) {
+      if (usd === undefined) { try { usd = loadConfig(autonomous.worktree).budget?.usd; } catch { usd = undefined; } }
+    } else {
+      let own: ForgeConfig;
+      try { own = loadConfig(main); } catch (e) { throw new UsageError(`infinite start: ${(e as Error).message}; fix \`.forge/config.yaml\` before you start: every cycle reads it`); }
+      usd ??= own.budget?.usd;
     }
     const budget = { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}), ...(usd !== undefined ? { usd } : {}) };
     const run: RunState = { ...startRun(io.now(), budget, queueMax, session, locale ?? null), ...(autonomous ? { autonomous } : {}) };
@@ -102,7 +108,8 @@ export const command: Command = (args, ctx) => {
       const t = config ? trustFor(autonomous.worktree, config, ts()) : null;
       if (t?.hash) trust = { state: t.state, hash: t.hash, ...(t.blocked ? { blocked: true as const, note: false as const } : {}) };
     }
-    return json({ ...run, publish: { infinite: infinitePublish(main, run, io.now()) }, ...(trust ? { trust } : {}) });
+    // m10: with a cap, the person hears once what it is checked against and when.
+    return json({ ...run, ...(usd !== undefined ? { costNote: capNote(usd) } : {}), publish: { infinite: infinitePublish(main, run, io.now()) }, ...(trust ? { trust } : {}) });
   }
   if (sub === 'phase') {
     // 6b-3, spec «Fases que se replanifican»: the first phase of the plan, in its order, whose tasks the roadmap's state says are

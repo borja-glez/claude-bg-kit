@@ -42,7 +42,13 @@ describe('transcriptCost', () => {
     const c = transcriptCost(file, Date.parse(T0))!;
     // m1: 4 + 2 = 6; m2 (Sonnet 5.5: $0.1 read, $4 1-hour write, $2.5 a 5-minute one): 0.1 + 4 + 2.5 = 6.6
     expect(c.usd).toBeCloseTo(12.6, 6);
-    expect(c).toMatchObject({ messages: 2, unpriced: 0, truncated: false });
+    expect(c).toMatchObject({ messages: 2, unpriced: 0, unread: false });
+  });
+  it('m11: a line past the read limit is skipped, and the cost says part of it was not read', () => {
+    const dir = tmp('forge-cost-long-');
+    const file = path.join(dir, 's1.jsonl');
+    writeFileSync(file, lines(assistant(1, 'm1', 'claude-opus-5-5', { input: M }), assistant(2, 'm2', 'claude-opus-5-5', { input: M }).replace('"x"', `"${'y'.repeat(2000)}"`)));
+    expect(transcriptCost(file, Date.parse(T0), { maxLine: 1000 })).toMatchObject({ usd: 4, messages: 1, unread: true });
   });
   it('counts a model it has no price for as unpriced, unless the message used no tokens', () => {
     const dir = tmp('forge-cost-unpriced-');
@@ -61,23 +67,29 @@ describe('runCost', () => {
     config = tmp('forge-cost-config-');
     mkdirSync(projects(), { recursive: true });
   });
-  it("adds the run's session, its subagents at any depth and the sessions its ledger names since the start", () => {
+  it("adds the run's session, its subagents at any depth and the members of the run's executions since the start", () => {
     writeFileSync(path.join(projects(), 's1.jsonl'), lines(assistant(1, 'a', 'claude-opus-5-5', { input: M })));
     mkdirSync(path.join(projects(), 's1', 'subagents', 'nested'), { recursive: true });
     writeFileSync(path.join(projects(), 's1', 'subagents', 'agent-x.jsonl'), lines(assistant(2, 'b', 'claude-opus-5-5', { output: M / 10 })));
     writeFileSync(path.join(projects(), 's1', 'subagents', 'nested', 'agent-y.jsonl'), lines(assistant(3, 'c', 'claude-opus-5-5', { input: M / 2 })));
-    // a member session in another project folder (its worktree), named by the ledger
+    // a member session of the run's execution e1 (its coordinator, s1, logged in it), in another project folder (its worktree)
     mkdirSync(path.join(config, 'projects', 'other'), { recursive: true });
     writeFileSync(path.join(config, 'projects', 'other', 's2.jsonl'), lines(assistant(4, 'd', 'claude-opus-5-5', { input: M })));
-    appendEvent(root, { ts: at(4), kind: 'phase', task: 'T1', phase: 'implement', session: 's2' });
+    appendEvent(root, { ts: at(2), kind: 'phase', task: 'T1', phase: 'brief', session: 's1', runId: 'e1' });
+    appendEvent(root, { ts: at(4), kind: 'phase', task: 'T1', phase: 'implement', session: 's2', runId: 'e1' });
+    // m7: another forge session of the person in the same checkout, outside the run's executions, is not the run's
+    writeFileSync(path.join(config, 'projects', 'other', 's3.jsonl'), lines(assistant(4, 'e', 'claude-opus-5-5', { input: 25 * M })));
+    appendEvent(root, { ts: at(5), kind: 'phase', task: 'fix-x', phase: 'implement', session: 's3' });
+    appendEvent(root, { ts: at(5), kind: 'phase', task: 'U1', phase: 'implement', session: 's3', runId: 'other-run' });
     // a session that logged only before the run started is not the run's
-    appendEvent(root, { ts: at(-10), kind: 'phase', task: 'T0', phase: 'implement', session: 's0' });
+    appendEvent(root, { ts: at(-10), kind: 'phase', task: 'T0', phase: 'implement', session: 's0', runId: 'e1' });
     const c = runCost({ main: root, runRoot: root, run: run0(), configDir: config, now: new Date(at(10)) });
     expect(c).toEqual({ usd: 4 + 2 + 2 + 4, partial: false, at: at(10) });
   });
   it('is a lower bound (partial) when a session has no transcript, and unknown when none has one', () => {
     writeFileSync(path.join(projects(), 's1.jsonl'), lines(assistant(1, 'a', 'claude-opus-5-5', { input: M })));
-    appendEvent(root, { ts: at(4), kind: 'phase', task: 'T1', phase: 'implement', session: 'gone' });
+    appendEvent(root, { ts: at(3), kind: 'phase', task: 'T1', phase: 'brief', session: 's1', runId: 'e1' });
+    appendEvent(root, { ts: at(4), kind: 'phase', task: 'T1', phase: 'implement', session: 'gone', runId: 'e1' });
     expect(runCost({ main: root, runRoot: root, run: run0(), configDir: config, now: new Date(at(10)) })).toEqual({ usd: 4, partial: true, at: at(10) });
     expect(runCost({ main: root, runRoot: root, run: run0({ sessionId: 'nobody' }), configDir: tmp('forge-cost-empty-'), now: new Date(at(10)) }))
       .toEqual({ usd: null, partial: true, at: at(10) });
@@ -132,12 +144,21 @@ describe('forge infinite start --max-usd and the cycle that measures it', () => 
     const alone = run(['infinite', 'start', '--max-usd', '20', '--session', 's1'], io);
     expect(alone.code).toBe(2);
     expect(alone.stderr).toContain('--cycles');
-    // a config that does not load may hold the cap: refused, unless the cap comes with --max-usd
+    // m9: a config that does not load is refused with or without the cap: the first cycle would fail on it anyway
     writeFileSync(path.join(root, '.forge', 'config.yaml'), 'budget:\n  usd: -1\n');
-    const broken = run(['infinite', 'start', '--cycles', '3', '--session', 's1'], io);
-    expect(broken.code).toBe(2);
-    expect(broken.stderr).toContain('--max-usd');
-    expect(run(['infinite', 'start', '--cycles', '3', '--max-usd', '4', '--session', 's1'], io).code).toBe(0);
+    for (const cap of [[], ['--max-usd', '4']]) {
+      const broken = run(['infinite', 'start', '--cycles', '3', ...cap, '--session', 's1'], io);
+      expect(broken.code).toBe(2);
+      expect(broken.stderr).toContain('fix `.forge/config.yaml`');
+      expect(broken.stderr).not.toContain('--max-usd');
+    }
+  });
+  it('m10: a start with a cap says once that it is a lower bound checked between cycles', () => {
+    const out = JSON.parse(run(['infinite', 'start', '--cycles', '3', '--max-usd', '5', '--session', 's1'], io).stdout);
+    expect(out.costNote).toMatch(/lower bound/);
+    expect(out.costNote).toMatch(/after each cycle/);
+    run(['stop'], io);
+    expect(JSON.parse(run(['infinite', 'start', '--cycles', '3', '--session', 's1'], io).stdout)).not.toHaveProperty('costNote');
   });
   it('each cycle records what the run spent; at the cap the run stops cleanly with budget-usd', () => {
     expect(run(['infinite', 'start', '--cycles', '9', '--max-usd', '5', '--session', 's1'], io).code).toBe(0);
@@ -165,6 +186,23 @@ describe('forge infinite start --max-usd and the cycle that measures it', () => 
     run(['stop'], io);
     run(['infinite', 'start', '--cycles', '2', '--session', 's1'], io);
     expect(JSON.parse(run(['cycle', '--progress', 'yes'], io).stdout)).not.toHaveProperty('cost');
+  });
+  it("m9: a profile takes budget.usd from its worktree's config, the one its run trusts, and tolerates one that does not load", () => {
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't'); g('config', 'core.autocrlf', 'false');
+    writeFileSync(path.join(root, 'a.txt'), 'a'); g('add', 'a.txt'); g('commit', '-qm', 'a');
+    const prepared = JSON.parse(run(['infinite', 'prepare', '--profile', 'spike', '--name', 'tetris'], io).stdout) as { worktree: string };
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'budget:\n  usd: 9\n');
+    mkdirSync(path.join(prepared.worktree, '.forge'), { recursive: true });
+    writeFileSync(path.join(prepared.worktree, '.forge', 'config.yaml'), 'budget:\n  usd: 3\n');
+    const wt = { ...io, cwd: prepared.worktree, git: defaultGit(prepared.worktree) };
+    expect(run(['infinite', 'start', '--profile', 'spike', '--name', 'tetris', '--hours', '2', '--session', 'c1'], wt).code).toBe(0);
+    expect(readRun().budget).toEqual({ hours: 2, usd: 3 });
+    run(['stop'], io);
+    writeFileSync(path.join(prepared.worktree, '.forge', 'config.yaml'), 'budget:\n  usd: -1\n');
+    expect(run(['infinite', 'start', '--profile', 'spike', '--name', 'tetris', '--hours', '2', '--session', 'c2'], wt).code).toBe(0);
+    expect(readRun().budget).toEqual({ hours: 2 });
   });
   it('the Stop hook block shows what was spent of the cap', () => {
     run(['infinite', 'start', '--cycles', '9', '--max-usd', '5', '--session', 's1'], io);
