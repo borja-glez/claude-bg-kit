@@ -167,6 +167,23 @@ describe('routingRule and routeReminder', () => {
     expect(routeReminder({ ...r, stage: 'handed-off' }, NOW.getTime())).toBeNull();
     expect(routeReminder(null, NOW.getTime())).toBeNull();
   });
+  it("names the person's choice and that using-superpowers puts their instructions above its skills, over brainstorming's writing-plans gate (w8 FR6)", () => {
+    const r = { task: 't1', chosen: 'superpowers-design' as const, by: 'user' as const, stage: 'designing' as const, ts: NOW.toISOString(), session: 'S1' };
+    const design = routeReminder(r, NOW.getTime())!;
+    expect(design.startsWith('forge: the user chose «superpowers designs, forge builds» for task t1 ("superpowers-design").')).toBe(true);
+    expect(design).toContain("using-superpowers puts the user's instructions above its skills");
+    expect(design).toContain('brainstorming\'s "invoke superpowers:writing-plans and no other skill" gives way to it');
+    // The hand-off comes before the case without a file, and the gate's own words come before the hand-off.
+    expect(design.indexOf('writing-plans and no other skill')).toBeLessThan(design.indexOf('hand off with forge:run --from-spec'));
+    expect(design.indexOf('hand off with forge:run --from-spec')).toBeLessThan(design.indexOf('If brainstorming ends'));
+    const plan = routeReminder({ ...r, chosen: 'superpowers-plan', stage: 'planning', plan: 'docs/p.md' }, NOW.getTime())!;
+    expect(plan.startsWith('forge: the user chose «superpowers plans, forge executes» for task t1 ("superpowers-plan").')).toBe(true);
+    expect(plan).toContain("using-superpowers puts the user's instructions above its skills");
+    expect(plan).toContain('hand off with forge:run --superpowers-plan docs/p.md instead of subagent-driven-development or executing-plans');
+    expect(plan).not.toContain('writing-plans and no other skill');
+    // A route auto mode chose is still the person's: they set auto.
+    expect(routeReminder({ ...r, by: 'auto' }, NOW.getTime())).toMatch(/^forge: the user's auto mode chose «superpowers designs, forge builds»/);
+  });
   it('reminds the hand-over of a brainstorming that ends without a file, on both mixed routes (A1)', () => {
     const r = { task: 't1', chosen: 'superpowers-design' as const, by: 'user' as const, stage: 'designing' as const, ts: NOW.toISOString() };
     for (const doc of [r, { ...r, chosen: 'superpowers-plan' as const, stage: 'planning' as const }]) {
@@ -227,6 +244,14 @@ describe('forge hook route-session and route-prompt', () => {
     personal('workflow: off\n');
     expect(hook('route-prompt', PROMPT).stdout).toBe('');
     expect(hook('route-session', { session_id: 'S1' }).stdout).toBe('');
+  });
+  it('the message that approves the spec carries the reminder, whatever it says (w8 FR6)', () => {
+    writeRoute(root, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'S1' });
+    for (const prompt of ['Sí, la spec está bien, la apruebo', 'lgtm', 'Approved. Go ahead.']) {
+      const text = context(hook('route-prompt', { session_id: 'S1', prompt }))?.additionalContext as string;
+      expect(text, prompt).toContain("using-superpowers puts the user's instructions above its skills");
+      expect(text, prompt).toContain('hand off with forge:run --from-spec');
+    }
   });
   it('outside a git repository there is neither rule nor hint; the same folder once in git gets both (w8 FR2)', () => {
     const plain = tmp('forge-route-nogit-');

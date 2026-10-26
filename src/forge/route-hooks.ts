@@ -153,15 +153,19 @@ function fresh(r: RouteDoc, now: number): boolean {
  *  themselves; a plain forge:run does not, so the hand-over without a file names the command that does. */
 export function routeReminder(r: RouteDoc | null, now: number): string | null {
   if (!r || (r.stage !== 'designing' && r.stage !== 'planning') || !fresh(r, now)) return null;
+  if (r.chosen !== 'superpowers-design' && r.chosen !== 'superpowers-plan') return null;
   // Without a session (never so in the hooks, whose routes all have one) the command takes the environment's id.
   const close = `FORGE route stage --stage handed-off${r.session ? ` --session ${r.session}` : ''}`;
+  // w8 FR6: it rides on every message of the person while the route is half done, the one that approves the spec
+  // included, and wins over the next step a superpowers skill names by naming the person's choice and the rule of
+  // using-superpowers that puts the user's instructions above its skills (brainstorming 7.0.0's gate names writing-plans).
+  const who = r.by === 'auto' ? "the user's auto mode chose" : 'the user chose';
+  const choice = r.chosen === 'superpowers-design' ? '«superpowers designs, forge builds»' : '«superpowers plans, forge executes»';
+  const lead = `forge: ${who} ${choice} for task ${r.task} ("${r.chosen}"). using-superpowers puts the user's instructions above its skills, so this choice wins over the next step a superpowers skill names`;
   if (r.chosen === 'superpowers-design') {
-    return `forge: the user routed task ${r.task} as "${r.chosen}". When the spec is written and approved, hand off with forge:run --from-spec ${r.spec ?? '<the spec path>'} instead of writing-plans. If brainstorming ends without a spec (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r.task}/task.txt, run ${close} and invoke forge:run`;
+    return `${lead}: brainstorming's "invoke superpowers:writing-plans and no other skill" gives way to it. When the spec is written and approved, hand off with forge:run --from-spec ${r.spec ?? '<the spec path>'} instead of writing-plans. If brainstorming ends without a spec (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r.task}/task.txt, run ${close} and invoke forge:run`;
   }
-  if (r.chosen === 'superpowers-plan') {
-    return `forge: the user routed task ${r.task} as "${r.chosen}". When the plan is written, hand off with forge:run --superpowers-plan ${r.plan ?? '<the plan path>'} instead of subagent-driven-development or executing-plans. If brainstorming ends without a spec or a plan (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r.task}/task.txt, run ${close} and invoke forge:run`;
-  }
-  return null;
+  return `${lead}. When the plan is written, hand off with forge:run --superpowers-plan ${r.plan ?? '<the plan path>'} instead of subagent-driven-development or executing-plans. If brainstorming ends without a spec or a plan (a quick task, a small change agreed in the chat, the questions skipped), do not build it: write the decisions to .forge/work/${r.task}/task.txt, run ${close} and invoke forge:run`;
 }
 
 /** K1-12: a forge task of this session counts as open this long after its last event. */
