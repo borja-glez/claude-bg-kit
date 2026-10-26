@@ -80,7 +80,8 @@ describe('the texts of the page (G-19, G-20, H-20)', () => {
     expect([es.run.stage.triage, es.run.stage.done, es.run.stage.blocked, es.run.stage.stopped]).toEqual(['triaje', 'hecha', 'bloqueada', 'parada']);
     expect(es.action).toEqual({ accept: 'aceptada', fix: 'arreglo', redo: 'rehacer' });
     expect(es.run.taskStatus.stopped).toBe('parada');
-    expect(es.run.stoppedHint).toBe('parada con /forge:stop');
+    // w8 fix round 1: the page says it as the band does, «detenida con /forge:stop».
+    expect(es.run.stoppedHint).toBe('detenida con /forge:stop');
     expect(dictFor('en').run.stoppedHint).toBe('stopped with /forge:stop');
   });
 });

@@ -425,11 +425,11 @@ export const register: Register = on => {
           ...address('design', m.designUrl, t.viewDesign, t.short.viewDesign, 'd', t.designCopied, t.designShown),
         ];
       } else if (m.mode === 'run') {
-        // w8 W1: Stop only while the run is active. One that ended is closed with Close (/forge:stop, at once, as a
-        // notice's), except a finished one, which its merge closes.
+        // w8 W1: Stop only while the run is active. One that ended, a finished one too (a merge the person declined leaves
+        // it open), is closed with Close (/forge:stop, at once, as a notice's).
         const end: Control[] = !m.ended
           ? [{ key: 'stop-run', label: t.stopRun, hotkey: 't', confirm: true, press: confirmed('stop-run', 't', '/forge:stop', m.viewer.runId) }]
-          : m.ended === 'finished' ? [] : [{ key: 'close', label: t.close, short: t.short.close, hotkey: 'c', press: submit('/forge:stop') }];
+          : [{ key: 'close', label: t.close, short: t.short.close, hotkey: 'c', press: submit('/forge:stop') }];
         modeControls = [
           { key: 'status', label: t.status, short: t.short.status, hotkey: 's', press: submit('/waypoint:status') },
           ...end,

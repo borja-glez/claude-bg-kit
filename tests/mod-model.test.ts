@@ -548,12 +548,16 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
       .toBe(`◌ diseño a medias: a|b ${'x'.repeat(35)}… · hace 3 min`);
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', since: '2026-10-13T12:00:00.000Z' })).toBe('◌ ejecución parada: 3/12 integradas · hace 2 d');
     // W1 (w8): a run that finished reads finished, never stopped.
-    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 3, stopReason: 'finished', since: '2026-10-13T12:00:00.000Z' })).toBe('◌ ejecución terminada: 3/3 integradas · hace 2 d');
-    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 3, stopReason: 'finished' }, 'en')).toBe('◌ execution finished: 3/3 integrated · 3 min ago');
+    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 3, stopReason: 'finished', since: '2026-10-13T12:00:00.000Z' })).toBe('✓ ejecución terminada: 3/3 integradas · hace 2 d');
+    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 3, stopReason: 'finished' }, 'en')).toBe('✓ execution finished: 3/3 integrated · 3 min ago');
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: null }, 'en')).toBe('◌ execution without a coordinator: 3/12 integrated · 3 min ago');
     const openRun = { kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', coordinatorOpen: true };
     expect(n(openRun)).toBe('◌ ejecución parada, abierta en otra conversación: 3/12 integradas · hace 3 min');
     expect(n(openRun, 'en')).toBe('◌ execution stopped, open in another conversation: 3/12 integrated · 3 min ago');
+    // w8 fix round 1 (Important 1): a run that finished reads finished even while its coordinator's conversation is open.
+    const finishedOpen = { ...openRun, stopReason: 'finished', integrated: 3, total: 3 };
+    expect(n(finishedOpen)).toBe('✓ ejecución terminada (abierta en otra conversación): 3/3 integradas · hace 3 min');
+    expect(n(finishedOpen, 'en')).toBe('✓ execution finished (open in another conversation): 3/3 integrated · 3 min ago');
   });
   it('oneLine drops the control and bidi characters, and clip only cuts by width (M1)', () => {
     const c = (...codes: number[]) => String.fromCharCode(...codes);

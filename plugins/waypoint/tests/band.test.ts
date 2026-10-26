@@ -207,8 +207,8 @@ test('the run band shows the execution, stops it and offers no per-session work 
   }
 });
 
-// w8 W1: a run that ended is not stopped again. A finished one reads finished, with no Stop and no Close (a merge closes
-// it); one that stalled, was stopped or ran out of budget says why and offers Close (/forge:stop, sent at once).
+// w8 W1: a run that ended is not stopped again: it says why and offers Close (/forge:stop, sent at once), a finished one
+// too, since a run whose merge was declined stays open (fix round 1, Minor 3).
 test('the run band of an ended run says why, without Stop', async ($, on) => {
   engineBottom(on);
   const sent: string[] = [];
@@ -220,8 +220,10 @@ test('the run band of an ended run says why, without Stop', async ($, on) => {
   let ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
   expect(await lineOf(ui)).toBe('► EJECUCIÓN · ✓ terminada · 12/12 integradas');
   expect(await ui.find({ key: 'stop-run' })).toBeUndefined();
-  expect(await ui.find({ key: 'close' })).toBeUndefined();
+  expect(await ui.find({ type: 'Button', text: 'Cerrar' })).toBeDefined();
   expect(await ui.find({ type: 'Button', text: 'Estado' })).toBeDefined();
+  await ui.press({ key: 'close' });
+  expect(sent.at(-1)).toBe('/forge:stop');
   await ui.unmount();
   for (const [why, line] of [['stalled', '▲ atascada'], ['stopped', '■ detenida con /forge:stop'], ['budget', '▲ sin presupuesto']] as const) {
     band = ended(why);

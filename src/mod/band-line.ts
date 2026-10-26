@@ -60,7 +60,7 @@ export const TEXT = {
     noticeOtherDesign: 'otra sesión ({seat}) trabaja en el diseño',
     noticeOtherRun: 'ejecución de forge en curso, la coordina otra sesión',
     noticePrevTask: 'quedó a medias:', noticePrevDesign: 'diseño a medias:',
-    noticeRunStopped: 'ejecución parada:', noticeRunFinished: 'ejecución terminada:', noticeRunOrphan: 'ejecución sin coordinadora:',
+    noticeRunStopped: 'ejecución parada:', noticeRunFinished: 'ejecución terminada:', noticeRunFinishedOpen: 'ejecución terminada (abierta en otra conversación):', noticeRunOrphan: 'ejecución sin coordinadora:',
     noticeRunOpen: 'ejecución parada, abierta en otra conversación:', openElsewhere: 'en otra conversación',
     stage: { brief: 'brief', implement: 'implementar', validate: 'validar', verify: 'verificar', review: 'revisar', verdict: 'veredicto', integrate: 'integrar', execution: 'ejecución' },
   },
@@ -94,7 +94,7 @@ export const TEXT = {
     noticeOtherDesign: 'another session ({seat}) is working on the design',
     noticeOtherRun: 'forge execution running, coordinated by another session',
     noticePrevTask: 'left in progress:', noticePrevDesign: 'design left in progress:',
-    noticeRunStopped: 'execution stopped:', noticeRunFinished: 'execution finished:', noticeRunOrphan: 'execution without a coordinator:',
+    noticeRunStopped: 'execution stopped:', noticeRunFinished: 'execution finished:', noticeRunFinishedOpen: 'execution finished (open in another conversation):', noticeRunOrphan: 'execution without a coordinator:',
     noticeRunOpen: 'execution stopped, open in another conversation:', openElsewhere: 'open elsewhere',
     stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', execution: 'execution' },
   },
@@ -234,12 +234,14 @@ function noticeParts(m: NoticeBand, nowMs: number, t: Texts): BandPart[] {
     return m.task ? [lead, { key: 'task', text: m.task, prio: 4, hue: dim, glue: ' ' }, ...agoPart] : [lead, ...agoPart];
   }
   if (m.subject === 'run') {
-    // w8 W1: a run that finished reads finished, never stopped.
-    const lead = m.coordinatorOpen ? { text: t.noticeRunOpen, short: t.openElsewhere }
-      : m.stopReason === 'finished' ? { text: t.noticeRunFinished, short: t.ended.finished }
+    // w8 W1: a run that finished reads finished (✓), never stopped, also while its coordinator's conversation is open.
+    const finished = m.stopReason === 'finished';
+    const lead = finished ? { text: m.coordinatorOpen ? t.noticeRunFinishedOpen : t.noticeRunFinished, short: t.ended.finished }
+      : m.coordinatorOpen ? { text: t.noticeRunOpen, short: t.openElsewhere }
         : m.stopReason ? { text: t.noticeRunStopped, short: t.stoppedSfx } : { text: t.noticeRunOrphan, short: t.noCoordinator };
+    const mark = finished ? '✓' : '◌';
     return [
-      { key: 'notice', text: `◌ ${lead.text}`, short: `◌ ${lead.short}`, prio: 2, hue: dim },
+      { key: 'notice', text: `${mark} ${lead.text}`, short: `${mark} ${lead.short}`, prio: 2, hue: dim },
       { key: 'count', text: `${count} ${t.integratedN}`, short: count, prio: 5, hue: dim, glue: ' ' },
       ...agoPart,
     ];

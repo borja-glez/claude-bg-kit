@@ -1772,7 +1772,7 @@ describe('the task detail in four tabs (§4.7)', () => {
     expect(html).toContain('<div class="lbl">Ronda 6</div><div class="shots"><div class="shot-row del">✗ cart</div></div>');
     expect(html).toContain('Sin comprobar: refund');
     m.states.T002 = { ...m.states.T002!, forge: forgeV2({ stage: 'stopped' }) };
-    expect(modalOf(renderApp(m, ui({ modal: 'T002', tab: 'forge' })))).toContain('parada con /forge:stop');
+    expect(modalOf(renderApp(m, ui({ modal: 'T002', tab: 'forge' })))).toContain('detenida con /forge:stop');
   });
 
   it('Conversación: the task’s notes with Reply, decisions with their structure and the proposal it came from, with its count', () => {
@@ -2050,7 +2050,7 @@ describe('the runs view (G-07, §4.3, H-24)', () => {
     expect(h).toContain('aria-expanded="true"');
     for (const s of ['subagentes · 3 en paralelo', 'forge/run-shop → main', '<dd>terminó</dd>', 'aceptada · 0 C · 1 I · 2 m', '<dt>Aplazados</dt><dd>3</dd>', '<dt>Decisiones</dt><dd>2</dd>']) expect(h, s).toContain(s);
     expect(h).toContain('<button type="button" class="rtb" data-action="open-task" data-id="T001" data-k="rt:shop-20261010T090000000Z:T001"><span class="k">T001</span> Esquema de pedidos <span class="mono rs-integrated">integrada · 25 min · 2 rondas · 1 aplazado</span></button>');
-    expect(h).toContain('<span class="k">T003</span> Cart mock <span class="mono rs-stopped">parada con /forge:stop</span>');
+    expect(h).toContain('<span class="k">T003</span> Cart mock <span class="mono rs-stopped">detenida con /forge:stop</span>');
   });
   it('a task in two open runs has one key per run: morphdom never keeps one row for both (C19)', () => {
     const runs = [runSummary({ runId: 'run-a', tasks: [{ id: 'T001', status: 'stopped' }] }), runSummary({ runId: 'run-b', endedAt: '2026-10-10T12:00:00.000Z', tasks: [{ id: 'T001', status: 'integrated' }] })];
@@ -2110,7 +2110,7 @@ describe('the runs view (G-07, §4.3, H-24)', () => {
       const m = base();
       return { ...m, meta: { ...m.meta!, locale }, run: { ...runDoc({ active: false, stopReason }), startedAt: at(-90), lastStepAt: at(-30) } };
     };
-    expect(renderApp(stopped('stopped'), ui({ view: 'runs' }))).toContain('<div class="warnbox" role="note"><b>La ejecución r1 se paró con /forge:stop</b><div class="hint">');
+    expect(renderApp(stopped('stopped'), ui({ view: 'runs' }))).toContain('<div class="warnbox" role="note"><b>La ejecución r1 se detuvo con /forge:stop</b><div class="hint">');
     expect(renderApp(stopped('budget'), ui({ view: 'runs' }))).toContain('<b>La ejecución r1 agotó el presupuesto</b>');
     expect(renderApp(stopped('budget'), ui())).toContain('<b>La ejecución r1 agotó el presupuesto</b>');
     expect(renderApp(stopped('stopped'), ui())).not.toContain('se atascó');
