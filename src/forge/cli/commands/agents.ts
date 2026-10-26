@@ -23,7 +23,8 @@ function knownBrief(cwd: string, brief: string): void {
   const e = executionHolding(cwd, { project, task: id });
   const t = e?.active ? e.tasks[id] : undefined;
   if (t && !(t.status === 'running' && (t.stage === 'implement' || t.stage === 'validate'))) {
-    throw new UsageError(`agents: --task ${brief}: ${id} is ${t.status} at stage ${t.stage} in the execution; a fresh implementer is named while it runs at implement or validate (check it with forge swarm status)`);
+    const where = `${id} is ${t.status} at stage ${t.stage} in the execution`;
+    throw new UsageError(`agents: --task ${brief}: ${where}; a fresh implementer is named while it runs at implement or validate (check it with forge swarm status)`);
   }
 }
 
