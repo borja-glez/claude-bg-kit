@@ -259,6 +259,17 @@ describe('the runner agent and the coordinator text (A10)', () => {
       'SendMessage', '`<T> accepted`', '`<T> handback: <', '`<T> handback: taken back`', 'validators-head-<n>.json',
       '--out <WORK>/review-prep-<n>.json']) expect(md, w).toContain(w);
   });
+  it('FC6: forge-runner says its agents may run in the background and their reply wakes it, and keeps its commands in the foreground', () => {
+    const md = doc('plugins/forge/agents/forge-runner.md');
+    expect(md).not.toContain('Nothing wakes you');
+    expect(md).not.toContain('Foreground only');
+    const lines = md.split('\n');
+    const head = lines.findIndex(l => l.startsWith('- **Commands in the foreground, agents back by their reply.**'));
+    expect(head).toBeGreaterThan(-1);
+    const section = lines.slice(head, lines.findIndex((l, i) => i > head && l.startsWith('- **'))).join('\n');
+    for (const w of ['never with `run_in_background`', 'timeout: 600000', 'may run in the background', 'its reply comes back to you and wakes you',
+      'end your turn', 'never poll', 'all in one message', 'hand back']) expect(section, w).toContain(w);
+  });
   it('forge-runner hands back a refusal, a refusal an agent got around and a brief left partly undone, and never works around one itself', () => {
     const md = doc('plugins/forge/agents/forge-runner.md');
     const back = md.split('\n').find(l => l.startsWith('2. **Back.**'))!;
