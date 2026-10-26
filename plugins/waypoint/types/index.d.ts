@@ -11,7 +11,8 @@ export type WaypointBand = (
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
       // every running task, at most twelve, and the accepted ones waiting to integrate.
       integrated: number; queued: number; total: number; slots: { task: string; stage: string; round: number }[];
-      worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null;
+      // ended: why a run that is no longer active ended (a finished run is no stop); null while it is active.
+      worst: 'alive' | 'silent' | 'stopped'; ended: 'finished' | 'stalled' | 'stopped' | 'budget' | null; roadmapUrl: string | null;
       // the seat of the conversation that looks (its own binding, else the run's coordinator), its inbox and pending
       // decision, the plan's progress and its first phase not done.
       sid: string; inbox: number; escalation: boolean; percent: number; phase: { index: number; total: number; name: string } | null;

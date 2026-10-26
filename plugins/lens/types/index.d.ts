@@ -11,7 +11,8 @@ export type LensPanel = {
     run?: boolean;
   } | null;
   superpowers: {
-    plan: string; tasks: number; done: number; current: { task: string; round: number; cap?: number | null } | null; lastLines: string[];
+    // tasks: the plan's task count; null when no plan could be read, and then only the tasks done are known (w8).
+    plan: string; tasks: number | null; done: number; current: { task: string; round: number; cap?: number | null } | null; lastLines: string[];
     // stale: not finished and unchanged for over a day.
     stale?: boolean;
   } | null;
