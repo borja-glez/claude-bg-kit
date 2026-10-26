@@ -56,6 +56,12 @@ function blockReason(run: RunState): string {
   const parts: string[] = [];
   parts.push(run.budget.cycles !== undefined ? `cycle ${run.cycle + 1} of ${run.budget.cycles}` : `cycle ${run.cycle + 1}`);
   if (run.budget.hours !== undefined) parts.push(`until ${hhmm(new Date(Date.parse(run.startedAt) + run.budget.hours * 3600_000))} UTC`);
+  // FX2: what the last cycle counted of the cap.
+  const usd = run.budget.usd;
+  if (usd !== undefined) {
+    const c = run.cost;
+    parts.push(!c ? `cap $${usd}` : c.usd === null ? `cap $${usd}, cost unknown` : `$${c.usd.toFixed(2)}${c.partial ? ' or more' : ''} of $${usd} spent`);
+  }
   return `forge infinite mode is active (${parts.join(' / ')}). Run the next cycle as /forge:infinite describes; to end the run create .forge/stop or run /forge:stop.`;
 }
 

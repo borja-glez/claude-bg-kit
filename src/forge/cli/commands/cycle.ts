@@ -18,6 +18,8 @@ import { loadApprovals, loadProposals } from '../../proposals.js';
 import { judgeQueue } from '../../judge.js';
 import { readBlocked } from '../../autonomous.js';
 import { stateDirOf } from '../../phases.js';
+import { costNote, runCost } from '../../run-cost.js';
+import { claudeConfigDir } from '../../superpowers.js';
 
 type Flag = (name: string) => string | undefined;
 type Inputs = { plan: Plan | null; db: string | null; validate: string | null };
@@ -104,8 +106,11 @@ export const command: Command = (args, ctx) => {
     const o = { runRoot, main, run: next, dry, at, now: io.now(), since, explored: explore, ...inputs };
     next = { ...next, saturation: dry < SATURATION_ROUNDS ? null : reportFor(o) };
   }
+  // FX2: with a usd cap, what the run spent so far; stopReason (infinite status, the Stop hook) stops it at the cap.
+  if (next.budget.usd !== undefined) next = { ...next, cost: runCost({ main, runRoot, run: next, configDir: claudeConfigDir(io.env ?? process.env), now: io.now() }) };
   saveRun(runRoot, next);
   appendEvent(runRoot, { ts: at, kind: 'cycle', cycle: next.cycle, progress: progress === 'yes', ...(next.lastError ? { error: next.lastError } : {}),
     ...(round ? { explore: round } : {}) });
-  return json({ ...next, reply: runReply(runRoot, next), publish: { infinite: infinitePublish(main, next, io.now()) } });
+  const note = costNote(next);
+  return json({ ...next, ...(note ? { costNote: note } : {}), reply: runReply(runRoot, next), publish: { infinite: infinitePublish(main, next, io.now()) } });
 };

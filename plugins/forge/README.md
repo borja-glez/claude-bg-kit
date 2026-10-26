@@ -63,7 +63,7 @@ forge depends on [waypoint](../waypoint/README.md) ^0.36.0, which is installed w
 | `/forge:run --superpowers-plan <plan>` | Run a superpowers plan task by task on the Medium path, with validators, review and verdict. |
 | `/forge:run --auto <task>` | Work the task in auto mode: questions only at launch, every decision recorded. |
 | `/forge:review [<base>]` | Review a branch with forge's validators and reviewers, without fixing it. |
-| `/forge:infinite [--cycles N] [--hours H]` | Unattended improvement cycles within a budget. |
+| `/forge:infinite [--cycles N] [--hours H] [--max-usd N]` | Unattended improvement cycles within a budget. |
 | `/forge:infinite --profile spike\|product "<idea>" [--cycles N] [--hours H]` | An autonomous run from an idea, on its own branch and worktree. |
 | `/forge:decide <id> approve\|reject\|comment <text>` | Decide or comment on a proposal from any session. |
 | `/forge:decisions [revert <n>]` | List what forge decided without asking, and undo one after your confirmation. |
@@ -219,7 +219,7 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 
 ## Infinite mode
 
-`/forge:infinite [--cycles N] [--hours H]` needs an approved waypoint design, a plan and a budget. It asks once when no budget is given, and `forge infinite start` refuses to start without `--cycles` or `--hours`. It runs `forge infinite start`, writes `meta/infinite` to the roadmap and ends the turn. `infinite start` binds the session that runs it, so use one session per checkout.
+`/forge:infinite [--cycles N] [--hours H] [--max-usd N]` needs an approved waypoint design, a plan and a budget. It asks once when no budget is given, and `forge infinite start` refuses to start without `--cycles` or `--hours`. It runs `forge infinite start`, writes `meta/infinite` to the roadmap and ends the turn. `infinite start` binds the session that runs it, so use one session per checkout.
 
 **Each cycle** forge:
 
@@ -234,7 +234,7 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 **Stop conditions:**
 
 - the file `.forge/stop` exists;
-- the budget (cycles or hours) is used up;
+- the budget (cycles or hours) is used up, or the run reached its spending cap (`--max-usd`, below);
 - in an autonomous profile, the run is `saturated` ([Autonomous profiles](#autonomous-profiles));
 - 3 cycles in a row made no progress;
 - the same error happened twice in a row;
@@ -242,6 +242,8 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 - nothing is approved while the pending queue is full.
 
 When a stop condition first appears, the Stop hook marks the run inactive and blocks once, so the session closes the run: it turns off `meta/infinite` and reports. An inactive run never blocks again. `/forge:stop` marks the run inactive itself, so a run whose session is gone can be stopped and a new one started. A run left idle resumes when the next turn in its session ends. waypoint's own Stop hook coexists; forge blocks only while `run.json` is active.
+
+**Spending cap.** `--max-usd N` (or `budget.usd` in `.forge/config.yaml`) adds a cap in US dollars to the cycles or hours, never in their place. Each `forge cycle` counts what the run has spent since it started, from the transcripts of its sessions in Claude Code's `projects` folder: the session that drives it, every session that logged a forge event since then (the members of its executions) and their subagents, each message priced once by its model and its cache writes. It keeps that in `run.json` (`cost`), and once it reaches the cap the run stops cleanly as `budget-usd`; the Stop hook's line shows what was spent of it. The count is a measure, not the bill: Claude Code's side calls (the auto mode classifier, titles) are not in the transcripts, and on 2026-10-26 the count came to 90 to 99 % of what Claude Code reported, so leave that margin. When a session has no transcript or a model has no price, `cost.partial` says the count is a lower bound; when no transcript is found, the cost is unknown (`usd: null`), the cap cannot stop the run and `cycle` and `infinite status` say so in `costNote`, while the cycles or hours still end it.
 
 ### Autonomous profiles
 
@@ -404,6 +406,8 @@ validate:
   parallel: 3                  # validators at once, 1 to 8; 1 runs them one at a time
   retry: flaky                 # flaky | always | never: a failure runs again after a flaky history (30 days); with --baseline, also a test that passed on the base
 generated: ["dist/**"]         # tracked build output forge puts back after its validators; default []
+budget:
+  usd: 20                      # optional: the spending cap infinite start takes without --max-usd (Infinite mode)
 tdd: off                       # off | superpowers | verified: superpowers' TDD skill, or forge checks that the new tests fail on BASE
 review:
   express: true                # express reviews when one or two important findings are left; default true
@@ -595,7 +599,7 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 <summary><b>Infinite mode and execution</b></summary>
 
 - `infinite prepare --profile spike|product --name N` - create or reuse the branch `forge/<profile>-<name>` and its worktree `.claude/worktrees/<profile>-<name>` and print `{runId, worktree, branch, startBranch, created, project, next}`; it never touches your checkout and refuses from inside an active run's worktree.
-- `infinite start --cycles N | --hours H --session ID [--queue-max N] [--locale code] [--profile P --name N]`, `infinite status`, `cycle --progress yes|no [--error-file F] [--explore] [--plan p --db d] [--validate f]`, `stop` - a budget needs `--cycles`, `--hours` or both; `--queue-max` caps the pending proposals queue; `--session` is Claude's id of the session that drives the run (the skill passes it; else `CLAUDE_CODE_SESSION_ID`, and without either it exits with code 2): only that session's Stop hook chains the cycles. `--locale` records the person's language: the Stop hook and every wake remind the session to answer in it. `--profile P --name N` (both, or neither) starts the autonomous run of a prepared profile, only from its worktree on its branch (see [Autonomous profiles](#autonomous-profiles)): it refuses while a run is active, keeps the run's session ids in `.forge/autonomous/<runId>/sessions.json`, and prints the run's own `trust` in the commands of `.forge/config.yaml` (`blocked: true` when the guard or you refused them). In an autonomous run, `cycle` takes `--plan p --db d` every cycle, and an exploration round (one whose scout and critic ran) adds `--explore`, which takes no value (the CLI counts what passed, from the ledger), and `--validate f`, that cycle's `validate --all` output; elsewhere they are refused. From 3 exploration rounds in a row that passed nothing, each cycle writes the saturation report (`saturation` in `run.json`, its `explored` saying whether that cycle was an exploration round), and an exploration round that finds nothing left stops the run as `saturated`.
+- `infinite start --cycles N | --hours H --session ID [--max-usd N] [--queue-max N] [--locale code] [--profile P --name N]`, `infinite status`, `cycle --progress yes|no [--error-file F] [--explore] [--plan p --db d] [--validate f]`, `stop` - a budget needs `--cycles`, `--hours` or both; `--max-usd` adds a spending cap (else `budget.usd` of the config), which each `cycle` measures into `cost` ([Infinite mode](#infinite-mode)); `--queue-max` caps the pending proposals queue; `--session` is Claude's id of the session that drives the run (the skill passes it; else `CLAUDE_CODE_SESSION_ID`, and without either it exits with code 2): only that session's Stop hook chains the cycles. `--locale` records the person's language: the Stop hook and every wake remind the session to answer in it. `--profile P --name N` (both, or neither) starts the autonomous run of a prepared profile, only from its worktree on its branch (see [Autonomous profiles](#autonomous-profiles)): it refuses while a run is active, keeps the run's session ids in `.forge/autonomous/<runId>/sessions.json`, and prints the run's own `trust` in the commands of `.forge/config.yaml` (`blocked: true` when the guard or you refused them). In an autonomous run, `cycle` takes `--plan p --db d` every cycle, and an exploration round (one whose scout and critic ran) adds `--explore`, which takes no value (the CLI counts what passed, from the ledger), and `--validate f`, that cycle's `validate --all` output; elsewhere they are refused. From 3 exploration rounds in a row that passed nothing, each cycle writes the saturation report (`saturation` in `run.json`, its `explored` saying whether that cycle was an exploration round), and an exploration round that finds nothing left stops the run as `saturated`.
 - `infinite phase --plan p --db d [--mark F]` - in a product run, from its worktree: the first phase of the plan, in its order, whose tasks the roadmap's state says are all done and that was not reviewed yet, as `{closed, phases, held, reviewed}`: `phases` is each phase's `{id, done, total}` (an empty phase never closes), `held` the tasks a re-plan may not change, each with its `reason`, and `reviewed` the phases already reviewed; `--mark F` records the review of `F`. A spike run exits 2.
 - `market note --file f --session SID [--locale es|en] | last` - keep a `forge-market` report (`market.json`: a summary and findings, each with its sources) in `.forge/market/` and print `{file, findings, noWeb, publish}`, `publish` being the roadmap's market note (without `--locale`, in the run's language); exit 2 when the file is no market report. `last` prints `{file}`, the path of the last report, `null` when there is none.
 - `authorize merge-on-finish --branch b [--run runId | --project P [--hook-session id]] [--locale es|en]` - the start question of a run that may merge by itself at the end, as `{authId, runId, ask}`: the skill asks `ask` as printed and the hook `answer` records the answer, which `swarm start --merge-on-finish` checks. Without `--run` (auto mode at launch) it needs `--project`, names that project in the question and counts only for this session and that project, for 24 hours after your answer.

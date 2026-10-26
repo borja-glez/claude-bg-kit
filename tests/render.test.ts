@@ -2522,7 +2522,7 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     const stopLine = (html: string) => /<div class="ast">([^<]*)<\/div>/.exec(html)?.[1] ?? '';
     // Every reason forge writes (src/forge/run.ts stopReason, cli/commands/stop.ts): one colon at most (the command's own
     // aside), and the stop word once.
-    for (const reason of ['saturated', 'budget-cycles', 'budget-hours', 'stop-file', 'stopped', 'no-progress', 'repeated-error', 'no-cycle', 'queue-full']) {
+    for (const reason of ['saturated', 'budget-cycles', 'budget-hours', 'budget-usd', 'stop-file', 'stopped', 'no-progress', 'repeated-error', 'no-cycle', 'queue-full']) {
       for (const [locale, word] of [['es', 'parada'], ['en', 'stopped']] as const) {
         const line = stopLine(card({ stopReason: reason }, locale));
         expect(line, `${locale} ${reason}`).not.toBe('');
@@ -2532,6 +2532,9 @@ describe('the conversation (G-17, H-17, §4.6.7)', () => {
     }
     expect(stopLine(card({ stopReason: 'stopped' }))).toBe('Parada: con /forge:stop');
     expect(stopLine(card({ stopReason: 'stop-file' }))).toBe('Parada: con /forge:stop');
+    // FX2: the spending cap of --max-usd
+    expect(stopLine(card({ stopReason: 'budget-usd' }))).toBe('Parada: llegó a su tope de gasto');
+    expect(stopLine(card({ stopReason: 'budget-usd' }, 'en'))).toBe('Stopped: reached its spending cap');
     // A stopped run without a reason.
     for (const stopReason of [null, undefined]) expect(stopLine(card({ stopReason })), String(stopReason)).toBe('Parada');
     expect(stopLine(card({ stopReason: null }, 'en'))).toBe('Stopped');
