@@ -196,6 +196,40 @@ test('the command opens the pane and shows the newest ledger against its plan', 
   expect(reads).not.toContain(`${ROOT}/.superpowers/sdd/old/progress.md`);
 });
 
+test('the Todos and Claude Code tasks cards are never drawn empty: not before their tools run, not for an empty list, not once the only task is deleted (w8 M5)', async ($, on) => {
+  serveFiles(on, []);
+  servePanes(on);
+  const clock = start(on);
+  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  on('tool.call', { tool: 'TaskCreate' }, (_$, e) => ({ result: { task: { id: '1', subject: e.subject } } }));
+  on('tool.call', { tool: 'TaskUpdate' }, (_$, e) => ({ result: { success: true, taskId: e.taskId, updatedFields: ['status'] } }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  const cards = async () => {
+    const out: string[] = [];
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ plugin: 'lens', surface, component: 'Pane', requestId: PANE, props: PANE_PROPS });
+      out.push(await said(ui));
+      await ui.unmount();
+    }
+    const shot = (await $.command.run({ ...RUN, args: 'foto' })).text!;
+    const row = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: { command: 'lens', args: 'foto', text: shot, isErrored: false } });
+    out.push(await said(row));
+    await row.unmount();
+    // Each drawing holds the cards (the superpowers run's at least), so what it lacks is left out, not undrawn.
+    for (const drawn of out) expect(drawn).toContain('plans/new.md');
+    return out.join(' || ');
+  };
+  // Opus 5.5 has neither tool unless CLAUDE_CODE_ENABLE_TODO_TOOLS=1: a session that never calls them.
+  expect(await cards()).not.toMatch(/Todos|Claude Code tasks/);
+  await $.tool.call({ tool: 'TodoWrite', todos: [], tool_use_id: 'w1' });
+  await $.tool.call({ tool: 'TaskCreate', subject: 'Write the spec', description: 'd', tool_use_id: 'c1' });
+  await $.tool.call({ tool: 'TaskUpdate', taskId: '1', status: 'deleted', tool_use_id: 'u1' });
+  await clock.advance(1000);
+  expect(await cards()).not.toMatch(/Todos|Claude Code tasks/);
+});
+
 test('TaskCreate and TaskUpdate calls of any loop fill the Claude Code tasks card; a refused one adds nothing (w8 M1: no classic hook)', async ($, on) => {
   serveFiles(on, []);
   servePanes(on);

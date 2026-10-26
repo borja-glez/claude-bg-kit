@@ -1666,7 +1666,7 @@ describe('plugin layout', () => {
     expect(approved).toContain('`capabilitiesChanged: true`');
   });
 
-  it('READMEs describe wave 3a: the status per task, the task line, the tasks in progress and the classic hooks', () => {
+  it('READMEs describe wave 3a: the status per task, the task line, the tasks in progress, and what lens hears agents and tasks from (w8 M1: no classic hook)', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
       for (const s of ['.forge/status/<key>.json', '`taskLine`', 'forge-task:', 'taskStartedAt']) expect(md, `${f}: ${s}`).toContain(s);
@@ -1674,7 +1674,8 @@ describe('plugin layout', () => {
     expect(read('plugins/lens/README.md')).toContain('Tasks in progress');
     expect(read('plugins/lens/README.es.md')).toContain('Tareas en curso');
     for (const f of ['plugins/lens/README.md', 'plugins/lens/README.es.md']) {
-      for (const s of ['.forge/status/', '.forge/jobs/', '`SubagentStart`', '`TaskCreated`', 'forge-task:']) expect(read(f), `${f}: ${s}`).toContain(s);
+      for (const s of ['.forge/status/', '.forge/jobs/', '`agent.spawn`', '`turn.complete`', '`TaskCreate`', '`TaskUpdate`', 'forge-task:']) expect(read(f), `${f}: ${s}`).toContain(s);
+      for (const s of ['`TaskCreated`', '`TaskCompleted`', '`SubagentStop`']) expect(read(f), `${f}: ${s}`).not.toContain(s);
     }
   });
   it('READMEs describe wave 3b: the band letters and the keyboard outside fullscreen, the photo, the status line', () => {
