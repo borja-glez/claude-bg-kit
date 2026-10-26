@@ -1084,6 +1084,14 @@ it("brief adds the threat model of the project's config (K4-02)", () => {
   expect(r.code).toBe(0);
   expect(r.stdout).toContain("## Threat model\n\n- Protects: the person's files\n");
 });
+it('FC6: the brief of a plan task that names a report .md says how the implementer delivers it, and that it says so', () => {
+  writeFileSync(path.join(root, 'plan.yaml'), PLAN_YAML.replace('done_when: users can log in', 'done_when: docs/REPORT.md lists the login errors'));
+  const out = run(['brief', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout;
+  const line = out.split('\n').find(l => l.startsWith('Files named `docs/REPORT.md`:'))!;
+  for (const w of ['refuses to Write', 'REPORT, SUMMARY, FINDINGS or ANALYSIS', '`git mv`', 'return its text in your reply', 'say which in your report', 'never in silence']) expect(line, w).toContain(w);
+  writeFileSync(path.join(root, 'plan.yaml'), PLAN_YAML);
+  expect(run(['brief', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout).not.toContain('Files named');
+});
 it('triage --plan without a value is a usage error, not free text', () => {
   expect(run(['triage', '--plan'], io).code).toBe(2);
   expect(run(['triage', '--plan', '--task', 'T001'], io).code).toBe(2);

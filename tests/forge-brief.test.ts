@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parsePlan } from '../src/lib/plan.js';
-import { renderBrief, taskText, tddLine, parsePrior, priorSection } from '../src/forge/brief.js';
+import { renderBrief, taskText, tddLine, parsePrior, priorSection, refusedMdNames, refusedMdLine, REFUSED_MD } from '../src/forge/brief.js';
 import { renderThreatModel } from '../src/forge/threat-model.js';
 
 const PLAN = parsePlan(`project: shop
@@ -26,6 +26,19 @@ tasks:
     depends_on: [T001]
     zones: ["src/api/orders/**"]
 `);
+
+describe('FC6: a file Claude Code refuses to Write in a subagent', () => {
+  it('refusedMdNames: each .md name whose last segment starts with REPORT, SUMMARY, FINDINGS or ANALYSIS, any case, once, in order', () => {
+    const text = 'Write `docs/report.md` and SUMMARY.md. See analysis-2026.md, docs/findings_q3.md, docs/design.md, report.mdx, my-report.md, (docs/Report.md) and docs\\Reports\\ANALYSIS.md; docs/report.md again.';
+    expect(refusedMdNames(text)).toEqual(['docs/report.md', 'SUMMARY.md', 'analysis-2026.md', 'docs/findings_q3.md', 'docs/Report.md', 'docs\\Reports\\ANALYSIS.md']);
+    expect(refusedMdNames('a report in docs/notes.md; reports/notes.md; the summary')).toEqual([]);
+    expect(REFUSED_MD.test('Findings.MD')).toBe(true);
+  });
+  it('refusedMdLine names them and says how they are still delivered, never in silence; none, no line', () => {
+    expect(refusedMdLine(['docs/report.md', 'SUMMARY.md'])).toBe('Files named `docs/report.md`, `SUMMARY.md`: in a subagent, Claude Code refuses to Write a `.md` file whose name starts with REPORT, SUMMARY, FINDINGS or ANALYSIS (any case). To create or rewrite one, write it under another name and rename it with git (`git add` it, then `git mv` it to its name), or return its text in your reply for the coordinator to write; say which in your report, never in silence.');
+    expect(refusedMdLine([])).toBeNull();
+  });
+});
 
 describe('brief', () => {
   it('taskText joins title, includes and done_when', () => {

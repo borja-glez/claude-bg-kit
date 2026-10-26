@@ -181,6 +181,12 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
     writeFileSync(path.join(root, F), PLAN.replace(/\n/g, '\r\n'));
     io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z'), git: () => null, env: {} };
   });
+  it('FC6: the brief of a superpowers task that names a summary .md carries the line on how to deliver it', () => {
+    const P = 'docs/superpowers/plans/sum.md';
+    writeFileSync(path.join(root, P), '# Sum\n\n### Task 1: a\n\n**Files:**\n- Create: `docs/summary-q3.md`\n\n- [ ] Write the summary\n\n### Task 2: b\n\n- [ ] step\n');
+    expect(run(['brief', '--superpowers-plan', P, '--task', '1'], io).stdout).toMatch(/\nFiles named `docs\/summary-q3\.md`: in a subagent, Claude Code refuses to Write/);
+    expect(run(['brief', '--superpowers-plan', P, '--task', '2'], io).stdout).not.toContain('Files named');
+  });
   it('tasks prints the plan and its tasks', () => {
     const r = JSON.parse(run(['sp-plan', 'tasks', F], io).stdout);
     expect(r.plan).toMatchObject({ title: 'Cart Totals', goal: 'Show the cart total with taxes on the checkout page.' });

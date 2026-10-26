@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { isPlanId } from '../../../lib/plan.js';
 import { isBugTask } from '../../triage.js';
-import { renderBrief, BUG_LINE, parsePrior, priorSection, type PriorCommit } from '../../brief.js';
+import { renderBrief, BUG_LINE, parsePrior, priorSection, refusedMdLine, refusedMdNames, type PriorCommit } from '../../brief.js';
 import { renderThreatModel } from '../../threat-model.js';
 import { loadConfig } from '../../config.js';
 import { UsageError } from '../errors.js';
@@ -26,6 +26,12 @@ function briefBug(dir: string, title: string): string | null {
 function briefThreatModel(dir: string): string | null {
   try { const tm = loadConfig(dir).threatModel; return tm ? renderThreatModel(tm) : null; } catch { return null; }
 }
+
+// FC6: a brief that names a .md file Claude Code refuses to Write in a subagent ends with the line on how to deliver it.
+const withRefusedMd = (brief: string): string => {
+  const line = refusedMdLine(refusedMdNames(brief));
+  return line ? `${brief}\n${line}\n` : brief;
+};
 
 export const command: Command = (args, ctx) => {
   const { io, repoDir, flag, has, ok } = ctx;
@@ -60,7 +66,7 @@ export const command: Command = (args, ctx) => {
     const n = spTaskNumber(flag('task'));
     let text: string;
     try { text = readFileSync(path.resolve(io.cwd, file), 'utf8'); } catch { throw new UsageError(`brief: cannot read ${file}`); }
-    try { return ok(renderSpBrief(text, n, { planPath: file.replace(/\\/g, '/'), tdd: briefTdd(io, repoDir) })); } catch (e) {
+    try { return ok(withRefusedMd(renderSpBrief(text, n, { planPath: file.replace(/\\/g, '/'), tdd: briefTdd(io, repoDir) }))); } catch (e) {
       if (e instanceof SpPlanError) throw new UsageError(`brief: ${file}: ${e.message}`);
       throw e;
     }
@@ -68,8 +74,8 @@ export const command: Command = (args, ctx) => {
   const { plan, task } = planTask(io.cwd, flag('plan'), flag('task'));
   const design = flag('design') ?? path.join(path.dirname(flag('plan')!), 'design.md');
   const designPath = existsSync(path.resolve(io.cwd, design)) ? design.replace(/\\/g, '/') : null;
-  return ok(renderBrief(plan, task, {
+  return ok(withRefusedMd(renderBrief(plan, task, {
     planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: briefTdd(io, repoDir), bug: briefBug(repoDir, task.title),
     threatModel: briefThreatModel(repoDir), prior, priorTotal,
-  }));
+  })));
 };
