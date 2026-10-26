@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ROUTE_SUPERPOWERS, satisfiesRange, type CheckResult, type DoctorCheck, type DoctorCtx } from './doctor.js';
 import { installedPlugins, locateSuperpowers, type InstalledPlugin } from './superpowers.js';
 import { findWaypointCli } from './cli/commands/waypoint-cli.js';
+import { claudeVersion, OBSERVED_WITH } from './claude-bin.js';
 import { samePath } from '../lib/worktree.js';
 
 /** A4: the checks of the install forge runs from: waypoint and superpowers against their ranges, which copy runs, the permissions and waypoint doctor. */
@@ -203,4 +204,22 @@ const waypointDoctorCheck: DoctorCheck = {
   },
 };
 
-export const INSTALL_CHECKS: readonly DoctorCheck[] = [waypointVersionCheck, runningCopyCheck, superpowersVersionCheck, permissionsCheck, waypointDoctorCheck];
+/** FC5: the Claude Code here against OBSERVED_WITH, the version forge's platform facts were recorded with. Another
+ *  version is a warning, never a failure: forge may well run on it. */
+const claudeVersionCheck: DoctorCheck = {
+  id: 'claude-version',
+  run(ctx) {
+    const id = 'claude-version';
+    const found = claudeVersion(ctx.env);
+    if (!found) return { id, status: 'unverified', detail: 'no Claude Code answered --version (CLAUDE_CODE_EXECPATH, claude on PATH) and AI_AGENT names none' };
+    const data = { version: found.version, source: found.source, observedWith: OBSERVED_WITH };
+    if (found.version === OBSERVED_WITH) return { id, status: 'ok', detail: `Claude Code ${found.version}, the version forge's platform facts were recorded with`, data };
+    return {
+      id, status: 'warn', data,
+      detail: `Claude Code ${found.version} runs here; forge's platform facts (its hooks, subagents and background agents) were recorded with Claude Code ${OBSERVED_WITH}`,
+      fix: { do: `nothing to repair: if a hook, a subagent or a background agent behaves differently than forge expects, say Claude Code ${found.version} when you report it`, kind: 'manual' },
+    };
+  },
+};
+
+export const INSTALL_CHECKS: readonly DoctorCheck[] = [waypointVersionCheck, runningCopyCheck, superpowersVersionCheck, claudeVersionCheck, permissionsCheck, waypointDoctorCheck];

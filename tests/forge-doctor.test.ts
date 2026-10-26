@@ -6,6 +6,8 @@ import { doctorExit, doctorSay, runChecks, satisfiesRange, type CheckResult, typ
 import { run, type Io } from '../src/forge/cli/run.js';
 import { assumeTrustedForTests } from '../src/forge/trust-flag.js';
 import { agentTranscript, pendingCall } from '../src/forge/waiting-calls.js';
+import { claudeVersion, OBSERVED_WITH } from '../src/forge/claude-bin.js';
+import { OBSERVED_WITH as HARNESS_OBSERVED_WITH } from './e2e/harness/claude-bin.js';
 import { useTempDirs } from './helpers/tmp.js';
 const tmp = useTempDirs();
 
@@ -162,6 +164,38 @@ describe('forge doctor (the command)', () => {
     const files = (readdirSync(dir, { recursive: true }) as string[]).filter(f => statSync(path.join(dir, f)).isFile()).map(f => f.split(path.sep).join('/'));
     expect(files.sort()).toEqual(Object.keys(seed).sort());
     for (const [rel, text] of Object.entries(seed)) expect(readFileSync(path.join(dir, rel), 'utf8'), rel).toBe(text);
+  });
+});
+
+describe('FC5: the Claude Code version against the one forge was recorded with', () => {
+  const posix = (files: string[], answers: Record<string, string | null>) => ({
+    platform: 'linux' as NodeJS.Platform, isFile: (f: string) => files.includes(f), run: (f: string) => answers[f] ?? null,
+  });
+  it('claudeVersion asks the binary that runs this session, else the claude on PATH, else reads AI_AGENT', () => {
+    expect(claudeVersion({ CLAUDE_CODE_EXECPATH: '/b/claude', PATH: '/p' }, posix(['/p/claude'], { '/b/claude': '2.1.310 (Claude Code)\n', '/p/claude': '2.0.1 (Claude Code)\n' })))
+      .toEqual({ version: '2.1.310', source: 'running' });
+    expect(claudeVersion({ CLAUDE_CODE_EXECPATH: '/b/claude', PATH: '/x:/p' }, posix(['/p/claude'], { '/p/claude': '2.0.1 (Claude Code)\n' })))
+      .toEqual({ version: '2.0.1', source: 'path' });
+    expect(claudeVersion({ PATH: '/p', AI_AGENT: 'claude-code_2-1-311_agent' }, posix([], {}))).toEqual({ version: '2.1.311', source: 'env' });
+    expect(claudeVersion({ AI_AGENT: 'other_1-2-3' }, posix([], {}))).toBeNull();
+    expect(claudeVersion({}, posix([], {}))).toBeNull();
+    // On Windows only the native claude.exe of PATH is asked (a claude.cmd would need cmd.exe).
+    const win = { platform: 'win32' as NodeJS.Platform, isFile: (f: string) => /claude\.(exe|cmd)$/.test(f), run: (f: string) => (f.endsWith('.exe') ? '2.1.300 (Claude Code)' : null) };
+    expect(claudeVersion({ Path: 'C:\\a;C:\\b' }, win)).toEqual({ version: '2.1.300', source: 'path' });
+  });
+  it('doctor: the version forge was recorded with is ok, another one warns with what to do, none read is unverified', () => {
+    const root = tmp('doctor-claude-');
+    const doctorWith = (env: Record<string, string>) => (JSON.parse(run(['doctor'], { cwd: root, now: () => new Date('2026-10-24T10:00:00.000Z'), env: { CLAUDE_CONFIG_DIR: path.join(root, 'cfg'), ...env }, scriptPath: path.join(root, 'forge.cjs') }).stdout).checks as CheckResult[])
+      .find(c => c.id === 'claude-version')!;
+    const agent = (v: string) => ({ AI_AGENT: `claude-code_${v.replace(/\./g, '-')}_agent` });
+    expect(doctorWith(agent(OBSERVED_WITH))).toMatchObject({ status: 'ok', data: { version: OBSERVED_WITH, observedWith: OBSERVED_WITH } });
+    const other = doctorWith(agent('9.9.9'));
+    expect(other).toMatchObject({ status: 'warn', data: { version: '9.9.9', observedWith: OBSERVED_WITH }, fix: { kind: 'manual' } });
+    expect(other.detail).toContain(`recorded with Claude Code ${OBSERVED_WITH}`);
+    expect(doctorWith({}).status).toBe('unverified');
+  });
+  it('the e2e harness and forge read one OBSERVED_WITH', () => {
+    expect(HARNESS_OBSERVED_WITH).toBe(OBSERVED_WITH);
   });
 });
 
