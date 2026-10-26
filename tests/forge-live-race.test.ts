@@ -4,7 +4,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { liveFile, liveLock, LIVE_LOCK_STALE_MS, LIVE_LOCK_WAIT_MS } from '../src/forge/live.js';
+import { liveFile, liveLock, LIVE_END_LOCK_WAIT_MS, LIVE_LOCK_STALE_MS, LIVE_LOCK_WAIT_MS } from '../src/forge/live.js';
 import { seedExecution } from './helpers/execution.js';
 import { useTempDirs } from './helpers/tmp.js';
 
@@ -97,6 +97,19 @@ describe('FC2: the live signal with real processes at once', () => {
     expect(r.ms).toBeLessThan(LIVE_LOCK_WAIT_MS + 5000);
     expect(agents()).toEqual(['h1']);
     // Not its lock: it stays for its holder.
+    expect(readFileSync(liveLock(liveFile(root, 's1')), 'utf8')).toBe(held);
+  }, 60_000);
+  it('SessionEnd, which Claude Code gives little time, waits for a held lock only LIVE_END_LOCK_WAIT_MS and still writes the end (w8 integration)', async () => {
+    await hook({ hook_event_name: 'SubagentStart', agent_id: 'e1', agent_type: 'x' });
+    const held = JSON.stringify({ pid: process.pid, at: new Date().toISOString() });
+    writeFileSync(liveLock(liveFile(root, 's1')), held);
+    const r = await hook({ hook_event_name: 'SessionEnd', reason: 'clear' });
+    expect(r.code).toBe(0);
+    expect(LIVE_END_LOCK_WAIT_MS).toBeLessThan(LIVE_LOCK_WAIT_MS);
+    expect(r.ms).toBeGreaterThanOrEqual(LIVE_END_LOCK_WAIT_MS - 100);
+    expect(r.ms).toBeLessThan(LIVE_LOCK_WAIT_MS);
+    const doc = JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8')) as { ended: boolean; event: string; agents: unknown[] };
+    expect(doc).toMatchObject({ ended: true, event: 'SessionEnd', agents: [] });
     expect(readFileSync(liveLock(liveFile(root, 's1')), 'utf8')).toBe(held);
   }, 60_000);
 });

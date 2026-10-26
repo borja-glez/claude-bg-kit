@@ -37,17 +37,20 @@ export function nextLive(prev: LiveDoc | null, ev: { event: LiveEvent; agentId?:
 export const liveLock = (file: string) => `${file}.lock`;
 /** How long a live hook waits for the lock before it writes without it (fail-open: a hook never holds the session). */
 export const LIVE_LOCK_WAIT_MS = 2000;
+/** w8 integration: SessionEnd waits this much at most, as the Stop hook waits less for execution.lock: Claude Code gives
+ *  that hook little time (waypoint's SessionEnd says so), and the `ended` it writes is what R4 relies on. */
+export const LIVE_END_LOCK_WAIT_MS = 300;
 /** The lock is held for one read and one write of a small file: older than this, or with its pid gone, it was left behind. */
 export const LIVE_LOCK_STALE_MS = 5000;
 
 /**
  * FC2: the one read-modify-write of a live signal: under its lock (liveLock), reads the signal as it is now, applies
  * `fn` and writes what it returns (null: nothing) whole. Several hooks of one session at once (SubagentStart of three
- * agents) each add their agent, none lost. A lock a live process holds is waited for LIVE_LOCK_WAIT_MS, then the
- * signal is written without it, as before the lock; one left by a dead process, or older than LIVE_LOCK_STALE_MS, is
+ * agents) each add their agent, none lost. A lock a live process holds is waited for `waitMs` (LIVE_LOCK_WAIT_MS), then
+ * the signal is written without it, as before the lock; one left by a dead process, or older than LIVE_LOCK_STALE_MS, is
  * taken over. The signal's format is the same.
  */
-function updateLive(main: string, file: string, fn: (prev: LiveDoc | null) => LiveDoc | null): void {
+function updateLive(main: string, file: string, fn: (prev: LiveDoc | null) => LiveDoc | null, waitMs = LIVE_LOCK_WAIT_MS): void {
   forgeDir(main);
   mkdirSync(path.dirname(file), { recursive: true });
   const apply = () => {
@@ -58,7 +61,7 @@ function updateLive(main: string, file: string, fn: (prev: LiveDoc | null) => Li
   };
   let ran = false;
   try {
-    withFileLock(liveLock(file), () => { ran = true; apply(); }, { waitMs: LIVE_LOCK_WAIT_MS, staleMs: LIVE_LOCK_STALE_MS });
+    withFileLock(liveLock(file), () => { ran = true; apply(); }, { waitMs, staleMs: LIVE_LOCK_STALE_MS });
   } catch (e) {
     // An error of the write itself is the caller's; a lock that could not be taken is not: write without it.
     if (ran) throw e;
@@ -197,10 +200,11 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
       const bound = viewer.coordinator && exec.hookSession === sessionId && !exec.closedAt;
       if (!bound || !(event === 'SessionEnd' || (event === 'SessionStart' && existsSync(file)))) return '';
     }
-    // FC2: read, applied and written back under the signal's lock (updateLive).
+    // FC2: read, applied and written back under the signal's lock (updateLive); a SessionEnd waits for it less.
     updateLive(main, file, prev => (!exec.active && event === 'SessionStart' && prev?.ended !== true ? null
       : nextLive(prev, { event, agentId: typeof input.agent_id === 'string' ? input.agent_id : undefined, agentType: typeof input.agent_type === 'string' ? input.agent_type : undefined },
-        { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() })));
+        { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() })),
+    event === 'SessionEnd' ? LIVE_END_LOCK_WAIT_MS : LIVE_LOCK_WAIT_MS);
     // The resume text is for a run that is active; an ended one is taken up with /forge:run --resume.
     if (starting && exec.active) {
       const running = Object.values(exec.tasks).filter(t => t.status === 'running').length;
