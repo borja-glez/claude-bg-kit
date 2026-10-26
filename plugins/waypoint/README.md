@@ -165,6 +165,8 @@ By design, `multi` stays true while a message addressed to the session is open, 
 
 forge's sessions mode starts one session per task itself: `forge swarm tick` composes its launch (the worktree `.claude/worktrees/task-<T>` on `task/<T>`, `/forge:member`, and the `--effort` and `--model` of its `swarm.member` setting, medium by default) and the coordinator runs it; `waypoint launch --task` exits with code 2. The band of such a member says "of the execution of <coordinator>". Any session can also join a running execution as a manual member from `/waypoint:work`, and take a pending task. `session-id` gives only letters, digits, `_`, `.` and `-`, the ids forge accepts.
 
+**A background session in the main checkout.** Claude Code lets a background session that has not entered a worktree write nothing in the main checkout (`worktree.bgIsolation`). `waypoint validate` tells the skills so (its last line, `{"bg": {"jobTmp": …}}`): `/waypoint:plan` then lists the roadmap into the conversation, saves each listing in the job's temporary folder and reads it with `waypoint db-import`, and the CLI writes every other file; `/waypoint:work` enters a worktree first, since a task cannot be worked there either. Limit: a plan that has to be written or edited by hand (a new plan, the link to the design) waits for an interactive session.
+
 For many tracks at once with automatic integration, use forge's [execution modes](../forge/README.md#execution-modes).
 
 ## Sessions: seat and binding

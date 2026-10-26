@@ -2,11 +2,48 @@
 // session that has not entered a worktree Claude Code refuses every Write, Edit and out_dir inside the shared checkout
 // (bgIsolation), and a session in a track worktree must not write into the main checkout: the CLI writes the roadmap URL
 // into plan.yaml (setRoadmapText), adds a delegated task to it (addTaskText), reads the versions the session listed
-// (parseVersions) and turns a listing read into the conversation into documents (parseListing). Pure: run.ts reads and
-// writes the files.
+// (parseVersions) and turns a listing read into the conversation into documents (parseListing). Pure but for
+// backgroundGuard, which reads the environment and a few files: run.ts reads and writes the files.
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
 import { isMap, isScalar, isSeq, parseDocument, stringify, type Document } from 'yaml';
 import { parsePlan, PlanError } from '../lib/plan.js';
 import type { Known } from '../lib/sync.js';
+
+/**
+ * Fix round 1 (Important 2): whether this is a background session of Claude Code in a repository's main checkout, where
+ * Claude Code refuses every Write, Edit and out_dir (bgIsolation), with the job's temp folder it may write to. The CLI
+ * inherits the session's environment: `CLAUDE_JOB_DIR` (and `CLAUDE_CODE_SESSION_KIND=bg`, when it is passed on). The
+ * guard is off with `CLAUDE_BG_ISOLATION=none`, or `worktree.bgIsolation: none` in the checkout's .claude/settings.local.json,
+ * .claude/settings.json or the user's settings.json (in that order of precedence), and in a linked worktree (its `.git`
+ * is a file) or outside a repository. Null when there is no guard.
+ */
+export function backgroundGuard(env: Record<string, string | undefined>, cwd: string): { jobTmp: string } | null {
+  const job = env.CLAUDE_JOB_DIR;
+  if (!job || (env.CLAUDE_CODE_SESSION_KIND !== undefined && env.CLAUDE_CODE_SESSION_KIND !== 'bg')) return null;
+  let root: string | null = null;
+  for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
+    const git = path.join(dir, '.git');
+    if (existsSync(git)) {
+      try { if (statSync(git).isDirectory()) root = dir; } catch { root = null; }
+      break;
+    }
+    if (path.dirname(dir) === dir) break;
+  }
+  if (!root) return null;
+  const isolation = env.CLAUDE_BG_ISOLATION;
+  if (isolation === 'none') return null;
+  if (isolation !== 'worktree') {
+    const user = env.CLAUDE_CONFIG_DIR ?? path.join(env.USERPROFILE ?? env.HOME ?? '', '.claude');
+    for (const file of [path.join(root, '.claude', 'settings.local.json'), path.join(root, '.claude', 'settings.json'), path.join(user, 'settings.json')]) {
+      let mode: unknown;
+      try { mode = (JSON.parse(readFileSync(file, 'utf8')) as { worktree?: { bgIsolation?: unknown } } | null)?.worktree?.bgIsolation; } catch { continue; }
+      if (mode === 'none') return null;
+      if (mode === 'worktree') break;
+    }
+  }
+  return { jobTmp: path.join(job, 'tmp') };
+}
 
 /** A collection name, as clean-cache takes it. */
 export const COLLECTION = /^[a-z_]{1,32}$/;

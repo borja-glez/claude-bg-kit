@@ -1,7 +1,7 @@
 ---
 name: work
 description: Use when working on a project that has a waypoint plan (docs/waypoint/*/plan.yaml) — join the roadmap, take the next task, and keep the live roadmap artifact updated as tasks start, block and finish. Coordinates with other parallel sessions (heartbeat, inbox, recovery, overlap warnings, delegation, phase close). Triggers: "/waypoint:work", "join the roadmap", "next task", "continue the plan".
-allowed-tools: Bash(node *waypoint.cjs*) Bash(git status *) Bash(git diff *) Bash(git log *) Bash(git add *) Bash(git commit *) Bash(git rev-parse *) Bash(git symbolic-ref *) Bash(git worktree list *) Bash(git merge main) Bash(git merge --abort) ArtifactData Read Write Edit ListAgents SendMessage
+allowed-tools: Bash(node *waypoint.cjs*) Bash(git status *) Bash(git diff *) Bash(git log *) Bash(git add *) Bash(git commit *) Bash(git rev-parse *) Bash(git symbolic-ref *) Bash(git worktree list *) Bash(git merge main) Bash(git merge --abort) ArtifactData Read Write Edit ListAgents SendMessage EnterWorktree
 ---
 
 # waypoint: work through the plan

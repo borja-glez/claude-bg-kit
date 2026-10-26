@@ -26,7 +26,7 @@ import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
 import { isCommitCommand, runHook } from './hooks.js';
-import { COLLECTION, PlanFileError, addTaskText, isWebLink, parseListing, parseVersions, setRoadmapText, type ListedDoc } from './plan-files.js';
+import { COLLECTION, PlanFileError, addTaskText, backgroundGuard, isWebLink, parseListing, parseVersions, setRoadmapText, type ListedDoc } from './plan-files.js';
 import { launchCommand, launchRun, PLAN_PATH } from '../lib/launcher.js';
 import { PAGE_RULES, declaresAssets, roadmapCapabilities, rulesOf, sharingChange, sharingNotice, syncSummary } from '../lib/publish.js';
 import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
@@ -190,7 +190,10 @@ export function run(argv: string[], io: Io): Result {
             }
           }
         }
-        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}${refs}`);
+        // Fix round 1 (Important 2): the skills run validate first; a background session in the main checkout, which
+        // Claude Code lets write nothing there, learns it from the last line, with the job folder it may write to.
+        const bg = backgroundGuard(io.env ?? {}, io.cwd);
+        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}${refs}${bg ? `\n${JSON.stringify({ bg })}` : ''}`);
       }
       case 'replan': {
         // 6b-3 Task 1: moves, orders, adds, edits and retires phases and tasks, never renumbering, with the why in the plan's

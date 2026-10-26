@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { run, type Io } from '../src/cli/run.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { PAGE_RULES, roadmapCapabilities } from '../src/lib/publish.js';
@@ -245,5 +246,57 @@ describe('add-task: a delegated task goes into the main checkout\'s plan through
     expect(run(['add-task', 'plan.yaml', '--task-file', 'none.json'], io).code).toBe(2);
     expect(run(['add-task', 'plan.yaml'], io).code).toBe(2);
     expect(planText()).toBe(before);
+  });
+});
+
+describe('validate says when the session is a background one in the main checkout (fix round 1, Important 2)', () => {
+  const git = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', '-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8' }).trim();
+  let job: string;
+  let user: string;
+  beforeEach(() => {
+    job = tmp('wp-job-');
+    user = tmp('wp-user-');
+    git(dir, 'init', '-q', '-b', 'main');
+  });
+  const validate = (cwd: string, env: Record<string, string>) => {
+    const r = run(['validate', 'plan.yaml'], { ...io, cwd, env: { CLAUDE_CONFIG_DIR: user, ...env } });
+    expect(r.code, r.stderr).toBe(0);
+    return r.stdout.trimEnd().split('\n');
+  };
+  const BG = () => ({ CLAUDE_CODE_SESSION_KIND: 'bg', CLAUDE_JOB_DIR: job });
+  it('prints {"bg":{"jobTmp":…}} last for a background session (its job folder) in the main checkout, and nothing else changes', () => {
+    const lines = validate(dir, BG());
+    expect(lines[0]).toMatch(/^ok: \d+ tasks/);
+    expect(JSON.parse(lines.at(-1)!)).toEqual({ bg: { jobTmp: path.join(job, 'tmp') } });
+    // The job folder alone says it too, when the kind is not passed on.
+    expect(JSON.parse(validate(dir, { CLAUDE_JOB_DIR: job }).at(-1)!)).toEqual({ bg: { jobTmp: path.join(job, 'tmp') } });
+    // A subfolder of the main checkout is the checkout.
+    mkdirSync(path.join(dir, 'sub'));
+    copyFileSync(path.join(dir, 'plan.yaml'), path.join(dir, 'sub', 'plan.yaml'));
+    expect(JSON.parse(validate(path.join(dir, 'sub'), BG()).at(-1)!)).toHaveProperty('bg');
+  });
+  it('prints nothing more for an interactive session, another kind, a linked worktree, outside a repository, or with bgIsolation none', () => {
+    const plain = validate(dir, {});
+    expect(plain.join(' ')).not.toContain('"bg"');
+    expect(validate(dir, { ...BG(), CLAUDE_CODE_SESSION_KIND: 'daemon' })).toEqual(plain);
+    expect(validate(dir, { ...BG(), CLAUDE_BG_ISOLATION: 'none' })).toEqual(plain);
+    git(dir, 'add', 'plan.yaml'); git(dir, 'commit', '-qm', 'plan');
+    const wt = path.join(tmp('wp-wt-'), 'w');
+    git(dir, 'worktree', 'add', '-q', wt);
+    expect(validate(wt, BG())).toEqual(plain);
+    const outside = tmp('wp-out-');
+    copyFileSync(path.join(dir, 'plan.yaml'), path.join(outside, 'plan.yaml'));
+    expect(validate(outside, BG())).toEqual(plain);
+  });
+  it('reads worktree.bgIsolation from the checkout\'s settings.local.json, then settings.json, then the user\'s', () => {
+    const set = (file: string, mode: string) => { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, JSON.stringify({ worktree: { bgIsolation: mode } })); };
+    set(path.join(user, 'settings.json'), 'none');
+    expect(validate(dir, BG()).join(' ')).not.toContain('"bg"');
+    set(path.join(dir, '.claude', 'settings.json'), 'worktree');
+    expect(validate(dir, BG()).at(-1)).toContain('"bg"');
+    set(path.join(dir, '.claude', 'settings.local.json'), 'none');
+    expect(validate(dir, BG()).join(' ')).not.toContain('"bg"');
+    // The session's own CLAUDE_BG_ISOLATION wins over the files.
+    expect(validate(dir, { ...BG(), CLAUDE_BG_ISOLATION: 'worktree' }).at(-1)).toContain('"bg"');
   });
 });

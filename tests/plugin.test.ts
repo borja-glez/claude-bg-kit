@@ -1650,10 +1650,16 @@ describe('plugin layout', () => {
   it('waypoint:plan asks the model to write no file of the checkout: the CLI writes them, and a background session lists into the conversation (w8 W2)', () => {
     const plan = read('plugins/waypoint/skills/plan/SKILL.md');
     for (const w of ['--write-capabilities', 'set-roadmap <plan> <url>', "--versions '<V>'", 'the three calls in one message', 'clean-cache <plan> meta plan state',
-      '**A background session in the main checkout.**', 'db-import <plan> <collection>=<job tmp>/waypoint-<collection>.txt', "--known .waypoint/<project>/known.json` instead of `--versions`",
+      '**A background session in the main checkout.**', 'db-import <plan> <collection>=<jobTmp>/waypoint-<collection>.txt', "--known .waypoint/<project>/known.json` instead of `--versions`",
       'from your own worktree, as the work skill\'s delegation does']) expect(plan, w).toContain(w);
     for (const w of ['capabilities.json` with the Write tool', 'Write `.waypoint/<project>/known.json`', 'Write the returned URL into', 'write them to the file and run the command again',
       'with cwd = `MAIN_REPO`']) expect(plan, w).not.toContain(w);
+    // Fix round 1 (Important 2): the CLI says it is a background session (validate's last line), not the prompt's text,
+    // and a refused Write of the job folder ends in the person, never in the shell.
+    for (const w of ['When its last line is `{"bg": {"jobTmp": "<folder>"}}`', 'If that Write is refused too', 'ask the user to run `/waypoint:plan` in an interactive session, and stop']) expect(plan, w).toContain(w);
+    expect(plan).not.toContain('your instructions name');
+    expect(workRef('setup')).toContain('When its last line is `{"bg": {"jobTmp": …}}`, this is a background session in the main checkout');
+    expect(workRef('setup')).toContain('call `EnterWorktree` and start §0 again from that worktree');
     // The delegation adds the task through the CLI and lists into its own worktree, never into MAIN_REPO.
     const multi = workRef('multisession');
     const delegation = multi.slice(multi.indexOf('**Delegation.**'), multi.indexOf('\n## After the task'));

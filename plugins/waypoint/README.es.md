@@ -165,6 +165,8 @@ Por diseño, `multi` sigue en true mientras esté abierto un mensaje dirigido a 
 
 El modo sessions de forge arranca él mismo una sesión por tarea: `forge swarm tick` compone su arranque (el worktree `.claude/worktrees/task-<T>` sobre `task/<T>`, `/forge:member`, y el `--effort` y el `--model` de su ajuste `swarm.member`, medium por defecto) y la coordinadora lo ejecuta; `waypoint launch --task` sale con código 2. La banda de un miembro así dice «de la ejecución de <coordinadora>». Cualquier sesión puede además unirse desde `/waypoint:work` a una ejecución en marcha como miembro manual y coger una tarea pendiente. `session-id` solo da letras, dígitos, `_`, `.` y `-`, los ids que acepta forge.
 
+**Una sesión en segundo plano en el checkout principal.** Claude Code no deja escribir nada en el checkout principal a una sesión en segundo plano que no ha entrado en un worktree (`worktree.bgIsolation`). `waypoint validate` se lo dice a las skills (su última línea, `{"bg": {"jobTmp": …}}`): `/waypoint:plan` lista entonces el roadmap en la conversación, guarda cada listado en la carpeta temporal del trabajo y lo lee con `waypoint db-import`, y la CLI escribe el resto de ficheros; `/waypoint:work` entra antes en un worktree, porque allí tampoco se puede trabajar una tarea. Límite: un plan que hay que escribir o editar a mano (un plan nuevo, el enlace al diseño) espera a una sesión interactiva.
+
 Para muchos frentes a la vez con integración automática, usa los [modos de ejecución](../forge/README.es.md#modos-de-ejecución) de forge.
 
 ## Sesiones: asiento y vínculo
