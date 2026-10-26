@@ -72,6 +72,20 @@ describe('forge prefs and local set', () => {
     writeFileSync(path.join(root, '.forge', 'config.yaml'), 'workflow: off\n');
     expect(JSON.parse(run(['prefs'], { ...io, env }).stdout)).toMatchObject({ workflow: 'off', sources: { workflow: 'config' } });
   });
+  it('forge prefs says when FORGE_WORKFLOW is not a workflow and which ones are (fix round 1)', () => {
+    const r = run(['prefs'], { ...io, env: { FORGE_WORKFLOW: 'of' } });
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out).toMatchObject({ workflow: 'ask', sources: { workflow: 'default' } });
+    expect(out.warning).toBe('FORGE_WORKFLOW="of" is not a workflow, so it is ignored; it can be ask, forge, superpowers, superpowers-design, superpowers-plan or off');
+    expect(r.stderr).toBe(`forge: ${out.warning}\n`);
+    // Also when the project's files decide: the setting is still wrong.
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'workflow: forge\n');
+    expect(JSON.parse(run(['prefs'], { ...io, env: { FORGE_WORKFLOW: 'Superpower' } }).stdout)).toMatchObject({ workflow: 'forge', warning: expect.stringContaining('"Superpower"') });
+    for (const fine of ['forge', ' OFF ', '', '  ']) expect(JSON.parse(run(['prefs'], { ...io, env: { FORGE_WORKFLOW: fine } }).stdout), JSON.stringify(fine)).not.toHaveProperty('warning');
+    expect(run(['prefs'], { ...io, env: {} }).stderr).toBe('');
+  });
   it('refuses bad values, and a broken config.yaml', () => {
     expect(run(['local', 'set', 'workflow', 'maybe'], io).code).toBe(2);
     expect(run(['local', 'set', 'autonomy', 'always'], io).code).toBe(2);

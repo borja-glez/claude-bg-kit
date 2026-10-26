@@ -17,6 +17,14 @@ export function envWorkflow(env: Record<string, string | undefined>): Workflow |
   return isWorkflow(v) ? v : undefined;
 }
 
+/** w8 fix round 1: what `forge prefs` says of a FORGE_WORKFLOW that is set but is no workflow (an empty one is unset). */
+export function envWorkflowWarning(env: Record<string, string | undefined>): string | null {
+  const raw = env.FORGE_WORKFLOW;
+  if (raw === undefined || !raw.trim() || envWorkflow(env)) return null;
+  const shown = JSON.stringify(raw.length > 40 ? `${raw.slice(0, 40)}…` : raw);
+  return `FORGE_WORKFLOW=${shown} is not a workflow, so it is ignored; it can be ${WORKFLOWS.slice(0, -1).join(', ')} or ${WORKFLOWS.at(-1)}`;
+}
+
 function pick<T>(levels: [T | undefined, PrefSource][], dflt: T): [T, PrefSource] {
   for (const [v, source] of levels) if (v !== undefined) return [v, source];
   return [dflt, 'default'];
