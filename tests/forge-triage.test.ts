@@ -125,10 +125,14 @@ describe('triage', () => {
       // the pieces the new project only uses («that uses», «que use») are not its own.
       'make the app talk to the backend and the API', 'haz que la app use la API y la base de datos', 'start the app with the database and the API',
       'arranca la app con el backend y el frontend', "write the app's backend and frontend README", 'create a service that uses the dashboard API',
-      'crea un servicio que use la API y la base de datos del cliente', 'build the login page of the app with the API and the database']) atMostMedium(t);
+      'crea un servicio que use la API y la base de datos del cliente', 'build the login page of the app with the API and the database',
+      // Fix round 3: the free word comes only after an article, and only one.
+      'build login app pages with the API and the database', 'create a very small todo app with a frontend and an API']) atMostMedium(t);
     // A request to create an app or project with several pieces, one of them strong, is Large.
     for (const t of ['crea una app de reservas con backend y frontend', 'build a new app with a frontend and a backend', 'crea una app con backend y un dashboard',
-      'create a new project from scratch with a React frontend and a Postgres database', 'crea un nuevo servicio con su API y su base de datos']) {
+      'create a new project from scratch with a React frontend and a Postgres database', 'crea un nuevo servicio con su API y su base de datos',
+      // Fix round 3: one free word after the article, as English puts its modifier («a todo app», «a booking service»).
+      'build a todo app with a frontend and an API', 'create a booking service with a database and a frontend', 'crea una nueva app web con backend y frontend']) {
       expect(triage(t, young, []).path, t).toBe('large');
       expect(triage(t, young, []).reasons.join(' '), t).toMatch(/greenfield repository with several pieces/);
     }

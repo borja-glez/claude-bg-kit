@@ -81,8 +81,10 @@ const WEAK_PIECES: [string, RegExp][] = [
   ['admin', words('admin')],
 ];
 // Fix round 2: a create verb whose direct object is the app, project or service (an article or «new» at most between).
+// Fix round 3: after the article, one free word too, where English puts its modifier («a todo app», «a booking service»).
 const CREATE_PROJECT = new RegExp(`(?<![\\p{L}\\p{N}_])(?:crea|crear|create|build|construye|construir|monta|montar|desarrolla|desarrollar|develop|scaffold`
-  + `|implementa|implementar|implement)\\s+(?:(?:a|an|un|una|nuevo|nueva|new)\\s+){0,2}(?:apps?|aplicaci[oó]n(?:es)?|proyectos?|projects?|servicios?|services?)(?![\\p{L}\\p{N}_])`, 'iu');
+  + `|implementa|implementar|implement)\\s+(?:(?:(?:a|an|un|una|nuevo|nueva|new)\\s+){1,2}(?:[^\\s.;!?]+\\s+)?)?`
+  + `(?:apps?|aplicaci[oó]n(?:es)?|proyectos?|projects?|servicios?|services?)(?![\\p{L}\\p{N}_])`, 'iu');
 const FIX_START = /^\s*(?:arregla|arreglar|corrige|corregir|repara|reparar|soluciona|solucionar|fix|repair|solve)(?![\p{L}\p{N}_])/iu;
 // What the new project only uses («that uses the dashboard API», «que use la API») is no piece of its own.
 const ONLY_USES = /(?<![\p{L}\p{N}_])(?:(?:that|which)\s+(?:uses?|calls?|consumes?|reads?\s+from|talks?\s+to)|que\s+(?:use|usa|usen|usan|utilice|utiliza|llame|llama|consuma|consume|lea\s+de|lee\s+de|hable\s+con|habla\s+con))(?![\p{L}\p{N}_])[\s\S]*$/iu;
