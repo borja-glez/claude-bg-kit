@@ -1197,17 +1197,32 @@ let photoCount = 0;
 
 // Step 3 of §4.6: the files read once, the model and its cards built and kept under a new number; the command answers
 // one line, so a model that reads command output pays for one line only. Nothing is written to $.state.
-async function takePhoto($: Engine): Promise<string> {
-  const now = await nowMs($);
+// Review Minor 3: how long /lens foto waits for its read; past it the photo is taken from what lens holds, and the read
+// goes on for the next look.
+const PHOTO_READ_MS = 5_000;
+
+// What a photo reads: the band, the files and, carry 7, the agents list (with the pane closed nothing asked it, so a
+// subagent that ended would be drawn as running). It never throws.
+async function readForPhoto($: Engine, now: number): Promise<void> {
   if (sessionId === null) {
     try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
   }
   try { roadmap = await loadBandModel($); bandRead = true; } catch { /* keep the last one */ }
   keepRunBaseline();
   try { panelFiles = await loadPanelFiles($, now); } catch { /* the files read last */ }
-  // Carry 7: with the pane closed nothing asked the agents list; the photo asks it once, as a refresh does, so a subagent
-  // that ended is not drawn as running.
   try { adoptListed(await agentList($), now); } catch { /* the agents heard of */ }
+}
+
+// Waits for `work` up to `ms` on the engine's clock; whatever it has not done by then it goes on doing unwaited.
+async function within($: Engine, work: Promise<void>, ms: number): Promise<void> {
+  const wait: { timer: Timer | null } = { timer: null };
+  const expiry = new Promise<void>(resolve => { wait.timer = $.clock.after(ms, () => resolve()); });
+  try { await Promise.race([work.catch(() => undefined), expiry]); } finally { wait.timer?.cancel(); }
+}
+
+async function takePhoto($: Engine): Promise<string> {
+  const now = await nowMs($);
+  await within($, readForPhoto($, now), PHOTO_READ_MS);
   const model = await buildPanel($);
   keepBand($, model);
   const t = textsFor(model.locale);
