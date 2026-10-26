@@ -58,7 +58,7 @@ function updateLive(main: string, file: string, fn: (prev: LiveDoc | null) => Li
   };
   let ran = false;
   try {
-    withFileLock(liveLock(file), 'the live signal', () => { ran = true; apply(); }, { waitMs: LIVE_LOCK_WAIT_MS, staleMs: LIVE_LOCK_STALE_MS });
+    withFileLock(liveLock(file), () => { ran = true; apply(); }, { waitMs: LIVE_LOCK_WAIT_MS, staleMs: LIVE_LOCK_STALE_MS });
   } catch (e) {
     // An error of the write itself is the caller's; a lock that could not be taken is not: write without it.
     if (ran) throw e;

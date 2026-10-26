@@ -164,14 +164,18 @@ function takeoverGate(lock: string, d: Required<LockDeps>): (() => void) | null 
   return null;
 }
 
+/** A lock a live process still held after the wait: `holder` is its pid, null when its file could not be read. */
+export class LockBusyError extends Error {
+  constructor(readonly holder: number | null) { super(`locked by ${holder ?? 'another process'}`); }
+}
+
 /**
- * Takes the lock `file` (created with 'wx', holding this pid and the time) or throws the UsageError
- * `<label> is locked by <pid>` after `waitMs`. A holder whose pid died or that holds it past `staleMs` left it behind:
- * it is taken over under the takeover gate, unless the file changed since it was read (another process took it over
- * first). A file not written yet (its writer is between open and write) is waited for, and taken over once its mtime
- * is that old.
+ * Takes the lock `file` (created with 'wx', holding this pid and the time) or throws LockBusyError after `waitMs`. A
+ * holder whose pid died or that holds it past `staleMs` left it behind: it is taken over under the takeover gate,
+ * unless the file changed since it was read (another process took it over first). A file not written yet (its writer
+ * is between open and write) is waited for, and taken over once its mtime is that old.
  */
-function acquireLock(file: string, label: string, d: Required<LockDeps>): Holder {
+function acquireLock(file: string, d: Required<LockDeps>): Holder {
   const attempts = Math.ceil(d.waitMs / LOCK_RETRY_MS);
   let holder: number | null = null;
   let refused: NodeJS.ErrnoException | null = null;
@@ -203,7 +207,7 @@ function acquireLock(file: string, label: string, d: Required<LockDeps>): Holder
     d.sleep(LOCK_RETRY_MS);
   }
   if (refused && holder === null) throw refused;
-  throw new UsageError(`${label} is locked by ${holder ?? 'another process'}`);
+  throw new LockBusyError(holder);
 }
 
 /** Removes the lock only while it is still the one this call took (a takeover after `staleMs` is someone else's). */
@@ -215,14 +219,14 @@ function releaseLock(file: string, mine: Holder): void {
 /**
  * Runs `fn` under the lock `file` (its folder must exist) and returns what it returns; the lock is released in a
  * finally. A lock a live process holds for less than `staleMs` (LOCK_STALE_MS) is waited for, every LOCK_RETRY_MS for
- * `waitMs` (LOCK_WAIT_MS); then it throws the UsageError `<label> is locked by <pid>`, and `fn` never ran.
+ * `waitMs` (LOCK_WAIT_MS); then it throws LockBusyError, and `fn` never ran.
  */
-export function withFileLock<T>(file: string, label: string, fn: () => T, deps: LockDeps = {}): T {
+export function withFileLock<T>(file: string, fn: () => T, deps: LockDeps = {}): T {
   const d: Required<LockDeps> = {
     now: deps.now ?? (() => new Date()), sleep: deps.sleep ?? sleepSync, alive: deps.alive ?? pidAlive,
     waitMs: deps.waitMs ?? LOCK_WAIT_MS, staleMs: deps.staleMs ?? LOCK_STALE_MS,
   };
-  const mine = acquireLock(file, label, d);
+  const mine = acquireLock(file, d);
   try { return fn(); } finally { releaseLock(file, mine); }
 }
 
@@ -235,11 +239,16 @@ export function withFileLock<T>(file: string, label: string, fn: () => T, deps: 
  */
 export function updateExecution(root: string, fn: (cur: ExecutionState | null) => ExecutionState | null, deps: LockDeps = {}): ExecutionState | null {
   forgeDir(root);
-  return withFileLock(executionLock(root), 'execution.json', () => {
-    const next = fn(readExecution(root));
-    if (next) saveExecution(root, next);
-    return next;
-  }, deps);
+  try {
+    return withFileLock(executionLock(root), () => {
+      const next = fn(readExecution(root));
+      if (next) saveExecution(root, next);
+      return next;
+    }, deps);
+  } catch (e) {
+    if (e instanceof LockBusyError) throw new UsageError(`execution.json is locked by ${e.holder ?? 'another process'}`);
+    throw e;
+  }
 }
 
 /**
