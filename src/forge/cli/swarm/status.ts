@@ -8,6 +8,7 @@ import { readWorkDir, workDir, workRel } from '../../task-ref.js';
 import { gitRun, predictMerge, type MergePrediction } from '../../merge-predict.js';
 import { runDocOf } from '../../run-doc.js';
 import { boundLiveness, releaseWrites, openTasks } from './shared.js';
+import { deviationsOf } from '../../deviation.js';
 
 /**
  * D-08: each task's work folder, relative to the main checkout, as `swarm status` prints it (`work`): the project's
@@ -58,5 +59,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     // J-15: meta/run as the roadmap takes it, built by the CLI; carry 10: once the run ended, the writes that free the
     // coordinator's tasks it left running or stopped.
     publish: state ? { run: runDocOf(main, state), ...(!state.active ? { release: releaseWrites(state, openTasks(state)) } : {}) } : null,
+    // FX1: the run's implementers that were not the ones forge named, for the report that closes it.
+    ...(state ? { deviations: deviationsOf(readEvents(main), e => e.runId === state.runId) } : {}),
   });
 };

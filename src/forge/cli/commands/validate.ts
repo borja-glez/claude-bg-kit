@@ -16,6 +16,8 @@ import { mainCheckout } from '../../local.js';
 import { loadTrusted } from '../../trust.js';
 import { noSlot } from '../../jobs.js';
 import { defaultExec, defaultGit, repoReader } from '../exec.js';
+import { eventsOf, resolveProject } from '../../task-ref.js';
+import { deviationSay, deviationsOf, sinceLastTriage } from '../../deviation.js';
 
 export const command: Command = (args, ctx) => {
   const { io, repoDir, flag, has, json, ts } = ctx;
@@ -105,6 +107,14 @@ export const command: Command = (args, ctx) => {
       const names = (r.failing ?? []).filter(n => was.has(n));
       if (names.length) out.stderr += `already failing on the base by name (not yours): ${r.validator}: ${names.slice(0, 10).join('; ')}${names.length > 10 ? ` (+${names.length - 10} more)` : ''}\n`;
     }
+  }
+  // FX1: the Trivial and Small paths close with this pass: it says this run's deviations of the task (from its last triage).
+  const task = flag('task');
+  if (task && scope.mode === 'small') {
+    const ledger = readEvents(io.cwd);
+    const mine = eventsOf(ledger, { project: resolveProject({ task, events: ledger }), task });
+    const line = deviationSay(deviationsOf(sinceLastTriage(mine, task)), 'en');
+    if (line) out.stderr += `${line}\n`;
   }
   if (denied) out.stderr += 'configCommands: denied — only the validators forge detects ran\n';
   if (restored.length) out.stderr += `restored ${restored.length} tracked file(s) the validators regenerated: ${restored.join(', ')}\n`;

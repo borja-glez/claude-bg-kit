@@ -15,6 +15,7 @@ import { runDocOf } from '../run-doc.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
 import { normalizePublicTask, type ExecTask, type ExecutionState, type PublicTask } from '../../lib/execution-state.js';
 import { isPlanId, parsePlan } from '../../lib/plan.js';
+import { deviationsOf, tellDeviations } from '../deviation.js';
 
 // D-12: `FORGE swarm step`, one step of a plan execution in one process. It calls the CLI itself (deps.cli) for each
 // command, so every one of them behaves as when the skill runs it alone (its --cwd, its events, the lock).
@@ -823,11 +824,15 @@ function stepOnce(c: Ctx, e0: ExecutionState, returned: Set<string>, versions: V
   }
   // 4. What the roadmap batch publishes.
   const after = readExecution(io.cwd) ?? e0;
-  const out = {
+  const out: Record<string, unknown> = {
     // The leases it publishes run from now, at the step's end (M7).
     actions: c.actions, publish: publishOf(io, after, started, versions, io.now()),
     running: Object.values(after.tasks).filter(t => t.status === 'running').length, parallel: after.parallel, wait, say: stepSay(c.actions, wait, c.locale),
   };
+  // FX1: the deviations of the run since the previous step's tick (the hook records them as the coordinator starts its
+  // agents, between steps), said once.
+  const since = e0.lastStepAt ? Date.parse(e0.lastStepAt) : -Infinity;
+  tellDeviations(out, deviationsOf(readEvents(io.cwd), e => e.runId === e0.runId && Date.parse(e.ts) > since), c.locale);
   // 5. Last, the writes that must not outlive a step that died before its output (respawned.json, asked.json's re-ask).
   for (const write of c.after) write();
   return { code: 0, stdout: JSON.stringify(out, null, 2) + '\n', stderr: warnings };

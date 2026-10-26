@@ -34,6 +34,7 @@ import { loadTrustedConfig } from '../trust.js';
 import { sayTdd, tddForBrief, tddPending } from '../tdd.js';
 import { defaultExec } from './exec.js';
 import { eventsSince, executionHolding } from '../execution.js';
+import { deviationsOf, tellDeviations, type Deviation } from '../deviation.js';
 import { runWithCache, cacheGit, checkoutPrefix, cleanTree } from '../validate-cache.js';
 import { noSlot, type Slot } from '../jobs.js';
 import { reviewRound, reviewerKey, withSecurity, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type SpawnEntry, type TriageReview } from '../review-round.js';
@@ -269,8 +270,13 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     validators: detectValidators(deps.repo, config), repo: deps.repo, base: baseSha, dir, n,
   };
   // Carry 3: in an execution, only its own verdicts count (the round, the redo, the express review, the validators rounds).
-  const since = executionHolding(deps.cwd, { project, task: id })?.startedAt ?? null;
+  const holder = executionHolding(deps.cwd, { project, task: id });
+  const since = holder?.startedAt ?? null;
   const counted = eventsSince(events, since);
+  // FX1: the deviations of this brief since its previous review, said once by the review that follows them; a plan
+  // execution's swarm step says them itself, at the step after they happened.
+  const lastReview = counted.map(e => e.kind === 'phase' && isTask(e, id) && e.phase === 'review' && e.brief === Number(n)).lastIndexOf(true);
+  const deviations = holder?.active && holder.kind === 'plan' ? [] : deviationsOf(counted.slice(lastReview + 1), e => isTask(e, task));
   const round = reviewRoundOf(counted, task);
   const roundDir = path.join(dir, `reviews-${n}-${round}`);
   mkdirSync(roundDir, { recursive: true });
@@ -352,7 +358,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     && lastVerdict?.action === 'fix' && Array.isArray(prevSent?.validators) && prevSent!.validators.length === 0 && expressCandidate(index, round)
     && SHA.test(baseSha) && !(verified && tddPending(tddCtx))) {
     const express = expressPrep({ deps, task, project, id, n, round, pathName, review, previous, prevReviews, fixFiles, fixZones, dir, roundDir, baseSha,
-      baselineArg, diff, head, tmFile, index, reviewsCount, locale, noCache: args.includes('--no-cache') });
+      baselineArg, diff, head, tmFile, index, reviewsCount, locale, noCache: args.includes('--no-cache'), deviations });
     if (express) return express;
   }
 
@@ -466,6 +472,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     out.say = sayPrep(reviewsCount, ok, results.filter(blocking).map(r => failingLabel(r, locale)), plan, locale, cachedNames(results).length)
       + (t ? ' ' + sayTdd(t.check, locale) : '');
   }
+  tellDeviations(out, deviations, locale);
   return json(out);
 }
 
@@ -510,6 +517,8 @@ interface ExpressCtx {
   previous: Partial<Record<ReviewRole, PreviousResult>>; prevReviews: Partial<Record<ReviewerKey, Review>>; fixFiles: string[]; fixZones: Zone[];
   dir: string; roundDir: string; baseSha: string; baselineArg: string; diff: string; head: string; tmFile: string | null;
   index: FindingsIndex; reviewsCount: { n: number; max: number }; locale: string | undefined; noCache: boolean;
+  /** FX1: the brief's deviations this review says. */
+  deviations: Deviation[];
 }
 
 /**
@@ -558,6 +567,7 @@ function expressPrep(c: ExpressCtx): Result | null {
     ...(plan.carried.length ? { carried: plan.carried.map(x => x.name) } : {}), delegated: plan.delegated,
   };
   if (c.locale === 'es' || c.locale === 'en') out.say = sayExpress(c.reviewsCount, plan, c.locale);
+  tellDeviations(out, c.deviations, c.locale);
   return json(out);
 }
 
@@ -900,15 +910,20 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   // ruled out of the model in earlier reviews that this one does not name (the index carries them).
   const deferred = [...result.deferred, ...result.minor.filter(f => f.residual === 'out-of-model'),
     ...(result.action === 'accept' && !fresh ? carriedOutOfModel(index, round, result) : [])];
-  return json({
+  const out: Record<string, unknown> = {
     action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer, reviews: reviewsCount, ...(express ? { express: true } : {}),
     findings, deferred, minor: result.minor, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null, handover, revert,
     invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
     incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name), round, reasons: result.reasons,
     ...(twins.shadow.length ? { shadow: twins.shadow } : {}), ...(twins.shadowSkipped.length ? { shadowSkipped: twins.shadowSkipped } : {}),
     ...(twins.shadowPending.length ? { shadowPending: twins.shadowPending } : {}),
-  });
+  };
+  // FX1: a brief that leaves the loop (accepted, or a breaker or a stall) closes with every deviation it had.
+  if (!FIX_NEXT.includes(d.next)) tellDeviations(out, deviationsOf(eventsSince(events, since), e => isTask(e, task)), locale);
+  return json(out);
 }
+
+const FIX_NEXT: readonly unknown[] = ['resume', 'fresh-stronger', 'redo'];
 
 /**
  * `FORGE prep --task <id>-<n> --path <p> [--phase <name>] [--dir <dir>] [--cwd <worktree>] [--base <sha>] [--no-baseline] [--no-cache]`: before a brief's work, in

@@ -168,8 +168,11 @@ tasks:
   const g = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim();
   const out = (r: { stdout: string; code: number; stderr: string }) => { if (r.code !== 0) throw new Error(r.stderr); return JSON.parse(r.stdout); };
   const step = () => out(run(['swarm', 'step', '--plan', 'plan.yaml', '--db', 'db'], io)) as { actions: { type: string; task?: string; agent?: string }[]; say: string };
-  const start = (agentId: string, agentType: string) =>
-    run(['hook', 'live'], { ...io, stdin: JSON.stringify({ session_id: 'hook-main', hook_event_name: 'SubagentStart', agent_id: agentId, agent_type: agentType, cwd: root }) });
+  // the coordinator starts its agents after the step that handed them out
+  const start = (agentId: string, agentType: string) => run(['hook', 'live'], {
+    ...io, now: () => new Date(NOW.getTime() + 30_000),
+    stdin: JSON.stringify({ session_id: 'hook-main', hook_event_name: 'SubagentStart', agent_id: agentId, agent_type: agentType, cwd: root }),
+  });
   beforeEach(() => {
     root = tmp('forge-deviation-step-');
     g(root, 'init', '-q', '-b', 'main'); g(root, 'config', 'user.email', 'a@b.c'); g(root, 'config', 'user.name', 't'); g(root, 'config', 'core.autocrlf', 'false');
@@ -192,6 +195,73 @@ tasks:
     const other = spawn.agent === 'forge-impl-heavy' ? 'forge-mech' : 'forge-impl-heavy';
     start('a2', `forge:${other}`);
     expect(readEvents(root).filter(e => e.kind === 'deviation')).toEqual([expect.objectContaining({ task: 'T1-1', agent: other, expected: spawn.agent, project: 'shop' })]);
+    // the next step says it once, and swarm status lists it for the closing report
+    io = { ...io, now: () => new Date(NOW.getTime() + 40_000) };
+    const said = step();
+    expect(said.say).toContain(`Deviation from the triage: T1-1 started ${other} where forge named ${spawn.agent}.`);
+    expect((said as { deviations?: unknown }).deviations).toEqual([expect.objectContaining({ task: 'T1-1', agent: other })]);
+    io = { ...io, now: () => new Date(NOW.getTime() + 60_000) };
+    expect(step().say).not.toContain('Deviation');
+    expect(out(run(['swarm', 'status'], io)).deviations).toEqual([expect.objectContaining({ task: 'T1-1', agent: other, expected: spawn.agent })]);
+  });
+});
+
+describe('a deviation is said where the work goes on, and listed for the closing report', () => {
+  let root: string; let wt: string; let io: Io; let base: string;
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: wt, encoding: 'utf8' }).trim();
+  const work = () => path.join(root, '.forge', 'work', 'T1');
+  const review = { light: true, flags: [], reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium', agent: 'forge-review-correctness' }] };
+  const deviation = (min: number, task = 'T1-1') => appendEvent(root, ev(min, { kind: 'deviation', task, agent: 'forge-impl', expected: 'forge-impl-light', agentId: `a${min}` }));
+  beforeEach(() => {
+    root = tmp('forge-deviation-say-');
+    wt = path.join(root, 'wt');
+    mkdirSync(path.join(wt, '.forge'), { recursive: true });
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(0)"\n');
+    writeFileSync(path.join(wt, 'a.txt'), 'one\n');
+    git('init', '-q'); git('config', 'core.autocrlf', 'false'); git('add', '-A'); git('commit', '-q', '-m', 'base');
+    base = git('rev-parse', 'HEAD');
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo\n'); git('commit', '-q', '-am', 'change');
+    mkdirSync(work(), { recursive: true });
+    writeFileSync(path.join(work(), 'brief-1.md'), '# T1\n');
+    writeFileSync(path.join(work(), 'baseline-1.json'), '[{"validator":"check","ok":true,"flaky":false,"durationMs":1,"failures":[]}]\n');
+    io = { cwd: root, now: () => new Date(at(30)), env: {} };
+    appendEvent(root, cliTriage(0, 'T1', 'forge-impl-light', { path: 'medium', review }));
+  });
+  const prep = (locale = 'en') => JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json',
+    '--dir', '.forge/work/T1', '--cwd', wt, '--locale', locale], io).stdout);
+
+  it('review-prep says the deviations of the brief since its last review, once', () => {
+    deviation(10);
+    const first = prep();
+    expect(first.deviations).toEqual([{ task: 'T1-1', agent: 'forge-impl', expected: 'forge-impl-light', at: at(10) }]);
+    expect(first.say).toContain('Deviation from the triage: T1-1 started forge-impl where forge named forge-impl-light.');
+    expect(prep('es').say).not.toContain('forge-impl-light');
+    deviation(40);
+    io = { ...io, now: () => new Date(at(50)) };
+    expect(prep('es').say).toContain('Desvío del triaje: en T1-1 arrancó forge-impl donde forge nombró forge-impl-light.');
+  });
+  it('review-close and last --task list every deviation of the brief', () => {
+    deviation(10);
+    deviation(12, 'T2-1');
+    prep();
+    writeFileSync(path.join(work(), 'reviews-1-1', 'correctness.json'), JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] }));
+    const close = JSON.parse(run(['review-close', '--task', 'T1-1', '--dir', '.forge/work/T1', '--path', 'medium', '--cwd', wt, '--locale', 'en'], io).stdout);
+    expect(close.deviations).toEqual([{ task: 'T1-1', agent: 'forge-impl', expected: 'forge-impl-light', at: at(10) }]);
+    expect(close.say).toContain('Deviation from the triage: T1-1');
+    expect(JSON.parse(run(['last', '--task', 'T1'], io).stdout).deviations).toEqual([expect.objectContaining({ task: 'T1-1' })]);
+    expect(JSON.parse(run(['last', '--task', 'T3'], io).stdout).deviations).toEqual([]);
+  });
+  it('the Small path is told by its validate --all, for this run of the task', () => {
+    appendEvent(root, cliTriage(20, 'fix-a', 'forge-mech', { path: 'small' }));
+    deviation(25, 'fix-a-1');
+    const r = run(['validate', '--all', '--path', 'small', '--task', 'fix-a', '--cwd', wt], io);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain('Deviation from the triage: fix-a-1 started forge-impl where forge named forge-impl-light.');
+    // an implementer's own --affected pass says nothing
+    expect(run(['validate', '--affected', 'a.txt', '--task', 'fix-a-1', '--cwd', wt], io).stderr).not.toContain('Deviation');
+    // a deviation of an earlier run of the task (before its last triage) is not this run's
+    appendEvent(root, cliTriage(28, 'fix-a', 'forge-mech', { path: 'small' }));
+    expect(run(['validate', '--all', '--path', 'small', '--task', 'fix-a', '--cwd', wt], io).stderr).not.toContain('Deviation');
   });
 });
 

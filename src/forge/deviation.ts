@@ -13,6 +13,37 @@ import type { Io } from './cli/run.js';
 const IMPLEMENTER_AGENTS: readonly string[] = ['forge-mech', 'forge-impl-light', 'forge-impl', 'forge-impl-high', 'forge-impl-heavy', 'forge-fable'];
 export const isImplementerAgent = (name: string): boolean => IMPLEMENTER_AGENTS.includes(name);
 
+/** A deviation as the CLI prints it: the brief, who started, who forge named, and when. */
+export interface Deviation { task: string; agent: string; expected: string; at: string }
+
+/** The deviation events of `events` that `keep` takes, as printed; one that does not read is left out. */
+export function deviationsOf(events: readonly LedgerEvent[], keep: (e: LedgerEvent) => boolean = () => true): Deviation[] {
+  return events.flatMap(e => (e.kind === 'deviation' && typeof e.task === 'string' && typeof e.agent === 'string' && typeof e.expected === 'string' && keep(e)
+    ? [{ task: e.task, agent: e.agent, expected: e.expected, at: e.ts }] : []));
+}
+
+/** The line the person reads (their language: es, else English); '' with none. */
+export function deviationSay(list: readonly Deviation[], locale: string | undefined): string {
+  if (!list.length) return '';
+  return locale === 'es'
+    ? `Desvío del triaje: ${list.map(d => `en ${d.task} arrancó ${d.agent} donde forge nombró ${d.expected}`).join('; ')}.`
+    : `Deviation from the triage: ${list.map(d => `${d.task} started ${d.agent} where forge named ${d.expected}`).join('; ')}.`;
+}
+
+/** Appends the line to `out.say` (or makes it) and lists them in `out.deviations`; nothing with none. */
+export function tellDeviations(out: Record<string, unknown>, list: readonly Deviation[], locale: string | undefined): void {
+  if (!list.length) return;
+  const line = deviationSay(list, locale);
+  out.deviations = list;
+  out.say = typeof out.say === 'string' && out.say ? `${out.say} ${line}` : line;
+}
+
+/** The events of task `id` from its last CLI triage on: this run of it (a fresh triage starts a new one). */
+export function sinceLastTriage(events: readonly LedgerEvent[], id: string): LedgerEvent[] {
+  const at = events.map(e => e.kind === 'triage' && e.task === id && Array.isArray(e.reasons)).lastIndexOf(true);
+  return at < 0 ? [...events] : events.slice(at);
+}
+
 /** A fix round's next that hands the brief to an implementer (review-close's `implementer`). */
 const FIX_NEXT: readonly unknown[] = ['resume', 'fresh-stronger', 'redo'];
 
