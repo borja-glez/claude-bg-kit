@@ -74,6 +74,17 @@ describe('next --notes --seat-dir: the notes of a pick, and lastNoteTs kept by t
     expect(r.notes!.say).toEqual([2, 3, 4, 5, 6].map(i => `Nota de Ana en el roadmap: «nota ${i}»`));
     expect(r.notes!.notes.map(n => n.id)).toEqual(['n2', 'n3', 'n4', 'n5', 'n6']);
   });
+  it('the notes command caps a first join at five too, so forge reading notes without lastNoteTs announces the same (fix round 1, Minor 6)', () => {
+    docsAt('db/notes', Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`n${i}`, note(70 - i * 10, `nota ${i}`)])));
+    const notes = (...a: string[]) => JSON.parse(cli('notes', '--notes', 'db/notes', '--plan', 'plan.yaml', ...a).stdout) as { notes: { id: string }[]; say: string[]; latest: string };
+    for (const first of [notes(), notes('--since', '')]) {
+      expect(first.notes.map(n => n.id)).toEqual(['n2', 'n3', 'n4', 'n5', 'n6']);
+      expect(first.say).toHaveLength(5);
+      expect(first.latest).toBe(note(10, '').ts);
+    }
+    // With a lastNoteTs, every newer one, however many.
+    expect(notes('--since', note(80, '').ts).notes).toHaveLength(7);
+  });
   it('without --notes it prints what it printed before; --notes without --seat-dir, or a seat with no session.json, is exit 2', () => {
     dbOf();
     expect(next()).not.toHaveProperty('notes');

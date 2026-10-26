@@ -485,7 +485,7 @@ export function run(argv: string[], io: Io): Result {
           let s: Record<string, unknown> = {};
           try { const v: unknown = JSON.parse(readFileSync(file, 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) s = v as Record<string, unknown>; } catch { s = {}; }
           const plan = loadPlan();
-          notes = notesOf(notesDir, view, plan.locale.toLowerCase().startsWith('es') ? 'es' : 'en', typeof s.lastNoteTs === 'string' ? s.lastNoteTs : null, FIRST_JOIN_NOTES);
+          notes = notesOf(notesDir, view, plan.locale.toLowerCase().startsWith('es') ? 'es' : 'en', typeof s.lastNoteTs === 'string' && s.lastNoteTs ? s.lastNoteTs : null, FIRST_JOIN_NOTES);
           if (!notes) return fail('next: the notes listing is not a folder — list notes first', 2);
           if (notes.latest !== null && notes.latest !== s.lastNoteTs) writeAtomic(file, `${JSON.stringify({ ...s, lastNoteTs: notes.latest }, null, 2)}\n`);
         }
@@ -524,7 +524,9 @@ export function run(argv: string[], io: Io): Result {
         // The plan, when given, names the task ids a line may mention and the language when --locale is not given.
         const plan = flag('plan') !== undefined ? parsePlan(readFileSync(abs(flag('plan')!), 'utf8')) : null;
         const locale = localeFlag ?? (plan?.locale?.toLowerCase().startsWith('es') ? 'es' : 'en');
-        const r = notesOf(dir, plan, locale, flag('since') ?? null);
+        // Fix round 1 (Minor 6): a first join (no --since, or an empty one) gets only the last FIRST_JOIN_NOTES notes, here
+        // as in `next --notes`, so every reader of the notes (waypoint, forge) announces the same.
+        const r = notesOf(dir, plan, locale, flag('since') || null, FIRST_JOIN_NOTES);
         return r ? ok(JSON.stringify(r)) : fail('notes cache missing — list notes first');
       }
       case 'inbox': {
