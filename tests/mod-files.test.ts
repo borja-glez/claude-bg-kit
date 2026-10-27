@@ -645,6 +645,15 @@ describe('the band at an anchor (a checkout below the session root)', () => {
     expect(await loadBandModel($, { checkout: child, project: 'p' })).toMatchObject({ mode: 'work', project: 'p' });
     expect(await loadBandModel($)).toMatchObject({ mode: 'none' });
   });
+  it("an ephemeral run's coordinator there has no project, and its role is still its own", async () => {
+    const ephemeral = JSON.stringify({ ...JSON.parse(EXEC), runId: 'e1', kind: 'ephemeral', project: 'loose', tasks: { 'abc-k3x9': task('running') } });
+    const { $ } = fake(root, { [`${child}/.forge/execution.json`]: ephemeral });
+    expect(await loadBandModel($, { checkout: child, project: null })).toEqual({ mode: 'none', viewer: { role: 'owner', coordinator: true, runId: 'e1' } });
+  });
+  it('a project the checkout does not hold falls back to the one pickProject chooses', async () => {
+    const { $ } = fake(root, base(child));
+    expect(await loadBandModel($, { checkout: child, project: 'gone' })).toMatchObject({ mode: 'work', project: 'demo-shop', viewer: { role: 'owner' } });
+  });
   it('reads forge from the main checkout of that checkout', async () => {
     const main = '/c/main';
     const { $, reads } = fake(root, { ...base(child), [`${child}/.git`]: `gitdir: ${main}/.git/worktrees/x\n`, [`${main}/.forge/execution.json`]: EXEC });

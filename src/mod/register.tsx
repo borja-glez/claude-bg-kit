@@ -133,8 +133,8 @@ let armed: { key: string; runId: string | null; until: number } | null = null;
 let refreshPending = false;
 
 // D4, D6: where this conversation's work is when the session started in a folder above it. The search (anchor.ts) runs
-// when `anchorDirty` says so (a session or conversation start, a waypoint or forge call, an anchor gone) or when the
-// session root moved; the ordinary refresh reads the anchored checkout's files without searching.
+// when `anchorDirty` says so (a session or conversation start, a main-loop waypoint or forge call, an anchor gone) or
+// when the session root moved; the ordinary refresh reads the anchored checkout's files without searching.
 let anchor: Anchor | null = null;
 let anchorDirty = true;
 let anchorRoot: string | null = null;
@@ -176,8 +176,9 @@ async function refresh($: Engine): Promise<void> {
       try {
         const at = await bandAt($);
         const model = await loadBandModel($, at);
-        // The anchored checkout no longer holds the anchor (a binding ended or released, a run closed): search again.
-        if (at && model.mode === 'none') anchorDirty = true;
+        // The anchored checkout no longer names this conversation its owner (a binding ended or released, a run closed):
+        // search again, as lens does. Not by the band drawn: an ephemeral run's coordinator or member draws none there.
+        if (at && model.viewer.role !== 'owner') anchorDirty = true;
         const current = await read($, band);
         if (JSON.stringify(current) !== JSON.stringify(model)) {
           await update($, band, () => model);
@@ -416,16 +417,17 @@ export const register: Register = on => {
     return result;
   }).catch(($, e, next) => next(e));
 
-  // D4: a waypoint or forge call of this session may bind it, so the anchor is searched again, once the call returned.
+  // D4: a waypoint or forge call of the main loop may bind this conversation, start or join a run, so the anchor is
+  // searched again, once the call returned. A subagent's cannot (forge's executors append a status at every step).
   // They only observe: the call goes on when the search fails.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const result = await next(e);
-    if (!result.deny && /waypoint\.cjs|forge\.cjs/.test(String(e.command ?? ''))) searchAgain($);
+    if (!e.agentId && !result.deny && /waypoint\.cjs|forge\.cjs/.test(String(e.command ?? ''))) searchAgain($);
     return result;
   }).catch(($, e, next) => next(e));
   on('tool.call', { tool: 'Skill' }, async ($, e, next) => {
     const result = await next(e);
-    if (!result.deny && /^(waypoint|forge):/.test(String(e.skill ?? ''))) searchAgain($);
+    if (!e.agentId && !result.deny && /^(waypoint|forge):/.test(String(e.skill ?? ''))) searchAgain($);
     return result;
   }).catch(($, e, next) => next(e));
 

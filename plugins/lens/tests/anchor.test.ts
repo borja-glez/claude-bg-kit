@@ -472,6 +472,27 @@ test('ticking the checkboxes of its own plan searches no more', async ($, on) =>
   expect(await pane($)).toMatch(/Shop inline plan.*2 done/);
 });
 
+test("a subagent's forge.cjs call does not search; the main loop's does", async ($, on) => {
+  const w = world(CENTRAL, repoA({ run: SESSION_ID, tasks: SESSION_ID }));
+  serveWorld(on, w);
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  expect(await pane($)).toContain('Fase 1/2 · Base');
+  // Each search lists the session root once.
+  const searches = () => w.lists.filter(p => p === CENTRAL).length;
+  const before = searches();
+  // A forge executor appends its task's status: only the main loop can bind, start or join a run.
+  await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" status --task T001 --phase implement', agentId: 'a1', tool_use_id: 'b1' } as never);
+  await clock.advance(10_000);
+  expect(searches()).toBe(before);
+  await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" status --task T001 --phase implement', tool_use_id: 'b2' } as never);
+  await clock.advance(10_000);
+  expect(searches()).toBe(before + 1);
+});
+
 test('a refresh in flight across /clear keeps nothing of the old conversation', async ($, on) => {
   const w = world(CENTRAL, repoA({ run: OTHER, tasks: OTHER, bound: SESSION_ID }));
   // Armed, the next read of repository A's .git (the band's first read on a refresh) waits until released.

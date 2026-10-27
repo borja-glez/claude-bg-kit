@@ -1849,3 +1849,44 @@ test('a bind that lands while the search is in flight is not lost: the rerun sea
   expect(line).toBe(WORK_LINE);
   await ui.unmount();
 });
+
+// forge's ephemeral run in /c/a, coordinated by this conversation: no waypoint project there, so its band draws nothing.
+const EPHEMERAL = JSON.stringify({
+  runId: 'e1', kind: 'ephemeral', mode: 'subagents', parallel: 3, project: 'a', base: 'main', branch: 'forge/run', mergeOnFinish: false,
+  coordinator: 'main', hookSession: SESSION_ID, active: true, stopReason: null, stallReason: null, startedAt: '2026-10-11T09:00:00.000Z',
+  lastStepAt: '2026-10-11T10:04:00.000Z', lastBlockStep: null, sleepUntil: null, tasks: {},
+});
+
+test("an ephemeral run's coordinator below the root is searched for once, not on every tick", async ($, on) => {
+  engineBottom(on);
+  const listed: string[] = [];
+  serveFiles(on, { ...gitIn(REPO), [`${REPO}/.forge/execution.json`]: EPHEMERAL }, listed, () => SESSION_ID, [], () => CENTRAL);
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await clock.advance(30000);
+  const second = listed.length;
+  await clock.advance(30000);
+  // Each search lists the session root once; the ticks read the anchored checkout's forge files, and search no more.
+  expect(listed.filter(p => p === CENTRAL)).toHaveLength(1);
+  expect(listed.slice(second)).toContain(`${REPO}/.forge`);
+});
+
+test("a subagent's forge call does not search; the main loop's does", async ($, on) => {
+  engineBottom(on);
+  const listed: string[] = [];
+  serveFiles(on, projectIn(REPO), listed, () => SESSION_ID, [], () => CENTRAL);
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  const searches = () => listed.filter(p => p === CENTRAL).length;
+  const before = searches();
+  // A forge executor appends its task's status: only the main loop can bind, start or join a run.
+  await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" status --task T002 --phase implement', agentId: 'a1' } as never);
+  await clock.settle();
+  expect(searches()).toBe(before);
+  await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" status --task T002 --phase implement' } as never);
+  await clock.settle();
+  expect(searches()).toBe(before + 1);
+});

@@ -95,9 +95,9 @@ let roadmap: BandModel = noneBand();
 let bandRead = false;
 // The lens anchor design (docs/superpowers/specs/2026-10-27-lens-project-anchor-design.md), D2-D5: the checkout every
 // file-backed card reads, and whether this conversation joined it or works there alone. The search (anchor.ts) runs when
-// `anchorDirty` says so (a session or conversation start, the pane opening, a waypoint or forge call, a superpowers
-// ledger or plan written, an anchor gone) or when the session root moved; the ordinary refresh reads the anchored
-// checkout without searching. No anchor: no card read from project files (D3).
+// `anchorDirty` says so (a session or conversation start, the pane opening, a main-loop waypoint or forge call, a
+// superpowers ledger or plan written, an anchor gone) or when the session root moved; the ordinary refresh reads the
+// anchored checkout without searching. No anchor: no card read from project files (D3).
 let anchor: Anchor | null = null;
 let anchorDirty = true;
 let anchorRoot: string | null = null;
@@ -1802,7 +1802,8 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e));
 
   // The main loop's tool in flight and its todo list; a subagent's tool goes on its own agent (E-11). A forge.cjs call of
-  // any loop names a task this session works on (E-06), and the main loop's ScheduleWakeup says when it wakes (E-11).
+  // any loop names a task this session works on (E-06), one of the main loop searches for the anchor again (D4), and the
+  // main loop's ScheduleWakeup says when it wakes (E-11).
   on('tool.call', async ($, e, next) => {
     const mine = !e.agentId;
     const input = e as unknown as Record<string, unknown>;
@@ -1853,10 +1854,12 @@ export const register: Register = on => {
               forgeHeardAt = await nowMs($);
               void noteActivity($);
             }
-            // D4: a waypoint or forge call may bind this conversation, start or join a run, or start a task of its own.
-            if (own || trackingKind('Bash', input)) anchorDirty = true;
+            // D4: a waypoint or forge call of the main loop may bind this conversation, start or join a run, or start a
+            // task of its own. A subagent's cannot (forge's executors append a status at every step): the task it names
+            // is kept above, for the next search.
+            if (mine && (own || trackingKind('Bash', input))) anchorDirty = true;
           }
-          if (e.tool === 'Skill' && trackingKind('Skill', input)) anchorDirty = true;
+          if (mine && e.tool === 'Skill' && trackingKind('Skill', input)) anchorDirty = true;
           // w8 M1: a TaskCreate or TaskUpdate of any loop that ran moves the Claude Code tasks card.
           if (answer.isError !== true) {
             const cc = taskCall(activity.ccTasks, String(e.tool), input, (answer as { result?: unknown }).result);
