@@ -1,6 +1,7 @@
-import { changedSections, designBody, parseDesign, sectionsOf, type DesignMeta } from '../lib/design.js';
-import { entryKind, type ChangelogEntry } from '../lib/history.js';
+import { changedSections, designBody, parseDesign, sectionsOf, wordCount, type DesignMeta, type Section } from '../lib/design.js';
+import { entryKind, type ChangelogEntry, type EntryKind } from '../lib/history.js';
 import { renderMarkdown } from '../lib/markdown.js';
+import { clean } from '../lib/decisions.js';
 import { verdictOf, type Critique, type Proposal, type Verdict } from '../lib/critique.js';
 import { appliedVersion, pendingProposals, resolvedIn, rewroteRound, line, GATE_LIST_MAX, type Dismissed, type GateCritique } from '../lib/design-gate.js';
 
@@ -29,6 +30,12 @@ export interface PageCritique {
  */
 export interface VersionDiff { changed: string[]; added: string[]; removed: string[]; against?: number }
 
+/**
+ * A heading of a version: its level, text and slug; its words (a `##` counts its `###` too); for a `##`, the first
+ * sentence of its text (`lead`); and whether this version added it or changed it against the one before (`change`).
+ */
+export interface TocEntry { level: 2 | 3; heading: string; slug: string; words: number; lead?: string; change?: 'changed' | 'added' }
+
 export interface DesignPageData {
   meta: DesignMeta;
   words: number;
@@ -45,9 +52,61 @@ export interface DesignPageData {
   critiques: PageCritique[];
   /** How many older critiques `critiques` left out; present only when not 0. */
   critiquesMore?: number;
-  versions: { version: number; date: string; note: string; words: number; html: string; toc: { level: 2 | 3; heading: string; slug: string }[]; diff: VersionDiff | null }[];
-  /** A-24: the changelog entries before the embedded versions: their date and note only. */
-  earlier?: { version: number; date: string; note: string }[];
+  versions: { version: number; date: string; note: string; words: number; kind: EntryKind | null; html: string; toc: TocEntry[]; diff: VersionDiff | null }[];
+  /** A-24: the changelog entries before the embedded versions: their date, note, words and kind only. */
+  earlier?: { version: number; date: string; note: string; words: number; kind: EntryKind | null }[];
+}
+
+const LEAD_MAX = 180;
+
+/**
+ * The first sentence of a section's own prose, as plain text of LEAD_MAX characters at most; '' when it has none. Code,
+ * tables, quotes and callouts are skipped; a sentence that ends in a colon goes on into the list after it («La escalera
+ * pasa a cinco peldaños: mech → …»).
+ */
+export function leadOf(text: string): string {
+  let fence = false;
+  let lead = '';
+  for (const raw of text.split(/\r?\n/)) {
+    if (/^\s*(`{3,}|~{3,})/.test(raw)) { if (lead) break; fence = !fence; continue; }
+    const l = raw.trim();
+    if (fence || /^(\||#|<|>|!\[|---|\*\*\*)/.test(l)) continue;
+    if (!l) { if (lead && !lead.endsWith(':')) break; continue; }
+    // One clean line (no control or bidi characters), without its list marker, link targets and emphasis.
+    const t = clean(l, Number.MAX_SAFE_INTEGER).replace(/^(?:[-*+]|\d+[.)])\s+/, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`]/g, '').trim();
+    if (!t) continue;
+    lead = lead ? `${lead} ${t}` : t;
+    const end = /[.!?](\s|$)/.exec(lead);
+    if (end) { lead = lead.slice(0, end.index + 1); break; }
+    if (Array.from(lead).length >= LEAD_MAX) break;
+  }
+  const chars = Array.from(lead);
+  return chars.length > LEAD_MAX ? `${chars.slice(0, LEAD_MAX - 1).join('').trimEnd()}…` : lead;
+}
+
+/** K3-09 and the page's map: every heading with its words, lead and what this version did to it. */
+export function tocOf(sections: Section[], marks: Map<string, 'changed' | 'added'>): TocEntry[] {
+  return sections.map((s, i) => {
+    let words = wordCount(s.text);
+    let lead = '';
+    if (s.level === 2) {
+      lead = leadOf(s.text);
+      for (let j = i + 1; j < sections.length && sections[j].level === 3; j++) {
+        words += wordCount(sections[j].text);
+        if (!lead) lead = leadOf(sections[j].text);
+      }
+    }
+    const change = marks.get(s.slug);
+    return { level: s.level, heading: s.heading, slug: s.slug, words, ...(lead ? { lead } : {}), ...(change ? { change } : {}) };
+  });
+}
+
+/** What a version added and changed against the one before it, by slug (the intro apart). */
+function marksOf(prev: string | undefined, next: string): Map<string, 'changed' | 'added'> {
+  if (prev === undefined) return new Map();
+  const before = designBody(prev);
+  const was = new Set(sectionsOf(before).map(s => s.slug));
+  return new Map(changedSections(before, designBody(next)).changed.filter(s => s !== '_intro').map(s => [s, was.has(s) ? 'changed' : 'added'] as const));
 }
 
 /**
@@ -97,18 +156,20 @@ export function buildDesignPageData(input: {
     const i = from + j;
     const d = parseDesign(texts[n]);
     const entry = input.changelog.find(c => c.version === n);
+    const prev = i === 0 ? undefined : texts[numbers[i - 1]];
     return {
       version: n,
       date: entry?.date ?? '',
       note: entry?.note ?? '',
       words: d.words,
-      html: renderMarkdown(d.body),
-      toc: sectionsOf(d.body).map(({ level, heading, slug }) => ({ level, heading, slug })),
-      diff: i === 0 ? null : { ...versionDiff(texts[numbers[i - 1]], texts[n]), ...(numbers[i - 1] !== n - 1 ? { against: numbers[i - 1] } : {}) },
+      kind: entry ? entryKind(entry) : null,
+      html: renderMarkdown(d.body, { locale: cur.meta.locale }),
+      toc: tocOf(d.sections, marksOf(prev, texts[n])),
+      diff: prev === undefined ? null : { ...versionDiff(prev, texts[n]), ...(numbers[i - 1] !== n - 1 ? { against: numbers[i - 1] } : {}) },
     };
   });
   const earlier = input.changelog.filter(c => c.version < (numbers[from] ?? Infinity))
-    .sort((a, b) => a.version - b.version).map(({ version, date, note }) => ({ version, date, note }));
+    .sort((a, b) => a.version - b.version).map(e => ({ version: e.version, date: e.date, note: e.note, words: e.words, kind: entryKind(e) }));
   const dismissed = input.dismissed ?? {};
   const known = new Set([...input.changelog.map(e => e.version), currentNo]);
   // The page data stays bounded and clean like the gate's lists: the newest GATE_LIST_MAX rounds and, in each, the newest

@@ -11,6 +11,7 @@ import { readDocs } from '../lib/read-docs.js';
 import { availableTasks, commitShas } from '../lib/deps.js';
 import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, isIdle, multiSession, IDLE_MINUTES } from '../lib/coordination.js';
 import { parseDesign, changedSections, designBody, designStatus, DesignError, setDesignStatus } from '../lib/design.js';
+import { visualIssues } from '../lib/visual-blocks.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, line, mergeDismissed } from '../lib/design-gate.js';
 import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, roundList, AppliedError, ENTRY_KINDS, entryKind, entryRound, type EntryKind } from '../lib/history.js';
@@ -879,7 +880,12 @@ export function run(argv: string[], io: Io): Result {
         return out(0, { released, sid: seat.sid, seatDir: rel(seat.dir), now: now.toISOString(), ...(batch ? { batch } : {}) });
       }
       case 'design-validate': {
-        const d = parseDesign(readFileSync(abs(args[0]), 'utf8'));
+        const text = readFileSync(abs(args[0]), 'utf8');
+        const d = parseDesign(text);
+        // The diagrams, charts and steps of the body, with the line of the file each one starts on.
+        const offset = text.slice(0, text.length - d.body.length).split('\n').length - 1;
+        const visual = visualIssues(d.body).map(s => s.replace(/^line (\d+)/, (_, n) => `line ${Number(n) + offset}`));
+        if (visual.length) throw new DesignError(visual);
         const log = readChangelog(path.dirname(abs(args[0])));
         const sections = d.sections.length;
         return ok(`ok: ${d.words} words, ${sections} sections, v${log[log.length - 1]?.version ?? 0}`);

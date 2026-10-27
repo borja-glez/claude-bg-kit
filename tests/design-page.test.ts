@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildDesignPageData } from '../src/design-page/build.js';
-import { mountDesignPage, renderDesignPage } from '../src/design-page/client.js';
+import { mermaidConfig, mountDesignPage, renderDesignPage, MERMAID_URL, type Mermaid } from '../src/design-page/client.js';
 
 const fixture = readFileSync(path.join(process.cwd(), 'tests/fixtures/design.md'), 'utf8');
 const data = buildDesignPageData({
@@ -219,19 +219,21 @@ describe('renderDesignPage: badge, rounds, diff and the version buttons (K3-09, 
   it('tells every round with its verdict, its counts and what became of each proposal; the latest round is open', () => {
     const html = renderDesignPage(rich, 5);
     expect(html).toContain('<section class="rounds" aria-labelledby="wp-l-rounds"><h2 class="lbl" id="wp-l-rounds">Rondas</h2>');
-    expect(html).toContain('<details class="rd" data-round="1"><summary><b>Ronda 1</b> · v1 · <span class="vd vd-changes">con cambios</span> · 1 C · 1 M · 2 m</summary>');
+    expect(html).toContain('<details class="rd" data-round="1"><summary><b>Ronda 1</b><span>v1</span><span class="vd vd-changes">con cambios</span><span class="cnt">1 C · 1 M · 2 m</span></summary>');
     expect(html).toContain('<details class="rd" data-round="2" open>');
-    expect(html).toContain('[Hueco · crítica]</span> <b>Peligros</b> — p1 → c1 <span class="fate f-applied">aplicada en v2</span>');
+    expect(html).toContain('<li class="pp sv-critical"><div class="pp-h"><span class="sev">crítica</span><span class="cat">Hueco</span><b class="sec">Peligros</b><span class="fate f-applied">aplicada en v2</span></div><div class="pp-p"><span class="lbl">Problema</span><p>p1</p></div><div class="pp-c"><span class="lbl">Cambio propuesto</span><p>c1</p></div></li>');
+    // A proposal names its section with a link when the version shown has it.
+    expect(html).toContain('<a class="sec" href="#arquitectura" data-slug="arquitectura">Arquitectura</a>');
     expect(html).toContain('<span class="fate f-resolved">resuelta en la entrevista</span>');
-    expect(html).toContain('<b>Introducción</b> — p3 → c3 <span class="fate f-dismissed">descartada: fuera de alcance</span>');
+    expect(html).toContain('<b class="sec">Introducción</b><span class="fate f-dismissed">descartada: fuera de alcance</span>');
     expect(html).toContain('<span class="fate f-pending">pendiente</span>');
     expect(html).toContain('<span class="fate f-rewritten">reescrita</span>');
-    for (const s of ['applied in v2', 'resolved in the interview', 'dismissed: fuera de alcance', '<b>Round 1</b>', '[Gap · critical]']) expect(renderDesignPage(en, 5)).toContain(s);
+    for (const s of ['applied in v2', 'resolved in the interview', 'dismissed: fuera de alcance', '<b>Round 1</b>', '<span class="sev">critical</span><span class="cat">Gap</span>']) expect(renderDesignPage(en, 5)).toContain(s);
     expect(renderDesignPage(data, 2)).not.toContain('class="rounds"');
   });
   it('a ready round with no proposals says so', () => {
     const ready = { ...rich, critiques: [{ round: 3, version: 4, scope: 'changed' as const, verdict: 'ready' as const, proposals: [] }] };
-    expect(renderDesignPage(ready, 5)).toContain('<span class="vd vd-ready">lista</span> · 0 C · 0 M · 0 m</summary><p class="none">Sin propuestas: no queda nada crítico ni mayor.</p>');
+    expect(renderDesignPage(ready, 5)).toContain('<span class="vd vd-ready">lista</span><span class="cnt">0 C · 0 M · 0 m</span></summary><p class="none">Sin propuestas: no queda nada crítico ni mayor.</p>');
   });
   it('says how many older rounds and proposals the data left out, so none is hidden silently', () => {
     const more = { ...rich, critiquesMore: 7, critiques: rich.critiques.map(c => ({ ...c, proposalsMore: 3 })) };
@@ -242,10 +244,23 @@ describe('renderDesignPage: badge, rounds, diff and the version buttons (K3-09, 
     expect(renderDesignPage(rich, 5)).not.toContain('class="more"');
   });
   it('says under the versions what the shown version changed, added and removed', () => {
-    expect(renderDesignPage(rich, 5)).toContain('<p class="diff">cambió §Arquitectura</p>');
-    expect(renderDesignPage(rich, 2)).toContain('<p class="diff">nueva §Riesgos · quitada §Peligros</p>');
-    expect(renderDesignPage(rich, 1)).not.toContain('class="diff"');
-    expect(renderDesignPage(rich, 3)).not.toContain('class="diff"');
+    const vers = (html: string) => /<section class="vers"[\s\S]*?<\/section>/.exec(html)?.[0] ?? '';
+    expect(vers(renderDesignPage(rich, 5))).toContain('<p class="diff">cambió §Arquitectura</p>');
+    expect(vers(renderDesignPage(rich, 2))).toContain('<p class="diff">nueva §Riesgos · quitada §Peligros</p>');
+    expect(vers(renderDesignPage(rich, 1))).not.toContain('class="diff"');
+    expect(vers(renderDesignPage(rich, 3))).not.toContain('class="diff"');
+  });
+  it('marks the headings, the map and the section list with what the shown version added or changed', () => {
+    const html = renderDesignPage(rich, 5);
+    expect(html).toContain('<h2 id="arquitectura" data-change="changed" data-label="cambió en v5">');
+    expect(html).toContain('<span class="chip changed">cambió en v5</span>');
+    expect(html).toContain('<a href="#arquitectura" data-slug="arquitectura" class="chg-changed">');
+    expect(renderDesignPage(rich, 2)).toContain('<h2 id="riesgos" data-change="added" data-label="nueva en v2">');
+    expect(renderDesignPage(rich, 1)).not.toContain('data-change');
+  });
+  it('says when the version shown is not the current one, with a way back', () => {
+    expect(renderDesignPage(rich, 2)).toContain('<div class="old"><p>Estás leyendo la v2 (2026-10-11), no la versión actual.</p><button type="button" class="go" data-version="5">Ir a la v5</button></div>');
+    expect(renderDesignPage(rich, 5)).not.toContain('class="old"');
   });
   it('says when a version is compared across a gap in the history, also when nothing changed, in Spanish and English (carry 9)', () => {
     const gap = buildDesignPageData({ ...richInput, history: { 1: richInput.history[1], 3: richInput.history[3] } });
@@ -256,13 +271,13 @@ describe('renderDesignPage: badge, rounds, diff and the version buttons (K3-09, 
   });
   it('marks a round whose critique names a version the changelog does not have (carry 9)', () => {
     const odd = { ...rich, critiques: [{ ...rich.critiques[0], version: 9, unknownVersion: true as const }] };
-    expect(renderDesignPage(odd, 5)).toContain('<b>Ronda 1</b> · v9 (versión desconocida) · ');
-    expect(renderDesignPage({ ...odd, meta: { ...odd.meta, locale: 'en' } }, 5)).toContain('<b>Round 1</b> · v9 (unknown version) · ');
+    expect(renderDesignPage(odd, 5)).toContain('<b>Ronda 1</b><span>v9 (versión desconocida)</span>');
+    expect(renderDesignPage({ ...odd, meta: { ...odd.meta, locale: 'en' } }, 5)).toContain('<b>Round 1</b><span>v9 (unknown version)</span>');
     expect(renderDesignPage(rich, 5)).not.toContain('desconocida');
   });
   it('shows how many proposals are pending in all, as the gate counts them (carry 9)', () => {
-    expect(renderDesignPage({ ...rich, pending: 47 }, 5)).toContain('<div><b>47</b>Pendientes</div>');
-    expect(renderDesignPage({ ...rich, pending: 47, meta: { ...rich.meta, locale: 'en' } }, 5)).toContain('<div><b>47</b>Pending</div>');
+    expect(renderDesignPage({ ...rich, pending: 47 }, 5)).toContain('<div><dt>Pendientes</dt><dd class="hot">47</dd></div>');
+    expect(renderDesignPage({ ...rich, pending: 47, meta: { ...rich.meta, locale: 'en' } }, 5)).toContain('<div><dt>Pending</dt><dd class="hot">47</dd></div>');
   });
   it('marks the version buttons with aria-pressed', () => {
     const html = renderDesignPage(rich, 5);
@@ -307,8 +322,10 @@ describe('mountDesignPage: language, focus and open rounds (K3-11)', () => {
     mounted(nol);
     expect(document.documentElement.lang).toBe('en');
   });
-  it('has a banner, one main and named navigation and sections, in both languages; the labels are real headings (carry 10)', () => {
-    for (const [d, names] of [[rich, ['Versiones', 'Pilares', 'Prompt de arranque', 'Rondas', 'Índice']], [{ ...rich, meta: { ...rich.meta, locale: 'en' } }, ['Versions', 'Pillars', 'Start prompt', 'Rounds', 'Contents']]] as const) {
+  it('has a banner, one main and named navigation, views and sections, in both languages; the labels are real headings (carry 10)', () => {
+    const es = { header: ['Versiones', 'Prompt de arranque'], main: ['Pilares', 'Mapa del documento', 'Rondas'], toc: 'Índice', views: 'Vistas', tabs: ['Documento', 'Revisión2', 'Historia5'] };
+    const en = { header: ['Versions', 'Start prompt'], main: ['Pillars', 'Document map', 'Rounds'], toc: 'Contents', views: 'Views', tabs: ['Document', 'Review2', 'History5'] };
+    for (const [d, names] of [[rich, es], [{ ...rich, meta: { ...rich.meta, locale: 'en' } }, en]] as const) {
       const root = mounted(d);
       // The accessible name of a region: the heading of the page it points at, else its aria-label.
       const nameOf = (el: Element) => {
@@ -318,12 +335,46 @@ describe('mountDesignPage: language, focus and open rounds (K3-11)', () => {
       expect(root.querySelectorAll('header').length).toBe(1);
       expect(root.querySelector('header')?.parentElement).toBe(root);
       expect(root.querySelectorAll('main').length).toBe(1);
-      expect(nameOf(root.querySelector('main nav.toc')!)).toBe(names[4]);
-      expect(Array.from(root.querySelectorAll('main section')).map(nameOf)).toEqual(names.slice(0, 4));
-      expect(Array.from(root.querySelectorAll('.lbl')).map(l => [l.tagName, l.textContent])).toEqual([[ 'H2', names[0]], ['H2', names[2]], ['H2', names[3]], ['H2', names[4]]]);
-      expect(root.querySelector('main .doc')).not.toBeNull();
+      expect(Array.from(root.querySelectorAll('header section')).map(nameOf)).toEqual(names.header);
+      expect(Array.from(root.querySelectorAll('main section')).map(nameOf)).toEqual(names.main);
+      expect(nameOf(root.querySelector('nav.sn-list')!)).toBe(names.toc);
+      expect(nameOf(root.querySelector('[role="tablist"]')!)).toBe(names.views);
+      const tabs = Array.from(root.querySelectorAll('[role="tab"]'));
+      expect(tabs.map(t => t.textContent)).toEqual(names.tabs);
+      expect(Array.from(root.querySelectorAll('[role="tabpanel"]')).map(p => [nameOf(p), (p as HTMLElement).hidden])).toEqual(names.tabs.map((t, i) => [t, i > 0]));
+      expect(Array.from(root.querySelectorAll('h2.lbl')).map(l => l.textContent)).toEqual([...names.header, names.toc, names.main[1], names.main[2]]);
+      expect(root.querySelector('#wp-p-doc article.body')).not.toBeNull();
       root.remove();
     }
+  });
+  it('switches views with the tabs and the arrow keys, without repainting the document', () => {
+    const root = mounted(rich);
+    const article = root.querySelector('article.body');
+    (root.querySelector('[data-tab="review"]') as HTMLElement).click();
+    expect((root.querySelector('#wp-p-review') as HTMLElement).hidden).toBe(false);
+    expect((root.querySelector('#wp-p-doc') as HTMLElement).hidden).toBe(true);
+    expect(root.querySelector('#wp-t-review')?.getAttribute('aria-selected')).toBe('true');
+    expect((root.querySelector('.secnav') as HTMLElement).hidden).toBe(true);
+    expect((root.querySelector('.strip-w') as HTMLElement).hidden).toBe(true);
+    root.querySelector('#wp-t-review')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect((root.querySelector('#wp-p-history') as HTMLElement).hidden).toBe(false);
+    expect(document.activeElement).toBe(root.querySelector('#wp-t-history'));
+    root.querySelector('#wp-t-history')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect((root.querySelector('#wp-p-doc') as HTMLElement).hidden).toBe(false);
+    expect(root.querySelector('article.body')).toBe(article);
+  });
+  it('a version picked in the history opens it in the document view; a section named by a proposal opens the document', () => {
+    const root = mounted(rich);
+    (root.querySelector('[data-tab="history"]') as HTMLElement).click();
+    (root.querySelector('#wp-p-history button.col[data-version="1"]') as HTMLElement).click();
+    expect((root.querySelector('#wp-p-doc') as HTMLElement).hidden).toBe(false);
+    expect(root.querySelector('.vl .v.on')?.getAttribute('data-version')).toBe('1');
+    expect(root.innerHTML).toContain('id="peligros"');
+    (root.querySelector('.go') as HTMLElement).click();
+    expect(root.querySelector('.vl .v.on')?.getAttribute('data-version')).toBe('5');
+    (root.querySelector('[data-tab="review"]') as HTMLElement).click();
+    (root.querySelector('a.sec[data-slug="arquitectura"]') as HTMLElement).click();
+    expect((root.querySelector('#wp-p-doc') as HTMLElement).hidden).toBe(false);
   });
   it('announces the version a click shows in a live region outside the repainted page (carry 10)', () => {
     const root = mounted(rich);
@@ -343,8 +394,8 @@ describe('mountDesignPage: language, focus and open rounds (K3-11)', () => {
     const p = rich.critiques[0].proposals[0];
     const crits = Array.from({ length: 40 }, (_, i) => ({ ...rich.critiques[1], round: i + 1, proposals: Array.from({ length: 40 }, (_, j) => ({ ...p, n: j + 1 })) }));
     const html = renderDesignPage({ ...rich, critiques: crits, critiquesMore: 5 }, 5);
-    expect(html.match(/<details /g)?.length).toBe(40);
-    expect(html.match(/<li>/g)?.length).toBe(1600);
+    expect(html.match(/<details class="rd"/g)?.length).toBe(40);
+    expect(html.match(/<li class="pp /g)?.length).toBe(1600);
     expect(html.length).toBeLessThan(1_000_000);
   });
   it('a pressed version keeps the focus on its own button, now pressed', () => {
@@ -377,23 +428,30 @@ describe('theme of the design page (K3-11)', () => {
   });
   it('makes the version buttons and the copy button 44 px tall on a touch screen', () => {
     const coarse = /@media \(pointer: coarse\)\{([^{}]*)\{([^}]*)\}/.exec(css);
-    expect(coarse?.[1]).toContain('.vers .v');
+    expect(coarse?.[1]).toContain('.vl .v');
     expect(coarse?.[1]).toContain('.cp');
     expect(coarse?.[2]).toContain('min-height:44px');
   });
 });
 
 describe('the versions before the embedded ones (A-24)', () => {
-  const summary = (locale: string) => (locale.startsWith('es') ? 'Versiones anteriores' : 'Earlier versions');
-  it('are listed under the versions, folded, with their date and note escaped', () => {
-    const html = renderDesignPage({ ...data, earlier: [{ version: 1, date: '2026-10-01', note: 'nota <1>' }] }, data.current);
-    expect(html).toContain('<details class="earlier">');
-    expect(html).toContain(`<summary>${summary(data.meta.locale)}</summary>`);
+  const history = (html: string) => /<div class="panel" id="wp-p-history"[\s\S]*$/.exec(html)?.[0] ?? '';
+  it('are in the history with their date, kind and note escaped, as columns that do not switch the page', () => {
+    const html = history(renderDesignPage({ ...data, versions: data.versions.slice(1), earlier: [{ version: 1, date: '2026-10-01', note: 'nota <1>', words: 12, kind: 'draft' }] }, data.current));
+    expect(html).toContain('<p class="more">Versiones anteriores: v1–v1</p>');
+    expect(html).toContain('<div class="col past" title="v1 · 2026-10-01 · borrador · 12 palabras">');
+    expect(html).toContain('<b class="hs-v">v1</b>');
     expect(html).toContain('nota &lt;1&gt;');
   });
-  it('without them there is no list', () => {
-    expect(renderDesignPage({ ...data, earlier: [] }, data.current)).not.toContain('class="earlier"');
-    expect(renderDesignPage(data, data.current)).not.toContain('class="earlier"');
+  it('without them there is no line for them', () => {
+    expect(history(renderDesignPage({ ...data, earlier: [] }, data.current))).not.toContain('class="more"');
+    expect(history(renderDesignPage(data, data.current))).not.toContain('class="col past"');
+  });
+  it('the history draws every version by its words and colours it by what made it', () => {
+    const html = history(renderDesignPage(rich, 5));
+    expect(html).toContain('<button type="button" class="col on" data-version="5" data-to="doc" title="v5 · 2026-10-14 · enmienda · 38 palabras">');
+    expect(html).toContain('<i class="k-rewrite"');
+    expect(html).toContain('<span class="key"><span class="k-draft">borrador</span><span class="k-edit">propuestas aplicadas</span><span class="k-rewrite">reescritura</span><span class="k-ok">aprobación</span><span class="k-ok">enmienda</span></span>');
   });
   it('five versions are all embedded with none earlier; at six the first is earlier; they are listed by version (M9)', () => {
     const entry = (version: number) => ({ version, date: `2026-10-${String(version).padStart(2, '0')}`, note: `nota ${version}`, words: 40, round: 0 });
@@ -405,13 +463,73 @@ describe('the versions before the embedded ones (A-24)', () => {
     expect(five.earlier).toEqual([]);
     const six = build(6);
     expect(six.versions.map(v => v.version)).toEqual([2, 3, 4, 5, 6]);
-    expect(six.earlier).toEqual([{ version: 1, date: '2026-10-01', note: 'nota 1' }]);
+    expect(six.earlier).toEqual([{ version: 1, date: '2026-10-01', note: 'nota 1', words: 40, kind: null }]);
     // A changelog out of order still lists the earlier versions by version.
     expect(build(7, [entry(2), entry(1), ...[3, 4, 5, 6, 7].map(entry)]).earlier?.map(e => e.version)).toEqual([1, 2]);
   });
-  it('their summary gets the focus ring and the 44 px touch target a round\'s has (M9)', () => {
+  it('the controls of the views, the history and the rounds get the focus ring and the 44 px touch target (M9)', () => {
     const css = readFileSync(path.join(process.cwd(), 'src/design-page/theme.css'), 'utf8');
-    expect(css).toMatch(/\.earlier>summary:focus-visible[^{}]*\{outline:2px solid var\(--t-blue\)/);
-    expect(/@media \(pointer: coarse\)\{([^{}]*)\{([^}]*)\}/.exec(css)?.[1]).toContain('.earlier>summary');
+    for (const sel of ['.tab', '.secnav>summary', '.rd>summary', '.hs-v', '.go']) {
+      expect(css).toMatch(new RegExp(`${sel.replace(/[.>]/g, m => `\\${m}`)}:focus-visible[^{}]*\\{outline:2px solid var\\(--t-blue\\)`));
+      expect(/@media \(pointer: coarse\)\{([^{}]*)\{([^}]*)\}/.exec(css)?.[1]).toContain(sel);
+    }
+  });
+});
+
+describe('diagrams: the page draws the ```mermaid blocks itself, in its theme', () => {
+  const withDiagrams = buildDesignPageData({
+    current: fixture.replace('Backend en Node y frontend web.', 'Backend en Node y frontend web.\n\n```mermaid\nflowchart LR\n  a --> b\n```\n\n```mermaid\nnot a diagram\n```'),
+    history: { 1: fixture }, source: 's/',
+    changelog: [{ version: 1, date: '2026-10-10', note: 'a', words: 1, round: 0 }, { version: 2, date: '2026-10-11', note: 'b', words: 1, round: 0 }],
+  });
+  const fake = () => {
+    const calls = { load: 0, init: [] as Record<string, unknown>[], drawn: [] as string[] };
+    const m: Mermaid = {
+      initialize: c => { calls.init.push(c); },
+      parse: async t => (t.startsWith('not') ? false : {}),
+      run: async ({ nodes }) => { for (const n of nodes) { calls.drawn.push(n.textContent ?? ''); n.setAttribute('data-processed', 'true'); n.innerHTML = '<svg></svg>'; } },
+    };
+    return { calls, mermaid: () => { calls.load++; return Promise.resolve(m); } };
+  };
+  const settle = () => new Promise(r => setTimeout(r, 0));
+  it('loads Mermaid once, draws each diagram from its source and marks one that does not parse', async () => {
+    const { calls, mermaid } = fake();
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    mountDesignPage(root, withDiagrams, { mermaid });
+    await settle();
+    expect(calls.load).toBe(1);
+    expect(calls.drawn).toEqual(['flowchart LR\n  a --> b']);
+    expect(calls.init[0]).toMatchObject({ startOnLoad: false, securityLevel: 'strict', theme: 'base' });
+    const bad = root.querySelectorAll('pre.mermaid')[1] as HTMLElement;
+    expect(bad.getAttribute('data-bad')).toBe('Este diagrama tiene un error en su fuente:');
+    expect(bad.textContent).toBe('not a diagram');
+    // Another view draws nothing; a version with diagrams draws them again; a theme change redraws from the source.
+    (root.querySelector('[data-tab="review"]') as HTMLElement).click();
+    (root.querySelector('.vl [data-version="1"]') as HTMLElement).click();
+    (root.querySelector('.vl [data-version="2"]') as HTMLElement).click();
+    await settle();
+    expect(calls.drawn).toHaveLength(1);
+    (root.querySelector('[data-tab="doc"]') as HTMLElement).click();
+    await settle();
+    expect(calls.drawn).toHaveLength(2);
+    document.documentElement.setAttribute('data-theme', 'light');
+    await settle();
+    await settle();
+    expect(calls.drawn).toEqual(['flowchart LR\n  a --> b', 'flowchart LR\n  a --> b', 'flowchart LR\n  a --> b']);
+    expect(calls.load).toBe(1);
+    document.documentElement.removeAttribute('data-theme');
+    root.remove();
+  });
+  it('the Mermaid build is pinned on an allowed CDN', () => {
+    expect(MERMAID_URL).toMatch(/^https:\/\/cdn\.jsdelivr\.net\/npm\/mermaid@\d+\.\d+\.\d+\/dist\/mermaid\.min\.js$/);
+  });
+  it('the theme takes the page tokens it finds and says whether the page is dark', () => {
+    const style = document.createElement('style');
+    style.textContent = ':root{--base:#eff1f5;--text:#4c4f69}';
+    document.head.appendChild(style);
+    const vars = mermaidConfig(document).themeVariables as Record<string, unknown>;
+    expect(vars).toMatchObject({ darkMode: false, primaryColor: '#eff1f5', primaryTextColor: '#4c4f69' });
+    style.remove();
   });
 });

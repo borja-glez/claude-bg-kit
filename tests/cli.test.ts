@@ -797,6 +797,19 @@ describe('design commands', () => {
     expect(b.stderr).toContain('project');
   });
 
+  it('design-validate checks the charts, steps and diagrams of the body, by the line of the file', () => {
+    const text = readFileSync(path.join(dir, rel), 'utf8');
+    const lines = text.split('\n').length;
+    writeFileSync(path.join(dir, rel), `${text}\n\`\`\`chart\ndata:\n  - { label: a, value: -3 }\n\`\`\`\n\n\`\`\`steps\n- solo uno\n\`\`\`\n\n\`\`\`mermaid\n\`\`\`\n`);
+    const r = run(['design-validate', rel], io);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`line ${lines + 1}: chart: data[0] needs a \`value\`, a number ≥ 0`);
+    expect(r.stderr).toContain(`line ${lines + 6}: steps: 2 to 8 steps`);
+    expect(r.stderr).toContain(`line ${lines + 10}: mermaid: the diagram is empty`);
+    writeFileSync(path.join(dir, rel), `${text}\n\`\`\`chart\ndata:\n  - { label: a, value: 3 }\n\`\`\`\n`);
+    expect(run(['design-validate', rel], io).code).toBe(0);
+  });
+
   it('design-snapshot never fills gaps and never overwrites', () => {
     const a = run(['design-snapshot', rel, '--note', 'borrador'], io);
     expect(JSON.parse(a.stdout).version).toBe(1);
@@ -890,7 +903,7 @@ describe('design commands', () => {
     expect(run(['design-page', rel, '--out', 'p.html'], io).code).toBe(0);
     const data = JSON.parse(/id="wp-design-data">(.*?)<\/script>/s.exec(readFileSync(path.join(dir, 'p.html'), 'utf8'))![1]);
     expect(data.versions.map((x: { version: number }) => x.version)).toEqual([3, 4, 5, 6, 7]);
-    expect(data.earlier).toEqual([{ version: 1, date: '2026-10-01', note: 'nota 1' }, { version: 2, date: '2026-10-02', note: 'nota 2' }]);
+    expect(data.earlier).toEqual([{ version: 1, date: '2026-10-01', note: 'nota 1', words: 10, kind: null }, { version: 2, date: '2026-10-02', note: 'nota 2', words: 10, kind: null }]);
     // The first embedded version still says what it changed against the one before it.
     expect(data.versions[0].diff).toEqual({ changed: [], added: [], removed: [] });
   });

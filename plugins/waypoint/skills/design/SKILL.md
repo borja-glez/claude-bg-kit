@@ -47,7 +47,7 @@ source: <path>                   # added by design-import: the spec this design 
 ---
 ```
 
-The body is Markdown with `##` sections.
+The body is Markdown with `##` sections. Before writing a body or rewriting a section, read `references/visuals.md`: the diagrams, charts, steps and callouts the design page draws, and when to use each.
 
 ## Approved designs
 
