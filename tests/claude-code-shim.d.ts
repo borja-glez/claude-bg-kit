@@ -5,6 +5,7 @@ declare module 'claude-code' {
     session: { root(): Promise<string>; id(): Promise<string> };
     store: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void> };
     clock: { now(): Promise<number>; sleep(ms: number): Promise<void> };
+    ui: { log(message: string, opts?: { to?: string }): void };
     fs: {
       read(path: string): Promise<string>;
       list(path: string): Promise<{ name: string; kind: 'file' | 'dir'; size: number; mtimeMs: number }[]>;

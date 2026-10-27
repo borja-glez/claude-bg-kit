@@ -105,7 +105,7 @@ async function readBoundText($: Engine, path: string, now: number): Promise<stri
  * are taken as readSeats takes them on disk: the folders with a safe name other than the checkout seat's own id, the
  * first MAX_SEATS by name; then one without a bound.json is skipped. A file over its size cap is not read.
  */
-async function seatFiles($: Engine, wp: string, now: number): Promise<SeatFiles> {
+export async function seatFiles($: Engine, wp: string, now: number): Promise<SeatFiles> {
   const bindings: Record<string, string> = {};
   const seatSessions: Record<string, string> = {};
   const session = await readSmall($, join(wp, 'session.json'), SESSION_MAX_BYTES);
