@@ -88,6 +88,8 @@ function repoA(o: { run: string; tasks: string; bound?: string }): Record<string
 type World = {
   root: string; cwd: string; id: string | null; language?: string; files: Record<string, string>; writes: string[]; lists: string[];
   gate?: (path: string) => Promise<void> | undefined;
+  // A folder listed here is refused with the text it maps to, whatever the files are.
+  deny?: Record<string, string>;
 };
 function serveWorld(on: On, world: World) {
   const at = NOW - 60_000;
@@ -108,6 +110,8 @@ function serveWorld(on: On, world: World) {
   });
   on('fs.list', (_$, e) => {
     world.lists.push(norm(e.path));
+    const refusal = world.deny?.[norm(e.path)];
+    if (refusal) return { deny: refusal };
     const prefix = `${norm(e.path)}/`;
     const names = new Map<string, { kind: 'file' | 'dir'; size: number }>();
     for (const [path, text] of Object.entries(world.files)) {
@@ -155,7 +159,19 @@ async function step($: Engine): Promise<void> {
 
 // Everything the pane says, in order: Text strings, Svg alt texts and Button labels.
 async function pane($: Engine): Promise<string> {
-  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  return said(await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS }));
+}
+
+// The photo `/lens foto` takes, as its row draws it.
+async function photo($: Engine): Promise<string> {
+  const text = (await $.command.run({ ...RUN, args: 'foto' })).text ?? '';
+  return said(await $.ui.mount({
+    plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: { command: 'lens', args: '', text, isErrored: false },
+    viewport: { columns: 100, rows: 30, isFullscreen: false },
+  }));
+}
+
+async function said(ui: { drawn: () => Promise<unknown>; unmount: () => Promise<unknown> }): Promise<string> {
   const out: string[] = [];
   const walk = (n: unknown): void => {
     if (typeof n === 'string') { out.push(n); return; }
@@ -472,4 +488,88 @@ test('a refresh in flight across /clear keeps nothing of the old conversation', 
   release();
   await clock.advance(1000);
   expect(await pane($)).not.toContain('Fase');
+});
+
+test('a refused session root shows the unreadable line, in the pane and in the photo', async ($, on) => {
+  const w = world(CENTRAL, repoA({ run: SESSION_ID, tasks: SESSION_ID }));
+  w.deny = { [CENTRAL]: 'a network location is not reached from here' };
+  serveWorld(on, w);
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await step($);
+  await $.command.run(RUN);
+  await clock.advance(10_000);
+  expect(await pane($)).toContain('cannot read /c: a network location is not reached from here');
+  expect(await photo($)).toContain('cannot read /c: a network location is not reached from here');
+});
+
+test('a refused anchored checkout shows the unreadable line with its path', async ($, on) => {
+  const w = world(CENTRAL, repoA({ run: SESSION_ID, tasks: SESSION_ID }));
+  serveWorld(on, w);
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  expect(await pane($)).toContain('Fase 1/2 · Base');
+  expect(await pane($)).not.toContain('no se puede leer');
+  // The ordinary refresh finds it, in the project's language, the anchor held.
+  w.deny = { [`${REPO}/.waypoint`]: 'EACCES: permission denied' };
+  await clock.advance(10_000);
+  expect(await pane($)).toContain(`no se puede leer ${REPO}/.waypoint: EACCES: permission denied`);
+  expect(await photo($)).toContain(`no se puede leer ${REPO}/.waypoint: EACCES: permission denied`);
+});
+
+test('a refused .forge of the anchored checkout shows the unreadable line with its path', async ($, on) => {
+  const w = world(CENTRAL, repoA({ run: SESSION_ID, tasks: SESSION_ID }));
+  serveWorld(on, w);
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  expect(await pane($)).toContain('Fase 1/2 · Base');
+  // Without the run the join is lost and searched again: the refusal is the search's, and nothing else is drawn from the project.
+  w.deny = { [`${REPO}/.forge`]: 'EACCES: permission denied' };
+  await clock.advance(10_000);
+  const text = await pane($);
+  expect(text).toContain(`no se puede leer ${REPO}/.forge: EACCES: permission denied`);
+  expect(text).not.toContain('Fase');
+});
+
+test('a refused unrelated child says nothing', async ($, on) => {
+  const w = world(CENTRAL, {
+    ...repoA({ run: OTHER, tasks: OTHER, bound: OTHER }),
+    [`${CENTRAL}/locked/.forge/x.json`]: '{}',
+  });
+  w.deny = { [`${CENTRAL}/locked`]: 'EACCES: permission denied' };
+  serveWorld(on, w);
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await step($);
+  await $.command.run(RUN);
+  await clock.advance(10_000);
+  const text = await pane($);
+  expect(w.lists).toContain(`${CENTRAL}/locked`);
+  expect(text).toContain('Now');
+  expect(text).not.toMatch(/no se puede leer|cannot read/);
+});
+
+test('a vanished anchored checkout drops the anchor quietly', async ($, on) => {
+  const w = world(CENTRAL, repoA({ run: SESSION_ID, tasks: SESSION_ID }));
+  serveWorld(on, w);
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  expect(await pane($)).toContain('Fase 1/2 · Base');
+  for (const path of Object.keys(w.files)) if (path.startsWith(`${REPO}/`)) delete w.files[path];
+  await clock.advance(10_000);
+  await clock.advance(10_000);
+  const text = await pane($);
+  expect(text).not.toContain('Fase');
+  expect(text).not.toMatch(/no se puede leer|cannot read/);
 });

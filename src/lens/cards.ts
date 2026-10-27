@@ -27,6 +27,8 @@ export interface CardTexts {
   cached: string; reviewersLbl: string;
   // Wave 7 A5: what waits for the person.
   sNeeds: string; needKind: Record<NeedKind, string>; needCoordinator: string; needConversation: string; needRoadmap: string; needUnverified: string;
+  // D8: a folder the engine refused to read, with the reason: one line.
+  unreadable: (path: string, reason: string) => string;
 }
 
 type Forge = NonNullable<PanelModel['forge']>;
@@ -195,6 +197,9 @@ function tasksCard(m: PanelModel, rows: ActivityRow[], t: CardTexts): Card {
 export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
   const out: Card[] = [];
   let usageCard: Card | null = null;
+
+  // D8: a refused folder is not "nothing here": one line, first, clipped to the card's width by the drawing.
+  if (m.unreadable) out.push({ id: 'unreadable', icon: '▲', title: t.unreadable(m.unreadable.path, m.unreadable.reason), hue: 'yellow', blocks: [] });
 
   if (m.mainModel || m.tool || m.turnSeconds !== null || m.waiting || m.jobs?.length) {
     const blocks: Block[] = [];

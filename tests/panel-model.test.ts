@@ -135,7 +135,7 @@ describe('buildPanelModel', () => {
   it('is all-null for an empty project', () => {
     expect(buildPanelModel(base)).toEqual({
       locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], subagentsDone: [], tool: null, turnSeconds: null, ccTasks: null,
-      forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, activities: [], waiting: null, jobs: [], usage: null,
+      forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, unreadable: null, activities: [], waiting: null, jobs: [], usage: null,
     });
   });
   it('derives waypoint from a work band and takes its locale', () => {

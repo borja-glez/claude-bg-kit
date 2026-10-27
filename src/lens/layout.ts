@@ -23,7 +23,7 @@ const MIN_COLUMNS = 20;
 // The cells kept for the summary after a window of boxes («+42 ■ · 12 □» fits in sixteen columns).
 const SUMMARY_CELLS = 8;
 /** F-01: which cards go first when the rows run out; the last ones are left out first. */
-export const CARD_PRIORITY: readonly CardId[] = ['now', 'needs', 'tasks', 'execution', 'roadmap', 'agents', 'superpowers', 'todos', 'ccTasks', 'usage'];
+export const CARD_PRIORITY: readonly CardId[] = ['unreadable', 'now', 'needs', 'tasks', 'execution', 'roadmap', 'agents', 'superpowers', 'todos', 'ccTasks', 'usage'];
 
 type PaneProps = { bodyColumns?: unknown; placement?: unknown; scroll?: { bodyRows?: unknown } | null; view?: { agentId?: unknown } | null };
 

@@ -43,7 +43,7 @@ export type Block =
   | { kind: 'chips'; chips: { text: string; hue: Hue }[] };
 
 /** Which section a card is: the pane's cut leaves out the least important first (src/lens/layout.ts). */
-export type CardId = 'now' | 'needs' | 'tasks' | 'execution' | 'roadmap' | 'agents' | 'superpowers' | 'todos' | 'ccTasks' | 'usage';
+export type CardId = 'unreadable' | 'now' | 'needs' | 'tasks' | 'execution' | 'roadmap' | 'agents' | 'superpowers' | 'todos' | 'ccTasks' | 'usage';
 export interface Card { id?: CardId; icon: string; title: string; hue: Hue; chip?: { text: string; hue: Hue }; subtitle?: string; blocks: Block[] }
 
 const PAD = 14;

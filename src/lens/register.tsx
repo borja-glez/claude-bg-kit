@@ -3,7 +3,7 @@ import type { Register, Timer } from 'claude-code';
 import { noneBand, type BandModel } from '../mod/model.js';
 import { buildPanelModel, bandKey, parsePlanTasks, parseSddLedger, planFileOf, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, type Engine } from '../mod/files.js';
-import { findAnchor, isOwnStatus, samePath, under, type Anchor, type AnchorScope, type Refusal } from '../mod/anchor.js';
+import { findAnchor, fsFailure, isOwnStatus, refusalReason, samePath, under, type Anchor, type AnchorScope, type Refusal } from '../mod/anchor.js';
 import { normalizeStatus, statusKey, statusRootOf, type ForgeStatus } from '../lib/forge-status.js';
 import { JOB_FILE_MAX, parseJob, runRoleOf } from './activities.js';
 import { isSafeId, parseExecution } from '../lib/execution-state.js';
@@ -112,6 +112,8 @@ const OWN_PATHS_MAX = 20;
 let ownStatusTasks: string[] = [];
 // D8: a refused read of the session root or of the anchored checkout, for the panel to say.
 let refused: Refusal | null = null;
+// D8: the same, found by an ordinary refresh listing the anchored checkout's .forge and .waypoint.
+let readRefused: Refusal | null = null;
 // One search at a time; the epoch moves with the conversation, so a search begun for the one before is not adopted.
 let anchorSearch: Promise<void> | null = null;
 let anchorEpoch = 0;
@@ -671,6 +673,7 @@ function resetAnchor(): void {
   anchorId = null;
   anchorNoId = false;
   refused = null;
+  readRefused = null;
   ownPaths = [];
   ownTasks = [];
   ownStatusTasks = [];
@@ -709,11 +712,23 @@ function idRead($: Engine): void {
   if (paneUp) void refreshPanel($, true);
 }
 
+// D8: lens's own reads swallow every error, so a refusal of the anchored checkout's .forge or .waypoint is asked of a
+// checked listing; a missing folder says nothing.
+async function refusedIn($: Engine, checkout: string): Promise<Refusal | null> {
+  for (const name of ['.forge', '.waypoint']) {
+    const path = join(checkout, name);
+    try { await $.fs.list(path); } catch (err) { if (fsFailure(err) === 'refused') return { path, reason: refusalReason(err) }; }
+  }
+  return null;
+}
+
 // D3, D5: the files of the anchored checkout; no anchor, none.
 async function loadPanelFiles($: Engine, now: number): Promise<PanelFiles> {
   forgeSeen = null;
   const at = anchor;
-  if (!at) return {};
+  if (!at) { readRefused = null; return {}; }
+  const denied = await refusedIn($, at.checkout);
+  if (at === anchor) readRefused = denied;
   let forge: PanelFiles = {};
   try { forge = await loadForgeFiles($, at.checkout, now, at.scope); } catch { /* no forge section */ }
   // A lone forge task whose status no longer reads as this conversation's is searched for again.
@@ -1176,7 +1191,7 @@ async function buildPanel($: Engine): Promise<PanelModel> {
   const subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   return buildPanelModel({
     band: roadmap, ...panelFiles, activity: { ...activity, subagents, finished: freshFinished(finished, now) }, now, usage: usageInput(), sessionId,
-    links, ownTasks, wakeAt, focusAgent, locale: localeNow(),
+    links, ownTasks, wakeAt, focusAgent, locale: localeNow(), unreadable: readRefused ?? refused,
   });
 }
 
@@ -1335,6 +1350,7 @@ const TEXT = {
     sNeeds: 'Te toca',
     needKind: { 'review-question': 'pregunta de revisión', authorization: 'fusión por autorizar', 'untrusted-commands': 'confianza en los comandos', run: 'ejecución parada', question: 'pregunta', proposal: 'propuesta', 'design-approval': 'diseño por aprobar', surface: 'permiso de superficie' },
     needCoordinator: 'te toca en la conversación de la coordinadora', needConversation: 'en la conversación que preguntó', needRoadmap: 'en el roadmap', needUnverified: 'no se pudo leer',
+    unreadable: (path: string, reason: string) => `no se puede leer ${path}: ${reason}`,
     needsN: (n: number) => `te toca ${n}`,
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
     commandFailed: (why: string) => `lens no pudo responder a /lens: ${why}. Vuelve a probar; el motivo queda también en el log de depuración.`,
@@ -1371,6 +1387,7 @@ const TEXT = {
     sNeeds: 'Waiting for you',
     needKind: { 'review-question': 'review question', authorization: 'merge to authorize', 'untrusted-commands': 'trust in the commands', run: 'stopped execution', question: 'question', proposal: 'proposal', 'design-approval': 'design to approve', surface: 'surface permission' },
     needCoordinator: "your turn in the coordinator's conversation", needConversation: 'in the conversation that asked', needRoadmap: 'on the roadmap', needUnverified: 'could not be read',
+    unreadable: (path: string, reason: string) => `cannot read ${path}: ${reason}`,
     needsN: (n: number) => `waiting for you ${n}`,
     pressEnter: 'Command ready in the prompt: press Enter',
     commandFailed: (why: string) => `lens could not answer /lens: ${why}. Try it again; the reason is in the debug log too.`,

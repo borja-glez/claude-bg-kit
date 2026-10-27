@@ -46,7 +46,8 @@ export function fsFailure(err: unknown): 'missing' | 'refused' {
 export function refusalReason(err: unknown): string {
   const text = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
   const code = err && typeof err === 'object' ? String((err as { code?: unknown }).code ?? '') : '';
-  return (text || code || 'unreadable').replace(/\s+/g, ' ').trim().slice(0, 120);
+  // The engine heads its refusals with the plugin and the call («lens: $.fs.list: …»): the person wants the cause.
+  return (text || code || 'unreadable').replace(/\s+/g, ' ').trim().replace(/^[\w-]+: \$\.fs\.\w+: /, '').slice(0, 120);
 }
 
 const norm = (p: string): string => {

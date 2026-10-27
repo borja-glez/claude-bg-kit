@@ -6,7 +6,7 @@ import type { PanelModel } from '../src/lens/model.js';
 type Row = PanelModel['activities'][number];
 const EMPTY: PanelModel = {
   locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], tool: null, turnSeconds: null, ccTasks: null,
-  forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, activities: [], waiting: null, jobs: [], usage: null,
+  forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, unreadable: null, activities: [], waiting: null, jobs: [], usage: null,
 };
 const ACT = (over: Partial<Row> = {}): Row => ({
   key: 'T001', kind: 'forge', owner: 'own', dim: false, done: false, slot: false, expanded: false, stopped: false, task: 'T001', project: null, title: null,

@@ -25,7 +25,7 @@ const T: CardTexts = {
   waitingOn: (n, wake) => `waiting on ${n} subagent${n === 1 ? '' : 's'}${wake ? ` · wakes in ${wake}` : ''}`, waitingLbl: 'waiting', cached: 'cached', reviewersLbl: 'reviewers',
   sNeeds: 'Waiting for you',
   needKind: { 'review-question': 'review question', authorization: 'merge to authorize', 'untrusted-commands': 'trust in the commands', run: 'stopped execution', question: 'question', proposal: 'proposal', 'design-approval': 'design to approve', surface: 'surface permission' },
-  needCoordinator: "your turn in the coordinator's conversation", needConversation: 'in the conversation that asked', needRoadmap: 'on the roadmap', needUnverified: 'could not be read',
+  needCoordinator: "your turn in the coordinator's conversation", needConversation: 'in the conversation that asked', needRoadmap: 'on the roadmap', needUnverified: 'could not be read', unreadable: (path, reason) => `cannot read ${path}: ${reason}`,
 };
 const FORGE: NonNullable<PanelModel['forge']> = {
   task: 'orders', path: 'large', phase: 'implement', agent: 'forge-impl-heavy', validators: [{ name: 'test', ok: true }],
@@ -33,7 +33,7 @@ const FORGE: NonNullable<PanelModel['forge']> = {
 };
 const EMPTY: PanelModel = {
   locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], tool: null, turnSeconds: null, ccTasks: null,
-  forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, activities: [], waiting: null, jobs: [], usage: null,
+  forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, unreadable: null, activities: [], waiting: null, jobs: [], usage: null,
 };
 const EXEC: NonNullable<PanelModel['execution']> = {
   runId: 'r1', mode: 'subagents', parallel: 3, branch: 'forge/run-shop', active: true, stopReason: null, stallReason: null,
@@ -696,7 +696,7 @@ describe('the «Waiting for you» card (w7 A5)', () => {
       ['proposal', 'Cache', '/forge:decide p1'],
       '+6',
     ]);
-    expect(CARD_PRIORITY.indexOf('needs')).toBe(1);
+    expect(CARD_PRIORITY.indexOf('needs')).toBe(CARD_PRIORITY.indexOf('now') + 1);
   });
   it("shows at most 6 rows and counts the rest of the total (A5.m9a)", () => {
     const items = Array.from({ length: 8 }, (_, i) => item({ id: `n${i}` }));
@@ -711,5 +711,15 @@ describe('the «Waiting for you» card (w7 A5)', () => {
     expect(card.blocks[0]).toMatchObject({ kind: 'row', right: 'on the roadmap' });
     expect(card.blocks[1]).toMatchObject({ kind: 'row', tag: { text: 'merge to authorize' }, text: 'could not be read: .forge/execution/auth/x.json', dim: true });
     expect(buildCards(EMPTY, T, 0).some(c => c.id === 'needs')).toBe(false);
+  });
+});
+
+describe('the unreadable line (D8)', () => {
+  it('is the first card, one line with the path and the reason, and absent without a refusal', () => {
+    const cards = buildCards({ ...EMPTY, unreadable: { path: '/c/a/.forge', reason: 'EACCES' } }, T, 0);
+    expect(cards[0]).toMatchObject({ id: 'unreadable', title: 'cannot read /c/a/.forge: EACCES', blocks: [] });
+    expect(cardAlt(cards[0]!)).toContain('cannot read /c/a/.forge: EACCES');
+    expect(buildCards(EMPTY, T, 0).some(c => c.id === 'unreadable')).toBe(false);
+    expect(CARD_PRIORITY.indexOf('unreadable')).toBe(0);
   });
 });

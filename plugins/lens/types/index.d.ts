@@ -57,6 +57,8 @@ export type LensPanel = {
   // what waits for the person, as the band carries it (needs-you.ts in lib): absent when nothing does
   needs?: { total: number; items: { kind: 'review-question' | 'authorization' | 'untrusted-commands' | 'run' | 'question' | 'proposal' | 'design-approval' | 'surface'; id: string; what: string; task: string | null; runId: string | null; file: string | null; since: string | null; command: string | null; place: 'coordinator' | 'conversation' | 'roadmap' | null; unverified?: true }[] };
   mainModel: { model: string; effort: string | null } | null;
+  // a folder lens needs and the engine refused to read (not a missing one), for the panel to say.
+  unreadable: { path: string; reason: string } | null;
   // one entry per piece of work going on: a forge task, a workflow run, superpowers, the todos, the agents without a task.
   activities: {
     key: string; kind: 'forge' | 'workflow' | 'superpowers' | 'todo' | 'adhoc'; owner: 'own' | 'other';

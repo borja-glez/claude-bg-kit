@@ -15,7 +15,7 @@ const T: SurfaceTexts = {
 };
 const EMPTY: PanelModel = {
   locale: 'es', waypoint: null, superpowers: null, todos: null, subagents: [], tool: null, turnSeconds: null, ccTasks: null,
-  forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, activities: [], waiting: null, jobs: [], usage: null,
+  forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, unreadable: null, activities: [], waiting: null, jobs: [], usage: null,
 };
 const ACT = (over: Partial<Row> = {}): Row => ({
   key: 'T002', kind: 'forge', owner: 'own', dim: false, done: false, slot: false, expanded: true, stopped: false, task: 'T002', project: null, title: null,

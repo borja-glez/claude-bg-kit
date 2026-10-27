@@ -29,6 +29,10 @@ describe('anchor choice', () => {
     expect(fsFailure('weird')).toBe('refused');
   });
 
+  it('refusalReason leaves out the engine\'s plugin and call heading', () => {
+    expect(refusalReason(new Error('lens: $.fs.list: EACCES: permission denied'))).toBe('EACCES: permission denied');
+  });
+
   it('refusalReason is one line of at most 120 characters', () => {
     const r = refusalReason(new Error(`EACCES: no\n${'x'.repeat(300)}`));
     expect(r).not.toContain('\n');

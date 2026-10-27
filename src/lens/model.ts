@@ -232,6 +232,8 @@ export type PanelModel = {
   // what waits for the person, as the band carries it (needs-you.ts in lib): absent when nothing does
   needs?: { total: number; items: { kind: 'review-question' | 'authorization' | 'untrusted-commands' | 'run' | 'question' | 'proposal' | 'design-approval' | 'surface'; id: string; what: string; task: string | null; runId: string | null; file: string | null; since: string | null; command: string | null; place: 'coordinator' | 'conversation' | 'roadmap' | null; unverified?: true }[] };
   mainModel: { model: string; effort: string | null } | null;
+  // a folder lens needs and the engine refused to read (not a missing one), for the panel to say.
+  unreadable: { path: string; reason: string } | null;
   // one entry per piece of work going on: a forge task, a workflow run, superpowers, the todos, the agents without a task.
   activities: {
     key: string; kind: 'forge' | 'workflow' | 'superpowers' | 'todo' | 'adhoc'; owner: 'own' | 'other';
@@ -559,7 +561,7 @@ export function buildPanelModel(input: {
   // (undefined: not known, every task counts as own, as before; null: it could not be read), when its last
   // ScheduleWakeup wakes it, and the agent the person looks at.
   links?: readonly AgentLink[]; ownTasks?: readonly string[]; sessionId?: string | null; wakeAt?: number | null; focusAgent?: string | null;
-  activity: Activity; now: number; locale?: string;
+  activity: Activity; now: number; locale?: string; unreadable?: { path: string; reason: string } | null;
   // `officialOwnUsd`: this session's own computed cost at the moment `officialUsd` was read, for the drift check.
   usage?: { session: UsageState; run: UsageState | null; officialUsd: number | null; officialOwnUsd?: number | null };
 }): PanelModel {
@@ -680,6 +682,7 @@ export function buildPanelModel(input: {
     proposals: pendingProposals(input.proposals),
     ...(band.needs ? { needs: band.needs } : {}),
     mainModel: mainLoop?.model ? { model: mainLoop.model, effort: mainLoop.effort } : null,
+    unreadable: input.unreadable ?? null,
     activities: view.activities, waiting: view.waiting, jobs: view.jobs,
     usage,
   };
