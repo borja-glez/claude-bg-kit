@@ -43,7 +43,7 @@ export function renderPage(m: Model, ui: UiState, dv: Derived = computeDerived(m
     const badge = v === 'talk' ? openProposals : 0;
     return `<button type="button" class="nav${on ? ' on' : ''}" data-action="view" data-view="${v}"${on ? ' aria-current="page"' : ''} aria-label="${esc(d.views[v])}${badge ? ` (${badge})` : ''}"><b aria-hidden="true">${NAV_ICON[v]}</b><span class="nl" aria-hidden="true">${esc(d.views[v])}</span><span class="ns" aria-hidden="true">${esc(d.navShort[v])}</span>${badge > 0 ? `<span class="badge" aria-hidden="true">${badge}</span>` : ''}</button>`;
   }).join('');
-  const body = view === 'plan' ? renderPlanView(m, d, ui, dv)
+  const body = view === 'plan' ? renderPlanView(m, d, ui, dv, loc)
     : view === 'schedule' ? renderScheduleView(m, d, ui, loc, dv)
     : view === 'runs' ? renderRunsView(m, d, ui, loc, dv)
     : view === 'sessions' ? renderSessionsView(m, d, ui, dv)
@@ -80,7 +80,8 @@ function renderStrip(m: Model, d: Dict, dv: Derived, loc: string): string {
   const cur = x.currentVersion;
   const v = cur ? x.byVersion[cur] : undefined;
   const version = cur && v
-    ? `<span class="sv" title="${esc(d.strip.versionTitle(cur, v.done, v.total))}">${esc(versionLabel(cur))} · ${v.percent} %</span>`
+    // v3: the version in progress is a link to what it holds (Plan filtered by it).
+    ? `<button type="button" class="sv" data-action="view" data-view="plan" data-pf="v:${esc(cur)}" data-k="strip:v" title="${esc(`${d.strip.versionTitle(cur, v.done, v.total)} · ${d.versions.stripTitle(versionLabel(cur))}`)}">${esc(versionLabel(cur))} · ${v.percent} %</button>`
     : `<span class="sv">${x.percent} %</span>`;
   // G-12: the one forecast end, with how many it counts in parallel in its title.
   const f = dv.forecast;

@@ -7,6 +7,7 @@ import type { MessageType, PlanTask, RunDoc } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
 import type { Dict } from '../i18n.js';
 import { escalatedSessions, esc, hhmm, labelOf, liveDot, num, pastMs, rel, safeMsgType, safeStatus, trackTag } from '../html.js';
+import { miniFlow } from '../flow.js';
 import type { Model, UiState } from '../model.js';
 
 const MSG_COLOR: Record<MessageType, string> = { overlap_warning: 'mauve', handoff_request: 'peach', delegate: 'teal', reply: 'blue', escalation: 'yellow' };
@@ -39,6 +40,8 @@ export function renderSessionsView(m: Model, d: Dict, ui: UiState, dv: Derived):
     const folded = isEnded || !live.length;
     const state = rid === NO_RUN ? '' : rid === active ? d.sessions.running : isEnded ? d.sessions.ended : '';
     const title = `${rid === NO_RUN ? d.sessions.noRun : d.sessions.group(rid)}${state ? ` · ${state}` : ''} · ${d.sessions.count(list.length)}`;
+    // v3: the active run says how it runs under its title: mode, slots, branch and since when.
+    const runMeta = r && rid === active ? `<span class="srm mono">${esc(labelOf(d.run.mode, r.mode))} · ${esc(d.run.slots(r.slots.length, r.parallel))} · ${esc(r.branch)}${r.startedAt && pastMs(r.startedAt, m.now) !== null ? ` · ${esc(d.sess.since(hhmm(r.startedAt)))} · ${rel(d, 'dur', r.startedAt, m.now)}` : ''}</span>` : '';
     // Final review M1: a run and «Sin ejecución» have keys of their own kind (r:<run> and none), so no run id, whatever it
     // says, takes the other's. M2: the fold the data says is in the key too, so a change of it is a new node the morph does
     // not keep folded; the fold the person chose (the `toggle` event, app.ts) wins over it. Re-review N2: while it does, the
@@ -52,7 +55,7 @@ export function renderSessionsView(m: Model, d: Dict, ui: UiState, dv: Derived):
     const inner = folded || !idle.length
       ? cards(list)
       : `${cards(live)}<details class="sidle" ${fold('si', false)}><summary>${esc(d.liveSess.idle(idle.length))}</summary>${cards(idle)}</details>`;
-    return `<details class="sgrp" ${fold('sg', !folded)}><summary><span class="lbl">${esc(title)}</span></summary>${inner}</details>`;
+    return `<details class="sgrp" ${fold('sg', !folded)}><summary><span class="lbl">${esc(title)}</span>${runMeta}</summary>${inner}</details>`;
   }).join('');
   return `${head}<section class="sessions-view">${body}</section>`;
 }
@@ -83,44 +86,51 @@ function card(m: Model, d: Dict, dv: Derived, sid: string, esca: Set<string>): s
     const t = safeMsgType(g.type);
     return `<div class="msg c-${MSG_COLOR[t]}"><span class="who">${esc(g.from)} → ${esc(g.to)} · ${esc(d.msgType[t])}</span>${esc(g.text)}</div>`;
   }).join('')}</div>` : warn ? `<div class="thread"><div class="lbl ye">${esc(d.needsDecision)}</div></div>` : '';
-  const taskList = tasks.length
-    ? tasks.map(t => `<div class="stk"><button type="button" class="chip st-${safeStatus(m.states[t.id]?.status)}" data-action="open-task" data-id="${esc(t.id)}" data-k="ts:${esc(sid)}:${esc(t.id)}">${esc(t.id)}</button> ${esc(t.title)}</div>`).join('')
-    : '—';
-  // H-23: the coordinator of the active run lists its slots.
+  // H-23: the coordinator of the active run lists its slots; v3: as a board, and its tasks only once (the ones in no slot
+  // go under «Otras tareas»).
   const r = m.run && m.run.active && m.run.coordinator === sid ? m.run : null;
-  return `<div class="sc ${warn ? 'warn' : ''} ${idle ? 'idle' : ''}" data-k="s:${esc(sid)}">
-      <h3>${warn ? '⚠' : '<span class="dot">●</span>'} ${esc(s.name)} ${s.role ? `<span class="tag">${esc(labelOf(d.run.role, s.role))}</span>` : ''} ${trackTag(m, s.track)}</h3>
-      <dl class="kv">
-        <dt>${esc(d.sessions.tasks)}</dt><dd>${taskList}</dd>
-        ${r ? `<dt>${esc(d.sessions.slots)}</dt><dd>${slotList(m, d, r)}</dd>` : ''}
-        <dt>${esc(d.field.branch)}</dt><dd>${esc(s.branch ?? '—')}</dd>
-        <dt>${esc(d.field.agent)}</dt><dd>${esc(s.agentName ?? '—')}</dd>
-        <dt>${esc(d.heartbeat)}</dt><dd>${hb}</dd>
-        <dt>${esc(d.field.zones)}</dt><dd>${zoneParts.length ? zoneParts.join(' · ') : '—'}</dd>
-      </dl>
-      ${prog ? `<div class="bar c"><i style="width:${pct}%"></i></div><div class="mono">${num(prog.done)}/${num(prog.total)}</div>` : ''}
-      ${thread}
+  const inSlots = new Set(r && r.kind !== 'ephemeral' ? r.slots.map(x => x.task) : []);
+  const rest = tasks.filter(t => !inSlots.has(t.id));
+  const taskList = rest.map(t => `<li class="stk"><button type="button" class="chip st-${safeStatus(m.states[t.id]?.status)}" data-action="open-task" data-id="${esc(t.id)}" data-k="ts:${esc(sid)}:${esc(t.id)}">${esc(t.id)}</button><span class="stt">${esc(t.title)}</span>${miniFlow(d, m.states[t.id]?.exec?.stage)}</li>`).join('');
+  const meta = [
+    `<span title="${esc(d.heartbeat)}">♥ ${hb}</span>`,
+    s.branch ? `<span title="${esc(d.field.branch)}">⎇ ${esc(s.branch)}</span>` : '',
+    s.agentName ? `<span title="${esc(d.field.agent)}">${esc(s.agentName)}</span>` : '',
+  ].filter(Boolean).join('<span class="sep">·</span>');
+  const zoneChips = zoneParts.length ? `<div class="szones" title="${esc(d.field.zones)}">${zoneParts.map(z => `<span class="szc">${z}</span>`).join('')}</div>` : '';
+  const track = prog ? `<div class="strk"><span class="lbl">${esc(d.sess.track)}</span><div class="bar c"><i style="width:${pct}%"></i></div><span class="mono">${num(prog.done)}/${num(prog.total)}</span></div>` : '';
+  return `<div class="sc${warn ? ' warn' : ''}${idle ? ' idle' : ''}${r ? ' wide' : ''}" data-k="s:${esc(sid)}">
+      <header class="sch"><h3>${warn ? '⚠' : `<span class="dot">●</span>`} ${esc(s.name)} ${s.role ? `<span class="tag">${esc(labelOf(d.run.role, s.role))}</span>` : ''} ${trackTag(m, s.track)}</h3><div class="smeta mono">${meta}</div></header>
+      ${r ? slotBoard(m, d, r) : ''}
+      ${taskList ? `<div class="stl"><div class="lbl">${esc(r ? d.sess.other : d.sessions.tasks)}</div><ul class="stks">${taskList}</ul></div>` : !r ? `<div class="muted">${esc(d.sessions.tasks)}: —</div>` : ''}
+      ${zoneChips}${track}${thread}
     </div>`;
 }
 
-/** H-23: the slots of the active run: each one's task (a plan task opens its detail; a loose one has none), its stage, agent
- *  and time, with the liveness of its executor (or of the coordinator for a slot without one); then how many are free. */
-function slotList(m: Model, d: Dict, r: RunDoc): string {
+/** H-23: the slots of the active run, as a board (v3): a tile per slot with its task (a plan task opens its detail; a loose
+ *  one has none), the small flow of its stage, its agent and time, with the liveness of its executor (or of the coordinator
+ *  for a slot without one), its round when forge says it; then a dashed tile per free slot. */
+function slotBoard(m: Model, d: Dict, r: RunDoc): string {
   const coord = m.sessions[r.coordinator];
   // A loose id is not a plan id: an ephemeral run never takes a title or a lease from the plan, even on a clash.
   const ephemeral = r.kind === 'ephemeral';
-  const items = r.slots.map(s => {
+  const tiles = r.slots.map(s => {
     const task = ephemeral ? undefined : m.plan.tasks.find(t => t.id === s.task);
-    const ex = ephemeral ? undefined : m.states[s.task]?.exec;
+    const st = ephemeral ? undefined : m.states[s.task];
+    const ex = st?.exec;
     const l = ex ? liveness(m.now, ex.leaseUntil) : coord ? sessionLiveness(coord, m.now) : 'stopped';
     const title = task?.title ?? r.loose.find(x => x.id === s.task)?.title ?? '';
     const since = pastMs(s.since, m.now);
-    const line = `${esc(labelOf(d.run.stage, s.stage))}${s.agent ? ` · ${esc(s.agent)}` : ''}${since !== null ? ` · ${rel(d, 'lasts', s.since, m.now)}` : ''}`;
+    const f = st?.forge;
+    const round = f && typeof f.round === 'number' ? ` · r${num(f.round)}${typeof f.cap === 'number' ? `/${num(f.cap)}` : ''}` : '';
     const id = task
-      ? `<button type="button" class="chip st-${safeStatus(m.states[s.task]?.status)}" data-action="open-task" data-id="${esc(s.task)}" data-k="slot:${esc(s.task)}">${esc(s.task)}</button>`
+      ? `<button type="button" class="chip st-${safeStatus(st?.status)}" data-action="open-task" data-id="${esc(s.task)}" data-k="slot:${esc(s.task)}">${esc(s.task)}</button>`
       : `<span class="k">${esc(s.task)}</span>`;
-    return `<li class="sl">${liveDot(l)} ${id} ${esc(title)} <span class="mono">${line}</span></li>`;
+    return `<li class="slt live-${l}">${id}<span class="slti" title="${esc(title)}">${esc(title)}</span>`
+      + `<div class="slf">${liveDot(l)} ${miniFlow(d, s.stage)} <b>${esc(labelOf(d.run.stage, s.stage))}</b><span class="mono">${esc(round)}</span></div>`
+      + `<div class="mono slm">${s.agent ? esc(s.agent) : ''}${s.agent && since !== null ? ' · ' : ''}${since !== null ? rel(d, 'lasts', s.since, m.now) : ''}</div></li>`;
   }).join('');
   const free = Math.max(0, num(r.parallel) - r.slots.length);
-  return `${esc(d.run.slots(r.slots.length, r.parallel))}${free ? ` · ${esc(d.sessions.free(free))}` : ''}<ul class="slots">${items}</ul>`;
+  const empty = Array.from({ length: Math.min(free, 12) }, () => `<li class="slt free"><span class="muted">${esc(d.sessions.free(1))}</span></li>`).join('');
+  return `<div class="slotb"><div class="lbl">${esc(d.sessions.slots)} · ${esc(d.sess.slotsOf(r.slots.length, r.parallel))}</div><ul class="slotg">${tiles}${empty}</ul></div>`;
 }

@@ -9,6 +9,7 @@ import type { ForgeV1, PlanTask, TaskState } from '../../lib/types.js';
 import { globsOverlap } from '../../lib/zones.js';
 import type { Dict } from '../i18n.js';
 import { authorLabel, decisionBlock, esc, execLine, fmt, isOrphan, labelOf, noteText, num, oneOf, pastMs, rel, roleOf, safeNote, safeStatus, trackTag } from '../html.js';
+import { lastRoundLine, roundsStory, stageFlow, trailBar, whereIs } from '../flow.js';
 import { DETAIL_TABS, type DetailTab, type Model, type UiState } from '../model.js';
 
 const sec = (label: string, body: string) => `<div class="sec"><div class="lbl">${esc(label)}</div><div>${body}</div></div>`;
@@ -41,7 +42,7 @@ export function renderTaskModal(m: Model, d: Dict, ui: UiState, loc: string): st
     <div class="dtabs" role="tablist" aria-label="${esc(d.detail.tabsLabel)}">${tabButtons}</div>
     ${panel('summary', summaryTab(m, d, t, s, loc))}
     ${panel('definition', definitionTab(m, d, t, s))}
-    ${hasForge ? panel('forge', forgeTab(d, s, doc)) : ''}
+    ${hasForge ? panel('forge', forgeTab(m, d, s, doc, loc)) : ''}
     ${panel('talk', talkTab(m, d, ui, talk, loc))}
   </div></div>`;
 }
@@ -73,7 +74,7 @@ function summaryTab(m: Model, d: Dict, t: PlanTask, s: TaskState, loc: string): 
   const shas = new Set((s.commits ?? []).map(c => c.sha));
   // H-15: the commits the task's events carry that are not in its commits yet.
   const mid = m.events.filter(e => e.type === 'commit' && e.taskId === t.id && !(e.sha && shas.has(e.sha)));
-  return `${blocked}
+  return `${blocked}${nowBox(m, d, s)}
     ${sec(d.detail.status, `${esc(d.status[status])}${s.exec ? `<div class="mono exec">${execLine(m, d, s.exec, role)}</div>` : ''}`)}
     ${sec(d.field.period, period + duration)}
     ${sec(d.field.session, who)}
@@ -81,6 +82,24 @@ function summaryTab(m: Model, d: Dict, t: PlanTask, s: TaskState, loc: string): 
     ${sec(d.field.commits, s.commits?.length ? s.commits.map(c => row(c.sha, c.title, c.add, c.del)).join('') : '—')}
     ${mid.length ? sec(d.detail.intermediate, mid.map(e => row(e.sha, e.text ?? '', e.add, e.del)).join('')) : ''}
     ${s.summary ? sec(d.field.summary, inlineMd(esc(s.summary))) : ''}`;
+}
+
+/** v3: «Ahora», on top of the summary of a task forge works or worked: the flow of its stages, how long the current one
+ *  has run, the round against its cap, when forge last wrote it, and the last round with what blocked it and what next. */
+function nowBox(m: Model, d: Dict, s: TaskState): string {
+  const flow = stageFlow(m, d, s);
+  if (!flow) return '';
+  const doc = forgeV2(s.forge);
+  const { stage } = whereIs(s);
+  const parts = [
+    stage ? `<b>${esc(labelOf(d.run.stage, stage))}</b>` : '',
+    s.exec && pastMs(s.exec.since, m.now) !== null && stage !== 'done' ? rel(d, 'lasts', s.exec.since, m.now) : '',
+    doc && typeof doc.round === 'number' ? `<span${doc.overCap ? ' class="del"' : ''}>r${num(doc.round)}${typeof doc.cap === 'number' ? `/${num(doc.cap)}` : ''}</span>` : '',
+    doc ? esc(d.inProgress.brief(doc.brief)) : '',
+    esc(s.exec?.agent ?? doc?.agent ?? ''),
+    doc && pastMs(doc.updatedAt, m.now) !== null ? `${esc(d.flow.updated)} ${rel(d, 'ago', doc.updatedAt, m.now)}` : '',
+  ].filter(Boolean);
+  return `<section class="nowbox" aria-label="${esc(d.flow.label)}"><div class="lbl">${esc(d.flow.now)}</div>${flow}<div class="mono nowln">${parts.join(' · ')}</div>${lastRoundLine(d, s)}</section>`;
 }
 
 /** Definición: what it includes and when it is done, its section of the design (G-25), the zones planned against the
@@ -120,26 +139,24 @@ function chips(m: Model, d: Dict, ids: string[], key: string): string {
 
 /** Forge: a v2 block with its stages, rounds, validators, accepted round, deferred findings and skipped verification; a
  *  v1 block as before; and the verification by round. */
-function forgeTab(d: Dict, s: TaskState, doc: ForgeDocV2 | null): string {
-  const forge = doc ? renderForgeV2(d, doc) : s.forge ? sec(d.forge.title, renderForge(d, s.forge as ForgeV1)) : '';
+function forgeTab(m: Model, d: Dict, s: TaskState, doc: ForgeDocV2 | null, loc: string): string {
+  const forge = doc ? renderForgeV2(m, d, s, doc, loc) : s.forge ? sec(d.forge.title, renderForge(d, s.forge as ForgeV1)) : '';
   return `${forge}${s.evidence ? sec(d.verify.title, renderEvidence(d, s.evidence)) : ''}`;
 }
 
-function renderForgeV2(d: Dict, f: ForgeDocV2): string {
-  const stages = Object.entries(f.stages).filter(([, secs]) => secs > 0).map(([k, secs]) => `${labelOf(d.run.stage, k)} ${d.dur(secs / 60)}`).join(' · ');
+/** v3: the flow and the trail on top, then the story of the rounds (what blocked each one and what forge decided), the
+ *  validators as chips, the deferred findings and a skipped verification. */
+function renderForgeV2(m: Model, d: Dict, s: TaskState, f: ForgeDocV2, loc: string): string {
+  // v3: the time of each stage is under its node of the flow, which a v2 block always has.
   const head = `<div class="forge mono"><div><b>${esc(labelOf(d.path, f.path))}</b> · ${esc(labelOf(d.run.stage, f.stage))} · ${esc(d.inProgress.brief(f.brief))}${typeof f.round === 'number' ? ` · r${num(f.round)}${typeof f.cap === 'number' ? `/${num(f.cap)}` : ''}` : ''}</div>`
-    + `${f.agent ? `<div>${esc(d.forge.agent)}: ${esc(f.agent)}</div>` : ''}${stages ? `<div>${esc(d.detail.stages)}: ${esc(stages)}</div>` : ''}`
+    + `${f.agent ? `<div>${esc(d.forge.agent)}: ${esc(f.agent)}</div>` : ''}`
     + `${f.stage === 'stopped' ? `<div class="warn">${esc(d.run.stoppedHint)}</div>` : ''}</div>`;
   // K4-05: the accepted round, its score only in the title.
   const accepted = f.acceptedRound !== null
     ? `<div class="ok"${f.verdict && typeof f.verdict.score === 'number' ? ` title="${esc(`${d.forge.verdict}: ${f.verdict.score}`)}"` : ''}>${esc(d.detail.acceptedIn(f.acceptedRound))}</div>`
     : '';
-  const rounds = f.rounds.length
-    ? `<table class="rt"><thead><tr>${(['round', 'action', 'findings', 'reviewers', 'note'] as const).map(k => `<th>${esc(d.detail.roundCols[k])}</th>`).join('')}</tr></thead><tbody>${f.rounds.map(r => {
-        const over = typeof f.cap === 'number' && r.brief === f.brief && r.n > f.cap;
-        return `<tr${over ? ' class="over"' : ''}><td>${num(r.brief)}·${num(r.n)}</td><td>${esc(labelOf(d.action, r.action))}</td><td>${num(r.findings.critical)} C · ${num(r.findings.important)} I · ${num(r.findings.minor)} m</td><td>${esc(r.reviewers.join(', ') || '—')}</td><td>${esc(r.note)}</td></tr>`;
-      }).join('')}</tbody></table>`
-    : '—';
+  const story = roundsStory(m, d, s, loc);
+  const trail = trailBar(m, d, s, loc);
   const vals = f.validators.length
     ? `<ul class="vals">${f.validators.map(v => {
         const mark = v.skipped ? `<span class="muted">${esc(v.name)} ⊘</span>` : `<span class="${v.ok ? 'ok' : 'del'}">${esc(v.name)} ${v.ok ? '✓' : '✗'}</span>`;
@@ -151,7 +168,7 @@ function renderForgeV2(d: Dict, f: ForgeDocV2): string {
     ? sec(d.detail.deferred, f.deferred.map(x => `<div class="mono">${x.file ? `${esc(x.line ? `${x.file}:${x.line}` : x.file)} — ` : ''}${esc(x.problem)}</div>`).join(''))
     : '';
   const skipped = f.verify?.skipped ? `<div class="warn">${esc(d.detail.verifySkipped(f.verify.skipped))}</div>` : '';
-  return `${sec(d.forge.title, head + accepted)}${sec(d.detail.rounds, rounds)}${sec(d.forge.validators, vals)}${deferred}${skipped}`;
+  return `${sec(d.forge.title, stageFlow(m, d, s) + head + accepted)}${trail ? sec(d.flow.trail, trail) : ''}${sec(d.detail.rounds, story || '—')}${sec(d.forge.validators, vals)}${deferred}${skipped}`;
 }
 
 /** The verification: the result, every check (with its screenshot when uploaded), grouped by review round when the

@@ -9,8 +9,10 @@ import { phaseName } from '../../lib/timeline.js';
 import type { PlanStatus, PlanTask, TaskState, TaskStatus } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
 import type { Dict } from '../i18n.js';
-import { esc, eviMark, isOrphan, labelOf, num, safeStatus, trackTag, versionTable } from '../html.js';
+import { esc, eviMark, isOrphan, labelOf, num, safeStatus, trackTag } from '../html.js';
 import { PLAN_FORGE_KEYS, PLAN_TASK_KEYS, type Model, type PlanFilter, type PlanForgeKey, type PlanTaskKey, type UiState } from '../model.js';
+import { miniFlow } from '../flow.js';
+import { VERSION_KEY, versionCards, versionLabel, versionOfPhase, versionState } from './versions.js';
 
 type PhaseState = 'done' | 'in_progress' | 'committed' | 'provisional';
 const PH_ICON: Record<PhaseState, string> = { done: '✓', in_progress: '◉', committed: '▣', provisional: '○' };
@@ -21,7 +23,6 @@ const ST_ICON: Record<TaskStatus, string> = { free: '○', claimed: '◎', in_pr
 const PHASE_KEYS: readonly PlanStatus[] = ['committed', 'provisional'];
 const NO_FILTER: PlanFilter = { tasks: [], phases: [], forge: [], track: null };
 const TRACK_KEY = /^tr:([\w.-]{1,64})$/;
-const versionLabel = (id: string): string => (/^v/i.test(id) ? id : `v${id}`);
 const forgeV2 = (st: TaskState | undefined): ForgeDocV2 | null => {
   const f = st?.forge;
   return f && 'v' in f && f.v === 2 ? f : null;
@@ -49,10 +50,12 @@ export function parsePlanFilter(keys: readonly string[] | undefined): PlanFilter
   const f: PlanFilter = { tasks: [], phases: [], forge: [], track: null };
   for (const k of keys ?? []) {
     const track = TRACK_KEY.exec(k);
+    const version = VERSION_KEY.exec(k);
     if ((PLAN_TASK_KEYS as readonly string[]).includes(k)) { if (!f.tasks.includes(k as PlanTaskKey)) f.tasks.push(k as PlanTaskKey); }
     else if ((PHASE_KEYS as readonly string[]).includes(k)) { if (!f.phases.includes(k as PlanStatus)) f.phases.push(k as PlanStatus); }
     else if ((PLAN_FORGE_KEYS as readonly string[]).includes(k)) { if (!f.forge.includes(k as PlanForgeKey)) f.forge.push(k as PlanForgeKey); }
     else if (track) f.track = track[1]!;
+    else if (version) f.version = version[1]!;
   }
   return planFilterKeys(f).length ? f : undefined;
 }
@@ -60,13 +63,14 @@ export function parsePlanFilter(keys: readonly string[] | undefined): PlanFilter
 /** The keys of a filter in a fixed order: the URL's pf=. */
 export function planFilterKeys(f: PlanFilter | undefined): string[] {
   if (!f) return [];
-  return [...f.tasks, ...f.phases, ...f.forge, ...(f.track ? [`tr:${f.track}`] : [])];
+  return [...f.tasks, ...f.phases, ...f.forge, ...(f.track ? [`tr:${f.track}`] : []), ...(f.version ? [`v:${f.version}`] : [])];
 }
 
-/** A filter button pressed: its key in or out. */
+/** A filter button pressed: its key in or out. A version replaces the one chosen before (one version at a time). */
 export function togglePlanFilter(f: PlanFilter | undefined, key: string): PlanFilter | undefined {
   const keys = planFilterKeys(f);
-  return parsePlanFilter(keys.includes(key) ? keys.filter(k => k !== key) : [...keys, key]);
+  if (keys.includes(key)) return parsePlanFilter(keys.filter(k => k !== key));
+  return parsePlanFilter([...(VERSION_KEY.test(key) ? keys.filter(k => !VERSION_KEY.test(k)) : keys), key]);
 }
 
 /** The phase in progress: the first, in plan order, with a task not done; null when there is none. */
@@ -75,14 +79,17 @@ export function currentPhaseId(m: Model): string | null {
   return null;
 }
 
-export function renderPlanView(m: Model, d: Dict, ui: UiState, dv: Derived): string {
+export function renderPlanView(m: Model, d: Dict, ui: UiState, dv: Derived, loc: string): string {
   const x = dv.metrics;
-  const head = `<header class="hd"><h1>${esc(d.views.plan)}</h1><div class="meta"><b>${m.plan.phases.length}</b> ${esc(d.plan.phases)} · <b>${x.done}</b>/${x.total} ${esc(d.tasks)}</div></header>${versionTable(m, d, x)}`;
+  const head = `<header class="hd"><h1>${esc(d.views.plan)}</h1><div class="meta"><b>${m.plan.phases.length}</b> ${esc(d.plan.phases)} · <b>${x.done}</b>/${x.total} ${esc(d.tasks)}</div></header>${versionCards(m, d, x, { ends: dv.versionEnds, loc })}`;
   // H-24: an empty plan says how it gets its tasks.
   if (!m.plan.tasks.length) return `${head}<div class="muted">${esc(d.plan.empty)}</div>`;
   const f = ui.planFilter ?? NO_FILTER;
   // An unknown track (an old link, a hash edited by hand) filters nothing.
   const track = f.track && m.plan.tracks.some(t => t.id === f.track) ? f.track : null;
+  // v3: an unknown version filters nothing either. A version narrows the phases, as the phase's status does: it opens none.
+  const version = f.version ? m.plan.versions.find(v => v.id === f.version) ?? null : null;
+  const ownerOf = versionOfPhase(m);
   const filtering = f.tasks.length > 0 || f.forge.length > 0 || track !== null;
   const keyOf = new Map(m.plan.tasks.map(t => [t.id, planTaskKey(m, t.id)]));
   const forgeOf = new Map(m.plan.tasks.map(t => [t.id, forgeKeysOf(m.states[t.id])]));
@@ -101,6 +108,10 @@ export function renderPlanView(m: Model, d: Dict, ui: UiState, dv: Derived): str
     ${group(d.plan.groups.task, PLAN_TASK_KEYS.map(k => btn(k, d.plan.task[k], taskCount[k], f.tasks.includes(k))).join(''))}
     ${group(d.plan.groups.phase, PHASE_KEYS.map(k => btn(k, d.plan.phase[k], phaseCount[k], f.phases.includes(k))).join(''))}
     ${group(d.plan.groups.forge, PLAN_FORGE_KEYS.map(k => btn(k, d.plan.forge[k], forgeCount[k], f.forge.includes(k))).join(''))}
+    ${m.plan.versions.length ? group(d.plan.groups.version, m.plan.versions.map(v => {
+      const on = version?.id === v.id;
+      return `<button type="button" class="f pk-v${on ? ' on' : ''}" data-action="plan-filter" data-key="v:${esc(v.id)}" aria-pressed="${on}">${esc(versionLabel(v.id))} · ${num(x.byVersion[v.id]?.total ?? 0)}</button>`;
+    }).join('')) : ''}
     <label class="f trk" title="${esc(d.trackHelp)}">${esc(d.trackLabel)}: <select name="track" data-action="plan-track"><option value="">${esc(d.allTracks)}</option>${m.plan.tracks.map(t =>
       `<option value="${esc(t.id)}"${t.id === track ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>
     ${planFilterKeys(ui.planFilter).length ? `<button type="button" class="f" data-action="plan-clear">✕ ${esc(d.plan.clear)}</button>` : ''}
@@ -109,12 +120,15 @@ export function renderPlanView(m: Model, d: Dict, ui: UiState, dv: Derived): str
     && (!f.forge.length || forgeOf.get(t.id)!.some(k => f.forge.includes(k)))
     && (!track || t.track === track);
   const current = currentPhaseId(m);
-  const open = ui.planOpen ?? new Set(current ? [current] : []);
+  // With a version chosen, the phase open by default is its phase in progress (its first not done, else its first).
+  const inVersion = version ? m.plan.phases.filter(p => ownerOf.get(p.id) === version.id) : [];
+  const versionOpen = version ? (inVersion.find(p => p.id === current) ?? inVersion.find(p => x.byPhase[p.id]?.status !== 'done') ?? inVersion[0])?.id : undefined;
+  const open = ui.planOpen ?? new Set(version ? (versionOpen ? [versionOpen] : []) : current ? [current] : []);
   const hasCats = m.plan.tasks.some(t => t.category);
-  const versionOf = new Map<string, string>();
-  for (const v of m.plan.versions) for (const p of v.phases) if (!versionOf.has(p)) versionOf.set(p, v.id);
+  const versionOf = ownerOf;
   const phases = m.plan.phases
     .filter(p => !f.phases.length || f.phases.includes(p.plan_status))
+    .filter(p => !version || ownerOf.get(p.id) === version.id)
     .map(p => { const all = m.plan.tasks.filter(t => t.phase === p.id); return { p, all, shown: filtering ? all.filter(match) : all }; })
     .filter(y => !filtering || y.shown.length);
   // Review T4 M2: a task whose phase names none of the plan (phase documents out of step) is still listed, last, under
@@ -123,9 +137,22 @@ export function renderPlanView(m: Model, d: Dict, ui: UiState, dv: Derived): str
   const known = new Set(m.plan.phases.map(p => p.id));
   const stray = m.plan.tasks.filter(t => !known.has(t.phase));
   const strayShown = filtering ? stray.filter(match) : stray;
-  const strayGroup = strayShown.length && !f.phases.length
+  const strayGroup = strayShown.length && !f.phases.length && !version
     ? `<div class="plp" data-k="pl-none"><div class="plh"><span class="pn">${esc(d.plan.noPhase)}</span>${segBar(d, stray.map(t => ({ status: statusOf(m.states, t.id) })))}<span class="c">${num(stray.filter(t => statusOf(m.states, t.id) === 'done').length)}/${num(stray.length)}</span></div><div class="plt">${taskRows(m, d, strayShown, hasCats)}</div></div>`
     : '';
+  // v3: with versions, a header before the first phase of each one says which version the phases under it make up.
+  let lastVersion: string | null | undefined;
+  const versionHead = (p: { id: string }): string => {
+    if (!m.plan.versions.length) return '';
+    const vid = ownerOf.get(p.id) ?? null;
+    if (vid === lastVersion) return '';
+    lastVersion = vid;
+    const v = vid ? m.plan.versions.find(y => y.id === vid) : undefined;
+    if (!v) return `<div class="pvh" data-k="pvh:none"><b>${esc(d.versions.none)}</b></div>`;
+    const b = x.byVersion[v.id] ?? { done: 0, total: 0, percent: 0 };
+    const state = versionState(x, v);
+    return `<div class="pvh vs-${state}" data-k="pvh:${esc(v.id)}"><b>${esc(versionLabel(v.id))}</b> <span class="pill vs-${state}">${esc(d.versions.state[state])}</span> <span class="mono">${esc(d.versions.tasks(b.done, b.total))} · ${num(b.percent)} %${v.target ? ` · ${esc(d.versions.target(v.target))}` : ''}</span></div>`;
+  };
   const body = phases.map(({ p, all, shown }) => {
     const b = x.byPhase[p.id] ?? { done: 0, total: all.length, status: p.plan_status };
     const status = phaseState(b.status);
@@ -135,10 +162,10 @@ export function renderPlanView(m: Model, d: Dict, ui: UiState, dv: Derived): str
     const inner = `<span class="chev" aria-hidden="true">${isOpen ? '⌄' : '›'}</span><span class="k">${esc(p.id)}</span>${name ? ` <span class="pn">${esc(name)}</span>` : ''} <span class="pill ph-${status}">${PH_ICON[status]} ${esc(d.phaseStatus[status])}</span>${ver ? ` <span class="pv">${esc(versionLabel(ver))}</span>` : ''}${segBar(d, all.map(t => ({ status: statusOf(m.states, t.id) })))}<span class="c">${num(b.done)}/${num(b.total)}</span>`;
     const header = filtering
       ? `<div class="plh">${inner}</div>`
-      : `<button type="button" class="plh" data-action="plan-phase" data-id="${esc(p.id)}" aria-expanded="${isOpen}">${inner}</button>`;
+      : `<button type="button" class="plh" data-action="plan-phase" data-id="${esc(p.id)}" data-k="plh:${esc(p.id)}" aria-expanded="${isOpen}">${inner}</button>`;
     const goal = p.goal ? `<p class="goal">${esc(p.goal)}</p>` : '';
     const rows = isOpen && shown.length ? `<div class="plt">${taskRows(m, d, shown, hasCats)}</div>` : '';
-    return `<div class="plp ph-${status}" data-k="pl:${esc(p.id)}">${header}${goal}${rows}</div>`;
+    return `${versionHead(p)}<div class="plp ph-${status}" data-k="pl:${esc(p.id)}">${header}${goal}${rows}</div>`;
   }).join('') + strayGroup;
   const folds = filtering ? '' : `<div class="plc"><button type="button" class="f" data-action="plan-all" data-open="1">⌄ ${esc(d.tl.expand)}</button><button type="button" class="f" data-action="plan-all" data-open="0">⌃ ${esc(d.tl.collapse)}</button></div>`;
   const none = `<div class="muted">${esc(d.plan.none)} <button type="button" class="lnk" data-action="plan-clear">${esc(d.plan.clear)}</button></div>`;
@@ -181,5 +208,5 @@ function forgeMini(d: Dict, s: TaskState | undefined): string {
   const stage = s?.exec?.stage ?? doc?.stage ?? f?.phase;
   if (!stage) return '';
   const round = f && typeof f.round === 'number' ? ` · r${num(f.round)}${typeof f.cap === 'number' ? `/${num(f.cap)}` : ''}` : '';
-  return `<span class="fm${doc?.overCap ? ' del' : ''}">${esc(`${labelOf(d.run.stage, stage)}${round}`)}</span>`;
+  return `<span class="fm${doc?.overCap ? ' del' : ''}">${s?.status !== 'done' ? miniFlow(d, stage) : ''}${esc(`${labelOf(d.run.stage, stage)}${round}`)}</span>`;
 }

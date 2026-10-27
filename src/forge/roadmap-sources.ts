@@ -10,7 +10,7 @@ import { readEvents, readStatus, readStatuses, type LedgerEvent } from './ledger
 import { mainCheckout } from './local.js';
 import { eventsOf, projectOf, readWorkDir, type TaskRef } from './task-ref.js';
 import { parseVerifyFile } from './verdict.js';
-import { buildRoadmapData, type Asset, type ReviewDir, type VerifyRound } from './roadmap-doc.js';
+import { buildRoadmapData, type Asset, type BlockingFile, type ReviewDir, type VerifyRound } from './roadmap-doc.js';
 import { FORGE_DOC_MAX, fitForgeDoc, parseForgeDocV2, type IntegrationV2 } from '../lib/roadmap-doc.js';
 import { isSafeId, normalizePublicTask, type ExecTask, type ExecutionState } from '../lib/execution-state.js';
 import { statusKey } from '../lib/forge-status.js';
@@ -75,19 +75,32 @@ function integrationInRun(main: string, e: ExecutionState, t: ExecTask): Integra
 }
 
 /**
- * The review dirs of the task in its work folders (the first folder that has one wins) and the verify.json of each.
- * Only `reviews-<b>-<n>` directly under the work folder: the `earlier-<runId>/` folders prep sets aside are never read.
- * `at` is the mtime of the review dir and of the verify.json.
+ * The review dirs of the task in its work folders (the first folder that has one wins), the verify.json of each, and
+ * the findings files review-close leaves beside them for a review that did not accept, `findings-<b>-<n>.json` (the
+ * first folder whose file reads as a JSON object wins). Only what is directly under the work folder: the
+ * `earlier-<runId>/` folders prep sets aside are never read. `at` is the mtime of the review dir, of the verify.json and
+ * of the findings file.
  */
-function readReviews(folders: readonly { root: string; dir: string }[]): { reviews: ReviewDir[]; verifies: VerifyRound[] } {
+function readReviews(folders: readonly { root: string; dir: string }[]): { reviews: ReviewDir[]; verifies: VerifyRound[]; blocking: BlockingFile[] } {
   const seen = new Set<string>();
   const verified = new Set<string>();
+  const blocked = new Set<string>();
   const reviews: ReviewDir[] = [];
   const verifies: VerifyRound[] = [];
+  const blocking: BlockingFile[] = [];
   for (const f of folders) {
     let names: string[] = [];
     try { names = readdirSync(f.dir); } catch { continue; }
     for (const name of names.sort()) {
+      const b = /^findings-(\d+)-(\d+)\.json$/.exec(name);
+      if (b && !blocked.has(name)) {
+        const file = path.join(f.dir, name);
+        const json = readJson(file);
+        if (json && typeof json === 'object' && !Array.isArray(json)) {
+          blocked.add(name);
+          blocking.push({ brief: Number(b[1]), n: Number(b[2]), file: json, at: mtimeOf(file) });
+        }
+      }
       const m = /^reviews-(\d+)-(\d+)$/.exec(name);
       if (!m) continue;
       const brief = Number(m[1]), n = Number(m[2]);
@@ -105,7 +118,7 @@ function readReviews(folders: readonly { root: string; dir: string }[]): { revie
       verifies.push({ brief, n, file, local: relOf(f.root, evidence), shotPath: shot => path.resolve(evidence, shot), at: mtimeOf(verifyFile) });
     }
   }
-  return { reviews, verifies };
+  return { reviews, verifies, blocking };
 }
 
 const isUpload = (a: unknown): a is { path: string; id: string; url: string } =>
@@ -152,7 +165,7 @@ export function readKeptAssets(main: string, ref: TaskRef, events: readonly Ledg
 /**
  * C7: the state/T write of one task. Reads, in this order: its status (C5; the alias status.json only when it names
  * this task), its events (C4: only those of (project, task)), the execution of the main checkout and its public file,
- * its work folders (where this runs, then the main checkout: review dirs, verify files, deferred.json) and the uploads
+ * its work folders (where this runs, then the main checkout: review dirs, verify files, findings files, deferred.json) and the uploads
  * kept in <WORK>/assets.json. Writes `--out`, by default <WORK>/roadmap-doc.json where this runs. Exit 2 when forge
  * knows nothing of the task (no status, no event, no task in the run) or an argument is wrong; 3 when the block does
  * not validate or does not fit in 4096 bytes.
@@ -179,7 +192,7 @@ export function generateRoadmapDoc(io: DocIo, task: string, opts: GenerateOption
 
   const roots = [...new Set([here, io.cwd, main].map(r => path.resolve(r)))];
   const folders = roots.map(root => ({ root, dir: readWorkDir(root, ref, events) })).filter(f => existsSync(f.dir));
-  const { reviews, verifies } = readReviews(folders);
+  const { reviews, verifies, blocking } = readReviews(folders);
   const mainWork = readWorkDir(main, ref, events);
   const assetsFile = path.join(mainWork, 'assets.json');
   let assets = readAssets(assetsFile);
@@ -192,7 +205,7 @@ export function generateRoadmapDoc(io: DocIo, task: string, opts: GenerateOption
   try { evidenceMode = loadConfig(main).evidence === 'local' ? 'local' : 'upload'; } catch { /* the default */ }
 
   const built = buildRoadmapData({
-    task, status, events: mine, execution: inRun ? execution : null, execTask, publicTask, reviews, verifies,
+    task, status, events: mine, execution: inRun ? execution : null, execTask, publicTask, reviews, verifies, blocking,
     deferred: deferredFile ? readJson(deferredFile) : null, deferredAt: deferredFile ? mtimeOf(deferredFile) : null,
     integration: execTask && execution ? integrationInRun(main, execution, execTask) : integrationAt(here),
     assets, evidenceMode, now: io.now(),

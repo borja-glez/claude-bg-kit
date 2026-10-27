@@ -185,12 +185,15 @@ describe('sessions view', () => {
   });
   it('a task without zones reads «whole repository» in its session card and in its detail (carry 1)', () => {
     const open = { ...plan, tasks: plan.tasks.map(t => (t.id === 'T002' ? { ...t, zones: [] } : t)) };
-    const zonesOf = (html: string, start: string) => html.slice(html.indexOf(start)).match(/>Zonas(?: planificadas)?<\/(?:dt|div)>\s*<(?:dd|div)>([\s\S]*?)<\/(?:dd|div)>/)?.[1];
+    // v3: a session card shows its zones as chips (one per zone); the detail as a section.
+    const zonesOf = (html: string, start: string) => (start === 'class="sc'
+      ? html.slice(html.indexOf(start)).match(/<div class="szones"[^>]*>([\s\S]*?)<\/div>/)?.[1]?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      : html.slice(html.indexOf(start)).match(/>Zonas planificadas<\/div>\s*<div>([\s\S]*?)<\/div>/)?.[1]);
     for (const [view, start] of [[ui({ view: 'sessions' }), 'class="sc'], [ui({ modal: 'T002' }), 'class="modal"']] as const) {
       expect(zonesOf(renderApp({ ...base(), plan: open }, view), start)).toBe('todo el repositorio');
       expect(renderApp({ ...base(), plan: open, meta: { ...base().meta!, locale: 'en' } }, view)).toContain('whole repository');
     }
-    expect(renderApp({ ...base(), plan: open }, ui({ view: 'sessions' }))).not.toContain('<dd>**</dd>');
+    expect(renderApp({ ...base(), plan: open }, ui({ view: 'sessions' }))).not.toContain('<span class="szc">**</span>');
     // A task with zones keeps them.
     expect(zonesOf(renderApp(base(), ui({ view: 'sessions' })), 'class="sc')).toBe('src/api/orders/**');
   });
@@ -273,8 +276,8 @@ describe('the plan view (G-09, H-18, G-11)', () => {
     const m = { ...base(), plan: { ...plan, phases: plan.phases.map(p => (p.id === 'F2' ? { ...p, goal: 'cobrar <b>' } : { ...p, name: `${p.id} · ${p.name}` })) } };
     const html = renderApp(m, ui({ view: 'plan' }));
     expect(html).toContain('<h1>Plan</h1>');
-    expect(html).toContain('<button type="button" class="plh" data-action="plan-phase" data-id="F1" aria-expanded="true">');
-    expect(html).toContain('data-action="plan-phase" data-id="F2" aria-expanded="false"');
+    expect(html).toContain('<button type="button" class="plh" data-action="plan-phase" data-id="F1" data-k="plh:F1" aria-expanded="true">');
+    expect(html).toContain('data-action="plan-phase" data-id="F2" data-k="plh:F2" aria-expanded="false"');
     expect(html).toContain('<span class="k">F1</span> <span class="pn">Base</span>');
     expect(html).not.toContain('F1 · F1');
     expect(html).toMatch(/<span class="pill ph-in_progress">◉ En curso<\/span> <span class="pv">v0\.1<\/span><span class="seg" role="img"/);
@@ -296,7 +299,8 @@ describe('the plan view (G-09, H-18, G-11)', () => {
     const html = renderApp(m, ui({ view: 'plan' }));
     expect(html).toContain('<button type="button" class="pr" data-action="open-task" data-id="T001" data-k="t:T001"><span class="st st-done">✓ hecha · sin fusionar</span><span class="k">T001</span><span class="tt">Esquema de pedidos</span><span class="tag c-blue">Backend</span>');
     expect(html).toContain('class="evi del"');
-    expect(html).toContain('<span class="fm">verificar · r2/4</span>');
+    // v3: the small flow (one dot per stage, verify lit) before the stage and the round.
+    expect(html).toMatch(/<span class="fm"><span class="mflow" role="img" aria-label="verificar"><i class="past"><\/i><i class="past"><\/i><i class="past"><\/i><i class="cur"><\/i>(?:<i class=""><\/i>){3}<\/span>verificar · r2\/4<\/span>/);
     expect(html).toContain('<span class="st st-in_progress orphan">◉ Sin ejecutor</span>');
   });
 
@@ -338,12 +342,34 @@ describe('the plan view (G-09, H-18, G-11)', () => {
     expect(nothing).toContain('data-action="plan-clear"');
   });
 
-  it('an unknown track filters nothing, and the plan heads with its table of versions, with the targets when any has one (G-11, Review Focus 3)', () => {
+  it('an unknown track filters nothing, and the plan heads with a card per version, with its target when it has one (G-11, Review Focus 3; v3)', () => {
     const html = renderApp(base(), ui({ view: 'plan', planFilter: { tasks: [], phases: [], forge: [], track: 'nope' } }));
     expect(rowsOf(html)).toEqual(['T001', 'T002', 'T003']);
-    expect(html).toContain('<tr class="cur"><td>0.1</td><td>1/6</td><td>17 %</td></tr>');
+    const card = html.slice(html.indexOf('<article class="vc vs-current" data-k="vc:0.1">'));
+    expect(card).toContain('<b class="vid">v0.1</b> <span class="pill vs-current">En curso</span></header>');
+    expect(card).toContain('<span>1/6 tareas</span><span><b>17 %</b> · 2 fases</span>');
+    // Each phase of the version is a chip that opens Plan on it, filtered by the version.
+    expect(card).toContain('data-action="view" data-view="plan" data-pf="v:0.1" data-ph="F1"');
+    expect(card).toContain('data-pf="v:0.1" data-k="vsee:0.1">Ver sus tareas →</button>');
     const withTarget = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1', 'F2'], target: '2026-11-30' }] } };
-    expect(renderApp(withTarget, ui({ view: 'plan' }))).toContain('<th>Objetivo</th></tr></thead><tbody><tr class="cur"><td>0.1</td><td>1/6</td><td>17 %</td><td>2026-11-30</td></tr>');
+    expect(renderApp(withTarget, ui({ view: 'plan' }))).toContain('<span class="vtg mono">objetivo 2026-11-30</span>');
+  });
+
+  it('v3: a version filter keeps its phases only, opens its phase in progress, heads the list with the version and is one at a time', () => {
+    const two = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1'] }, { id: '0.2', phases: ['F2'] }] } };
+    const all = planOf(renderApp(two, ui({ view: 'plan' })));
+    expect([...all.matchAll(/<div class="pvh[^"]*" data-k="pvh:([\w.]+)">/g)].map(x => x[1])).toEqual(['0.1', '0.2']);
+    const v2 = planOf(renderApp(two, ui({ view: 'plan', planFilter: { tasks: [], phases: [], forge: [], track: null, version: '0.2' } })));
+    expect(v2).not.toContain('data-k="pl:F1"');
+    expect(v2).toContain('data-id="F2" data-k="plh:F2" aria-expanded="true"');
+    expect(rowsOf(v2)).toEqual(['T004', 'T005', 'T006']);
+    expect(v2).toContain('data-key="v:0.2" aria-pressed="true">v0.2 · 3</button>');
+    // An unknown version filters nothing.
+    expect(rowsOf(planOf(renderApp(two, ui({ view: 'plan', planFilter: { tasks: [], phases: [], forge: [], track: null, version: '9' } }))))).toEqual(['T001', 'T002', 'T003']);
+    expect(parsePlanFilter(['v:0.2', 'free'])).toEqual({ tasks: ['free'], phases: [], forge: [], track: null, version: '0.2' });
+    expect(parsePlanFilter(['v:a/b'])).toBeUndefined();
+    expect(togglePlanFilter(parsePlanFilter(['v:0.1', 'free']), 'v:0.2')).toEqual({ tasks: ['free'], phases: [], forge: [], track: null, version: '0.2' });
+    expect(togglePlanFilter(parsePlanFilter(['v:0.1']), 'v:0.1')).toBeUndefined();
   });
 
   it('a phase in no version has no version pill, its tasks count in the filters, and neither the table of versions nor the current version takes it (carry 4b-5)', () => {
@@ -356,15 +382,19 @@ describe('the plan view (G-09, H-18, G-11)', () => {
     expect(phases[1]).toContain('data-k="pl:F2"');
     expect(phases[1]).not.toContain('class="pv"');
     // F1 is done: F2, in no version, is the phase in progress, open with its rows.
-    expect(phases[1]).toContain('data-id="F2" aria-expanded="true"');
+    expect(phases[1]).toContain('data-id="F2" data-k="plh:F2" aria-expanded="true"');
     expect(rowsOf(html)).toEqual(['T004', 'T005', 'T006']);
     const counts = Object.fromEntries([...html.matchAll(/data-action="plan-filter" data-key="(\w+)" aria-pressed="false">[^<]* · (\d+)<\/button>/g)].map(x => [x[1], Number(x[2])]));
     expect([counts.done, counts.free]).toEqual([3, 3]);
     expect(['free', 'running', 'blocked', 'done', 'unmerged'].reduce((n, k) => n + counts[k]!, 0)).toBe(plan.tasks.length);
-    // The table has its one version, done, and no row for the phase outside it; the current version stays 0.1.
-    expect(html).toContain('<tbody><tr class="cur"><td>0.1</td><td>3/3</td><td>100 %</td></tr></tbody>');
-    expect(html).not.toContain('Sin versión');
-    expect(html).toContain('>v0.1 · 100 %</span>');
+    // The one version's card, completed, holds F1 and no chip of the phase outside it, which the list heads «Sin versión»;
+    // the current version stays 0.1.
+    const card = html.slice(html.indexOf('data-k="vc:0.1"'), html.indexOf('</article>'));
+    expect(card).toContain('<span class="pill vs-done">Completada</span>');
+    expect(card).toContain('<span>3/3 tareas</span>');
+    expect(card).not.toContain('data-ph="F2"');
+    expect(phases[0]).toContain('<div class="pvh" data-k="pvh:none"><b>Sin versión</b></div>');
+    expect(html).toContain('>v0.1 · 100 %</button>');
   });
 
   it('parsePlanFilter keeps the known keys once and a track; togglePlanFilter puts one in or out; nothing known is no filter (Review Focus 3)', () => {
@@ -953,7 +983,8 @@ describe('execution', () => {
   });
   it('loose tasks do not count in the plan progress, filters or timeline, and never show as orphaned', () => {
     const m = base();
-    const progress = (h: string) => h.match(/<b>\d+<\/b>\/\d+ (tareas|tasks)/)![0];
+    // v3: the tasks done are a tile of the summary.
+    const progress = (h: string) => h.match(/<span class="kbig">\d+<\/span><span class="kof">\/\d+<\/span>/)![0];
     const percent = (h: string) => h.match(/\d+ %/)![0];
     const before = renderApp(m, ui());
     m.run = looseRun();
@@ -1299,7 +1330,8 @@ describe('the status strip (§4.6, H-22, G-08, G-11, G-14, G-25)', () => {
   it('shows the percent of the current version, not the plan’s (G-11)', () => {
     const m = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1'] }, { id: '0.2', phases: ['F2'] }] } };
     const s = strip(renderApp(m, ui()));
-    expect(s).toMatch(/<span class="sv" title="Versión 0\.1: 1 de 3 tareas hechas">v0\.1 · 33 %<\/span>/);
+    // v3: a link to Plan filtered by the version.
+    expect(s).toMatch(/<button type="button" class="sv" data-action="view" data-view="plan" data-pf="v:0\.1" data-k="strip:v" title="Versión 0\.1: 1 de 3 tareas hechas · Ver qué incluye la versión v0\.1">v0\.1 · 33 %<\/button>/);
     expect(s).not.toContain('17 %');
     expect(strip(renderApp({ ...base(), plan: { ...plan, versions: [] } }, ui()))).toContain('<span class="sv">17 %</span>');
   });
@@ -1445,32 +1477,49 @@ describe('the summary (§4.6.1, §4.6.2)', () => {
     expect(now).not.toContain('data-id="fix-cart"');
   });
 
-  it('the header names the version in progress as the strip and the progress do, and the plan’s own version apart, labelled (carry 10e)', () => {
+  it('the tile names the version in progress as the strip does, and the header the plan’s own version apart, labelled (carry 10e; v3)', () => {
     const header = (html: string) => html.slice(html.indexOf('<header class="hd">'), html.indexOf('</header>'));
+    const tile = (html: string) => section(html, 'kpis');
     const m = { ...base(), meta: { ...base().meta!, version: '0.3' }, plan: { ...plan, versions: [{ id: '0.1', phases: ['F1'] }, { id: '0.2', phases: ['F2'] }] } };
     const html = renderApp(m, ui());
-    expect(header(html)).toContain('Versión en curso <b>v0.1</b> · versión del plan <b>0.3</b>');
-    expect(html.slice(html.indexOf('<div class="strip">'), html.indexOf('<header'))).toContain('>v0.1 · 33 %</span>');
-    expect(section(html, 'card prog')).toContain('<div class="big">v0.1 · 33 %</div>');
-    // The same version: said once.
-    expect(header(renderApp({ ...m, meta: { ...m.meta, version: 'v0.1' } }, ui()))).toMatch(/Versión en curso <b>v0\.1<\/b> · Fase/);
-    // Without versions there is no version in progress: the plan's own, as before.
-    const none = header(renderApp({ ...base(), plan: { ...plan, versions: [] } }, ui()));
-    expect(none).toContain('Versión <b>0.1</b>');
-    expect(none).not.toContain('en curso');
-    const en = header(renderApp({ ...m, meta: { ...m.meta, locale: 'en' } }, ui()));
-    expect(en).toContain('Version in progress <b>v0.1</b> · plan version <b>0.3</b>');
+    expect(header(html)).toContain('versión del plan <b>0.3</b>');
+    expect(html.slice(html.indexOf('<div class="strip">'), html.indexOf('<header'))).toContain('>v0.1 · 33 %</button>');
+    expect(tile(html)).toContain('<div class="lbl">Versión en curso</div>');
+    expect(tile(html)).toMatch(/data-pf="v:0\.1" data-k="kpi:v"[^>]*>v0\.1<\/button> <span class="kpct">33 %<\/span>/);
+    // The same version: said once, in the tile only.
+    expect(header(renderApp({ ...m, meta: { ...m.meta, version: 'v0.1' } }, ui()))).not.toContain('versión del plan');
+    // Without versions there is no version in progress: the header says the plan's own, and the tile the plan's percent.
+    const none = renderApp({ ...base(), plan: { ...plan, versions: [] } }, ui());
+    expect(header(none)).toContain('Versión <b>0.1</b>');
+    expect(tile(none)).not.toContain('Versión en curso');
+    expect(tile(none)).toContain('<span class="kbig">17 %</span>');
+    const en = renderApp({ ...m, meta: { ...m.meta, locale: 'en' } }, ui());
+    expect(header(en)).toContain('plan version <b>0.3</b>');
+    expect(tile(en)).toContain('Version in progress');
   });
 
-  it('the progress shows the current version, a table of versions and one segment per phase (G-11, H-27)', () => {
+  it('the summary’s tiles: the tasks done with what runs and what is blocked, the phase, the forecast end and the pace (v3)', () => {
+    const m = base();
+    m.states = { ...m.states, T004: { status: 'blocked', blockedBy: ['external'] } };
+    const k = section(renderApp(m, ui()), 'kpis');
+    expect(k).toContain('<span class="kbig">1</span><span class="kof">/6</span>');
+    expect(k).toMatch(/● 1 en marcha<\/span> · <span class="ye">⚠ 1 bloqueadas<\/span>/);
+    expect(k).toContain('<div class="lbl">Fase</div><div class="kv1"><span class="kbig">1</span><span class="kof">/2</span></div><div class="ksub">Base</div>');
+    expect(k).toContain('<div class="lbl">Fin previsto</div>');
+    expect(k).toContain('<div class="lbl">Ritmo real</div>');
+  });
+
+  it('the progress: with versions, a card per version with its phases as chips; without, one segment per phase (G-11, H-27; v3)', () => {
     const m = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1'] }, { id: '0.2', phases: ['F2'] }] } };
     const prog = section(renderApp(m, ui()), 'card prog');
-    expect(prog).toContain('<div class="big">v0.1 · 33 %</div>');
-    expect(prog).toContain('<tr class="cur"><td>0.1</td><td>1/3</td><td>33 %</td></tr>');
-    expect(prog).toContain('<tr><td>0.2</td><td>0/3</td><td>0 %</td></tr>');
-    expect(prog.match(/class="phseg/g)).toHaveLength(2);
-    expect(prog).toMatch(/class="phseg ph-in_progress cur"[^>]*><i style="width:33%"><\/i><b>F1<\/b> 33 %/);
-    expect(prog).toContain('Fin previsto');
+    expect(prog).toContain('<h2 class="lbl">Versiones</h2><div class="vcards compact">');
+    expect(prog).toContain('<article class="vc vs-current" data-k="vc:0.1">');
+    expect(prog).toContain('<article class="vc vs-pending" data-k="vc:0.2">');
+    expect(prog).toMatch(/class="vph cur" data-action="view" data-view="plan" data-pf="v:0\.1" data-ph="F1"[^>]*><i style="width:33%"><\/i><b>F1<\/b> 33 %/);
+    expect(prog).not.toContain('class="phseg');
+    const flat = section(renderApp({ ...base(), plan: { ...plan, versions: [] } }, ui()), 'card prog');
+    expect(flat.match(/class="phseg/g)).toHaveLength(2);
+    expect(flat).toMatch(/class="phseg ph-in_progress cur"[^>]*><i style="width:33%"><\/i><b>F1<\/b> 33 %/);
   });
 
   it('the recent activity: two lines, the time with the date when it is not today, the full text in its title (H-21)', () => {
@@ -1757,9 +1806,17 @@ describe('the task detail in four tabs (§4.7)', () => {
       shots: [{ surface: 'web', check: 'home', ok: true, round: 5, url: 'https://claude.ai/_blob/a' }, { surface: 'web', check: 'cart', ok: false, round: 6 }] } };
     const html = modalOf(renderApp(m, ui({ modal: 'T002', tab: 'forge' })));
     expect(html).toContain('<b>grande</b> · revisar · brief 1 · r6/5');
-    expect(html).toContain('Etapas: brief 2 min · implementar 25 min · revisar 10 min');
-    expect(html).toContain('<tr class="over"><td>1·6</td><td>aceptada</td><td>0 C · 1 I · 3 m</td><td>correctness</td><td>listo</td></tr>');
-    expect(html).toContain('<tr><td>1·5</td><td>arreglo</td><td>1 C · 2 I · 0 m</td><td>correctness, security</td><td>cerrar el caso</td></tr>');
+    // v3: each stage's time under its node of the flow (no «Etapas» line), and the rounds as a story, the one over the cap
+    // marked; a block of an older forge says what next with its note.
+    expect(html).toContain('<span class="fl">implementar</span><span class="ft">25 min</span>');
+    expect(html).not.toContain('Etapas:');
+    expect(html).toContain('<li class="rc a-accept over"><div class="rch"><b>Ronda 6</b> <span class="ra a-accept">aceptada</span>');
+    expect(html).toContain('<div class="rcc"><span class="cc cc-important">1 importante</span><span class="cc cc-minor">3 menores</span><span class="cc cc-deferred">1 aplazado</span></div>');
+    expect(html).toContain('<li class="rc a-fix"><div class="rch"><b>Ronda 5</b> <span class="ra a-fix">arreglo</span>');
+    expect(html).toContain('<span class="cc cc-critical">1 crítico</span><span class="cc cc-important">2 importantes</span>');
+    expect(html).toContain('<span class="rv">correctness</span><span class="rv">security</span>');
+    expect(html).toContain('<div class="rnext">→ cerrar el caso</div>');
+    expect(html).toContain('<div class="rnext">→ listo</div>');
     expect(html).toContain('<div class="ok" title="Veredicto: 0.91">Aceptada en la ronda 6</div>');
     expect(html).not.toMatch(/>[^<]*0\.91/);
     expect(html).toContain('<span class="ok">test ✓</span> <span class="mono">41.2 s</span> <span class="mono">caché</span>');
@@ -2041,7 +2098,7 @@ describe('the runs view (G-07, §4.3, H-24)', () => {
     const h = history(renderApp(m, ui({ view: 'runs' })));
     expect(h).toContain('<h2 class="lbl">Historial (2)</h2>');
     expect([...h.matchAll(/data-action="run-toggle" data-id="([^"]+)" aria-expanded="false"/g)].map(x => x[1])).toEqual(['shop-20261010T090000000Z', 'old-1']);
-    expect(h).toMatch(/<span class="rk rk-plan">Ejecución<\/span> <span class="k">shop-20261010T090000000Z<\/span> <span class="mono">[^<]+ · 2 h 05 min · 1\/2 integradas · fusionada en main<\/span>/);
+    expect(h).toMatch(/<span class="rk rk-plan">Ejecución<\/span> <span class="k">shop-20261010T090000000Z<\/span> <span class="mono">[^<]+ · 2 h 05 min · 1\/2 integradas · 0\/1 aceptadas a la primera · 2 revisiones por tarea · fusionada en main<\/span>/);
     expect(h).toContain('sin fusionar · rama forge/run-shop');
     expect(h).not.toContain('class="rhd"');
   });
@@ -2152,8 +2209,24 @@ describe('the sessions view (G-04, G-10, H-23)', () => {
     m.sessions.main = { ...m.sessions.main, currentTask: 'T005', role: 'coordinator' };
     const html = renderApp(m, ui({ view: 'sessions' }));
     expect([...html.matchAll(/data-action="open-task" data-id="(T\d+)" data-k="ts:/g)].map(x => x[1])).toEqual(['T001', 'T002', 'T003']);
-    expect(html).toContain('<div class="stk"><button type="button" class="chip st-in_progress" data-action="open-task" data-id="T001" data-k="ts:main:T001">T001</button> Esquema de pedidos</div>');
+    expect(html).toMatch(/<li class="stk"><button type="button" class="chip st-in_progress" data-action="open-task" data-id="T001" data-k="ts:main:T001">T001<\/button><span class="stt">Esquema de pedidos<\/span><span class="mflow" role="img" aria-label="implementar">/);
     expect(html).not.toContain('T005');
+  });
+  it('v3: the coordinator’s card spans the row, says its heartbeat and branch in one line, and lists under «Otras tareas» only the tasks in no slot', () => {
+    const m = base();
+    m.run = runDoc();
+    m.states = { ...m.states, T003: { status: 'claimed', owner: 'main' } };
+    m.sessions.main = { ...m.sessions.main, role: 'coordinator', runId: 'r1', branch: 'forge/run-1', leaseUntil: at(5) };
+    const html = renderApp(m, ui({ view: 'sessions' }));
+    const card = html.slice(html.indexOf('<div class="sc wide" data-k="s:main">'));
+    expect(card).not.toBe(html.slice(-1));
+    expect(card).toMatch(/<div class="smeta mono"><span title="latido">♥ <span data-rel="hb"[^>]*>[^<]*<\/span><\/span><span class="sep">·<\/span><span title="Rama">⎇ forge\/run-1<\/span>/);
+    expect([...card.matchAll(/data-k="ts:main:(T\d+)"/g)].map(x => x[1])).toEqual(['T003']);
+    expect(card).toContain('<div class="lbl">Otras tareas</div>');
+    expect(card).toContain('data-k="slot:T002"');
+    expect(cssRule(CSS, '.sc.wide')).toContain('grid-column:1/-1');
+    // The chips never break inside their id (the bug of «F0 / -0 / 7» on three lines).
+    expect(cssRule(CSS, '.chip')).toContain('white-space:nowrap');
   });
   it('groups the sessions by run: the active one first and open, an ended one folded, «Sin ejecución» last with its stopped sessions folded apart (G-04)', () => {
     const m = base();
@@ -2203,19 +2276,20 @@ describe('the sessions view (G-04, G-10, H-23)', () => {
     // Re-review N2: while the person's fold wins, the key keeps the data's fold of when the person chose.
     expect(head(renderApp(m, ui({ view: 'sessions', folds: new Map([['sg:none', { open: false, key: 'open' as const }]]) })))).toBe('sg:none:open');
   });
-  it('the coordinator of the active run lists its slots and the free ones, and the values of a card are aligned to the left (H-23)', () => {
+  it('the coordinator of the active run shows its slots as a board, with a dashed tile per free one (H-23; v3)', () => {
     const m = base();
     m.run = runDoc();
     m.sessions.main = { ...m.sessions.main, role: 'coordinator', runId: 'r1', leaseUntil: at(5) };
     const html = renderApp(m, ui({ view: 'sessions' }));
-    expect(html).toContain('<dt>Plazas</dt><dd>1/3 plazas · 2 libres<ul class="slots">');
-    expect(html).toMatch(/<li class="sl"><span class="dot live-alive">●<\/span> <button type="button" class="chip st-in_progress" data-action="open-task" data-id="T002" data-k="slot:T002">T002<\/button> API de pedidos <span class="mono">implementar · forge-impl-heavy · <span data-rel="lasts"/);
-    expect(cssRule(CSS, '.sc .kv dd')).toContain('text-align:left');
+    expect(html).toContain('<div class="slotb"><div class="lbl">Plazas · 1 de 3 plazas ocupadas</div><ul class="slotg">');
+    expect(html).toMatch(/<li class="slt live-alive"><button type="button" class="chip st-in_progress" data-action="open-task" data-id="T002" data-k="slot:T002">T002<\/button><span class="slti" title="API de pedidos">API de pedidos<\/span><div class="slf"><span class="dot live-alive">●<\/span> <span class="mflow"[^>]*>(?:<i[^>]*><\/i>){7}<\/span> <b>implementar<\/b>/);
+    expect(html).toMatch(/<div class="mono slm">forge-impl-heavy · <span data-rel="lasts"/);
+    expect(html.match(/<li class="slt free">/g)).toHaveLength(2);
   });
   it('a slot reads its time as a duration; an invalid or future since shows none', () => {
     const m = base();
     m.sessions.main = { ...m.sessions.main, role: 'coordinator', leaseUntil: at(5) };
-    const slotOf = (html: string) => { const i = html.indexOf('<li class="sl">'); return html.slice(i, html.indexOf('</li>', i)); };
+    const slotOf = (html: string) => { const i = html.indexOf('<li class="slt live-'); return html.slice(i, html.indexOf('</li>', i)); };
     m.run = runDoc();
     expect(slotOf(renderApp(m, ui({ view: 'sessions' })))).toContain('lleva 7 min');
     m.run = runDoc({ slots: [{ task: 'T002', stage: 'implement' as const, agent: null, by: 'main', since: at(30) }] });
@@ -2793,5 +2867,141 @@ describe('toggles say whether they are pressed, folds whether they are open, tex
       for (const action of want) expect(seen.get(action) ?? 0, `${view}: ${action}`).toBeGreaterThan(0);
       for (const tag of html.match(/<(textarea|input)\b[^>]*>/g) ?? []) expect(tag, `${view}: ${tag}`).toMatch(/aria-label="[^"]+"/);
     }
+  });
+});
+
+describe('v3: forge drawn — the flow of stages, the trail and the story of the rounds', () => {
+  const section = (html: string, cls: string) => { const at = html.indexOf(`<section class="${cls}`); return at < 0 ? '' : html.slice(at, html.indexOf('</section>', at)); };
+  const at = (min: number) => new Date(NOW + min * 60000).toISOString();
+  const modalOf = (html: string) => html.slice(html.indexOf('<div class="overlay"'));
+  const panel = (html: string, tab: string) => {
+    const i = html.indexOf(`id="dpanel-${tab}"`);
+    const next = html.indexOf('<div class="dpanel"', i + 1);
+    return html.slice(i, next > 0 ? next : undefined);
+  };
+  const doc = (over: object = {}) => ({
+    v: 2 as const, path: 'medium' as const, phase: 'verify', agent: 'forge-impl', round: 2, cap: 4, brief: 1, stage: 'verify' as const,
+    validators: [{ name: 'test', ok: true }],
+    rounds: [
+      { brief: 1, n: 1, action: 'fix' as const, note: 'round 1: resume the implementer', findings: { critical: 1, important: 1, minor: 0, deferred: 0 }, reviewers: ['correctness', 'security'], at: at(-30),
+        next: 'resume' as const, impl: 'forge-impl', score: 0.42, red: ['lint'],
+        why: [{ sev: 'critical' as const, problem: 'la sesión caducada <b>escribe</b>', file: 'src/a.ts', line: 88, by: 'security' }, { sev: 'important' as const, problem: 'fecha vacía' }] },
+      { brief: 1, n: 2, action: 'fix' as const, note: 'round 2: fresh implementer one tier up', findings: { critical: 0, important: 1, minor: 2, deferred: 0 }, reviewers: ['correctness'], at: at(-20),
+        next: 'fresh-stronger' as const, impl: 'forge-impl-high' },
+    ],
+    verify: { planned: true, result: null, passed: null, total: null, skipped: null, surfaces: ['web'] },
+    stages: { triage: 60, brief: 60, implement: 1200, validate: 120, review: 300, verdict: 60 }, integration: null, deferred: [], acceptedRound: null, overCap: false, updatedAt: at(-2),
+    trail: [{ s: 'triage', at: at(-50) }, { s: 'brief', at: at(-49), b: 1 }, { s: 'implement', at: at(-48), b: 1 }, { s: 'review', at: at(-33), b: 1, r: 1 }, { s: 'verdict', at: at(-31), b: 1, r: 1 },
+      { s: 'fix', at: at(-30), b: 1, r: 1 }, { s: 'verdict', at: at(-21), b: 1, r: 2 }, { s: 'fix', at: at(-20), b: 1, r: 2 }, { s: 'verify', at: at(-6), b: 1, r: 3 }],
+    ...over,
+  });
+  const model = (forge: object = doc(), extra: object = {}): Model => {
+    const m = base();
+    m.states = { ...m.states, T002: { status: 'in_progress', owner: 'main', startedAt: at(-50), forge: forge as never,
+      exec: { runId: 'r1', mode: 'subagents', by: 'main', agent: 'forge-impl-high', stage: 'verify', since: at(-6), leaseUntil: at(5) }, ...extra } };
+    return m;
+  };
+
+  it('the flow: the stages before it ticked with their time, the one in progress pulsing with how long it runs, verify dimmed when not planned', () => {
+    const html = modalOf(renderApp(model(), ui({ modal: 'T002' })));
+    const flow = html.slice(html.indexOf('<ol class="flow"'), html.indexOf('</ol>'));
+    expect([...flow.matchAll(/<li class="fn (\w+)/g)].map(x => x[1])).toEqual(['past', 'past', 'past', 'past', 'cur', 'todo', 'todo', 'todo', 'todo']);
+    expect(flow).toContain('<li class="fn past"><i class="fd" aria-hidden="true">✓</i><span class="fl">implementar</span><span class="ft">20 min</span></li>');
+    expect(flow).toMatch(/<li class="fn cur" aria-current="step"><i class="fd" aria-hidden="true">●<\/i><span class="fl">verificar<\/span><span class="ft"><span data-rel="dur"[^>]*>6 min<\/span><\/span><\/li>/);
+    // The review in progress is one past the closed ones, against the cap; the loop runs while forge is inside it.
+    expect(html).toContain('<div class="floop on" style="--a:2;--b:6" aria-hidden="true">');
+    expect(html).toContain('<span>↺ revisión 3 de 4</span>');
+    const unplanned = modalOf(renderApp(model(doc({ verify: { planned: false, result: null, passed: null, total: null, skipped: null, surfaces: [] }, stage: 'review' }), { exec: undefined }), ui({ modal: 'T002' })));
+    expect(unplanned).toContain('<li class="fn past skip"><i class="fd" aria-hidden="true">✓</i><span class="fl">verificar</span><span class="ft">no planificada</span></li>');
+  });
+
+  it('a blocked or stopped task stops at the last stage of its trail, in alarm and without the pulse; a lapsed lease stills it', () => {
+    const blocked = modalOf(renderApp(model(doc({ stage: 'blocked' }), { status: 'blocked', exec: undefined }), ui({ modal: 'T002' })));
+    expect(blocked).toContain('<li class="fn cur blocked still" aria-current="step"><i class="fd" aria-hidden="true">!</i><span class="fl">verificar</span>');
+    expect(blocked).not.toContain('class="floop on');
+    const stopped = modalOf(renderApp(model(doc({ stage: 'stopped' }), { exec: undefined }), ui({ modal: 'T002' })));
+    expect(stopped).toContain('<li class="fn cur stopped still" aria-current="step"><i class="fd" aria-hidden="true">■</i>');
+    const lapsed = modalOf(renderApp(model(doc(), { exec: { runId: 'r1', mode: 'subagents', by: 'main', stage: 'verify', since: at(-60), leaseUntil: at(-30) } }), ui({ modal: 'T002' })));
+    expect(lapsed).toContain('<li class="fn cur still" aria-current="step">');
+    // Without forge or an exec, no flow at all.
+    expect(modalOf(renderApp(base(), ui({ modal: 'T002' })))).not.toContain('class="flowbox"');
+  });
+
+  it('«Ahora» on top of the summary: stage, time, round, brief, agent, when forge wrote, and the last round with what next', () => {
+    const now = panel(modalOf(renderApp(model(), ui({ modal: 'T002' }))), 'summary');
+    expect(now).toContain('<section class="nowbox" aria-label="Dónde está en forge"><div class="lbl">Ahora</div>');
+    expect(now).toMatch(/<div class="mono nowln"><b>verificar<\/b> · <span data-rel="lasts"[^>]*>lleva 6 min<\/span> · <span>r2\/4<\/span> · brief 1 · forge-impl-high · forge la actualizó <span data-rel="ago"[^>]*>hace 2 min<\/span><\/div>/);
+    expect(now).toContain('<div class="lastr"><b>Ronda 2</b> · <span class="ra a-fix">arreglo</span><div class="rnext">→ Siguiente: un implementador nuevo, un escalón más arriba (forge-impl-high)</div></div>');
+  });
+
+  it('the story: each round with what blocked it (escaped), its red validators, who reviewed it and what forge decided; the score only in a title (K4-05)', () => {
+    const forge = panel(modalOf(renderApp(model(), ui({ modal: 'T002', tab: 'forge' }))), 'forge');
+    expect(forge).toContain('<span class="ra a-fix" title="puntuación 0.42">arreglo</span>');
+    expect(forge).not.toMatch(/>[^<]*0\.42/);
+    expect(forge).toContain('<li class="sev-critical"><b>crítico</b> <span class="k">security</span> <span class="mono loc">src/a.ts:88</span><span class="wp">la sesión caducada &lt;b&gt;escribe&lt;/b&gt;</span></li>');
+    expect(forge).toContain('<li class="sev-important"><b>importante</b><span class="wp">fecha vacía</span></li>');
+    expect(forge).toContain('<div class="rred"><span class="lbl">Validadores en rojo</span> <span class="del mono">✗ lint</span></div>');
+    expect(forge).toContain('<div class="rnext">→ Siguiente: otra ronda con el mismo implementador (forge-impl)</div>');
+    // The round in progress, last: its number, the stage it is in and the steps since the last close.
+    expect(forge).toMatch(/<li class="rc rlive"><div class="rch"><b>Ronda 3<\/b> <span class="ra rlive"><i class="pulse" aria-hidden="true"><\/i>en curso<\/span><\/div><div class="rnow"><span class="mflow"/);
+    expect(forge).toMatch(/<div class="rsteps mono"><span>verificar <span class="k">\d\d:\d\d<\/span><\/span><\/div>/);
+    // A block of an older forge (no next): the round's own note says what next.
+    const old = panel(modalOf(renderApp(model(doc({ rounds: [{ brief: 1, n: 1, action: 'fix', note: 'cerrar el caso', findings: { critical: 0, important: 1, minor: 0, deferred: 0 }, reviewers: [], at: at(-30) }] })), ui({ modal: 'T002', tab: 'forge' }))), 'forge');
+    expect(old).toContain('<div class="rnext">→ cerrar el caso</div>');
+    expect(old).not.toContain('class="rwhy"');
+  });
+
+  it('the trail: each step as wide as it lasted, the last growing to now, a tick where each round closed, and a legend of its stages', () => {
+    const forge = panel(modalOf(renderApp(model(), ui({ modal: 'T002', tab: 'forge' }))), 'forge');
+    const bar = forge.slice(forge.indexOf('<div class="tbar">'), forge.indexOf('<div class="tscale'));
+    expect(bar.match(/<i class="tseg /g)).toHaveLength(9);
+    // 50 min from the first step to now: the triage lasted 1 (2 %), the last step (verify) is 6 and still running.
+    expect(bar).toContain('<i class="tseg ts-triage" style="left:0.00%;width:2.00%" title="triaje · ');
+    expect(bar).toMatch(/<i class="tseg ts-verify tlive" style="left:88\.00%;width:12\.00%"/);
+    expect(bar).toMatch(/<b class="rtick a-fix" style="left:40\.00%" title="Ronda 1 · arreglo · [^"]+">r1<\/b>/);
+    expect(forge).toContain('<span>Ahora</span></div>');
+    expect(forge).toContain('<span><i class="ts-implement"></i>implementar</span>');
+    // A done task's trail ends at its last step, not now.
+    const done = panel(modalOf(renderApp(model(doc({ stage: 'done', trail: [{ s: 'implement', at: at(-40) }, { s: 'done', at: at(-20) }] }), { status: 'done', exec: undefined, doneAt: at(-20) }), ui({ modal: 'T002', tab: 'forge' }))), 'forge');
+    expect(done).not.toContain('tlive');
+    expect(done).not.toContain('<span>Ahora</span>');
+  });
+
+  it('the recent activity counts each closed round, with its action and first reason, and opens its task', () => {
+    const recent = renderApp(model(), ui()).split('<section class="card recent">')[1]!;
+    expect(recent).toContain('data-id="T002" data-k="r:T002:1-2"');
+    expect(recent).toContain('<span class="ev ev-round a-fix" aria-hidden="true">↺</span><b class="atk">T002</b><span class="tx" title="ronda 1: arreglo — crítico: la sesión caducada &lt;b&gt;escribe&lt;/b&gt;">');
+    expect(recent).toContain('<span class="k awho">correctness, security</span>');
+  });
+
+  it('each version not done says when it is forecast to end, in amber past its target; a completed one says nothing', () => {
+    const m = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1'], target: '2026-10-10' }, { id: '0.2', phases: ['F2'], target: '2030-01-01' }] } };
+    const html = renderApp(m, ui({ view: 'plan' }));
+    const card = (id: string) => html.slice(html.indexOf(`data-k="vc:${id}"`), html.indexOf('</article>', html.indexOf(`data-k="vc:${id}"`)));
+    // F1 still has T002 and T003 pending, and v0.1's target was yesterday: it ends past it.
+    expect(card('0.1')).toMatch(/<div class="veta mono late" title="pasa del objetivo">fin previsto [^<]+ · pasa del objetivo<\/div>/);
+    expect(card('0.2')).toMatch(/<div class="veta mono">fin previsto [^<·]+<\/div>/);
+    // The Summary's cards say it too.
+    expect(section(renderApp(m, ui()), 'card prog')).toContain('<div class="veta mono late"');
+    const done = { ...m, states: Object.fromEntries(plan.tasks.map(t => [t.id, { status: 'done' as const }])) };
+    expect(renderApp(done, ui({ view: 'plan' }))).not.toContain('class="veta');
+  });
+
+  it('a run of the history says how many integrated tasks took one review and the mean of reviews per task', () => {
+    const m = base();
+    m.runs = [runSummary({ tasks: [
+      { id: 'T001', status: 'integrated', rounds: 1 }, { id: 'T002', status: 'integrated', rounds: 3 }, { id: 'T003', status: 'integrated', rounds: 1 }, { id: 'T004', status: 'blocked', rounds: 2 },
+    ] })];
+    const h = section(renderApp(m, ui({ view: 'runs' })), 'card rhist');
+    expect(h).toContain(' · 2/3 aceptadas a la primera · 1,8 revisiones por tarea · ');
+    // Without rounds (an older runs/), neither.
+    m.runs = [runSummary({ tasks: [{ id: 'T001', status: 'integrated' }] })];
+    expect(section(renderApp(m, ui({ view: 'runs' })), 'card rhist')).not.toContain('revisiones por tarea');
+  });
+
+  it('the small flow lights the stage of a row in «En curso»; Plan without forge has none', () => {
+    const now = renderApp(model(), ui()).split('<section class="card now">')[1]!;
+    expect(now).toMatch(/<span class="mflow" role="img" aria-label="verificar"><i class="past"><\/i><i class="past"><\/i><i class="past"><\/i><i class="cur"><\/i>/);
+    expect(renderApp(base(), ui({ view: 'plan' }))).not.toContain('class="mflow"');
   });
 });

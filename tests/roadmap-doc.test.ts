@@ -45,6 +45,57 @@ describe('state/T.forge v2: parseForgeDocV2 (C7)', () => {
   });
 });
 
+describe('state/T.forge v3 fields: why, red, next, impl, score and the trail (waypoint 0.39)', () => {
+  const why = (k: number, sev: 'critical' | 'important' = 'important') => ({ sev, problem: `problem ${k}`, file: `src/f${k}.ts`, line: k, by: 'correctness' });
+  const step = (s: string, b?: number, r?: number) => ({ s, at: AT, ...(b ? { b } : {}), ...(r ? { r } : {}) });
+  it('the new fields round-trip', () => {
+    const d = doc({
+      rounds: [round(1, 1, { next: 'fresh-stronger', impl: 'forge-impl-strong', score: 0.42, why: [why(1, 'critical'), why(2)], red: ['test', 'lint'] }), round(1, 2, { action: 'accept', next: 'done', score: 0.9 })],
+      trail: [step('triage'), step('implement', 1), step('review', 1, 1), step('fix', 1, 1), step('stopped')],
+    });
+    expect(parseForgeDocV2(d)).toEqual(d);
+  });
+  it('a block without the new fields parses exactly as before, and nothing is reported', () => {
+    const got: string[] = [];
+    const d = doc({ agent: 'forge-impl', verdict: { action: 'fix', score: 0.4 } });
+    const p = parseForgeDocV2(d, f => { got.push(f); })!;
+    expect(p).toEqual(d);
+    expect(p).not.toHaveProperty('trail');
+    expect(Object.keys(p.rounds[0]).sort()).toEqual(['action', 'at', 'brief', 'findings', 'n', 'note', 'reviewers']);
+    expect(got).toEqual([]);
+  });
+  it('an invalid why item, next, impl, score or red name is dropped alone, never its round; an invalid trail step is dropped and reported, never the block', () => {
+    const got: string[] = [];
+    const p = parseForgeDocV2({
+      ...doc(),
+      rounds: [round(1, 1, {
+        next: 'later' as never, impl: '   ', score: 1.5,
+        why: [{ sev: 'minor', problem: 'x' }, { sev: 'critical', problem: '  ' }, 'x', null, { sev: 'important', problem: 'kept', file: 5, line: 0, by: '' }] as never,
+        red: [5, '', 'test'] as never,
+      }), round(1, 2, { score: Number.NaN, why: 'x' as never, red: {} as never })],
+      trail: [{ s: 'nap', at: AT }, { s: 'review', at: 'today' }, { s: 'fix', at: AT, b: 0, r: 'x' }, null, { s: 'triage', at: AT }],
+    }, (f, a) => { got.push(`${f} · ${a}`); })!;
+    expect(p).not.toBeNull();
+    expect(p.rounds).toEqual([round(1, 1, { why: [{ sev: 'important', problem: 'kept' }], red: ['test'] }), round(1, 2)]);
+    expect(p.trail).toEqual([{ s: 'fix', at: AT }, { s: 'triage', at: AT }]);
+    expect(got).toEqual(['forge.trail[0] · dropped', 'forge.trail[1] · dropped', 'forge.trail[3] · dropped']);
+    // A trail that is no list is left out and reported; a trail with no valid step is left out.
+    const rep: string[] = [];
+    expect(parseForgeDocV2({ ...doc(), trail: 'x' }, (f, a) => { rep.push(`${f} · ${a}`); })).not.toHaveProperty('trail');
+    expect(rep).toEqual(['forge.trail · coerced']);
+    expect(parseForgeDocV2({ ...doc(), trail: [{ s: 'nap', at: AT }] })).not.toHaveProperty('trail');
+  });
+  it('caps and clips: the first 3 whys of 100 characters, the first 4 red names, the newest 16 steps', () => {
+    const p = parseForgeDocV2(doc({
+      rounds: [round(1, 1, { why: [1, 2, 3, 4].map(k => ({ ...why(k), problem: `${k}`.repeat(300) })), red: ['a', 'b', 'c', 'd', 'e'] })],
+      trail: Array.from({ length: 20 }, (_, k) => step('review', 1, k + 1)),
+    }))!;
+    expect(p.rounds[0].why!.map(w => w.problem)).toEqual(['1'.repeat(100), '2'.repeat(100), '3'.repeat(100)]);
+    expect(p.rounds[0].red).toEqual(['a', 'b', 'c', 'd']);
+    expect(p.trail!.map(t => t.r)).toEqual(Array.from({ length: 16 }, (_, k) => k + 5));
+  });
+});
+
 describe('fitForgeDoc: at most 4 KB (C7)', () => {
   const val = (i: number) => ({ name: `validator-${i}`, ok: i % 2 === 0, ms: 1234, cached: true as const, failing: 3 });
   const deferred = (n: number, text: string) => Array.from({ length: n }, (_, i) => ({ file: `src/module-${i}/file.ts`, line: 100 + i, problem: text }));
@@ -70,6 +121,50 @@ describe('fitForgeDoc: at most 4 KB (C7)', () => {
     expect(r.dropped).toEqual(order.slice(0, r.dropped.length));
     expect(r.doc.rounds.every(x => x.brief === 2)).toBe(true);
     expect(r.doc.deferred).toHaveLength(5);
+  });
+  const why = (k: number, sev: 'critical' | 'important' = 'important') => ({ sev, problem: `${k}`.repeat(100), file: `src/module-${k}/a-file.ts`, line: 100 + k, by: 'correctness' });
+  const steps = (n: number) => Array.from({ length: n }, (_, k) => ({ s: 'review', at: AT, b: 1, r: k + 1 }));
+  it('v3: each of its cuts stops once the block fits: the newest 8 steps, one why per round (the first), no trail, then no why nor red', () => {
+    const base = doc({ rounds: [round(1, 1, { why: [why(1, 'critical'), why(2), why(3)], red: ['test'], next: 'resume', impl: 'forge-impl', score: 0.4 })], trail: steps(16) });
+    const under = (d: ForgeDocV2) => byteLength(JSON.stringify(d)) - 1;
+    const eight = fitForgeDoc(base, under(base));
+    expect(eight.dropped).toEqual(['trail>8']);
+    expect(eight.doc.trail!.map(t => t.r)).toEqual([9, 10, 11, 12, 13, 14, 15, 16]);
+    const one = fitForgeDoc(base, under(eight.doc));
+    expect(one.dropped).toEqual(['trail>8', 'rounds.why>1']);
+    expect(one.doc.rounds[0]).toMatchObject({ why: [why(1, 'critical')], red: ['test'] });
+    const noTrail = fitForgeDoc(base, under(one.doc));
+    expect(noTrail.dropped).toEqual(['trail>8', 'rounds.why>1', 'trail']);
+    expect(noTrail.doc).not.toHaveProperty('trail');
+    const bare = fitForgeDoc(base, under(noTrail.doc));
+    expect(bare.dropped).toEqual(['trail>8', 'rounds.why>1', 'trail', 'rounds.why']);
+    expect(bare.doc.rounds[0]).not.toHaveProperty('why');
+    expect(bare.doc.rounds[0]).not.toHaveProperty('red');
+    // What the round decided stays one cut longer: the page shows it without the whys.
+    expect(bare.doc.rounds[0]).toMatchObject({ next: 'resume', impl: 'forge-impl', score: 0.4, note: 'round note' });
+    expect(parseForgeDocV2(bare.doc)).toEqual(bare.doc);
+    // Then it goes too, before anything a block carried before v3: the page falls back to the round's note.
+    const plain = fitForgeDoc(base, under(bare.doc));
+    expect(plain.dropped).toEqual(['trail>8', 'rounds.why>1', 'trail', 'rounds.why', 'rounds.next']);
+    for (const k of ['next', 'impl', 'score']) expect(plain.doc.rounds[0]).not.toHaveProperty(k);
+    expect(plain.doc.rounds[0]!.note).toBe('round note');
+  });
+  it('v3: the Large limit case with a full trail and three whys and four red validators on every round fits, cut first by the v3 steps and then as it was before', () => {
+    const large = (over: Partial<RoundV2>) => doc({
+      path: 'large', cap: 5, round: 5, rounds: [1, 2, 3, 4, 5].map(n => round(1, n, { note: 'x'.repeat(120), reviewers: ['correctness', 'security', 'perf', 'verify'], ...over })),
+      validators: Array.from({ length: 10 }, (_, i) => val(i)), deferred: deferred(10, 'y'.repeat(160)),
+    });
+    const before = fitForgeDoc(large({}));
+    const full = { ...large({ next: 'fresh-stronger', impl: 'forge-impl-strong', score: 0.55, why: [why(1, 'critical'), why(2), why(3)], red: ['validator-1', 'validator-3', 'validator-5', 'validator-7'] }), trail: steps(16) };
+    expect(parseForgeDocV2(full)).toEqual(full);
+    const r = fitForgeDoc(full);
+    expect(r.fits).toBe(true);
+    expect(r.bytes).toBeLessThanOrEqual(FORGE_DOC_MAX);
+    // Every v3 field goes before anything the block carried before v3 (the subagent's finding: without the rounds.next
+    // cut, this block lost a deferred finding it kept before): what is left is the block of before, cut as it was.
+    expect(r.dropped).toEqual(['trail>8', 'rounds.why>1', 'trail', 'rounds.why', 'rounds.next', ...before.dropped]);
+    expect(r.doc.rounds.map(x => [x.brief, x.n])).toEqual([[1, 1], [1, 2], [1, 3], [1, 4], [1, 5]]);
+    expect(r.doc).toEqual(before.doc);
   });
   it('a block that already fits is left alone', () => {
     const small = doc();

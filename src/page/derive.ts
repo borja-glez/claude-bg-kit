@@ -2,7 +2,7 @@
 // key adds the minute (the forecast and every liveness move with the clock). The cache is per model object, so two models
 // never share an entry; renderApp without a Derived computes it fresh (computeDerived), which is what tests see.
 import { computeMetrics, type Metrics } from '../lib/metrics.js';
-import { criticalPath, forecastEnd, paceRatioOf, zoneHeat, type ForecastEnd, type ZoneHeat } from '../lib/insights.js';
+import { criticalPath, forecastSchedule, paceRatioOf, versionEnds, zoneHeat, type ForecastEnd, type ZoneHeat } from '../lib/insights.js';
 import { sessionLiveness } from '../lib/coordination.js';
 import { STAGES } from '../lib/types.js';
 import { num } from './html.js';
@@ -15,6 +15,8 @@ export interface Derived {
   byVersion: Metrics['byVersion'];
   /** G-12: the one forecast end of the page, which the strip, the timeline and the analysis read, with its parallelism. */
   forecast: ForecastEnd | null;
+  /** v3: when each version not done is forecast to end (ms), from the same schedule as `forecast`. */
+  versionEnds: Record<string, number>;
   /** G-12: the real pace against the estimates (paceRatioOf). */
   pace: number;
   critical: { ids: string[]; minutes: number };
@@ -76,10 +78,13 @@ export function computeDerived(m: Model): Derived {
   });
   const needs = once(() => needsOf(m));
   const pace = paceRatioOf(m.plan, m.states);
+  const schedule = forecastSchedule(m.plan, m.states, m.now, { parallel: parallelOf(m, liveSessions().live), paceRatio: pace });
+  const ends = once(() => versionEnds(m.plan, schedule?.ends));
   return {
     metrics,
     byVersion: metrics.byVersion,
-    forecast: forecastEnd(m.plan, m.states, m.now, { parallel: parallelOf(m, liveSessions().live), paceRatio: pace }),
+    forecast: schedule ? { at: schedule.at, parallel: schedule.parallel } : null,
+    get versionEnds() { return ends(); },
     pace,
     get critical() { return critical(); },
     get zones() { return zones(); },

@@ -10,13 +10,53 @@ import type { Derived } from '../derive.js';
 import type { Dict } from '../i18n.js';
 import { MAX_NOTE } from '../../lib/notes.js';
 import type { Need } from '../needs.js';
-import { authorLabel, escalatedSessions, esc, eviMark, fmt, hhmm, ICON, isOrphan, labelOf, liveDot, num, pastMs, rel, roleOf, safeNote, safeType, trackTag, versionTable } from '../html.js';
+import { authorLabel, escalatedSessions, esc, eviMark, fmt, hhmm, ICON, isOrphan, labelOf, liveDot, num, pastMs, rel, roleOf, safeNote, safeType, trackTag } from '../html.js';
+import { miniFlow } from '../flow.js';
+import { versionCards, versionLabel } from './versions.js';
 import type { Model, UiState } from '../model.js';
 
+/** v3: the figures on top, then two columns: what needs the person, what runs and what happened (wide), and the versions,
+ *  what comes next and the live sessions (narrow). Under 1180 px the columns stack, the wide one first. */
 export function renderSummary(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
-  return `<header class="hd"><h1>${esc(d.views.summary)}</h1>${metaLine(m, d, dv)}</header>
-  ${renderNeeds(m, d, ui, dv)}${renderAutonomous(m, d, loc)}${renderNow(m, d, dv)}${renderNext(m, d)}${renderProgress(m, d, dv, loc)}${renderRecent(m, d, loc)}${renderLive(m, d, dv)}`;
+  return `<header class="hd"><h1>${esc(d.views.summary)}</h1>${metaLine(m, d, dv)}</header>${renderKpis(m, d, dv, loc)}
+  <div class="sumg"><div class="sum-main">${renderNeeds(m, d, ui, dv)}${renderAutonomous(m, d, loc)}${renderNow(m, d, dv)}${renderRecent(m, d, loc)}</div>
+  <aside class="sum-side">${renderProgress(m, d, dv, loc)}${renderNext(m, d)}${renderLive(m, d, dv)}</aside></div>`;
 }
+
+/** v3: the plan's figures as tiles: the version in progress, the tasks done (with what runs and what is blocked), the
+ *  phase, the forecast end, the real pace and the last commit. */
+function renderKpis(m: Model, d: Dict, dv: Derived, loc: string): string {
+  const x = dv.metrics;
+  const tile = (label: string, value: string, sub: string, extra = '', cls = '') =>
+    `<div class="kpi${cls ? ` ${cls}` : ''}"><div class="lbl">${esc(label)}</div><div class="kv1">${value}</div>${sub ? `<div class="ksub">${sub}</div>` : ''}${extra}</div>`;
+  const bar = (pct: number, done = false) => `<div class="bar${done ? ' c' : ''}"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></div>`;
+  const cur = x.currentVersion;
+  const vb = cur ? x.byVersion[cur] : undefined;
+  const version = cur && vb
+    ? tile(d.kpi.version, `<button type="button" class="kbig" data-action="view" data-view="plan" data-pf="v:${esc(cur)}" data-k="kpi:v" title="${esc(d.versions.stripTitle(versionLabel(cur)))}">${esc(versionLabel(cur))}</button> <span class="kpct">${num(vb.percent)} %</span>`, esc(d.versions.tasks(vb.done, vb.total)), bar(vb.percent))
+    : tile(d.progress.title, `<span class="kbig">${num(x.percent)} %</span>`, '', bar(x.percent));
+  const running = x.inProgress.length;
+  const blocked = x.blocked.length;
+  const sub = [running ? `<span class="c-peach">● ${esc(d.num(running))} ${esc(d.kpi.running.toLowerCase())}</span>` : '', blocked ? `<span class="ye">⚠ ${esc(d.num(blocked))} ${esc(d.kpi.blocked)}</span>` : ''].filter(Boolean).join(' · ');
+  const tasks = tile(d.kpi.tasks, `<span class="kbig">${esc(d.num(x.done))}</span><span class="kof">/${esc(d.num(x.total))}</span>`, sub || `${num(x.percent)} %`, bar(x.percent, true));
+  const ci = m.plan.phases.findIndex(p => x.byPhase[p.id]?.status !== 'done');
+  const ph = ci >= 0 ? m.plan.phases[ci] : undefined;
+  const phase = tile(d.kpi.phase, `<span class="kbig">${ci >= 0 ? ci + 1 : m.plan.phases.length}</span><span class="kof">/${m.plan.phases.length}</span>`, ph ? esc(ph.name || ph.id) : esc(d.phaseStatus.done));
+  const f = dv.forecast;
+  const eta = tile(d.eta, `<span class="kmid">${f ? esc(day(f.at, loc)) : '—'}</span>`, f ? esc(d.insights.shared(f.parallel)) : '');
+  const pace = tile(d.pace, `<span class="kmid">${x.paceMin != null ? esc(d.dur(x.paceMin)) : '—'}</span>`, x.paceMin != null ? `${esc(d.progress.perTask)}${x.startedAt ? ` · ${esc(d.kpi.since)} ${esc(day(Date.parse(x.startedAt), loc))}` : ''}` : '');
+  const lc = m.meta?.metrics?.lastCommit;
+  const tests = m.meta?.metrics?.tests;
+  const commit = lc
+    ? tile(d.kpi.commit, `<b class="kmid mono">${esc(lc.sha.slice(0, 7))}</b>`, `${rel(d, 'ago', lc.ts, m.now)}${tests != null ? ` · <b>${num(tests)}</b> ${esc(d.tests)}` : ''}`)
+    : tests != null ? tile(d.kpi.tests, `<b class="kmid">${num(tests)}</b>`, '') : '';
+  return `<section class="kpis" aria-label="${esc(d.progress.title)}">${version}${tasks}${phase}${eta}${pace}${commit}</section>`;
+}
+
+/** A day as «28 oct», for the tiles. */
+const day = (ms: number, loc: string): string => {
+  try { return new Date(ms).toLocaleDateString(loc, { day: 'numeric', month: 'short' }); } catch { return ''; }
+};
 
 /**
  * 6b-3: the card of an autonomous run (meta/infinite with a profile): its profile, whether it runs or why it stopped, and
@@ -116,20 +156,16 @@ function renderNeeds(m: Model, d: Dict, ui: UiState, dv: Derived): string {
  *  the one in progress, as the strip and the progress say it; the plan's own version (meta.version) goes apart, labelled,
  *  when it is another one, and alone only when the plan has no versions. */
 function metaLine(m: Model, d: Dict, dv: Derived): string {
-  const x = dv.metrics;
-  const current = m.plan.phases.findIndex(p => x.byPhase[p.id]?.status !== 'done');
-  const idx = current === -1 ? m.plan.phases.length : current + 1;
-  const lc = m.meta?.metrics?.lastCommit;
-  const tests = m.meta?.metrics?.tests;
+  // v3: the version in progress, the phase, the tasks and the last commit went up to the tiles; the line keeps the plan's
+  // name, its own version when it is another one (or the only one, without versions) and its tracks.
   const own = m.meta?.version ?? '';
-  const cur = x.currentVersion;
-  const version = !cur ? `${esc(d.version)} <b>${esc(own)}</b>`
-    : `${esc(d.versionNow)} <b>${esc(versionLabel(cur))}</b>${own && versionLabel(own) !== versionLabel(cur) ? ` · ${esc(d.planVersion)} <b>${esc(own)}</b>` : ''}`;
-  return `<div class="meta">${esc(m.meta?.name ?? '')} · ${version} · ${esc(d.phase)} <b>${idx}</b>/${m.plan.phases.length} · <b>${x.done}</b>/${x.total} ${esc(d.tasks)} · <span title="${esc(d.trackHelp)}"><b>${m.plan.tracks.length}</b> ${esc(d.tracks)}</span>${tests != null ? ` · <b>${num(tests)}</b> ${esc(d.tests)}` : ''}${lc ? ` · ${esc(d.lastCommit)} <b>${esc(lc.sha.slice(0, 7))}</b> ${rel(d, 'ago', lc.ts, m.now)}` : ''}</div>`;
+  const cur = dv.metrics.currentVersion;
+  const version = !cur ? (own ? ` · ${esc(d.version)} <b>${esc(own)}</b>` : '')
+    : own && versionLabel(own) !== versionLabel(cur) ? ` · ${esc(d.planVersion)} <b>${esc(own)}</b>` : '';
+  return `<div class="meta">${esc(m.meta?.name ?? '')}${version} · <span title="${esc(d.trackHelp)}"><b>${m.plan.tracks.length}</b> ${esc(d.tracks)}</span></div>`;
 }
 
 const v2 = (f: TaskState['forge']): ForgeDocV2 | null => (f && 'v' in f && f.v === 2 ? f : null);
-const versionLabel = (id: string): string => (/^v/i.test(id) ? id : `v${id}`);
 
 /** «En curso» (H-08): one row per task under one header per run; the whole row is a button that opens the detail. */
 function renderNow(m: Model, d: Dict, dv: Derived): string {
@@ -181,7 +217,7 @@ export function nowRow(m: Model, d: Dict, t: PlanTask): string {
   const sid = ex?.by ?? st.owner;
   return `<button type="button" class="nr${orphan ? ' orphan' : ''}" data-action="open-task" data-id="${esc(t.id)}" data-k="t:${esc(t.id)}">`
     + `<span class="c-task"><span class="k">${esc(t.id)}</span> ${esc(t.title)}${orphan ? ` <span class="pill orphan">${esc(d.run.orphan)}</span>` : ''}${eviMark(m, d, t.id)}</span>`
-    + `<span class="c-stage">${liveDot(l)} ${esc(stage ? labelOf(d.run.stage, stage) : '—')}</span>`
+    + `<span class="c-stage">${liveDot(l)} ${esc(stage ? labelOf(d.run.stage, stage) : '—')}${miniFlow(d, stage)}</span>`
     + `<span class="c-round">${round}</span>`
     + `<span class="c-val">${validators(st)}</span>`
     + `<span class="c-time">${timeOf(m, d, st)}</span>`
@@ -230,31 +266,19 @@ function renderNext(m: Model, d: Dict): string {
     `<li><button type="button" class="nxb" data-action="open-task" data-id="${esc(t.id)}" data-k="nx:${esc(t.id)}"><span class="k">${esc(t.id)}</span> ${esc(t.title)} ${trackTag(m, t.track)}</button></li>`).join('')}</ul></section>`;
 }
 
-/** The progress (G-11, H-27): the current version's percent, every version, one segment per phase with the current one marked. */
+/** The progress (G-11, H-27; v3): with versions, a card per version with its phases (what each one holds); without them,
+ *  one segment per phase with the current one marked. The figures went up to the tiles. */
 function renderProgress(m: Model, d: Dict, dv: Derived, loc: string): string {
   const x = dv.metrics;
-  const cur = x.currentVersion;
-  const big = cur && x.byVersion[cur] ? `${esc(versionLabel(cur))} · ${x.byVersion[cur]!.percent} %` : `${x.percent} %`;
-  const versions = versionTable(m, d, x);
+  if (m.plan.versions.length) return `<section class="card prog"><h2 class="lbl">${esc(d.versions.title)}</h2>${versionCards(m, d, x, { ends: dv.versionEnds, loc, compact: true })}</section>`;
+  if (!m.plan.phases.length) return '';
   const current = m.plan.phases.findIndex(p => x.byPhase[p.id]?.status !== 'done');
-  const phases = m.plan.phases.length
-    ? `<div class="phs">${m.plan.phases.map((p, i) => {
-        const b = x.byPhase[p.id];
-        const pct = b && b.total ? Math.round((b.done / b.total) * 100) : 0;
-        return `<span class="phseg ph-${esc(b?.status ?? p.plan_status)}${i === current ? ' cur' : ''}" style="flex-grow:${Math.max(1, b?.total ?? 1)}" title="${esc(`${p.id} · ${p.name} · ${b?.done ?? 0}/${b?.total ?? 0}`)}"><i style="width:${pct}%"></i><b>${esc(p.id)}</b> ${pct} %</span>`;
-      }).join('')}</div>`
-    : '';
-  const f = dv.forecast;
-  return `<section class="card prog"><h2 class="lbl">${esc(d.progress.title)}</h2>
-    <div class="big">${big}</div>
-    <div class="mono">${x.done} ${esc(d.of)} ${x.total} ${esc(d.tasks)}</div>
-    ${versions}${phases}
-    <dl class="kv">
-      <dt>${esc(d.phasesDone)}</dt><dd>${x.phasesDone} ${esc(d.of)} ${x.phaseCount}</dd>
-      <dt>${esc(d.eta)}</dt><dd>${f ? esc(fmt(new Date(f.at).toISOString(), loc)) : '—'}</dd>
-      <dt>${esc(d.pace)}</dt><dd>${x.paceMin != null ? `${esc(d.dur(x.paceMin))} ${esc(d.progress.perTask)}` : '—'}</dd>
-      <dt>${esc(d.devSince)}</dt><dd>${x.startedAt ? esc(fmt(x.startedAt, loc)) : '—'}</dd>
-    </dl></section>`;
+  const phases = `<div class="phs">${m.plan.phases.map((p, i) => {
+      const b = x.byPhase[p.id];
+      const pct = b && b.total ? Math.round((b.done / b.total) * 100) : 0;
+      return `<span class="phseg ph-${esc(b?.status ?? p.plan_status)}${i === current ? ' cur' : ''}" style="flex-grow:${Math.max(1, b?.total ?? 1)}" title="${esc(`${p.id} · ${p.name} · ${b?.done ?? 0}/${b?.total ?? 0}`)}"><i style="width:${pct}%"></i><b>${esc(p.id)}</b> ${pct} %</span>`;
+    }).join('')}</div>`;
+  return `<section class="card prog"><h2 class="lbl">${esc(d.progress.title)}</h2>${phases}<div class="mono">${esc(d.phasesDone)}: ${x.phasesDone} ${esc(d.of)} ${x.phaseCount}</div></section>`;
 }
 
 const sameDay = (iso: string, now: number): boolean => {
@@ -270,18 +294,25 @@ function renderRecent(m: Model, d: Dict, loc: string): string {
     ...m.events.map(e => ({ ts: e.ts, k: `e:${e.id}`, task: e.taskId, icon: ICON[safeType(e.type)], cls: `ev-${safeType(e.type)}`, who: e.sessionId, text: e.text ?? d.eventText[safeType(e.type)], add: e.add, del: e.del })),
     ...m.messages.map(g => ({ ts: g.ts, k: `m:${g.id}`, task: g.taskId, icon: ICON.message, cls: 'ev-message', who: `${g.from} → ${g.to}`, text: g.text })),
     ...m.notes.filter(n => !n.proposalId).map(n => ({ ts: n.ts, k: `n:${n.id}`, task: n.taskId, icon: '✎', cls: `nt-${safeNote(n.type)}`, who: authorLabel(m, d, n.author), text: `${d.noteType[safeNote(n.type)]}: ${n.text}` })),
+    // v3: each review round forge closed is a change too: its action and the first finding that blocked it.
+    ...m.plan.tasks.flatMap(t => (v2(m.states[t.id]?.forge)?.rounds ?? []).map(r => {
+      const w = r.why?.[0];
+      return { ts: r.at, k: `r:${t.id}:${r.brief}-${r.n}`, task: t.id, icon: '↺', cls: `ev-round a-${r.action}`, who: r.reviewers.join(', '),
+        text: `${d.round.activity(r.n, labelOf(d.action, r.action))}${w ? ` — ${d.round.sev[w.sev] ?? w.sev}: ${w.problem}` : ''}` };
+    })),
   ].sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0)).slice(0, 14);
   if (!feed.length) return '';
   const items = feed.map(f => {
     const when = fmt(f.ts, loc, !sameDay(f.ts, m.now));
-    const nums = f.add != null ? `<span class="nums"><span class="ok">+${num(f.add)}</span><span class="del">−${num(f.del)}</span></span>` : '';
-    const body = `<span class="l1"><span class="mono t">${esc(when)}</span> <span class="ev ${f.cls}" aria-hidden="true">${f.icon}</span>${f.task ? ` <b>${esc(f.task)}</b>` : ''} <span class="k">${esc(f.who)}</span>${nums}</span><span class="l2"><span class="tx" title="${esc(f.text)}">${esc(f.text)}</span></span>`;
+    const nums = f.add != null ? `<span class="nums"><span class="ok">+${num(f.add)}</span><span class="del">−${num(f.del)}</span></span>` : '<span class="nums"></span>';
+    // v3: one row on a wide screen (time, icon, task, text, author, lines), two on a narrow one.
+    const body = `<span class="mono t">${esc(when)}</span><span class="ev ${f.cls}" aria-hidden="true">${f.icon}</span><b class="atk">${esc(f.task ?? '')}</b><span class="tx" title="${esc(f.text)}">${esc(f.text)}</span><span class="k awho">${esc(f.who)}</span>${nums}`;
     const isTask = !!f.task && m.plan.tasks.some(t => t.id === f.task);
     return isTask
       ? `<li><button type="button" class="act" data-action="open-task" data-id="${esc(f.task)}" data-k="${esc(f.k)}">${body}</button></li>`
       : `<li><div class="act">${body}</div></li>`;
   }).join('');
-  return `<section class="card recent"><h2 class="lbl">${esc(d.recent)}</h2><ul class="events">${items}</ul></section>`;
+  return `<section class="card recent"><h2 class="lbl">${esc(d.recent)}</h2><ul class="events feed">${items}</ul></section>`;
 }
 
 /** The live sessions (G-04), alive or silent by their lease; the stopped ones are a count that leads to Sesiones. */

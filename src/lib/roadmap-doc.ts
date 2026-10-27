@@ -28,9 +28,30 @@ const ACTIONS: readonly DocAction[] = ['accept', 'fix', 'redo'];
 /** The keys of `stages`: forge's stages and the triage before the first one. */
 export const STAGE_KEYS: readonly string[] = [...STAGES, 'triage'];
 
+/** v3 of the page (waypoint 0.39): the blocking findings a round names (`why`), its red validators (`red`) and the steps of
+ *  the trail. Optional: a block of an older forge has none, and an older page drops them. */
+export const WHY_MAX = 3;
+export const WHY_PROBLEM_MAX = 100;
+export const RED_MAX = 4;
+export const TRAIL_MAX = 16;
+/** What the round decided for the next attempt (forge's roundDecision `next`). */
+export type RoundNext = 'done' | 'resume' | 'fresh-stronger' | 'redo' | 'stalled' | 'breaker';
+export const ROUND_NEXTS: readonly RoundNext[] = ['done', 'resume', 'fresh-stronger', 'redo', 'stalled', 'breaker'];
+/** The stages a trail step can name: forge's stages, the triage, a fix attempt and the ends. */
+export const TRAIL_STAGES: readonly string[] = [...STAGES, 'triage', 'fix', 'done', 'stopped', 'blocked'];
+
 export interface ValidatorV2 { name: string; ok: boolean; flaky?: true; skipped?: string; preexisting?: true; ms?: number; cached?: true; failing?: number }
 export interface Findings4 { critical: number; important: number; minor: number; deferred: number }
-export interface RoundV2 { brief: number; n: number; action: DocAction; note: string; findings: Findings4; reviewers: string[]; at: string }
+/** A finding that blocked a round: its severity, the problem in one line, where, and which reviewer found it. */
+export interface WhyV2 { sev: 'critical' | 'important'; problem: string; file?: string; line?: number; by?: string }
+export interface RoundV2 {
+  brief: number; n: number; action: DocAction; note: string; findings: Findings4; reviewers: string[]; at: string;
+  /** What forge decided next, the agent of the next attempt, the verdict's score, the findings that blocked it and the
+   *  validators in red at its close. */
+  next?: RoundNext; impl?: string; score?: number; why?: WhyV2[]; red?: string[];
+}
+/** One step of the task's way through forge: the stage it entered, when, and its brief and review round when known. */
+export interface TrailV2 { s: string; at: string; b?: number; r?: number }
 export interface VerifyV2 { planned: boolean; result: 'pass' | 'fail' | 'blocked' | null; passed: number | null; total: number | null; skipped: string | null; surfaces: string[] }
 export interface IntegrationV2 { branch: string; sha: string | null; merged: boolean; target: string }
 export interface DeferredV2 { file?: string; line?: number; problem: string }
@@ -44,6 +65,8 @@ export interface ForgeDocV2 {
   // New in v2.
   brief: number; stage: DocStage; rounds: RoundV2[]; verify: VerifyV2 | null; stages: Record<string, number>;
   integration: IntegrationV2 | null; deferred: DeferredV2[]; acceptedRound: number | null; overCap: boolean; updatedAt: string;
+  /** The stages the task went through in this run, oldest first, the newest TRAIL_MAX. */
+  trail?: TrailV2[];
 }
 export interface ShotV2 { surface: string; check: string; ok: boolean; expected?: string; observed?: string; round: number; url?: string; id?: string }
 export interface EvidenceV2 {
@@ -91,7 +114,33 @@ function roundOf(r: unknown): RoundV2 | null {
   if (Object.values(findings).some(x => x === null)) return null;
   const reviewers = (Array.isArray(r.reviewers) ? r.reviewers : [])
     .filter((x): x is string => typeof x === 'string' && !!x.trim()).map(x => line(x, REVIEWER_MAX)).slice(0, REVIEWERS_MAX);
-  return { brief: r.brief, n: r.n, action: r.action, note: line(r.note, NOTE_MAX), findings: findings as Findings4, reviewers, at: r.at };
+  const out: RoundV2 = { brief: r.brief, n: r.n, action: r.action, note: line(r.note, NOTE_MAX), findings: findings as Findings4, reviewers, at: r.at };
+  // The v3 fields: each one that does not validate is left out alone, never the round.
+  if ((ROUND_NEXTS as readonly unknown[]).includes(r.next)) out.next = r.next as RoundNext;
+  if (typeof r.impl === 'string' && r.impl.trim()) out.impl = line(r.impl, NAME_MAX);
+  if (typeof r.score === 'number' && Number.isFinite(r.score) && r.score >= 0 && r.score <= 1) out.score = r.score;
+  const why = (Array.isArray(r.why) ? r.why : []).map(whyOf).filter((w): w is WhyV2 => !!w).slice(0, WHY_MAX);
+  if (why.length) out.why = why;
+  const red = (Array.isArray(r.red) ? r.red : []).filter((x): x is string => typeof x === 'string' && !!x.trim()).map(x => line(x, REVIEWER_MAX)).slice(0, RED_MAX);
+  if (red.length) out.red = red;
+  return out;
+}
+
+function whyOf(w: unknown): WhyV2 | null {
+  if (!isObj(w) || (w.sev !== 'critical' && w.sev !== 'important') || typeof w.problem !== 'string' || !w.problem.trim()) return null;
+  const out: WhyV2 = { sev: w.sev, problem: line(w.problem, WHY_PROBLEM_MAX) };
+  if (typeof w.file === 'string' && w.file.trim()) out.file = line(w.file, TEXT_MAX);
+  if (int(w.line, 1, 10_000_000)) out.line = w.line;
+  if (typeof w.by === 'string' && w.by.trim()) out.by = line(w.by, REVIEWER_MAX);
+  return out;
+}
+
+function trailOf(t: unknown): TrailV2 | null {
+  if (!isObj(t) || typeof t.s !== 'string' || !TRAIL_STAGES.includes(t.s) || !iso(t.at)) return null;
+  const out: TrailV2 = { s: t.s, at: t.at };
+  if (int(t.b, 1, 9999)) out.b = t.b;
+  if (int(t.r, 1, 99)) out.r = t.r;
+  return out;
 }
 
 function deferredOf(d: unknown): DeferredV2 | null {
@@ -166,6 +215,10 @@ export function parseForgeDocV2(x: unknown, report?: DocReport): ForgeDocV2 | nu
     deferred: keep(x.deferred, deferredOf, 'deferred', DEFERRED_MAX),
     acceptedRound: x.acceptedRound as number | null, overCap: x.overCap, updatedAt: x.updatedAt,
   };
+  if (Array.isArray(x.trail)) {
+    const trail = keep(x.trail, trailOf, 'trail', TRAIL_MAX, true);
+    if (trail.length) doc.trail = trail;
+  } else if (x.trail !== undefined) report?.('forge.trail', 'coerced', kindOf(x.trail));
   // The optional v1 fields: left out when absent; one that is there and invalid is left out and reported.
   const coerced = (field: string, v: unknown): void => report?.(`forge.${field}`, 'coerced', kindOf(v));
   if (typeof x.agent === 'string' && x.agent.trim()) doc.agent = line(x.agent, NAME_MAX);
@@ -187,6 +240,13 @@ export function parseForgeDocV2(x: unknown, report?: DocReport): ForgeDocV2 | nu
 type Step = [label: string, cut: (d: ForgeDocV2) => ForgeDocV2 | null];
 // C7: what is cut, in this order, until the block fits; each step that applies is named in `dropped`.
 const STEPS: readonly Step[] = [
+  // v3: what the page adds goes first, so a block that fitted before still carries everything it carried.
+  ['trail>8', d => (d.trail && d.trail.length > 8 ? { ...d, trail: d.trail.slice(-8) } : null)],
+  ['rounds.why>1', d => (d.rounds.some(r => (r.why?.length ?? 0) > 1) ? { ...d, rounds: d.rounds.map(r => (r.why && r.why.length > 1 ? { ...r, why: r.why.slice(0, 1) } : r)) } : null)],
+  ['trail', d => (d.trail ? withoutTrail(d) : null)],
+  ['rounds.why', d => (d.rounds.some(r => r.why || r.red) ? { ...d, rounds: d.rounds.map(({ why: _w, red: _r, ...r }) => r) } : null)],
+  // The page falls back to the round's note without them.
+  ['rounds.next', d => (d.rounds.some(r => r.next || r.impl || r.score !== undefined) ? { ...d, rounds: d.rounds.map(({ next: _n, impl: _i, score: _s, ...r }) => r) } : null)],
   ['deferred>5', d => (d.deferred.length > 5 ? { ...d, deferred: d.deferred.slice(0, 5) } : null)],
   ['rounds:earlier-briefs', d => (d.rounds.some(r => r.brief !== d.brief) ? { ...d, rounds: d.rounds.filter(r => r.brief === d.brief) } : null)],
   ['validators.failing', d => (d.validators.some(v => v.failing !== undefined) ? { ...d, validators: d.validators.map(({ failing: _f, ...v }) => v) } : null)],
@@ -195,8 +255,13 @@ const STEPS: readonly Step[] = [
   // The last resort, so the cap is a guarantee: the v1 core and the v2 scalars. Every v2 list goes (the rounds, and with
   // them their reviewers; the deferred findings, the verification and the integration), and of the validators only the
   // ones that failed stay, without their v2 fields.
-  ['core', d => ({ ...d, validators: d.validators.filter(v => !v.ok).map(v => ({ name: v.name, ok: v.ok })), rounds: [], verify: null, integration: null, deferred: [] })],
+  ['core', d => ({ ...withoutTrail(d), validators: d.validators.filter(v => !v.ok).map(v => ({ name: v.name, ok: v.ok })), rounds: [], verify: null, integration: null, deferred: [] })],
 ];
+
+function withoutTrail(d: ForgeDocV2): ForgeDocV2 {
+  const { trail: _t, ...rest } = d;
+  return rest;
+}
 
 /**
  * C7: the block cut in a fixed order until its JSON measures at most `max` UTF-8 bytes. The last step reduces it to its

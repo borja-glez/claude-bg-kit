@@ -7,7 +7,7 @@ import { parseVerifyFile } from '../src/forge/verdict.js';
 import { appendEvent, type LedgerEvent } from '../src/forge/ledger.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { deriveStatuses, statusKey, type StatusMap } from '../src/lib/forge-status.js';
-import { fitForgeDoc, parseForgeDocV2, STAGE_KEYS } from '../src/lib/roadmap-doc.js';
+import { fitForgeDoc, parseForgeDocV2, STAGE_KEYS, type ForgeDocV2 } from '../src/lib/roadmap-doc.js';
 import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
 import { MEDIUM_T1, ROADMAP_AT, writeVerify } from './fixtures/roadmap-ledger.js';
 import { useTempDirs } from './helpers/tmp.js';
@@ -17,7 +17,7 @@ const NOW = new Date(ROADMAP_AT(60));
 const statusOf = (events: readonly LedgerEvent[], task = 'T1', project: string | null = 'shop') =>
   events.reduce<StatusMap>((m, e) => deriveStatuses(m, e).map, {})[statusKey(task, project)!] ?? null;
 const input = (events: readonly LedgerEvent[], over: Partial<DocInput> = {}): DocInput => ({
-  task: 'T1', status: statusOf(events), events, execution: null, execTask: null, publicTask: null, reviews: [], verifies: [], deferred: null,
+  task: 'T1', status: statusOf(events), events, execution: null, execTask: null, publicTask: null, reviews: [], verifies: [], blocking: [], deferred: null,
   integration: null, assets: [], evidenceMode: 'upload', now: NOW, ...over,
 });
 const at = ROADMAP_AT(0);
@@ -36,8 +36,10 @@ describe('buildRoadmapData: the forge block v2 (G-02, G-05, K4-05)', () => {
     expect(forge).toMatchObject({ v: 2, path: 'medium', brief: 1, stage: 'done', phase: 'done', round: 2, cap: 4, acceptedRound: 2, overCap: false, updatedAt: NOW.toISOString(),
       verdict: { action: 'accept', score: 0.9 }, integration: null });
     expect(forge.rounds).toEqual([
-      { brief: 1, n: 1, action: 'fix', note: 'round 1: resume the implementer', findings: { critical: 1, important: 2, minor: 0, deferred: 0 }, reviewers: ['correctness', 'security'], at: ROADMAP_AT(20) },
-      { brief: 1, n: 2, action: 'accept', note: 'accepted', findings: { critical: 0, important: 1, minor: 3, deferred: 2 }, reviewers: ['correctness'], at: ROADMAP_AT(40) },
+      { brief: 1, n: 1, action: 'fix', note: 'round 1: resume the implementer', findings: { critical: 1, important: 2, minor: 0, deferred: 0 }, reviewers: ['correctness', 'security'], at: ROADMAP_AT(20),
+        next: 'resume', score: 0.4 },
+      { brief: 1, n: 2, action: 'accept', note: 'accepted', findings: { critical: 0, important: 1, minor: 3, deferred: 2 }, reviewers: ['correctness'], at: ROADMAP_AT(40),
+        next: 'done', score: 0.9 },
     ]);
     expect(forge.validators).toEqual([
       { name: 'test', ok: false, ms: 1000, failing: 2 },
@@ -106,6 +108,7 @@ describe('buildRoadmapData: the forge block v2 (G-02, G-05, K4-05)', () => {
     const e = exec({ T9: task({ stage: 'brief', agent: null }) });
     const f = buildRoadmapData(input([], { task: 'T9', status: null, execution: e, execTask: e.tasks.T9 })).forge;
     expect(f).toMatchObject({ path: 'large', brief: 1, stage: 'brief', rounds: [], validators: [], verify: null });
+    expect(f).not.toHaveProperty('trail');
     expect(parseForgeDocV2(f)).toEqual(f);
   });
   it('C1: a task the execution holds counts only the events since the execution started; an earlier run is not published as this one', () => {
@@ -121,6 +124,8 @@ describe('buildRoadmapData: the forge block v2 (G-02, G-05, K4-05)', () => {
     expect(held).not.toHaveProperty('verdict');
     expect(held).not.toHaveProperty('round');
     expect(held).not.toHaveProperty('cap');
+    // The trail is this run's way too: the earlier run's triage, reviews and done are not.
+    expect(held.trail).toEqual([{ s: 'implement', at: ROADMAP_AT(51), b: 1 }]);
     // Without a holding execution, every event of the task counts.
     const all = buildRoadmapData(input(events)).forge;
     expect(all.rounds).toHaveLength(2);
@@ -162,6 +167,178 @@ describe('buildRoadmapData: the forge block v2 (G-02, G-05, K4-05)', () => {
     // A later fix in the same brief leaves no accepted round either.
     const fixAfter: LedgerEvent[] = [...MEDIUM_T1.slice(0, 11), { ts: ROADMAP_AT(43), kind: 'verdict', task: 'T1-1', project: 'shop', dir: '.forge/work/shop/T1/reviews-1-3', action: 'fix', score: 0.3, signature: 's3', critical: 1, important: 0, minor: 0, deferred: 0, reviews: { n: 3, max: 4 } }];
     expect(buildRoadmapData(input(fixAfter)).forge.acceptedRound).toBeNull();
+  });
+});
+
+describe('buildRoadmapData: why a round went back and the trail (v3, waypoint 0.39)', () => {
+  const finding = (severity: string, problem: string, over: object = {}) => ({ severity, problem, ...over });
+  /** review-close's findings-1-<n>.json of a fix, as roadmap-sources reads it. */
+  const findingsFile = (n: number, findings: object[], validators: unknown[] = [], over: object = {}) =>
+    ({ brief: 1, n, at: ROADMAP_AT(20), file: { task: 'T1-1', round: n, action: 'fix', findings, validators, ...over } });
+  const RLO = String.fromCharCode(0x202e);
+
+  it('next, impl and score of a round come from its verdict and the round event logged right after it', () => {
+    const events = MEDIUM_T1.map(e => (e.kind === 'round' && e.next === 'resume' ? { ...e, implementer: { role: 'impl', agent: 'forge-impl' } } : e));
+    const [r1, r2] = buildRoadmapData(input(events)).forge.rounds;
+    expect(r1).toMatchObject({ next: 'resume', impl: 'forge-impl', score: 0.4, note: 'round 1: resume the implementer' });
+    // An accept starts no attempt: roundDecision's implementer is null.
+    expect(r2).toMatchObject({ next: 'done', score: 0.9 });
+    expect(r2).not.toHaveProperty('impl');
+  });
+  it('an unknown next, an implementer without an agent, a null or out-of-range score are left out, never the round', () => {
+    const odd = MEDIUM_T1.map(e => (e.kind === 'round' && e.next === 'resume' ? { ...e, next: 'later', implementer: { role: 'impl' } }
+      : e.kind === 'round' ? { ...e, implementer: null }
+        : e.kind === 'verdict' && e.action === 'fix' ? { ...e, score: null } : e.kind === 'verdict' ? { ...e, score: 1.5 } : e));
+    const rounds = buildRoadmapData(input(odd)).forge.rounds;
+    expect(rounds.map(r => r.action)).toEqual(['fix', 'accept']);
+    for (const k of ['next', 'impl', 'score']) expect(rounds[0]).not.toHaveProperty(k);
+    expect(rounds[1]).not.toHaveProperty('score');
+    expect(rounds[1]).not.toHaveProperty('impl');
+    // A long agent name is clipped as the page clips names.
+    const long = MEDIUM_T1.map(e => (e.kind === 'round' && e.next === 'resume' ? { ...e, implementer: { role: 'impl', agent: `forge-${'x'.repeat(200)}` } } : e));
+    expect(buildRoadmapData(input(long)).forge.rounds[0].impl).toHaveLength(80);
+  });
+  it('why and red of a review that did not accept: critical before important, the first three, one line each with where and who; the red validators by name, at most four', () => {
+    const blocking = [findingsFile(1, [
+      finding('important', 'the total skips the discount', { file: 'src/cart.ts', line: 40, reviewer: 'correctness', id: 'F2', origin: 'fix' }),
+      finding('important', `two\nlines${RLO} and a ${'long '.repeat(40)}tail`, { reviewer: 'perf', line: 0 }),
+      finding('critical', 'an order can be paid twice', { file: 'src/pay.ts', line: 7, reviewer: 'security' }),
+      finding('minor', 'a minor one never blocks'),
+      finding('important', '   '),
+      finding('important', 'a fourth blocking one, past the cap'),
+    ], [
+      { validator: 'test', failures: ['2 failed'], failing: ['cart > adds'] }, { validator: 'lint', failures: [] }, 'e2e', { validator: 'test' },
+      { validator: 'types' }, { validator: 'build' }, { failures: [] },
+    ])];
+    const [r1, r2] = buildRoadmapData(input(MEDIUM_T1, { blocking })).forge.rounds;
+    expect(r1.why).toEqual([
+      { sev: 'critical', problem: 'an order can be paid twice', file: 'src/pay.ts', line: 7, by: 'security' },
+      { sev: 'important', problem: 'the total skips the discount', file: 'src/cart.ts', line: 40, by: 'correctness' },
+      { sev: 'important', problem: `two lines and a ${'long '.repeat(40)}`.slice(0, 100).trimEnd(), by: 'perf' },
+    ]);
+    expect(r1.red).toEqual(['test', 'lint', 'e2e', 'types']);
+    // The note stays forge's reason: an older page shows it, and the new one falls back to it.
+    expect(r1.note).toBe('round 1: resume the implementer');
+    expect(r2).not.toHaveProperty('why');
+    expect(r2).not.toHaveProperty('red');
+    const forge = buildRoadmapData(input(MEDIUM_T1, { blocking })).forge;
+    expect(parseForgeDocV2(forge)).toEqual(forge);
+  });
+  it('no why nor red for an accept, from a file another close wrote, from a file that says nothing, nor from one older than the execution (C1)', () => {
+    // An accept's close removes its file: one left for the round anyway is not read.
+    const accepted = buildRoadmapData(input(MEDIUM_T1, { blocking: [findingsFile(2, [finding('critical', 'stale')], ['test'])] })).forge.rounds[1];
+    expect(accepted).not.toHaveProperty('why');
+    expect(accepted).not.toHaveProperty('red');
+    // The file of a close whose action is not the round's (a verdict logged without review-close).
+    const other = buildRoadmapData(input(MEDIUM_T1, { blocking: [findingsFile(1, [finding('critical', 'x')], ['test'], { action: 'redo' })] })).forge.rounds[0];
+    expect(other).not.toHaveProperty('why');
+    expect(other).not.toHaveProperty('red');
+    for (const file of [null, [], 'text', { findings: 'x', validators: {} }]) {
+      const r = buildRoadmapData(input(MEDIUM_T1, { blocking: [{ brief: 1, n: 1, file, at: ROADMAP_AT(20) }] })).forge.rounds[0];
+      expect(r, JSON.stringify(file)).not.toHaveProperty('why');
+      expect(r, JSON.stringify(file)).not.toHaveProperty('red');
+    }
+    // C1: a findings file from before the execution that holds the task is an earlier run's.
+    const e = exec({ T1: task() }, ROADMAP_AT(0));
+    const held = (atMin: number) => buildRoadmapData(input(MEDIUM_T1, { execution: e, execTask: e.tasks.T1,
+      blocking: [{ ...findingsFile(1, [finding('critical', 'paid twice')], ['test']), at: ROADMAP_AT(atMin) }] })).forge.rounds[0];
+    expect(held(-5)).not.toHaveProperty('why');
+    expect(held(-5)).not.toHaveProperty('red');
+    expect(held(20)).toMatchObject({ why: [{ sev: 'critical', problem: 'paid twice' }], red: ['test'] });
+    // Without a holding execution it counts.
+    const loose = buildRoadmapData(input(MEDIUM_T1, { blocking: [{ ...findingsFile(1, [finding('critical', 'paid twice')]), at: ROADMAP_AT(-5) }] })).forge.rounds[0];
+    expect(loose.why).toHaveLength(1);
+  });
+  it('the trail: the triage first, then each phase lowercased with its brief and round, oldest first', () => {
+    expect(buildRoadmapData(input(MEDIUM_T1)).forge.trail).toEqual([
+      { s: 'triage', at: ROADMAP_AT(0) },
+      { s: 'implement', at: ROADMAP_AT(1), b: 1 },
+      { s: 'validate', at: ROADMAP_AT(10), b: 1, r: 1 },
+      { s: 'review', at: ROADMAP_AT(12), b: 1, r: 1 },
+      { s: 'review', at: ROADMAP_AT(30), b: 1, r: 2 },
+      { s: 'done', at: ROADMAP_AT(45) },
+    ]);
+  });
+  it('the trail drops unknown phases and bad numbers, collapses a step that repeats the one before it, and keeps the newest 16', () => {
+    const p = (min: number, phase: string, over: object = {}): LedgerEvent => ({ ts: ROADMAP_AT(min), kind: 'phase', task: 'T1', project: 'shop', phase, ...over });
+    const events: LedgerEvent[] = [
+      { ts: ROADMAP_AT(0), kind: 'triage', task: 'T1', project: 'shop', path: 'medium', reasons: [], brief: 4 },
+      p(1, 'Implement', { brief: 1 }), p(2, 'nap', { brief: 1 }), p(3, 'implement', { brief: 1 }),
+      p(4, ' VALIDATE ', { brief: '1', round: 0 }), p(5, 'review', { brief: 1, round: 1 }), p(6, 'review', { brief: 1, round: 1 }),
+      { ts: 'later', kind: 'phase', task: 'T1', project: 'shop', phase: 'verdict', brief: 1, round: 1 },
+      p(7, 'fix', { brief: 1, round: 1, validators: true }), p(8, 'stopped'),
+    ];
+    expect(buildRoadmapData(input(events)).forge.trail).toEqual([
+      { s: 'triage', at: ROADMAP_AT(0) },
+      { s: 'implement', at: ROADMAP_AT(1), b: 1 },
+      { s: 'validate', at: ROADMAP_AT(4) },
+      { s: 'review', at: ROADMAP_AT(5), b: 1, r: 1 },
+      { s: 'fix', at: ROADMAP_AT(7), b: 1, r: 1 },
+      { s: 'stopped', at: ROADMAP_AT(8) },
+    ]);
+    // Ten rounds of review, verdict and fix: the newest 16 steps, so the triage and the first rounds go.
+    const long: LedgerEvent[] = [events[0], p(1, 'implement', { brief: 1 }), ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].flatMap(n =>
+      ['review', 'verdict', 'fix'].map((phase, k) => p(10 * n + k, phase, { brief: 1, round: n })))];
+    const trail = buildRoadmapData(input(long)).forge.trail!;
+    expect(trail).toHaveLength(16);
+    expect(trail[0]).toEqual({ s: 'fix', at: ROADMAP_AT(52), b: 1, r: 5 });
+    expect(trail.at(-1)).toEqual({ s: 'fix', at: ROADMAP_AT(102), b: 1, r: 10 });
+    const forge = buildRoadmapData(input(long)).forge;
+    expect(parseForgeDocV2(forge)).toEqual(forge);
+  });
+  it('a Large at its limit with v3 everywhere still fits in 4096 bytes: the v3 cuts go first and the rounds of its brief stay', () => {
+    const W = '.forge/work/shop/T1';
+    const events: LedgerEvent[] = [
+      { ts: ROADMAP_AT(0), kind: 'triage', task: 'T1', project: 'shop', path: 'large', reasons: [] },
+      { ts: ROADMAP_AT(1), kind: 'phase', task: 'T1', project: 'shop', phase: 'implement', brief: 1, base: 'abc1234' },
+      { ts: ROADMAP_AT(2), kind: 'validate', task: 'T1-1', project: 'shop', ok: false, scope: 'heavy', durationMs: 1, cached: false,
+        results: Array.from({ length: 10 }, (_, k) => ({ validator: `validator-${k}`, ok: k % 2 === 0, durationMs: 1234, cached: true, failing: ['a', 'b', 'c'], failingKnown: true })) },
+      ...[1, 2, 3, 4, 5].flatMap((n): LedgerEvent[] => [
+        { ts: ROADMAP_AT(10 * n), kind: 'phase', task: 'T1', project: 'shop', phase: 'review', brief: 1, round: n, reviewers: ['correctness', 'security', 'perf'] },
+        { ts: ROADMAP_AT(10 * n + 1), kind: 'phase', task: 'T1', project: 'shop', phase: 'verdict', brief: 1, round: n },
+        { ts: ROADMAP_AT(10 * n + 1), kind: 'verdict', task: 'T1-1', project: 'shop', dir: `${W}/reviews-1-${n}`, action: 'fix', score: 0.55, signature: `s${n}`,
+          critical: 1, important: 3, minor: 0, deferred: 0, reviews: { n, max: 5 } },
+        { ts: ROADMAP_AT(10 * n + 1), kind: 'round', task: 'T1-1', project: 'shop', round: n, cap: 4, next: 'fresh-stronger', reason: 'r'.repeat(120),
+          implementer: { role: 'impl-strong', agent: 'forge-impl-strong' }, reviews: { n, max: 5 } },
+        { ts: ROADMAP_AT(10 * n + 2), kind: 'phase', task: 'T1', project: 'shop', phase: 'fix', brief: 1, round: n },
+      ]),
+    ];
+    const blocking = [1, 2, 3, 4, 5].map(n => findingsFile(n, [
+      ...[1, 2, 3].map(k => finding('important', `${k}`.repeat(100), { file: `src/module-${n}/a-file-with-a-long-name-${k}.ts`, line: 1000 + k, reviewer: 'correctness' })),
+      finding('critical', 'c'.repeat(160), { file: `src/module-${n}/core.ts`, line: 1, reviewer: 'security' }),
+    ], ['validator-1', 'validator-3', 'validator-5', 'validator-7', 'validator-9']));
+    const deferred = (n: number) => Array.from({ length: n }, (_, k) => ({ file: `src/module-${k}/file.ts`, line: 100 + k, problem: 'y'.repeat(160) }));
+    // The same block as a forge before v3 built it: no trail, and rounds without what v3 adds.
+    const preV3 = (d: ForgeDocV2): ForgeDocV2 => {
+      const { trail: _t, ...rest } = d;
+      return { ...rest, rounds: d.rounds.map(({ next: _n, impl: _i, score: _s, why: _w, red: _r, ...r }) => r) };
+    };
+    for (const n of [10, 5]) {
+      const forge = buildRoadmapData(input(events, { blocking, deferred: deferred(n) })).forge;
+      expect(forge.trail).toHaveLength(16);
+      expect(forge.rounds).toHaveLength(5);
+      expect(forge.rounds.every(r => r.why?.length === 3 && r.why[0].sev === 'critical' && r.red?.length === 4 && r.impl === 'forge-impl-strong')).toBe(true);
+      const fit = fitForgeDoc(forge);
+      expect(fit.fits, `${n} deferred`).toBe(true);
+      expect(fit.bytes).toBeLessThanOrEqual(4096);
+      // The v3 cuts first, then what the block without v3 needed (10 deferred of 160 were over 4 KB before v3 too).
+      const before = fitForgeDoc(preV3(forge));
+      expect(before.dropped, `${n} deferred`).toEqual(n === 10 ? ['deferred>5'] : []);
+      // Every v3 field may go (rounds.next last of them), never before a cut the block of before did not need: once they
+      // are all gone, what is left is that block, cut exactly as before.
+      const v3 = fit.dropped.slice(0, fit.dropped.length - before.dropped.length);
+      expect(v3.slice(0, 4), `${n} deferred`).toEqual(['trail>8', 'rounds.why>1', 'trail', 'rounds.why']);
+      expect(v3.length === 4 || (v3.length === 5 && v3[4] === 'rounds.next'), `${n} deferred: ${v3.join(', ')}`).toBe(true);
+      expect(fit.dropped.slice(v3.length), `${n} deferred`).toEqual(before.dropped);
+      if (n === 10) expect(fit.doc).toEqual(before.doc);
+      expect(fit.doc.deferred).toHaveLength(5);
+      expect(fit.doc.rounds.map(r => [r.brief, r.n])).toEqual([[1, 1], [1, 2], [1, 3], [1, 4], [1, 5]]);
+      expect(fit.doc.rounds.every(r => r.note.length === 120)).toBe(true);
+      if (v3.length === 4) expect(fit.doc.rounds.every(r => r.next === 'fresh-stronger' && r.impl === 'forge-impl-strong' && r.score === 0.55)).toBe(true);
+      let drops = 0;
+      expect(parseForgeDocV2(fit.doc, () => { drops++; })).toEqual(fit.doc);
+      expect(drops).toBe(0);
+    }
   });
 });
 
@@ -309,7 +486,8 @@ describe('FORGE roadmap-doc (G-03, G-06)', () => {
     const forge = JSON.parse(readFileSync(out(cli('roadmap-doc', 'T2', '--project', 'shop')).file, 'utf8')).forge;
     expect(forge).not.toHaveProperty('round');
     expect(forge).not.toHaveProperty('cap');
-    expect(forge.rounds).toEqual([{ brief: 1, n: 1, action: 'accept', note: 'accepted', findings: { critical: 0, important: 0, minor: 0, deferred: 0 }, reviewers: ['correctness', 'security'], at: ROADMAP_AT(73) }]);
+    expect(forge.rounds).toEqual([{ brief: 1, n: 1, action: 'accept', note: 'accepted', findings: { critical: 0, important: 0, minor: 0, deferred: 0 }, reviewers: ['correctness', 'security'], at: ROADMAP_AT(73),
+      next: 'done', score: 0.9 }]);
     expect(forge.validators).toEqual([{ name: 'test', ok: true }]);
     expect(parseForgeDocV2(forge)).toEqual(forge);
   });
@@ -361,6 +539,29 @@ describe('FORGE roadmap-doc (G-03, G-06)', () => {
     out(cli('roadmap-doc', 'T1', '--project', 'shop'));
     expect(JSON.stringify(data())).not.toContain('reviews-1-9');
     expect(data().forge.rounds.some((r: { n: number }) => r.n === 9)).toBe(false);
+  });
+  it('v3: the findings file review-close left for a fix gives its round why and red; an accept\'s, an unreadable one or one set aside gives none', () => {
+    const work = path.join(root, WORK);
+    mkdirSync(path.join(work, 'earlier-r0'), { recursive: true });
+    writeFileSync(path.join(work, 'findings-1-1.json'), JSON.stringify({ task: 'T1-1', round: 1, action: 'fix', findings: [
+      { severity: 'important', problem: 'the total skips the discount', file: 'src/cart.ts', line: 40, reviewer: 'correctness', id: 'F2' },
+      { severity: 'critical', problem: 'an order can be paid twice', file: 'src/pay.ts', line: 7, reviewer: 'security', id: 'F1' },
+    ], validators: [{ validator: 'test', failures: ['2 failed'], failing: ['cart > adds'] }] }));
+    writeFileSync(path.join(work, 'findings-1-2.json'), JSON.stringify({ task: 'T1-1', round: 2, action: 'accept', findings: [{ severity: 'critical', problem: 'stale' }], validators: [] }));
+    writeFileSync(path.join(work, 'findings-1-3.json'), 'not json');
+    writeFileSync(path.join(work, 'findings-index-1.json'), '{}');
+    writeFileSync(path.join(work, 'earlier-r0', 'findings-1-2.json'), JSON.stringify({ action: 'fix', findings: [{ severity: 'critical', problem: 'an earlier run' }] }));
+    const r = out(cli('roadmap-doc', 'T1', '--project', 'shop'));
+    expect(r.dropped).toEqual([]);
+    const forge = data().forge;
+    expect(forge.rounds[0]).toMatchObject({ next: 'resume', score: 0.4, red: ['test'], why: [
+      { sev: 'critical', problem: 'an order can be paid twice', file: 'src/pay.ts', line: 7, by: 'security' },
+      { sev: 'important', problem: 'the total skips the discount', file: 'src/cart.ts', line: 40, by: 'correctness' },
+    ] });
+    expect(forge.rounds[1]).not.toHaveProperty('why');
+    expect(forge.trail.map((t: { s: string }) => t.s)).toEqual(['triage', 'implement', 'validate', 'review', 'review', 'done']);
+    expect(JSON.stringify(forge)).not.toContain('an earlier run');
+    expect(parseForgeDocV2(forge)).toEqual(forge);
   });
   // A status file the CLI reads is normalized, so a damaged one cannot reach the parse: the fit is the seam (Io.roadmapFit).
   it('exit 3 when the block is over the cap or does not validate: nothing is written, not even the uploads (C7)', () => {

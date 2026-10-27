@@ -1,11 +1,13 @@
 // C7 (wave 4): state/T's forge block (v2), its evidence and its exec, built from what forge keeps locally: the task's
-// status (C5), its ledger events (C4), the execution, its review dirs and its verify files. Pure:
+// status (C5), its ledger events (C4), the execution, its review dirs, its findings files and its verify files. Pure:
 // src/forge/roadmap-sources.ts reads the files, and FORGE roadmap-doc and the swarm commands write the result.
 import {
-  DEFERRED_MAX, DOC_PATHS, NOTE_MAX, PROBLEM_MAX, ROUNDS_MAX, SHOTS_MAX, STAGE_KEYS, UNCHECKED_MAX, VALIDATORS_MAX,
+  DEFERRED_MAX, DOC_PATHS, NOTE_MAX, PROBLEM_MAX, RED_MAX, ROUND_NEXTS, ROUNDS_MAX, SHOTS_MAX, STAGE_KEYS, TRAIL_MAX, TRAIL_STAGES,
+  UNCHECKED_MAX, VALIDATORS_MAX, WHY_MAX, WHY_PROBLEM_MAX,
   type DeferredV2, type DocAction, type DocPath, type DocStage, type EvidenceV2, type ForgeDocV2, type IntegrationV2,
-  type RoundV2, type ShotV2, type ValidatorV2, type VerifyV2,
+  type RoundNext, type RoundV2, type ShotV2, type TrailV2, type ValidatorV2, type VerifyV2, type WhyV2,
 } from '../lib/roadmap-doc.js';
+import { oneLine } from '../lib/one-line.js';
 import { deriveStatuses, reviewersOf, statusKey, type ForgeStatus, type StatusMap } from '../lib/forge-status.js';
 import { STAGES, type Stage, type TaskExec } from '../lib/types.js';
 import type { ExecTask, ExecutionState, PublicTask } from '../lib/execution-state.js';
@@ -26,10 +28,16 @@ export interface VerifyRound { brief: number; n: number; file: VerifyFile; local
  * same paths, so an upload counts only for its own run and round.
  */
 export interface Asset { path: string; id: string; url: string; runId: string | null; round: string }
+/**
+ * The findings file review-close leaves at the root of the work folder for a review that did not accept,
+ * `findings-<brief>-<n>.json` = `{task, round, action, findings, validators}` (an accept removes it): `file` is its JSON as
+ * read. `at` is its mtime (C1: one older than the execution is an earlier run's).
+ */
+export interface BlockingFile { brief: number; n: number; file: unknown; at?: string | null }
 export interface DocInput {
   task: string; status: ForgeStatus | null; events: readonly LedgerEvent[];
   execution: ExecutionState | null; execTask: ExecTask | null; publicTask: PublicTask | null;
-  reviews: readonly ReviewDir[]; verifies: readonly VerifyRound[]; deferred: unknown;
+  reviews: readonly ReviewDir[]; verifies: readonly VerifyRound[]; blocking: readonly BlockingFile[]; deferred: unknown;
   /** The mtime of deferred.json, for the entries that carry no `ts` of their own. */
   deferredAt?: string | null;
   integration: IntegrationV2 | null; assets: readonly Asset[]; evidenceMode: 'upload' | 'local'; now: Date;
@@ -50,6 +58,12 @@ const dirOf = (e: LedgerEvent): { brief: number; n: number } | null => {
   return m ? { brief: Number(m[1]), n: Number(m[2]) } : null;
 };
 const reviewsOf = (x: unknown): { n: number; max: number } | null => (isObj(x) && int(x.n, 1, 20) && int(x.max, 1, 20) ? { n: x.n, max: x.max } : null);
+/** v3: one line (oneLine) of at most `max` code points, trimmed: text the page's parser keeps as it is ('' for no text). */
+const lineOf = (v: unknown, max: number): string => (typeof v === 'string' ? Array.from(oneLine(v)).slice(0, max).join('').trimEnd() : '');
+/** A time the page's parser takes: an ISO date with its time. A trail step without one would be dropped (exit 3). */
+const isIso = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) && !Number.isNaN(Date.parse(v));
+// The page clips a reviewer's or a validator's name to 40 characters, an agent's and a file's as the other names.
+const NAME_MAX = 80, FILE_MAX = 200, REVIEWER_MAX = 40;
 
 /** Who reviewed a round: its phase review (C4), else, in an older ledger, the reviewers' files of its dir; verify when it ran. */
 function reviewersFor(i: DocInput, d: { brief: number; n: number }): string[] {
@@ -71,14 +85,71 @@ function roundsOf(i: DocInput): RoundV2[] {
   return [...last.values()].sort((a, b) => a - b).map(at => {
     const e = i.events[at];
     const d = dirOf(e)!;
-    // The note is the reason of the round event review-close logs right after the verdict.
-    const next = i.events.slice(at + 1).find(x => x.kind === 'round' && x.task === e.task);
-    return {
-      brief: d.brief, n: d.n, action: e.action as DocAction, note: typeof next?.reason === 'string' ? clip(next.reason, NOTE_MAX) : '',
+    const action = e.action as DocAction;
+    // The note is the reason of the round event review-close logs right after the verdict; v3 takes from the same event
+    // what roundDecision decided (next) and the agent of the attempt it starts (none when it starts none).
+    const decided = i.events.slice(at + 1).find(x => x.kind === 'round' && x.task === e.task);
+    const round: RoundV2 = {
+      brief: d.brief, n: d.n, action, note: typeof decided?.reason === 'string' ? clip(decided.reason, NOTE_MAX) : '',
       findings: { critical: count(e.critical), important: count(e.important), minor: count(e.minor), deferred: count(e.deferred) },
       reviewers: reviewersFor(i, d), at: e.ts,
     };
+    if ((ROUND_NEXTS as readonly unknown[]).includes(decided?.next)) round.next = decided!.next as RoundNext;
+    const implementer = decided?.implementer;
+    const impl = isObj(implementer) ? lineOf(implementer.agent, NAME_MAX) : '';
+    if (impl) round.impl = impl;
+    if (typeof e.score === 'number' && Number.isFinite(e.score) && e.score >= 0 && e.score <= 1) round.score = e.score;
+    return { ...round, ...blockingOf(i, d, action) };
   });
+}
+
+const SEVERITY = { critical: 0, important: 1 } as const;
+/**
+ * v3: what blocked a review that did not accept, from the findings file review-close left for it: its critical findings
+ * before its important ones, the first WHY_MAX, one line each with where and the reviewer that found them; and the
+ * validators in red at its close (`validators`, review-close's failing ones, by name). Nothing for an accept (its close
+ * removes the file), nor from a file whose action is not the round's (an earlier close wrote it, and the verdict that
+ * counts was logged without review-close).
+ */
+function blockingOf(i: DocInput, d: { brief: number; n: number }, action: DocAction): Pick<RoundV2, 'why' | 'red'> {
+  const f = action === 'accept' ? null : i.blocking.find(b => b.brief === d.brief && b.n === d.n)?.file;
+  if (!isObj(f) || (isAction(f.action) && f.action !== action)) return {};
+  const why = (Array.isArray(f.findings) ? f.findings as unknown[] : [])
+    .filter((x): x is Obj & { severity: WhyV2['sev'] } => isObj(x) && (x.severity === 'critical' || x.severity === 'important') && !!lineOf(x.problem, WHY_PROBLEM_MAX))
+    .sort((a, b) => SEVERITY[a.severity] - SEVERITY[b.severity]).slice(0, WHY_MAX)
+    .map(x => {
+      const w: WhyV2 = { sev: x.severity, problem: lineOf(x.problem, WHY_PROBLEM_MAX) };
+      const file = lineOf(x.file, FILE_MAX), by = lineOf(x.reviewer, REVIEWER_MAX);
+      if (file) w.file = file;
+      if (int(x.line, 1, 10_000_000)) w.line = x.line;
+      if (by) w.by = by;
+      return w;
+    });
+  // A failing validator is {validator, failures, failing}; a bare name is taken too.
+  const red = [...new Set((Array.isArray(f.validators) ? f.validators as unknown[] : [])
+    .map(v => lineOf(isObj(v) ? v.validator : v, REVIEWER_MAX)).filter(Boolean))].slice(0, RED_MAX);
+  return { ...(why.length ? { why } : {}), ...(red.length ? { red } : {}) };
+}
+
+/**
+ * v3: the task's way through forge in this run (ownRun's events): its triage, then each phase event whose phase,
+ * lowercased, is a stage the trail names, with its brief and review round when they are numbers (the phases swarm task
+ * logs carry neither). Oldest first, in the order of the ledger; a step that repeats the one before it (the same stage,
+ * brief and round) is that step, at its first time; the newest TRAIL_MAX.
+ */
+function trailOf(events: readonly LedgerEvent[]): TrailV2[] {
+  const steps: TrailV2[] = [];
+  for (const e of events) {
+    const s = e.kind === 'triage' ? 'triage' : e.kind === 'phase' && typeof e.phase === 'string' ? e.phase.trim().toLowerCase() : null;
+    if (!s || !TRAIL_STAGES.includes(s) || !isIso(e.ts)) continue;
+    const step: TrailV2 = { s, at: e.ts };
+    if (e.kind === 'phase' && int(e.brief, 1, 9999)) step.b = e.brief;
+    if (e.kind === 'phase' && int(e.round, 1, 99)) step.r = e.round;
+    const prev = steps.at(-1);
+    if (prev && prev.s === step.s && prev.b === step.b && prev.r === step.r) continue;
+    steps.push(step);
+  }
+  return steps.slice(-TRAIL_MAX);
 }
 
 /** The last validate of the task that is neither a baseline (prep, validate --base-run, swarm integrate's) nor an --affected pass. */
@@ -203,8 +274,9 @@ function evidenceOf(i: DocInput, brief: number): EvidenceV2 | null {
  * a new run of the same plan task restarts it in the same work folder, and an earlier run's rounds, accepted round,
  * over-cap flag and deferred findings are not this run's. The status is derived again from those events for the same
  * reason (its verdict, reviews and stages). What forge keeps on disk is dated the same way: deferred.json (by the entry's
- * own `ts`, else the file's mtime), the review dirs and the verifications (by their mtime) that predate the run are
- * left out. Without a holding execution (the task is not in it, or its startedAt is no date) everything counts.
+ * own `ts`, else the file's mtime), the review dirs, the findings files and the verifications (by their mtime) that
+ * predate the run are left out. Without a holding execution (the task is not in it, or its startedAt is no date)
+ * everything counts.
  */
 function ownRun(i: DocInput): DocInput {
   const e = i.execution;
@@ -220,7 +292,8 @@ function ownRun(i: DocInput): DocInput {
     // A deferred.json of an earlier run is no answer: the rulings of this run's events say what was deferred.
     deferred = kept.length ? kept : null;
   }
-  return { ...i, events, status: own, deferred, reviews: i.reviews.filter(r => current(r.at)), verifies: i.verifies.filter(v => current(v.at)) };
+  return { ...i, events, status: own, deferred, reviews: i.reviews.filter(r => current(r.at)), verifies: i.verifies.filter(v => current(v.at)),
+    blocking: i.blocking.filter(b => current(b.at)) };
 }
 
 /** C7: the forge block v2, the evidence and the exec of one task. */
@@ -239,11 +312,12 @@ export function buildRoadmapData(input: DocInput): RoadmapData {
   const stage = stageOf(i);
   const agent = i.execTask?.agent ?? liveOf(i)?.agent ?? s?.agent ?? null;
   const verdict = s?.verdict && isAction(s.verdict.action) ? { action: s.verdict.action as DocAction, score: s.verdict.score } : null;
+  const trail = trailOf(i.events);
   const forge: ForgeDocV2 = {
     v: 2, path: pathOf(i), phase: stage, ...(agent ? { agent: clip(agent, 80) } : {}), validators: validatorsOf(i.events),
     ...(verdict ? { verdict } : {}), ...(reviews ? { round: reviews.n, cap: reviews.max } : {}),
     brief, stage, rounds: all.slice(-ROUNDS_MAX), verify: verifyOf(s), stages: stagesOf(s), integration: i.integration,
-    deferred: deferredOf(i), acceptedRound, overCap, updatedAt: i.now.toISOString(),
+    deferred: deferredOf(i), acceptedRound, overCap, updatedAt: i.now.toISOString(), ...(trail.length ? { trail } : {}),
   };
   return { forge, evidence: evidenceOf(i, brief), exec: execOf(i) };
 }

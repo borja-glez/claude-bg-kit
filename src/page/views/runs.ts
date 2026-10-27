@@ -68,6 +68,17 @@ function uniqueTasks(r: RunSummaryDoc): RunSummaryDoc['tasks'] {
   return r.tasks.filter(t => !seen.has(t.id) && !!seen.add(t.id));
 }
 
+/** v3: how a run's reviews went, from the rounds runs/ keeps per task (its reviews with a verdict in the run): how many of
+ *  the integrated tasks took a single review, and the mean of reviews per task that had any. Nothing without rounds. */
+function quality(d: Dict, tasks: RunSummaryDoc['tasks']): string[] {
+  const reviewed = tasks.filter(t => num(t.rounds) > 0);
+  if (!reviewed.length) return [];
+  const integrated = reviewed.filter(t => t.status === 'integrated');
+  const first = integrated.filter(t => num(t.rounds) === 1).length;
+  const mean = Math.round((reviewed.reduce((n, t) => n + num(t.rounds), 0) / reviewed.length) * 10) / 10;
+  return [...(integrated.length ? [d.runs.firstPass(first, integrated.length)] : []), d.runs.meanRounds(d.num(mean))];
+}
+
 /** A duration in seconds as the loose list says it: under a minute, «<1 min». */
 const secsText = (d: Dict, secs: number): string => (secs < 60 ? d.runs.underMin : d.dur(secs / 60));
 
@@ -84,7 +95,7 @@ function renderHistory(m: Model, d: Dict, ui: UiState, loc: string): string {
     const tasks = uniqueTasks(r);
     const integrated = tasks.filter(t => t.status === 'integrated').length;
     const secs = (Date.parse(r.endedAt) - Date.parse(r.startedAt)) / 1000;
-    const parts = [fmt(r.endedAt, loc), Number.isFinite(secs) && secs >= 0 ? secsText(d, secs) : '', d.runs.integrated(integrated, tasks.length), r.merged ? d.runs.merged(r.target) : d.runs.unmerged(r.branch)].filter(Boolean);
+    const parts = [fmt(r.endedAt, loc), Number.isFinite(secs) && secs >= 0 ? secsText(d, secs) : '', d.runs.integrated(integrated, tasks.length), ...quality(d, tasks), r.merged ? d.runs.merged(r.target) : d.runs.unmerged(r.branch)].filter(Boolean);
     return `<li class="rhi" data-k="run:${esc(r.runId)}"><button type="button" class="rhb" data-action="run-toggle" data-id="${esc(r.runId)}" aria-expanded="${isOpen}"><span class="chev" aria-hidden="true">${isOpen ? '⌄' : '›'}</span><span class="rk rk-${kind}">${esc(d.runs.kind[kind])}</span> <span class="k">${esc(r.runId)}</span> <span class="mono">${parts.map(esc).join(' · ')}</span></button>${isOpen ? historyBody(m, d, r, tasks) : ''}</li>`;
   }).join('');
   return `<section class="card rhist"><h2 class="lbl">${esc(d.runs.history)} (${list.length})</h2><ul class="rhl">${items}</ul></section>`;

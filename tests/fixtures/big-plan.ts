@@ -57,6 +57,13 @@ export function bigStates(now = BIG_NOW): Record<string, TaskState> {
     };
   }
   (['implement', 'review', 'verify'] as const).forEach((stage, i) => {
+    // v3: the stages each one went through (a review, its verdict and a fix per closed round), up to the one it is in.
+    const trail: { s: string; at: string; b?: number; r?: number }[] = [{ s: 'triage', at: at(now, -48) }, { s: 'brief', at: at(now, -47), b: 1 }, { s: 'implement', at: at(now, -45), b: 1 }];
+    for (let k = 0; k < i; k++) {
+      const close = -30 + k * 5;
+      trail.push({ s: 'validate', at: at(now, close - 4), b: 1, r: k + 1 }, { s: 'review', at: at(now, close - 3), b: 1, r: k + 1 }, { s: 'verdict', at: at(now, close - 1), b: 1, r: k + 1 }, { s: 'fix', at: at(now, close), b: 1, r: k + 1 });
+    }
+    if (trail.at(-1)!.s !== stage) trail.push({ s: stage, at: at(now, -12 + i * 3), b: 1, r: i + 1 });
     out[taskId(DONE + 1 + i)] = {
       status: 'in_progress', owner: 'main', claimedAt: at(now, -50), startedAt: at(now, -48),
       exec: { runId: BIG_RUN, mode: 'subagents', by: 'main', agent: 'forge-impl', stage, round: 1, since: at(now, -12 + i * 3), leaseUntil: at(now, 10) },
@@ -64,10 +71,17 @@ export function bigStates(now = BIG_NOW): Record<string, TaskState> {
         v: 2, path: 'medium', phase: stage, agent: 'forge-impl', round: i + 1, cap: 4, brief: 1, stage,
         validators: [{ name: 'test', ok: true, ms: 41000 }, { name: 'typecheck', ok: true, ms: 9000, cached: true }, { name: 'lint', ok: i !== 1 }, { name: 'e2e', ok: true, flaky: true }],
         rounds: Array.from({ length: i }, (_, k) => ({
-          brief: 1, n: k + 1, action: 'fix' as const, note: `ronda ${k + 1}: arreglar el caso borde`,
-          findings: { critical: 0, important: 1, minor: 2, deferred: 0 }, reviewers: ['correctness'], at: at(now, -30 + k * 5),
+          brief: 1, n: k + 1, action: 'fix' as const, note: `round ${k + 1}: resume the implementer`,
+          findings: { critical: k === 0 && i === 2 ? 1 : 0, important: 1, minor: 2, deferred: 0 }, reviewers: ['correctness', ...(k === 0 ? ['security'] : [])], at: at(now, -30 + k * 5),
+          next: k === 1 ? 'fresh-stronger' as const : 'resume' as const, impl: k === 1 ? 'forge-impl-high' : 'forge-impl', score: 0.55 + k * 0.1,
+          why: [
+            ...(k === 0 && i === 2 ? [{ sev: 'critical' as const, problem: 'La sesión caducada sigue aceptando escrituras en el endpoint de pedidos', file: `src/mod${i}/part${i}/session.ts`, line: 88, by: 'security' }] : []),
+            { sev: 'important' as const, problem: 'El caso borde de la fecha vacía no se valida en el parser', file: `src/mod${i}/part${i}/parse.ts`, line: 40 + k, by: 'correctness' },
+          ],
+          ...(k === 0 && i === 2 ? { red: ['lint'] } : {}),
         })),
-        verify: null, stages: { brief: 60, implement: 600 }, integration: null, deferred: [], acceptedRound: null, overCap: false, updatedAt: at(now, -5),
+        verify: null, stages: { triage: 60, brief: 60, implement: 600 + i * 300, validate: 120 * i, review: 180 * i, verdict: 30 * i }, integration: null, deferred: [], acceptedRound: null, overCap: false, updatedAt: at(now, -5),
+        trail,
       },
     };
   });
@@ -75,7 +89,7 @@ export function bigStates(now = BIG_NOW): Record<string, TaskState> {
   const t118 = out[taskId(118)]!;
   out[taskId(118)] = { ...t118, forge: {
     v: 2, path: 'medium', phase: 'done', agent: 'forge-impl', round: 2, cap: 4, brief: 1, stage: 'done', validators: [{ name: 'test', ok: true }],
-    rounds: [{ brief: 1, n: 2, action: 'accept', note: 'listo', findings: { critical: 0, important: 0, minor: 2, deferred: 2 }, reviewers: ['correctness'], at: t118.doneAt! }],
+    rounds: [{ brief: 1, n: 2, action: 'accept', note: 'listo', findings: { critical: 0, important: 0, minor: 2, deferred: 2 }, reviewers: ['correctness'], at: t118.doneAt!, next: 'done', score: 0.91 }],
     verify: null, stages: { implement: 1200 }, integration: { branch: 'forge/run-big', sha: 'abc1234', merged: false, target: 'main' },
     deferred: [{ file: 'src/mod9/part2/x.ts', line: 12, problem: 'falta un índice' }, { problem: 'n+1 en el listado' }], acceptedRound: 2, overCap: false, updatedAt: t118.doneAt!,
   } };

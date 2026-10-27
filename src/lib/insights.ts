@@ -102,6 +102,13 @@ export function maxOf(values: Iterable<number>): number {
  * done does not count; a cycle is scheduled as if free of dependencies. Null when nothing is pending.
  */
 export function forecastEnd(plan: PlanView, states: States, now: number, opts: { parallel: number; paceRatio: number }): ForecastEnd | null {
+  const s = forecastSchedule(plan, states, now, opts);
+  return s ? { at: s.at, parallel: s.parallel } : null;
+}
+
+/** v3: the schedule forecastEnd reckons, with when each pending task ends (ms), so a version's end is the latest of its
+ *  tasks in the one schedule of the plan (its dependencies on other versions' tasks included). Null as forecastEnd. */
+export function forecastSchedule(plan: PlanView, states: States, now: number, opts: { parallel: number; paceRatio: number }): (ForecastEnd & { ends: Map<string, number> }) | null {
   const pending = plan.tasks.filter(t => !isDone(states, t.id));
   if (!pending.length) return null;
   const parallel = Math.max(1, Math.floor(Number.isFinite(opts.parallel) ? opts.parallel : 1));
@@ -147,7 +154,23 @@ export function forecastEnd(plan: PlanView, states: States, now: number, opts: {
   }
   const at = now + maxOf(finish.values()) * MIN;
   // A finite date past what a Date holds (an absurd estimate) would throw in toISOString: none rather than a broken page.
-  return Number.isFinite(at) && Math.abs(at) <= MAX_DATE ? { at: Math.round(at), parallel } : null;
+  if (!(Number.isFinite(at) && Math.abs(at) <= MAX_DATE)) return null;
+  const ends = new Map([...finish].map(([id, m]) => [id, Math.round(now + m * MIN)]));
+  return { at: Math.round(at), parallel, ends };
+}
+
+/** v3: when each version not done is forecast to end: the latest end of its pending tasks (those of its phases) in the
+ *  plan's schedule; absent for a version with nothing pending, or without a schedule. */
+export function versionEnds(plan: PlanView, ends: ReadonlyMap<string, number> | null | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!ends) return out;
+  for (const v of plan.versions) {
+    const phases = new Set(v.phases);
+    let last = -Infinity;
+    for (const t of plan.tasks) if (phases.has(t.phase)) { const e = ends.get(t.id); if (e !== undefined && e > last) last = e; }
+    if (Number.isFinite(last)) out[v.id] = last;
+  }
+  return out;
 }
 
 export interface Burndown {

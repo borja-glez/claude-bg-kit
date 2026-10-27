@@ -762,6 +762,10 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       // H-18: a link may carry the plan's filter («Te necesita» opens it on the deferred findings).
       const pf = el.dataset.pf;
       if (ui.view === 'plan' && pf !== undefined) ui.planFilter = parsePlanFilter(pf.split(','));
+      // v3: a phase chip of a version opens Plan on that phase, in view (only a phase the plan has).
+      const ph = el.dataset.ph;
+      if (ui.view === 'plan' && ph && model.plan.phases.some(p => p.id === ph)) { ui.planOpen = new Set([ph]); revealNext = byKey(`plh:${ph}`); focusNext = revealNext; }
+      else if (ui.view === 'plan' && pf !== undefined) ui.planOpen = undefined;
       // A link inside the detail closes it: the view it opens takes the focus (the link is gone with the detail).
       if (ui.modal) { ui.modal = null; ui.shot = null; trailAt = 0; opener = null; focusNext = 'main'; }
       linked = null;

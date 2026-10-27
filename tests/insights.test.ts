@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
-import { burndown, criticalPath, forecastEnd, maxOf, PACE_MAX, PACE_MIN, paceRatioOf, remainingMin, targetMs, zoneDir, zoneHeat } from '../src/lib/insights.js';
+import { burndown, criticalPath, forecastEnd, forecastSchedule, maxOf, PACE_MAX, PACE_MIN, paceRatioOf, remainingMin, targetMs, versionEnds, zoneDir, zoneHeat } from '../src/lib/insights.js';
 import { groupIds, layoutRows, NONE_GROUP, windowAt } from '../src/lib/timeline.js';
 import type { PlanView, States } from '../src/lib/types.js';
 
@@ -46,6 +46,21 @@ describe('forecastEnd: the one forecast of the page (G-12)', () => {
   it('takes first the task with the most critical path ahead, so two workers end in 60 min and not 70', () => {
     const p = mini([{ id: 'A', est: 10 }, { id: 'B', est: 50, deps: ['A'] }, { id: 'P', est: 30 }, { id: 'Q', est: 30 }]);
     expect(forecastEnd(p, {}, NOW, { parallel: 2, paceRatio: 1 })!.at).toBe(NOW + 60 * MIN);
+  });
+  it('v3: a version ends with its last pending task in the plan’s one schedule, waiting for the tasks of another version it needs', () => {
+    // v1 = F1 (A 10, B 20 after A); v2 = F2 (C 30, which needs B). One worker: A ends at 10, B at 30, C at 60.
+    const p: PlanView = { ...mini([{ id: 'A', est: 10 }, { id: 'B', est: 20, deps: ['A'] }]), phases: [{ id: 'F1', name: 'F', plan_status: 'committed' }, { id: 'F2', name: 'G', plan_status: 'committed' }],
+      versions: [{ id: '1', phases: ['F1'] }, { id: '2', phases: ['F2'] }, { id: '3', phases: [] }] };
+    p.tasks.push({ id: 'C', title: 'C', track: 'a', phase: 'F2', done_when: 'x', depends_on: ['B'], zones: [], estimate_min: 30 });
+    const s = forecastSchedule(p, {}, NOW, { parallel: 1, paceRatio: 1 })!;
+    expect(s.at).toBe(NOW + 60 * MIN);
+    expect(Object.fromEntries(s.ends)).toEqual({ A: NOW + 10 * MIN, B: NOW + 30 * MIN, C: NOW + 60 * MIN });
+    expect(forecastEnd(p, {}, NOW, { parallel: 1, paceRatio: 1 })).toEqual({ at: NOW + 60 * MIN, parallel: 1 });
+    // A version with nothing pending (v3 holds no phase; v1 once A and B are done) has no end.
+    expect(versionEnds(p, s.ends)).toEqual({ '1': NOW + 30 * MIN, '2': NOW + 60 * MIN });
+    const done = forecastSchedule(p, { A: { status: 'done' }, B: { status: 'done' } }, NOW, { parallel: 1, paceRatio: 1 })!;
+    expect(versionEnds(p, done.ends)).toEqual({ '2': NOW + 30 * MIN });
+    expect(versionEnds(p, null)).toEqual({});
   });
   it('the running tasks start now with what they have left, and the pace stretches every task', () => {
     const p = mini([{ id: 'A', est: 30 }, { id: 'B', est: 30 }]);

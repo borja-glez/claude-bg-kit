@@ -65,9 +65,9 @@ export const PLAN_TASK_KEYS: readonly PlanTaskKey[] = ['free', 'running', 'block
 /** H-18: the forge marks the plan filters by: deferred findings and rounds over the cap. */
 export type PlanForgeKey = 'deferred' | 'overcap';
 export const PLAN_FORGE_KEYS: readonly PlanForgeKey[] = ['deferred', 'overcap'];
-/** H-18: the plan's filters, by task, by the phase's plan status, by forge and by track. Within a group any matches;
- *  across groups all must. */
-export interface PlanFilter { tasks: PlanTaskKey[]; phases: PlanStatus[]; forge: PlanForgeKey[]; track: string | null }
+/** H-18: the plan's filters, by task, by the phase's plan status, by forge and by track; v3 adds the version (its
+ *  phases only, set only when one is chosen). Within a group any matches; across groups all must. */
+export interface PlanFilter { tasks: PlanTaskKey[]; phases: PlanStatus[]; forge: PlanForgeKey[]; track: string | null; version?: string }
 
 /** H-06: what the timeline's viewport shows, as rows: the first visible one and how many fit. Proportions of its scroll,
  *  so the page's zoom does not change them. */
