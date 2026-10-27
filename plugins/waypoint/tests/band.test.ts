@@ -1700,3 +1700,114 @@ test('with two rows and no room for every folded button told apart, m opens the 
   expect(await rowKeys()).toEqual([]);
   await ui.unmount();
 });
+
+// A central folder /c that holds repositories: the session starts there and the work is in /c/a.
+const CENTRAL = '/c';
+const REPO = '/c/a';
+const WORK_LINE = '● frente backend 1/2 · T002 API de pedidos · 5 m / 30 m · global 33 %';
+// The project of FILES, named p and kept in `dir`.
+const projectIn = (dir: string, over: Record<string, unknown> = {}): Record<string, string> => Object.fromEntries(
+  Object.entries(FILES).map(([path, text]) => [path.replace(ROOT, dir).replace('/demo/', '/p/'), path.endsWith('/bound.json') ? BOUND(over) : text]),
+);
+
+test('a conversation bound in a repository below the session root gets its work band', async ($, on) => {
+  engineBottom(on);
+  serveFiles(on, projectIn(REPO), [], () => SESSION_ID, [], () => CENTRAL);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await lineOf(ui)).toBe(WORK_LINE);
+  expect(await ui.find({ key: 'next-task' })).toBeDefined();
+  await ui.unmount();
+});
+
+test('a shell cd does not move the band', async ($, on) => {
+  engineBottom(on);
+  serveFiles(on, projectIn(REPO), [], () => SESSION_ID, [], () => CENTRAL);
+  on('session.cwd', () => ({ value: '/c/b' }));
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await clock.advance(30000);
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await lineOf(ui)).toContain('T002 API de pedidos');
+  await ui.unmount();
+});
+
+test('a clean conversation in the central folder gets no band', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, projectIn(REPO, { claude: 'conv-9' }), [], () => SESSION_ID, [], () => CENTRAL);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  const published = recordDrawn(on);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await ui.find({ text: 'engine band' })).toBeDefined();
+  expect(await ui.find({ type: 'Button' })).toBeUndefined();
+  expect(published).toEqual([false]);
+  await ui.unmount();
+});
+
+test('at the session root the band is as before', async ($, on) => {
+  engineBottom(on);
+  serveFiles(on, projectIn(REPO, { claude: 'conv-9' }), [], () => SESSION_ID, [], () => REPO);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  await $.session.start({ cwd: REPO, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await lineOf(ui)).toMatch(/^◦ otra sesión \(S1\) trabaja en T002/);
+  await ui.unmount();
+});
+
+test('a waypoint CLI call makes the band search again', async ($, on) => {
+  engineBottom(on);
+  const files: Record<string, string> = { [`${REPO}/docs/waypoint/p/plan.yaml`]: PLAN, [`${REPO}/.waypoint/p/session.json`]: JSON.stringify({ sessionId: 'S1', track: 'backend' }) };
+  serveFiles(on, files, [], () => SESSION_ID, [], () => CENTRAL);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await ui.find({ key: 'next-task' })).toBeUndefined();
+  Object.assign(files, projectIn(REPO));
+  // A call that is not the plugin's CLI does not search.
+  await $.tool.call({ tool: 'Bash', command: 'ls' } as never);
+  await sleepMs(50);
+  await ui.redraw();
+  expect(await ui.find({ key: 'next-task' })).toBeUndefined();
+  await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/waypoint.cjs" bind --task T002' } as never);
+  let line: string | undefined;
+  for (let i = 0; i < 100 && !line; i++) { await sleepMs(5); await ui.redraw(); line = await lineOf(ui); }
+  expect(line).toBe(WORK_LINE);
+  await ui.unmount();
+});
+
+test("the tick renews this conversation's binding in the anchored repository", async ($, on) => {
+  engineBottom(on);
+  const files = projectIn(REPO);
+  const written: string[] = [];
+  serveFiles(on, files, [], () => SESSION_ID, written, () => CENTRAL);
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await clock.advance(30000);
+  expect(written).toEqual([`${REPO}/.waypoint/p/bound.json`]);
+  expect(JSON.parse(files[`${REPO}/.waypoint/p/bound.json`]).seenAt).toBe('2026-10-11T10:05:30.000Z');
+});
+
+test("an ArtifactData write is mirrored into the anchored repository's cache", async ($, on) => {
+  engineBottom(on);
+  const url = 'https://claude.ai/artifact/Q71skZnSzoxfxm2799thGY';
+  const files = projectIn(REPO);
+  files[`${REPO}/.waypoint/p/session.json`] = JSON.stringify({ sessionId: 'S1', track: 'backend', url });
+  const written: string[] = [];
+  serveFiles(on, files, [], () => SESSION_ID, written, () => CENTRAL);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('tool.call', { tool: 'ArtifactData' }, () => ({ result: {}, text: 'database batch committed (1 writes)' }) as never);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  const claim = { action: 'batch', url, writes: [{ op: 'update', collection: 'state', doc_id: 'T001', data: { status: 'free' } }] };
+  await $.tool.call({ tool: 'ArtifactData', ...claim } as never);
+  expect(written).toContain(`${REPO}/.waypoint/p/dbcache/state/T001.json`);
+});

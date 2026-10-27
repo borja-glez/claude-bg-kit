@@ -66,7 +66,9 @@ const STATUS_WINDOW_MS = 24 * 3_600_000;
 const EXEC_MAX_BYTES = 64 * 1024;
 const MARKERS = ['.waypoint', '.forge', '.superpowers'];
 
-const debug = ($: Engine, message: string) => { try { $.ui.log(message, { to: 'debug' }); } catch { /* only a log */ } };
+function debug($: Engine, message: string): void {
+  try { $.ui.log(message, { to: 'debug' }); } catch { /* only a log */ }
+}
 
 /**
  * The checkouts to look in, the held one first, then the session root, then its first-level folders (the first

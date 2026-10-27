@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, RenderElement, Timer, UiPressArgument } from 'claude-code';
 import { noneBand, type NoticeBand } from './model.js';
-import { join, listOpt, loadBandModel, nowMs, readOpt, renewBindings, type Engine } from './files.js';
+import { join, listOpt, loadBandModel, nowMs, readOpt, renewBindings, sessionIdOf, type BandAt, type Engine } from './files.js';
+import { findAnchor, samePath, type Anchor } from './anchor.js';
 import { addDismissal, dismissalKey, dismissalUntil, DISMISS_STORE_KEY, isDismissed, normalizeDismissals, type Dismissals } from './notice-dismiss.js';
 import { bandParts, textsFor } from './band-line.js';
 import { DISMISS_KEY, layoutBand, MORE_HOTKEY, MORE_KEY, MORE_LABEL, SEP, type BandControl, type BandHue } from './band-fit.js';
@@ -131,6 +132,39 @@ let armed: { key: string; runId: string | null; until: number } | null = null;
 // meanwhile), so it reads once more when it ends ($.session.id() is asked again each time).
 let refreshPending = false;
 
+// D4, D6: where this conversation's work is when the session started in a folder above it. The search (anchor.ts) runs
+// when `anchorDirty` says so (a session or conversation start, a waypoint or forge call, an anchor gone) or when the
+// session root moved; the ordinary refresh reads the anchored checkout's files without searching.
+let anchor: Anchor | null = null;
+let anchorDirty = true;
+let anchorRoot: string | null = null;
+
+/** The checkout and project the band reads when the anchor is a join below the session root; undefined at the root, as before. */
+async function bandAt($: Engine): Promise<BandAt | undefined> {
+  try {
+    const root = await $.session.root();
+    if (anchorDirty || anchorRoot === null || !samePath(root, anchorRoot)) {
+      const sessionId = await sessionIdOf($);
+      const found = await findAnchor($, { root, sessionId, held: anchor?.checkout ?? null, kinds: 'join', now: await nowMs($) });
+      anchor = found.anchor;
+      anchorRoot = root;
+      // Without an id nothing could be searched for: ask again at the next refresh.
+      anchorDirty = sessionId === null;
+    }
+    return anchor && !samePath(anchor.checkout, root) ? { checkout: anchor.checkout, project: anchor.project } : undefined;
+  } catch { return undefined; }
+}
+
+function searchAgain($: Engine): void {
+  anchorDirty = true;
+  void refresh($);
+}
+
+function resetAnchor(): void {
+  anchor = null;
+  anchorDirty = true;
+}
+
 async function refresh($: Engine): Promise<void> {
   if (refreshing) { refreshPending = true; return; }
   refreshing = true;
@@ -138,7 +172,10 @@ async function refresh($: Engine): Promise<void> {
     do {
       refreshPending = false;
       try {
-        const model = await loadBandModel($);
+        const at = await bandAt($);
+        const model = await loadBandModel($, at);
+        // The anchored checkout no longer holds the anchor (a binding ended or released, a run closed): search again.
+        if (at && model.mode === 'none') anchorDirty = true;
         const current = await read($, band);
         if (JSON.stringify(current) !== JSON.stringify(model)) {
           await update($, band, () => model);
@@ -164,16 +201,19 @@ async function mirror($: Engine, input: unknown): Promise<boolean> {
   const id = artifactId((input as { url?: unknown } | null)?.url);
   if (!writes.length || !id) return false;
   const root = await $.session.root();
-  for (const p of (await listOpt($, join(root, '.waypoint'))).filter(d => d.kind === 'dir')) {
-    let url: unknown;
-    try { url = JSON.parse((await readOpt($, join(root, '.waypoint', p.name, 'session.json'))) ?? '').url; } catch { continue; }
-    if (artifactId(url) !== id) continue;
-    for (const w of writes) {
-      const file = join(root, '.waypoint', p.name, 'dbcache', w.collection, `${w.docId}.json`);
-      const text = applyWrite(await readOpt($, file), w);
-      if (text !== null) await $.fs.write(file, text);
+  // The session root, then the checkout of the anchor when it is another.
+  for (const place of anchor && !samePath(anchor.checkout, root) ? [root, anchor.checkout] : [root]) {
+    for (const p of (await listOpt($, join(place, '.waypoint'))).filter(d => d.kind === 'dir')) {
+      let url: unknown;
+      try { url = JSON.parse((await readOpt($, join(place, '.waypoint', p.name, 'session.json'))) ?? '').url; } catch { continue; }
+      if (artifactId(url) !== id) continue;
+      for (const w of writes) {
+        const file = join(place, '.waypoint', p.name, 'dbcache', w.collection, `${w.docId}.json`);
+        const text = applyWrite(await readOpt($, file), w);
+        if (text !== null) await $.fs.write(file, text);
+      }
+      return true;
     }
-    return true;
   }
   return false;
 }
@@ -191,7 +231,7 @@ async function checkLens($: Engine): Promise<void> {
 async function tick($: Engine): Promise<void> {
   try { await checkLens($); } catch { /* ignore */ }
   // C3: this conversation's binding stays alive while its band runs (at most one write a minute).
-  try { await renewBindings($); } catch { /* the next tick tries again */ }
+  try { await renewBindings($, anchor?.checkout ?? null); } catch { /* the next tick tries again */ }
   await refresh($);
   try {
     const m = await read($, band);
@@ -226,6 +266,7 @@ async function conversationId($: Engine): Promise<string | null> {
 // earlier end stopped it.
 async function newConversation($: Engine, id: string): Promise<void> {
   conversation = id;
+  resetAnchor();
   endedConversation = null;
   switchWatch?.cancel();
   switchWatch = null;
@@ -316,6 +357,7 @@ export const register: Register = on => {
     switchWatch?.cancel();
     switchWatch = null;
     endedConversation = null;
+    resetAnchor();
     conversation = await conversationId($);
     await loadDismissals($);
     await checkLens($);
@@ -369,6 +411,19 @@ export const register: Register = on => {
     try {
       if (!result.deny && !result.isError && !writeFailed(result.text) && await mirror($, e)) void refresh($);
     } catch { /* the next listing brings the copy up to date */ }
+    return result;
+  }).catch(($, e, next) => next(e));
+
+  // D4: a waypoint or forge call of this session may bind it, so the anchor is searched again, once the call returned.
+  // They only observe: the call goes on when the search fails.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const result = await next(e);
+    if (!result.deny && /waypoint\.cjs|forge\.cjs/.test(String(e.command ?? ''))) searchAgain($);
+    return result;
+  }).catch(($, e, next) => next(e));
+  on('tool.call', { tool: 'Skill' }, async ($, e, next) => {
+    const result = await next(e);
+    if (!result.deny && /^(waypoint|forge):/.test(String(e.skill ?? ''))) searchAgain($);
     return result;
   }).catch(($, e, next) => next(e));
 
