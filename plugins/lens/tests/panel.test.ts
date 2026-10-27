@@ -842,23 +842,31 @@ test('inline at one row the pane draws one row: the kept card clipped, its title
 
 // w8 M4: superpowers 7's ledgers, as this repository's own hold them: the plan's path absolute in the header (`X:/…`,
 // `X:\…`, a worktree's too) and in plan-path (msys `/x/…`, or relative), on a Windows root.
-function serveWindowsRoot(on: On, files: Record<string, string>) {
+// They hold on Windows only: elsewhere `E:\repo` is no absolute path, so the engine puts it under the working directory
+// before the fs hooks see it and they serve nothing (the CI's ubuntu job). serveWindowsRoot returns whether the engine
+// handed its hooks a path on the drive, as it does only where `E:\repo` is absolute; a test without one ends before its
+// expectations (the test runtime has no `process` to ask). The spelling itself (`X:/…`, msys, Cygwin) is planFileOf's,
+// which tests/lens-sdd-plan.test.ts covers on every system.
+function serveWindowsRoot(on: On, files: Record<string, string>): () => boolean {
+  let onDrive = false;
+  const key = (path: string): string => { if (/^[A-Za-z]:[\\/]/.test(path)) onDrive = true; return norm(path); };
   on('session.root', () => ({ value: 'E:\\repo' }));
   on('session.id', () => ({ value: SESSION_ID }));
-  on('fs.read', (_$, e) => (norm(e.path) in files ? { value: files[norm(e.path)]! } : { deny: `ENOENT ${e.path}` }));
-  on('fs.exists', (_$, e) => ({ value: norm(e.path) in files }));
-  on('fs.stat', (_$, e) => (norm(e.path) in files ? { value: { kind: 'file' as const, size: files[norm(e.path)]!.length, mtimeMs: NOW - 60_000, isLink: false } } : { deny: `ENOENT ${e.path}` }));
+  on('fs.read', (_$, e) => { const p = key(e.path); return p in files ? { value: files[p]! } : { deny: `ENOENT ${e.path}` }; });
+  on('fs.exists', (_$, e) => ({ value: key(e.path) in files }));
+  on('fs.stat', (_$, e) => { const p = key(e.path); return p in files ? { value: { kind: 'file' as const, size: files[p]!.length, mtimeMs: NOW - 60_000, isLink: false } } : { deny: `ENOENT ${e.path}` }; });
   on('fs.list', (_$, e) => {
-    const prefix = `${norm(e.path)}/`;
+    const prefix = `${key(e.path)}/`;
     const names = new Map<string, 'file' | 'dir'>();
     for (const path of Object.keys(files)) if (path.startsWith(prefix)) { const [head = '', ...rest] = path.slice(prefix.length).split('/'); names.set(head, rest.length ? 'dir' : 'file'); }
     return names.size ? { value: [...names].map(([name, kind]) => ({ name, kind, size: 0, mtimeMs: NOW - 60_000, isLink: false })) } : { deny: `ENOENT ${e.path}` };
   });
+  return () => onDrive;
 }
 const SP_PROGRESS = '\n## Progress\nTasks 1-2: complete (abc..def)\nTask 3: fix round 1/5 (flaky test)\n';
 
 test('a superpowers ledger whose plan path is absolute, in plan-path or in its header, counts against that plan (w8 M4)', async ($, on) => {
-  serveWindowsRoot(on, {
+  const onWindows = serveWindowsRoot(on, {
     '/repo/.superpowers/sdd/a/progress.md': `# SDD ledger — plan: E:\\repo\\docs\\superpowers\\plans\\abs.md${SP_PROGRESS}`,
     '/repo/.superpowers/sdd/a/plan-path': '/e/repo/docs/superpowers/plans/abs.md\n',
     '/repo/docs/superpowers/plans/abs.md': PLAN,
@@ -870,6 +878,7 @@ test('a superpowers ledger whose plan path is absolute, in plan-path or in its h
   await clock.advance(0);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
   const text = await said(ui);
+  if (!onWindows()) return ui.unmount();
   expect(text).toContain('docs/superpowers/plans/abs.md');
   expect(text).not.toContain('E:');
   expect(text).toMatch(/22%.*Task 3\/9.*2 done/);
@@ -877,7 +886,7 @@ test('a superpowers ledger whose plan path is absolute, in plan-path or in its h
 });
 
 test("a ledger whose header names a plan in a worktree of the root, with no plan-path, reads it there (w8 M4)", async ($, on) => {
-  serveWindowsRoot(on, {
+  const onWindows = serveWindowsRoot(on, {
     '/repo/.superpowers/sdd/b/progress.md': `# SDD ledger — plan: /e/repo/.claude/worktrees/w1/docs/superpowers/plans/wt.md${SP_PROGRESS}`,
     '/repo/.claude/worktrees/w1/docs/superpowers/plans/wt.md': PLAN,
   });
@@ -887,7 +896,9 @@ test("a ledger whose header names a plan in a worktree of the root, with no plan
   await $.command.run(RUN);
   await clock.advance(0);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
-  expect(await said(ui)).toMatch(/\.claude\/worktrees\/w1\/docs\/superpowers\/plans\/wt\.md.*Task 3\/9/);
+  const text = await said(ui);
+  if (!onWindows()) return ui.unmount();
+  expect(text).toMatch(/\.claude\/worktrees\/w1\/docs\/superpowers\/plans\/wt\.md.*Task 3\/9/);
   await ui.unmount();
 });
 
@@ -930,7 +941,7 @@ test('a ledger that names its plan by the real path of a root under a symbolic l
 });
 
 test('a ledger whose plan cannot be read shows the tasks done, never a total nor a false 100 % (w8 M4)', async ($, on) => {
-  serveWindowsRoot(on, {
+  const onWindows = serveWindowsRoot(on, {
     '/repo/.superpowers/sdd/c/progress.md': '# SDD ledger — plan: D:/elsewhere/plan.md\n\n## Progress\nTasks 1-3: complete (abc..def)\n',
     '/repo/.superpowers/sdd/c/plan-path': 'docs/superpowers/plans/gone.md',
   });
@@ -941,6 +952,7 @@ test('a ledger whose plan cannot be read shows the tasks done, never a total nor
   await clock.advance(0);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
   const text = await said(ui);
+  if (!onWindows()) return ui.unmount();
   expect(text).toContain('3 done');
   expect(text).not.toMatch(/\d+%/);
   expect(text).not.toMatch(/\/3\b/);
