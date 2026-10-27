@@ -319,12 +319,7 @@ export function normalizeStatus(x: unknown): ForgeStatus | null {
   };
 }
 
-/** C5: the statuses of a checkout by key, `<project>__<T>` or `<T>`. */
-/**
- * C5: the root whose .forge/status/ holds this session's task statuses, as ledgerRoot gives it on disk: the main
- * checkout for one of forge's task worktrees (`<main>/.claude/worktrees/task-*`), else the root itself. Shared by lens
- * and the anchor search (src/mod/anchor.ts), so both look where forge writes.
- */
+/** C5: where forge writes the task statuses of `root` (ledgerRoot on disk): `main` for a task worktree of it, else `root`. */
 export function statusRootOf(root: string, main: string): string {
   const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
   const r = norm(root);
@@ -332,6 +327,7 @@ export function statusRootOf(root: string, main: string): string {
   return name.startsWith('task-') && r.toLowerCase() === `${norm(main)}/.claude/worktrees/${name}`.toLowerCase() ? main : root;
 }
 
+/** C5: the statuses of a checkout by key, `<project>__<T>` or `<T>`. */
 export type StatusMap = Record<string, ForgeStatus>;
 
 /** C5: the file key of a task's status: `<project>__<T>` for a plan task, `<T>` for a loose one; null when a part, or the whole key, is not a safe id. */

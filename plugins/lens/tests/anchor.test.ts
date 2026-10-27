@@ -472,6 +472,23 @@ test('ticking the checkboxes of its own plan searches no more', async ($, on) =>
   expect(await pane($)).toMatch(/Shop inline plan.*2 done/);
 });
 
+test('a plan written through a path with .. anchors the checkout it lands in', async ($, on) => {
+  const w = world(CENTRAL, repoA({ run: OTHER, tasks: OTHER }));
+  serveWorld(on, w);
+  servePanes(on);
+  const clock = start(on);
+  // The file lands in repository A, whatever the path's spelling.
+  on('tool.call', { tool: 'Write' }, (_$, e) => { w.files[`${REPO}/docs/superpowers/plans/new.md`] = String(e.content); return { result: { type: 'create' } } as never; });
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  await $.tool.call({ tool: 'Write', file_path: `${SIBLING}/../a/./docs/superpowers/plans/new.md`, content: OWN_PLAN, tool_use_id: 'w1' } as never);
+  await clock.advance(10_000);
+  const text = await pane($);
+  expect(text).toMatch(/Shop inline plan.*Task 2\/2.*1 done/);
+  expect(text).not.toMatch(/other\.md|Other plan|flaky test/);
+});
+
 test("a subagent's forge.cjs call does not search; the main loop's does", async ($, on) => {
   const w = world(CENTRAL, repoA({ run: SESSION_ID, tasks: SESSION_ID }));
   serveWorld(on, w);

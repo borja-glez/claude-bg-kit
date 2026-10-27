@@ -683,12 +683,24 @@ function resetAnchor(): void {
   forgeSeen = null;
 }
 
+// An absolute path with / separators, its `.` and `..` folded (never above its root), so a checkout's length cuts it
+// where that checkout's files start.
+function foldDots(path: string): string {
+  const out: string[] = [];
+  for (const [i, part] of path.split('/').entries()) {
+    if (i > 0 && part === '.') continue;
+    if (i > 0 && part === '..') { if (out.length > 1) out.pop(); continue; }
+    out.push(part);
+  }
+  return out.join('/');
+}
+
 // D2.5, D2.6: a superpowers ledger or plan this session wrote is its own work: kept, absolute against the shell's
-// directory when relative, and the anchor is searched for again, unless the path was known and the anchored checkout
-// holds it (executing-plans ticks a checkbox a step: that moves no anchor).
+// directory when relative and its `.` and `..` folded, and the anchor is searched for again, unless the path was known
+// and the anchored checkout holds it (executing-plans ticks a checkbox a step: that moves no anchor).
 async function noteOwnPath($: Engine, filePath: unknown): Promise<void> {
   if (typeof filePath !== 'string' || !filePath) return;
-  const path = (/^([A-Za-z]:)?[\\/]/.test(filePath) ? filePath : join(await $.session.cwd(), filePath)).replace(/\\/g, '/');
+  const path = foldDots((/^([A-Za-z]:)?[\\/]/.test(filePath) ? filePath : join(await $.session.cwd(), filePath)).replace(/\\/g, '/'));
   if (!OWN_LEDGER_PATH.test(path) && !OWN_PLAN_PATH.test(path)) return;
   const known = ownPaths.some(p => samePath(p.path, path));
   ownPaths = [...ownPaths.filter(p => !samePath(p.path, path)), { path, at: await nowMs($) }].slice(-OWN_PATHS_MAX);
