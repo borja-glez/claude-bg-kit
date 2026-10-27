@@ -36,7 +36,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 <path d="M120 142V184H150" stroke="#585b70" stroke-width="1" fill="none" class="flow"/>
 <rect x="150" y="164" width="470" height="40" rx="10" fill="#181825" stroke="#313244" stroke-width="1"/>
 <text x="166" y="182" font-size="12.5" style="fill:#89b4fa" font-weight="700">T004 · subagente</text>
-<text x="166" y="197" font-size="10" class="m faint">.claude/worktrees/task-T004 · task/T004</text>
+<text x="166" y="197" font-size="10" class="m faint">.claude/worktrees/task-T004 · forge/task/T004</text>
 <rect x="370" y="180" width="150" height="8" rx="4" fill="#45475a"/><rect x="370" y="180" width="150" height="8" rx="4" fill="#89b4fa" class="g0"/>
 <g class="ok0"><text x="536" y="189" font-size="11.5" class="m" style="fill:#a6e3a1">✓ integrado</text>
 <path d="M620 184C700 184 772 350 772 370" stroke="#89b4fa" stroke-width="1.8" fill="none"/>
@@ -44,7 +44,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 <path d="M90 142V236H150" stroke="#585b70" stroke-width="1" fill="none" class="flow"/>
 <rect x="150" y="216" width="470" height="40" rx="10" fill="#181825" stroke="#313244" stroke-width="1"/>
 <text x="166" y="234" font-size="12.5" style="fill:#cba6f7" font-weight="700">T005 · subagente</text>
-<text x="166" y="249" font-size="10" class="m faint">.claude/worktrees/task-T005 · task/T005</text>
+<text x="166" y="249" font-size="10" class="m faint">.claude/worktrees/task-T005 · forge/task/T005</text>
 <rect x="370" y="232" width="150" height="8" rx="4" fill="#45475a"/><rect x="370" y="232" width="150" height="8" rx="4" fill="#cba6f7" class="g1"/>
 <g class="ok1"><text x="536" y="241" font-size="11.5" class="m" style="fill:#a6e3a1">✓ integrado</text>
 <path d="M620 236C700 236 722 350 722 370" stroke="#cba6f7" stroke-width="1.8" fill="none"/>
@@ -52,7 +52,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 <path d="M60 142V288H150" stroke="#585b70" stroke-width="1" fill="none" class="flow"/>
 <rect x="150" y="268" width="470" height="40" rx="10" fill="#181825" stroke="#313244" stroke-width="1"/>
 <text x="166" y="286" font-size="12.5" style="fill:#94e2d5" font-weight="700">T008 · subagente</text>
-<text x="166" y="301" font-size="10" class="m faint">.claude/worktrees/task-T008 · task/T008</text>
+<text x="166" y="301" font-size="10" class="m faint">.claude/worktrees/task-T008 · forge/task/T008</text>
 <rect x="370" y="284" width="150" height="8" rx="4" fill="#45475a"/><rect x="370" y="284" width="150" height="8" rx="4" fill="#94e2d5" class="g2"/>
 <g class="ok2"><text x="536" y="293" font-size="11.5" class="m" style="fill:#a6e3a1">✓ integrado</text>
 <path d="M620 288C700 288 672 350 672 370" stroke="#94e2d5" stroke-width="1.8" fill="none"/>

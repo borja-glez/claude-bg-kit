@@ -17,6 +17,18 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## waypoint
 
+### 0.38.0 — 2026-10-27
+
+#### Added
+- `waypoint commit-style` prints the style of the repository's commit titles, `{style, source}`: `conventional` when `commits.style` of `.forge/config.yaml` says so, or when at least 60 % of the last 20 commits of HEAD that are not merges start with a standard Conventional Commits type; else `plain`, waypoint's own titles. With fewer than three commits, as in a new repository, `FORGE_COMMIT_STYLE` (`conventional` or `plain`, in the `env` of `~/.claude/settings.json`) decides, else `plain`. forge reads the same rule.
+- `next` prints `commit`, the title of the picked task's commit in that style: `<T>: <title>`, or `<type>(<T>): <title>` for the session to give the type that fits.
+
+#### Changed
+- Commit titles follow the repository's style. In a repository that writes Conventional Commits, the design and plan commits of `/waypoint:design`, `/waypoint:plan`, `/waypoint:launch` and the multi-session work are `docs(waypoint): ` and the title waypoint gave them with its first letter in lower case (`docs(waypoint): design v3: round 2`, `docs(waypoint): update waypoint plan`), and a task's commit in `/waypoint:work` is `<type>(<T>): <title>`; elsewhere they stay as they were.
+
+#### Known limits
+- A repository whose commitlint allows only some scopes (`scope-enum`) refuses `waypoint` and the task ids as scopes; the history decides only from its last 20 commits, so one that mixes styles reads as `plain` until `commits.style` says otherwise.
+
 ### 0.37.1 — 2026-10-27
 
 #### Fixed
@@ -455,6 +467,22 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.33.0 — 2026-10-27
+
+#### Added
+- `commits.style` in `.forge/config.yaml` (`auto`, the default, `conventional` or `plain`) and `forge commit-style`, which prints `{style, source}`. With `auto`, forge writes Conventional Commits when at least 60 % of the last 20 commits of HEAD that are not merges start with a standard type (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`); otherwise its own style. With fewer than three commits, as in a new repository, your default decides: `FORGE_COMMIT_STYLE` (`conventional` or `plain`) in the `env` of `~/.claude/settings.json`, as `FORGE_WORKFLOW`; without it, its own style; it never overrides a history that already says a style. waypoint reads the same key and the same variable.
+- `begin` prints `commit` (`{style, source, line}`): `line` is the `Commit title` line every brief written by hand carries (Small, Medium, an ephemeral run's tasks).
+
+#### Changed
+- Commit titles follow the repository's style. A plan task's brief says `Commit title: <T>: <what the commit does>`, or `<type>(<T>): …` in Conventional Commits, where the implementer gives the type; a brief written by hand says `<type>: …`, or a title in the style of the repository's recent commits, where it said nothing before. forge's own commits become `chore(forge): integrate <T>`, `chore(forge): merge <run branch>`, `chore(forge): bring <base> into <run branch>`, `chore(<T>): learned notes of its verification` and `revert(<T>): undo the attempt for a redo (…)` in Conventional Commits, and stay as they were otherwise; the plan commits of infinite mode and `/forge:decisions` become `docs(waypoint): …`, which still name `(decision <n>)`. Implementers still read an older brief's `Commit title prefix`.
+- A task's branch is `forge/task/<T>`, in forge's own namespace, instead of `task/<T>`. An execution an earlier forge started keeps the `task/<T>` it recorded for each task until it ends, and a plan run takes up, as it is, the work an earlier forge left on that plan's `task/<T>`.
+- `swarm cleanup` removes `forge/task/*` and `forge/run-*` branches once merged, and a `task/<T>` only from forge's own worktree `task-<T>`: it no longer deletes every merged `task/*`, which could be one of yours. The `task/<T>` branches earlier runs left merged outside a worktree stay; delete them with `git branch -d` when they are forge's.
+- Depends on waypoint ^0.38.0.
+
+#### Known limits
+- A repository whose commitlint allows only some scopes (`scope-enum`) refuses `T3`, `forge` and `waypoint` as scopes.
+- The history decides only from its last 20 commits: one that mixes styles reads as `plain` until `commits.style` says otherwise. A superpowers plan's brief keeps the commit its own steps write.
 
 ### 0.32.1 — 2026-10-27
 

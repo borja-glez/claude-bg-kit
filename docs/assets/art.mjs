@@ -478,7 +478,7 @@ function swarm(t) {
     // Nested elbows left of the fronts: the deeper the front, the further left its trunk, so no line crosses a box.
     p.push(`<path d="M${120 - k * 30} 142V${y + 20}H150" stroke="${C.s2}" stroke-width="1" fill="none" class="flow"/>`);
     p.push(rect(150, y, 470, 40, { rx: 10, fill: C.mantle, stroke: C.s0 }));
-    p.push(text(166, y + 18, `${name} · ${t.subagent}`, { size: 12.5, weight: 700, fill: c }), text(166, y + 33, `.claude/worktrees/task-${name} · task/${name}`, { size: 10, cls: 'm faint' }));
+    p.push(text(166, y + 18, `${name} · ${t.subagent}`, { size: 12.5, weight: 700, fill: c }), text(166, y + 33, `.claude/worktrees/task-${name} · forge/task/${name}`, { size: 10, cls: 'm faint' }));
     const b = growBar(370, y + 16, 150, 8, c, 0.05, 1, cycle, { delay: d, hold: dur[k] }); css.push(b.css); p.push(b.body);
     const at = r1(((dur[k] * cycle + d) / cycle) * 100);
     css.push(`@keyframes ok${k}{0%{opacity:0}${at}%{opacity:0}${r1(at + 2)}%{opacity:1}96%{opacity:1}100%{opacity:0}}
