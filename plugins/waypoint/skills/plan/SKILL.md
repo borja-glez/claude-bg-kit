@@ -12,7 +12,7 @@ Talk to the user in their language. Everything stored (YAML keys, ids, database 
 
 ## 1. The plan file
 
-Location: `docs/waypoint/<project>/plan.yaml`. If it doesn't exist, write it from the approved design or the conversation:
+Location: `docs/waypoint/<project>/plan.yaml`. **Before a new plan from an approved design:** when it doesn't exist and `docs/waypoint/<project>/design.md` has `status: approved`, read `references/handoff.md` now and follow it first: the person chooses how the work goes on, and only some answers have this skill write the plan. If it doesn't exist, write it from the approved design or the conversation:
 
 ```yaml
 project: <kebab-id>            # [A-Za-z0-9_.-]
@@ -85,4 +85,4 @@ Run sync only from the main checkout (`MAIN_REPO` = the path on the first `workt
 
 ## 5. Report
 
-One short message: the `say` that `sync` printed in §4 (roadmap URL and the number of tasks, phases and tracks), as it is, then how to start working (`/waypoint:work [track]`). When forge drives the session, `/forge:run` gives this report itself and says that forge runs the tasks.
+One short message: the `say` that `sync` printed in §4 (roadmap URL and the number of tasks, phases and tracks), as it is. When forge drives the session, `/forge:run` gives this report itself and says that forge runs the tasks. Otherwise, how the work goes on: when §1 of this same run asked it, do what the answer said (`references/handoff.md` step 4); if not, read `references/handoff.md` now and follow it.

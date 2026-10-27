@@ -38,6 +38,7 @@ import { BOUND_VIAS, MAX_SEATS, isBoundVia, type BoundDoc } from '../lib/bound.j
 import { boundFile, boundLive, checkoutSid, leftSeatOf, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, settleBinding, writeAtomic, writeBinding } from '../lib/bound-fs.js';
 import { isSafeId } from '../lib/execution-state.js';
 import { commitStyleAt, taskCommitTitle, type CommitStyleOf } from '../lib/commit-style.js';
+import { handoffFor } from './handoff.js';
 import type { GitRun } from '../lib/git-info.js';
 import type { Commit, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState, TaskStatus } from '../lib/types.js';
 
@@ -51,7 +52,7 @@ const nodeSpawn: Spawn = (command, options) => spawn(command, options);
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined>; spawn?: Spawn }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|replan|hash|clean-cache|db-import|page|set-roadmap|add-task|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|commit-style|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-comments|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|replan|hash|clean-cache|db-import|page|set-roadmap|add-task|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|commit-style|handoff|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-comments|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -645,6 +646,13 @@ export function run(argv: string[], io: Io): Result {
         return ok(io.now().toISOString());
       case 'commit-style':
         return ok(JSON.stringify(commitStyleHere(io.cwd, io.env ?? process.env)));
+      case 'handoff': {
+        // How the work goes on after an approved design or a ready plan: the question the plan skill asks as printed.
+        const project = args[0];
+        if (!isSafeId(project) || project.startsWith('-')) return fail('handoff: usage: waypoint handoff <project> [--skills <a,b>] [--states <dir>] [--locale <code>]', 2);
+        const r = handoffFor(project, { cwd: io.cwd, env: io.env ?? process.env, now: io.now().getTime(), skills: flag('skills'), locale: flag('locale'), states: optStates() });
+        return 'error' in r ? fail(r.error, 2) : ok(JSON.stringify(r));
+      }
       case 'commit-info': {
         const rev = args[0] !== undefined && !args[0].startsWith('--') ? args[0] : 'HEAD';
         if (!args.includes('--event')) return ok(JSON.stringify(commitInfo(io.cwd, rev)));
