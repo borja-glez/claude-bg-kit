@@ -10,7 +10,7 @@
       { "matcher": "^(Read|Grep|Glob)$", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/guard-read.cjs\"" }] }
     ],
     "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook answer" }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook live" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook live", "timeout": 5 }] }],
     "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook live" }] }],
     "SubagentStop": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook live" }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook stop" }] }]

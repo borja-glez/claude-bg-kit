@@ -138,6 +138,9 @@ describe('plugin layout', () => {
     expect(h.hooks.Stop).toBeDefined();
     expect(h.hooks.SessionStart[0].matcher).toBe('startup|resume|clear|compact|fork');
     expect(h.hooks.SessionEnd[0].hooks[0].command).toContain('hook session-end');
+    // Claude Code gives every SessionEnd hook together 1.5 s unless one of them declares a timeout: on exit, under load,
+    // node starting the bundle passed it and the hook was cancelled («Hook cancelled»), leaving the binding open.
+    expect(h.hooks.SessionEnd[0].hooks[0].timeout).toBe(5);
     expect(h.modules).toEqual(['./register.js']);
     expect(existsSync(new URL('../plugins/waypoint/hooks/register.js', import.meta.url))).toBe(true);
   });
@@ -779,6 +782,8 @@ describe('plugin layout', () => {
     const hooks = read('plugins/forge/hooks/hooks.json');
     for (const ev of ['SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop', 'Stop']) expect(hooks).toContain(`"${ev}"`);
     expect(hooks).toContain('hook live');
+    // As waypoint's: the SessionEnd hook declares a timeout, or it shares Claude Code's 1.5 s with every other one.
+    expect(JSON.parse(hooks).hooks.SessionEnd[0].hooks[0].timeout).toBe(5);
   });
   it('skills describe the sessions executor, run members, manual members and unattended runs', () => {
     const runMd = read('plugins/forge/skills/run/SKILL.md');
