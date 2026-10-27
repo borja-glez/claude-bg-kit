@@ -17,6 +17,11 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## waypoint
 
+### 0.37.1 — 2026-10-27
+
+#### Fixed
+- Closing Claude Code (`/exit`, a double Ctrl+C) could print «SessionEnd hook [node …/waypoint.cjs hook session-end] failed: Hook cancelled» and leave the conversation's binding open. Claude Code gives a `SessionEnd` hook that declares no timeout 1.5 s, counted while the rest of the session shuts down, and starting node with waypoint's bundle did not always fit. The hook declares 5 s now; Claude Code still exits as soon as it is done, about 0.1 s.
+
 ### 0.37.0 — 2026-10-26
 
 #### Added
@@ -450,6 +455,11 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.32.1 — 2026-10-27
+
+#### Fixed
+- Closing Claude Code (`/exit`, a double Ctrl+C) could print «SessionEnd hook [node …/forge.cjs hook live] failed: Hook cancelled», and then the route did not record how its conversation ended nor the live signal that the session had ended. Claude Code gives a `SessionEnd` hook that declares no timeout 1.5 s, counted while the rest of the session shuts down; forge's hook declares 5 s now, and Claude Code still exits as soon as it is done.
 
 ### 0.32.0 — 2026-10-26
 

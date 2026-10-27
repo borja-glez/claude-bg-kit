@@ -7,8 +7,8 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 [English](README.md) · **Español** · [Historial de cambios](CHANGELOG.md)
 
-![waypoint 0.37.0](https://img.shields.io/badge/waypoint-0.37.0-cba6f7?style=flat-square)
-![forge 0.32.0](https://img.shields.io/badge/forge-0.32.0-fab387?style=flat-square)
+![waypoint 0.37.1](https://img.shields.io/badge/waypoint-0.37.1-cba6f7?style=flat-square)
+![forge 0.32.1](https://img.shields.io/badge/forge-0.32.1-fab387?style=flat-square)
 ![lens 0.15.0](https://img.shields.io/badge/lens-0.15.0-b4befe?style=flat-square)
 ![java 0.1.1](https://img.shields.io/badge/java-0.1.1-f9e2af?style=flat-square)
 ![web 0.1.1](https://img.shields.io/badge/web-0.1.1-94e2d5?style=flat-square)
