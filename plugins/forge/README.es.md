@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.33.0](https://img.shields.io/badge/versi%C3%B3n-0.33.0-fab387?style=flat-square)
-![depende de waypoint ^0.38.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.38.0-cba6f7?style=flat-square)
+![versión 0.34.0](https://img.shields.io/badge/versi%C3%B3n-0.34.0-fab387?style=flat-square)
+![depende de waypoint ^0.39.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.39.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -52,7 +52,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.38.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permisos recomendados, en `.claude/settings.local.json` de los proyectos en los que confías (no en tu `~/.claude/settings.json`, que lee todo proyecto): `"allow": ["Bash(node *forge.cjs*)"]` para que forge corra sin preguntar, y `"deny": ["Bash(*forge.cjs* hook *)"]`, que impide que Claude llame a mano a los comandos de hook de forge (por ejemplo `hook answer`, que registra tus respuestas) y no toca los hooks reales, porque las reglas de permisos nunca se les aplican. Opcionalmente añade `"ask": ["Bash(*forge.cjs* swarm merge*)", "Bash(*forge.cjs* local set*)"]`: la primera te pregunta antes de cada integración final, la segunda antes de que Claude registre un permiso de superficie o una preferencia (tu confianza en los comandos se registra solo con tu respuesta).
+forge depende de [waypoint](../waypoint/README.es.md) ^0.39.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permisos recomendados, en `.claude/settings.local.json` de los proyectos en los que confías (no en tu `~/.claude/settings.json`, que lee todo proyecto): `"allow": ["Bash(node *forge.cjs*)"]` para que forge corra sin preguntar, y `"deny": ["Bash(*forge.cjs* hook *)"]`, que impide que Claude llame a mano a los comandos de hook de forge (por ejemplo `hook answer`, que registra tus respuestas) y no toca los hooks reales, porque las reglas de permisos nunca se les aplican. Opcionalmente añade `"ask": ["Bash(*forge.cjs* swarm merge*)", "Bash(*forge.cjs* local set*)"]`: la primera te pregunta antes de cada integración final, la segunda antes de que Claude registre un permiso de superficie o una preferencia (tu confianza en los comandos se registra solo con tu respuesta).
 
 ## Uso
 
@@ -342,7 +342,7 @@ Solo se pueden decidir las propuestas `proposed` y `discussing`, y solo las deci
 
 `/forge:decide` funciona desde cualquier sesión, incluso sin roadmap. En ese caso solo cambian la copia local y el registro, y el siguiente `proposals pull` sustituye la decisión local por el estado del roadmap. Con `--from <doc json de la db>`, la CLI comprueba la decisión contra ese documento y no registra nada. Cuando la actualización del roadmap sale bien, `/forge:decide` guarda el documento actualizado con `proposals save --from` y registra el `event` que imprimió `decide`, así que una escritura fallida o rechazada en el roadmap nunca deja una decisión local suelta. `proposals save` solo copia: un estado que escribió otra persona nunca se registra como decisión de este checkout.
 
-**En el roadmap.** forge construye él mismo cada escritura del roadmap, y las skills solo las fijan (`if_version`). `roadmap-doc` escribe la actualización de `state/T` de la tarea: un bloque `forge` de 4 KB como mucho (brief, etapa, rondas de revisión con sus hallazgos por severidad y sus revisores, la ronda aceptada, validadores con tiempo y caché, verificación, tiempos por etapa, integración y hallazgos aplazados), su `evidence` por ronda y su `exec`; `swarm task`, `report`, `step`, `integrate` y `merge` imprimen el mismo `publish`. `swarm status` imprime `meta/run`; `infinite start`, `cycle` e `infinite status` imprimen `meta/infinite` con la sesión que conduce el run y su lease; `roadmap-run` escribe `runs/<runId>`, el resumen de una ejecución cuando termina, con las sesiones ejecutoras que hay que quitar; `decision add --session` imprime la nota de la decisión y cierra la pregunta que responde.
+**En el roadmap.** forge construye él mismo cada escritura del roadmap, y las skills solo las fijan (`if_version`). `roadmap-doc` escribe la actualización de `state/T` de la tarea: un bloque `forge` de 4 KB como mucho (brief, etapa, rondas de revisión con sus hallazgos por severidad y sus revisores, y desde 0.34 qué decidió cada una después, su agente y su puntuación, los hallazgos que la bloquearon con `fichero:línea` y los validadores en rojo; el recorrido de las etapas por las que pasó la tarea en esta ejecución; la ronda aceptada, validadores con tiempo y caché, verificación, tiempos por etapa, integración y hallazgos aplazados), su `evidence` por ronda y su `exec`; `swarm task`, `report`, `step`, `integrate` y `merge` imprimen el mismo `publish`. `swarm status` imprime `meta/run`; `infinite start`, `cycle` e `infinite status` imprimen `meta/infinite` con la sesión que conduce el run y su lease; `roadmap-run` escribe `runs/<runId>`, el resumen de una ejecución cuando termina, con las sesiones ejecutoras que hay que quitar; `decision add --session` imprime la nota de la decisión y cierra la pregunta que responde.
 
 ## Verificación
 

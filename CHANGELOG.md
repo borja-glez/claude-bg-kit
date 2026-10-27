@@ -17,6 +17,24 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## waypoint
 
+### 0.39.0 — 2026-10-27
+
+#### Added
+- **What each version holds.** Plan opens with a card per version: its state (completed, in progress, pending), bar, tasks, target and its phases as chips with their percent; a chip opens Plan on that phase and **See its tasks** filters by the version (`pf=v:<id>`, one version at a time). The list puts a header before the first phase of each version («No version» for the phases of none), and the filters gain a **Version** group. The strip's version and the Summary's version tile are links to it.
+- Each version not completed says when it is forecast to end («forecast end 2 Nov»), in amber when that is past its `target`: the latest end of its pending tasks in the plan's one forecast (`forecastSchedule` in `src/lib/insights.ts`, the schedule `forecastEnd` reckons, now with each task's end), so a version that waits for another's tasks ends after them.
+- Each run of the history in Runs says how its reviews went: how many of its integrated tasks took a single review and the mean of reviews per task («3/4 accepted at the first review · 1.5 reviews per task»), from the rounds `runs/` keeps.
+- **The Summary in a grid.** The plan's figures go up to a row of tiles: the version in progress, the tasks done (with how many run and how many are blocked), the phase, the forecast end, the real pace and the last commit with the tests. Below, two columns: what needs you, the autonomous run, «In progress» and the recent activity; the versions, «Next» and the live sessions. The activity is one row per change on a wide screen, and each review round forge closed is a change of its own, with its action and the first finding that blocked it.
+- **forge drawn in the task detail.** **Now**, on top of the Summary tab of a task forge works: the flow of forge's stages (triage to done), the past ones ticked with their time, the one in progress pulsing with how long it has run (still and in alarm colour when the task is blocked or stopped, or its executor's lease lapsed), verify dimmed when forge planned none, and a loop under implement…verdict with the review in progress against its cap («review 3 of 4», red over it), moving while forge is inside it; then when forge last wrote the task and the last round with what blocked it and what comes next.
+- The Forge tab draws the same flow, the task's way through forge as a bar (each stage as long as it lasted, the last one growing to now, a tick where each round closed, and a legend), and the rounds as a story instead of a table: each with its counts, the findings that blocked it with `file:line` and the reviewer, the validators in red, who reviewed it and what forge decided next, in words («Next: a new implementer one tier up (forge-impl-high)»), and the round in progress last, live, with the stages it went through since the last close. A block of a forge before 0.34 says each round's note instead. The score stays in a title (K4-05).
+- «In progress», Plan's rows and the slots carry a small flow of dots, the current stage lit.
+- **Sessions.** The coordinator of the active run spans the row, and its slots are a board: a tile per slot with its task, title, the flow of its stage, its round, agent and time, coloured by its executor's liveness, and a dashed tile per free slot. The tasks it holds in no slot go under **Other tasks**, so none is listed twice. Each card says its heartbeat, branch and agent in one line, its zones as chips and its track's progress as a labelled bar; the active run's group says its mode, slots, branch and since when.
+
+#### Fixed
+- A task chip no longer breaks inside its id (`F0-07` on three lines in a narrow session card): chips keep to one line.
+
+#### Changed
+- The Summary's header keeps the plan's name, its own version when it is not the one in progress, and its tracks; the version, phase, tasks and last commit are tiles. The table of versions of Summary and Plan gives way to the version cards, and the Forge tab's «Stages» line to the flow.
+
 ### 0.38.0 — 2026-10-27
 
 #### Added
@@ -467,6 +485,16 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.34.0 — 2026-10-27
+
+#### Added
+- `roadmap-doc` tells the roadmap why each review round went where it went. Each round of `state/T.forge` carries what forge decided next (`next`: `resume`, `fresh-stronger`, `redo`, `stalled`, `breaker` or `done`), the agent of the next attempt (`impl`), the verdict's score, the critical and important findings that blocked it (`why`, at most 3, critical first: severity, the problem in 100 characters, `file`, `line` and the reviewer that found it, from the round's `findings-<brief>-<round>.json`) and the validators in red at its close (`red`, at most 4). A findings file older than the execution is an earlier run's and is left out, as the review dirs are.
+- The block carries the task's `trail`: each stage it entered in this run (its triage and every `phase` event of the ledger, with its brief and round), oldest first, the newest 16. The swarm's step writes it at every stage change, so the roadmap shows a round moving before its verdict.
+- The 4 KB budget cuts what v3 adds first (the trail to 8 steps, one finding per round, the trail, the findings and red validators, then the decision), so a block that fitted before keeps everything it carried.
+
+#### Changed
+- Depends on waypoint ^0.39.0.
 
 ### 0.33.0 — 2026-10-27
 
