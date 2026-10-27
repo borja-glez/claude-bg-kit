@@ -1250,12 +1250,12 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 #### Added
 - **lens finds this conversation's project.** It used to read the folder the session started in, so a conversation started in a folder above several repositories and working in one of them showed only Now, Subagents and Usage. It now reads the session root or a repository one level below it, chosen by this conversation's anchor: a forge run it coordinates or is a member of, a waypoint binding of its own (these join the project, and everything shows as before, other sessions' work in it included), or its own work alone, a lone forge task or a superpowers ledger or plan it wrote (only that work, and the needs tied to its own tasks, show). A shell `cd` does not move it.
-- The anchor is searched again only on the session start, opening the panel, a waypoint or forge CLI call or skill, writing a superpowers ledger or plan, the session root moving, or the anchor being lost; the ordinary refresh walks no other repository.
+- The anchor is searched again only on the session start, opening the panel, a waypoint or forge CLI call or skill of the main session (not of a subagent), writing a superpowers ledger or plan, the session root moving, or the anchor being lost; the ordinary refresh walks no other repository. A folder below the session root counts only when it is a git checkout.
 - When the session root or the anchored repository cannot be read, the panel and the photo say it in one line with the path and the reason (`cannot read <path>: <reason>`). A missing folder says nothing; a refused unrelated folder only goes to the debug log.
 
 #### Changed
 - **A clean session shows only its own.** With no anchor nothing is read from project files (no Roadmap, Execution, Tasks in progress, Waiting for you, superpowers card, proposals, infinite run or automatic decisions); Now, Subagents, Usage, Todos and Claude Code tasks stay, and the language is Claude Code's `language` setting. This holds also when the session started inside the repository: another session's run and tasks no longer show there, dimmed or not.
-- The usage file `.forge/usage/<session>.json` is written only with an anchor, in the anchored repository.
+- The usage file `.forge/usage/<session>.json` is written only with an anchor, in the anchored repository, once it has a `.forge/`.
 
 ### 0.15.0 — 2026-10-26
 
