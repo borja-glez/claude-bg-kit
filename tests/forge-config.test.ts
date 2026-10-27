@@ -161,6 +161,13 @@ describe('forge config', () => {
     expect(() => parseConfig('route:\n  hint: maybe\n')).toThrow(ConfigError);
     expect(() => parseConfig('route:\n  other: 1\n')).toThrow(ConfigError);
   });
+  it('w9: commits.style is auto, conventional or plain, auto when the section is empty; anything else is a config error', () => {
+    expect(parseConfig(null).commits).toBeUndefined();
+    expect(parseConfig('commits:\n  style: conventional\n').commits).toEqual({ style: 'conventional' });
+    expect(parseConfig('commits: {}\n').commits).toEqual({ style: 'auto' });
+    expect(() => parseConfig('commits:\n  style: angular\n')).toThrow(/commits\.style/);
+    expect(() => parseConfig('commits:\n  scope: none\n')).toThrow(ConfigError);
+  });
 });
 
 describe('forge config get', () => {
@@ -179,11 +186,12 @@ describe('forge config get', () => {
     expect(JSON.parse(run(['config', 'get', 'verify.limits'], io).stdout)).toEqual({ checks: 8, shots: 10, minutes: 10 });
   });
   it('FC4: a known key without a value prints its default, or nothing, and exits 0', () => {
-    for (const key of ['swarm.setup', 'swarm.mode', 'swarm.nested', 'swarm.member.model', 'workflow', 'autonomy', 'verify.ports', 'verify.flow', 'threatModel', 'validators', 'route']) {
+    for (const key of ['swarm.setup', 'swarm.mode', 'swarm.nested', 'swarm.member.model', 'workflow', 'autonomy', 'verify.ports', 'verify.flow', 'threatModel', 'validators', 'route', 'commits']) {
       expect(run(['config', 'get', key], io), key).toEqual({ code: 0, stdout: '', stderr: '' });
     }
     // A key whose section is unset has the default the section would give it.
     expect(run(['config', 'get', 'route.hint'], io)).toEqual({ code: 0, stdout: 'on\n', stderr: '' });
+    expect(run(['config', 'get', 'commits.style'], io)).toEqual({ code: 0, stdout: 'auto\n', stderr: '' });
     expect(run(['config', 'get', 'threatModel.trusted'], io)).toEqual({ code: 0, stdout: '[]\n', stderr: '' });
     expect(run(['config', 'get', 'threatModel.notes'], io)).toEqual({ code: 0, stdout: '', stderr: '' });
     // Set, it prints the value; an unknown key, or one below a value, is still not a key.

@@ -1,7 +1,7 @@
 import { commitShas, isAvailable, isUnlocked, statusOf } from '../lib/deps.js';
 import { LEASE_MINUTES, sessionLiveness, zonesOf } from '../lib/coordination.js';
 import { effectiveZones, overlappingZones } from '../lib/zones.js';
-import type { ExecutionState, ExecTask, PublicTask } from '../lib/execution-state.js';
+import { taskBranch, type ExecutionState, type ExecTask, type PublicTask } from '../lib/execution-state.js';
 import type { PlanTask, PlanView, SessionDoc, Stage, States } from '../lib/types.js';
 
 /** A live session of a front that has not changed stage in this long, and sits idle, gets a nudge (once per window). */
@@ -28,6 +28,8 @@ export interface ScheduleInput {
   agents?: BgAgent[] | null;
   /** D-07: a merge of `swarm integrate` is in flight (merging.json): no integrate this tick. */
   merging?: boolean;
+  /** w9: the branch a manual member's finished task is on (its worktree's: the `task/<T>` of an earlier forge it took up); else taskBranch. */
+  branchOf?: (task: string) => string;
 }
 /** With agents running, the coordinator steps at least this often (it also renews its lease then). */
 export const STEP_WAIT_SECONDS = 300;
@@ -92,7 +94,7 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
     const o = owner(t.id);
     const shas = commitShas(states, t.id);
     if (tasks[t.id] || statusOf(states, t.id) !== 'done' || !o || o === exec.coordinator || !shas.length || shas.every(s => integrated.has(s))) continue;
-    tasks[t.id] = { status: 'accepted', stage: 'integrate', round: 0, worktree: '', branch: `task/${t.id}`, executor: 'manual', attempts: 0, agent: null, startedAt: nowIso, stageSince: nowIso, updatedAt: nowIso, detail: null, title: t.title };
+    tasks[t.id] = { status: 'accepted', stage: 'integrate', round: 0, worktree: '', branch: (i.branchOf ?? taskBranch)(t.id), executor: 'manual', attempts: 0, agent: null, startedAt: nowIso, stageSince: nowIso, updatedAt: nowIso, detail: null, title: t.title };
   }
   // A task started before titles were recorded gets its title from the plan.
   for (const [id, t] of Object.entries(tasks)) if (!t.title && byId.get(id)?.title) tasks[id] = { ...t, title: byId.get(id)!.title };
@@ -137,7 +139,7 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
     if (!startable(t)) continue;
     const clash = busy.some(b => overlappingZones(zonesOf(t, states[t.id]), zonesOf(b, states[b.id])).length > 0);
     if (clash) continue;
-    tasks[t.id] = { status: 'running', stage: 'brief', round: 0, worktree: '', branch: `task/${t.id}`, executor: exec.mode, attempts: 0, agent: null, startedAt: nowIso, stageSince: nowIso, updatedAt: nowIso, detail: null, title: t.title };
+    tasks[t.id] = { status: 'running', stage: 'brief', round: 0, worktree: '', branch: taskBranch(t.id), executor: exec.mode, attempts: 0, agent: null, startedAt: nowIso, stageSince: nowIso, updatedAt: nowIso, detail: null, title: t.title };
     busy.push(t);
     slots--;
     actions.push({ type: 'start', task: t.id });

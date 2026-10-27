@@ -7,7 +7,7 @@ import { seedExecution } from './helpers/execution.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readEvents } from '../src/forge/ledger.js';
 import { readExecution } from '../src/forge/execution.js';
-import { closedPhase, flowSince, phaseToVerify } from '../src/forge/flow.js';
+import { closedPhase, flowSince, integratedSince, phaseToVerify, runStart } from '../src/forge/flow.js';
 import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
 
 const tmp = useTempDirs();
@@ -264,6 +264,17 @@ describe('the flow pass (K2-13)', () => {
   it('an ephemeral run, already closed by the tick that finished it, still gets its pass (K2-13.4)', () => {
     seedExecution(root, execution({ kind: 'ephemeral', closedAt: AT, closedBy: 'merge' }));
     expect(vp().flow).not.toBeNull();
+  });
+});
+
+describe('w9: a run whose merges are titled in Conventional Commits', () => {
+  it('integratedSince and runStart find its tasks by chore(forge): integrate <T> as by forge: integrate <T>', () => {
+    const tasks = { T1: execution().tasks.T1, T2: execution().tasks.T2 };
+    const subjects = ['chore(forge): integrate T1', 'forge: integrate T2', 'chore(forge): integrate T10', 'chore(forge): merge forge/run-shop'];
+    const fake = (args: string[]) => (args.includes('--format=%s') ? subjects.join('\n')
+      : args.includes('--format=%H %P%x09%s') ? `a1 p1\t${subjects[0]}\n` : null);
+    expect(integratedSince({ tasks }, fake, 'base')).toEqual(['T1', 'T2']);
+    expect(runStart({ tasks }, fake)).toBe('p1');
   });
 });
 

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { parse } from 'yaml';
 import * as z from 'zod';
 import { EFFORTS, MODELS, type Effort, type Model } from '../lib/launcher.js';
+import { COMMIT_STYLE_SETTINGS, type CommitStyleSetting } from '../lib/commit-style.js';
 
 export type Profile = 'balanced' | 'economy' | 'quality';
 export const ROLES = ['impl-heavy', 'impl-high', 'impl', 'impl-light', 'mech', 'review-correctness', 'review-security', 'review-perf', 'review-final', 'verify'] as const;
@@ -61,6 +62,8 @@ export interface ForgeConfig {
   generated: string[];
   /** FX2: the spending cap `infinite start` takes when it gets no --max-usd. */
   budget?: { usd?: number };
+  /** w9: the style of the commit titles forge and waypoint write (src/lib/commit-style.ts); without it, auto. */
+  commits?: { style: CommitStyleSetting };
 }
 export class ConfigError extends Error {}
 
@@ -119,6 +122,7 @@ const Schema = z.object({
   }).strict().optional(),
   generated: z.array(z.string().min(1).max(200)).max(50).default([]),
   budget: z.object({ usd: z.number().positive().max(1_000_000).optional() }).strict().optional(),
+  commits: z.object({ style: z.enum(COMMIT_STYLE_SETTINGS).default('auto') }).strict().optional(),
   threatModel: z.object({
     protects: z.array(z.string().min(1).max(200)).min(1).max(10),
     trusted: z.array(z.string().min(1).max(200)).max(10).default([]),

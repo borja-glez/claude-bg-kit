@@ -8,7 +8,7 @@ import { readExecution, updateExecution, runWorktree, type LockDeps } from '../.
 import { mergeInFlight } from '../../merging.js';
 import type { ExecutionState } from '../../../lib/execution-state.js';
 import { claudeSessionId } from '../../../lib/claude-session.js';
-// auth's isForgeBranch (any forge/… branch: merging into it needs no answer) is not cleanup's (task/* and forge/run-*).
+// auth's isForgeBranch (any forge/… branch: merging into it needs no answer) is not cleanup's (forge/task/* and forge/run-*).
 import { checkMergeAuth, isForgeBranch as isForgeTarget, mergeAsk, pendingAuth, readAuths, useAuth, writeAuth, type AuthRecord } from '../../auth.js';
 import { loadTrustedConfig } from '../../trust.js';
 import { OBJECT_ID } from '../../local.js';
@@ -19,6 +19,7 @@ import { finalVerdictOf } from '../../roadmap-run.js';
 import type { Result } from '../context.js';
 import { type MergeOpts, mergeIn, cleanRunWorktree, attemptExtras } from './integration.js';
 import { localeArg, spanish, closeEnded } from './shared.js';
+import { forgeCommitTitle, resolveCommitStyle } from '../../../lib/commit-style.js';
 
 /** J-15, G-06: once the run branch is merged into its base, the forge block of every integrated task again (merged: true). */
 function mergedPublish(io: Io, e: ExecutionState): { publish: StateWrite[]; publishErrors?: string[] } {
@@ -117,8 +118,9 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   // I-03: before any permission is spent: without the person's trust in the commands, exit 2 with nothing merged.
   const config = loadTrustedConfig(io.cwd);
   const runAt = cleanRunWorktree(deps, runWorktree(io.cwd), e.branch);
+  const style = resolveCommitStyle(config.commits?.style, deps.git, io.env ?? process.env).style;
   const opts: MergeOpts = {
-    message: `forge: merge ${e.branch}`, scope: 'final', timeoutSec: config.validatorTimeoutSec, configRoot: io.cwd,
+    message: forgeCommitTitle(style, { kind: 'merge', branch: e.branch }), scope: 'final', timeoutSec: config.validatorTimeoutSec, configRoot: io.cwd,
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'main', setup: config.swarm.setup,
     runAt: runAt && tip && runAt.git(['rev-parse', 'HEAD'])?.trim() === tip ? runAt : null,
     personal: true, retryDeps: rest.includes('--retry-deps'),

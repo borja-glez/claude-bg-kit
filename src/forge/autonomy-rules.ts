@@ -691,7 +691,7 @@ function gitSeg(seg: Segment, ctx: GuardCtx): GuardVerdict | null {
   const { sub, rest, operands } = g;
   const prot = auto.protectedBranches.join('/');
   const isProtected = (t: string) => auto.protectedBranches.includes(destBranch(t));
-  // T4-OWN-BRANCHES-AMEND: the run's own branches are ctx.branches (run, execution and task/<T> branches) plus names under `<branch>/` or `<branch>-`.
+  // T4-OWN-BRANCHES-AMEND: the run's own branches are ctx.branches (run, execution and task branches) plus names under `<branch>/` or `<branch>-`.
   const ownsBranch = (t: string) => { const b = destBranch(t); return b === auto.branch || auto.branches.includes(b) || b.startsWith(auto.branch + '/') || b.startsWith(auto.branch + '-'); };
   const refDyn = (ws: Word[]) => ws.some(w => w.dynamic);
   /** A protected target (deny), a dynamic one (unknown), or one that is not the run's (deny): used by every destructive branch/ref op (T4-OWN-BRANCHES). */

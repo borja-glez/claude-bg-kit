@@ -6,7 +6,7 @@ import type { Io } from '../run.js';
 import { loadConfig } from '../../config.js';
 import { isLocale } from '../../../lib/forge-run.js';
 import { readEvents } from '../../ledger.js';
-import { updateExecution, taskBranch, taskWorktree, taskBase, type LockDeps } from '../../execution.js';
+import { updateExecution, taskBranch, taskBranchOf, legacyTaskBranch, taskWorktree, taskBase, type LockDeps } from '../../execution.js';
 import type { Liveness } from '../../../lib/coordination.js';
 import { planLocale } from '../../../lib/locale.js';
 import { coordinatorLiveness } from '../../../lib/execution-view.js';
@@ -63,31 +63,39 @@ export function loadTasksArg(io: Io, file: string | undefined, sub: string): Loo
 }
 
 /**
- * The worktree `task-<T>` of the main checkout on `task/<T>` (created from `runBranch` when the branch is new), with
+ * The worktree `task-<T>` of the main checkout on `branch`, `forge/task/<T>` (created from `runBranch` when the branch is
+ * new; w9: the `task/<T>` an execution an earlier forge started recorded, taskBranchOf), with
  * swarm.setup run when it is created. Shared by the coordinator's `swarm worktree` and a member's `--member`.
  * D-02: `base` is where the task left the run branch, so an earlier attempt's commits are in its diff, and `prior` lists them
- * (the newest PRIOR_MAX; `priorTotal` says how many there are when there are more). Final review 7: `task/<T>` is keyed by
+ * (the newest PRIOR_MAX; `priorTotal` says how many there are when there are more). Final review 7: the branch is keyed by
  * the bare id, so in a plan run (`project`) a branch that already holds commits above the run branch is taken up only when
  * the ledger holds a phase implement of this plan's `<T>`, or of a `<T>` that names no project (before 2c); another
  * project's run left it otherwise, and it is refused before anything is created.
  */
 export function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch: string,
-  project: string | null): { worktree: string; branch: string; base: string | null; setup: SetupResult; resumed: boolean; prior: PriorCommit[]; priorTotal?: number } {
+  project: string | null, branch = taskBranch(task)): { worktree: string; branch: string; base: string | null; setup: SetupResult; resumed: boolean; prior: PriorCommit[]; priorTotal?: number } {
   loadTrustedConfig(main); // I-03: before any worktree exists, so a retry after the answer still sets it up
   const dir = taskWorktree(main, task);
-  const branch = taskBranch(task);
   const g = (args: string[]) => deps.git(['-C', main, ...args]);
   let setup: SetupResult = null;
-  const exists = g(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
-  if (exists && project !== null && Number(g(['rev-list', '--count', `${runBranch}..refs/heads/${branch}`])?.trim() || 0) > 0) {
+  const has = (b: string) => g(['rev-parse', '--verify', '-q', `refs/heads/${b}`]) !== null;
+  const above = (b: string) => Number(g(['rev-list', '--count', `${runBranch}..refs/heads/${b}`])?.trim() || 0) > 0;
+  const thisPlans = () => {
     const events = readEvents(main);
     const owner = attribute(events);
-    const implemented = events.filter(e => e.kind === 'phase' && e.phase === 'implement' && isTask(e, task)).map(owner);
-    if (!implemented.some(p => p === project || p === null)) {
-      throw new UsageError(`swarm worktree: ${branch} holds commits that are not this plan's ${task} (another project's run): integrate, rename or remove that branch first`);
-    }
-  }
+    return events.filter(e => e.kind === 'phase' && e.phase === 'implement' && isTask(e, task)).map(owner).some(p => p === project || p === null);
+  };
   let existed = existsSync(dir);
+  // w9: the task worktree stays on the branch it has, and a plan run takes up, as it is, the work an execution of an
+  // earlier forge left on this plan's task/<T>; another task/<T> is never touched.
+  const on = existed ? deps.at(dir).git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim() : null;
+  if (on === taskBranch(task) || on === legacyTaskBranch(task)) branch = on;
+  else if (!existed && branch === taskBranch(task) && !has(branch) && project !== null && has(legacyTaskBranch(task))
+    && above(legacyTaskBranch(task)) && thisPlans()) branch = legacyTaskBranch(task);
+  const exists = has(branch);
+  if (exists && project !== null && above(branch) && !thisPlans()) {
+    throw new UsageError(`swarm worktree: ${branch} holds commits that are not this plan's ${task} (another project's run): integrate, rename or remove that branch first`);
+  }
   if (!existed) {
     excludeWorktrees(g);
     // A branch that outlived its worktree also brings the earlier attempt.
@@ -129,7 +137,7 @@ export interface MemberLaunch { worktree: string; branch: string; name: string; 
 
 /**
  * A-19: the launch of the session of a sessions-mode member of task <T>: in the task worktree (`swarm worktree <T>`
- * creates it and runs its setup) on task/<T>, with /forge:member and the member's effort and model from swarm.member.
+ * creates it and runs its setup) on its task branch (taskBranchOf), with /forge:member and the member's effort and model from swarm.member.
  * forge composes it, never waypoint. The caller checked planPath with checkPlanPath; a project that is not a safe id is
  * refused here (checkLaunchProject). An old swarm.launcher herdr reads as bg, and the note says so (I-18).
  */
@@ -141,7 +149,7 @@ export function memberLaunch(sub: string, root: string, planPath: string, task: 
   const prompt = `/forge:member --plan ${planPath} --task ${task} — run member of ${e.coordinator}: work only ${task}, then stop`;
   const spec = { name, prompt, worktree, effort: swarm.member.effort, ...(swarm.member.model ? { model: swarm.member.model } : {}) };
   return {
-    worktree, branch: taskBranch(task), name, prompt, command: launchCommand(spec), run: launchRun(spec),
+    worktree, branch: taskBranchOf(e, task), name, prompt, command: launchCommand(spec), run: launchRun(spec),
     ...(swarm.launcher === 'herdr' ? { note: 'swarm.launcher herdr was removed: the member starts with bg' } : {}),
   };
 }

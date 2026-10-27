@@ -15,6 +15,7 @@ import { runDocOf } from '../run-doc.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
 import { normalizePublicTask, type ExecTask, type ExecutionState, type PublicTask } from '../../lib/execution-state.js';
 import { isPlanId, parsePlan } from '../../lib/plan.js';
+import { commitStyleAt, forgeCommitTitle, integratedTaskOf } from '../../lib/commit-style.js';
 import { deviationsOf, tellDeviations } from '../deviation.js';
 
 // D-12: `FORGE swarm step`, one step of a plan execution in one process. It calls the CLI itself (deps.cli) for each
@@ -596,7 +597,7 @@ function closeVerify(c: Ctx, task: string, t: ExecTask, n: number, round: number
     // `git add` exits 1 for a tracked file under an ignored directory (as .forge/ may be) while it stages it all the
     // same: only the commit says whether they went in.
     git(['add', '--', ...files]);
-    const committed = git(['commit', '-q', '-m', `${task}: learned notes of its verification`, '--', ...files]) !== null;
+    const committed = git(['commit', '-q', '-m', forgeCommitTitle(commitStyleAt(c.io.cwd, git, c.io.env ?? process.env).style, { kind: 'notes', task }), '--', ...files]) !== null;
     const head = committed ? git(['rev-parse', 'HEAD'])?.trim() : null;
     if (head) writeJson(path.join(r.abs, `validators-head-${n}.json`), { round: round + 1, head, runId: c.runId });
     else c.actions.push({ type: 'error', task, command: 'git commit', code: 1, stderr: `could not commit ${files.join(', ')} in ${slash(t.worktree)}: commit them with the task's work` });
@@ -623,8 +624,8 @@ function integrateTask(c: Ctx, task: string): void {
 /**
  * M2: a task the execution has integrated while its roadmap state (DB/state/<T>.json, as the skill listed it) is not
  * `done`: the step that integrated it may have died before its output, or the `done` batch failed. Its `integrated`
- * action comes again with the commit of the run branch's merge of task/<T> (the merge whose second parent is its tip,
- * else the one titled `forge: integrate <T>`). A state the list did not bring says nothing: no action.
+ * action comes again with the commit of the run branch's merge of its task branch (the merge whose second parent is its tip,
+ * else the one titled `forge: integrate <T>` in either commit style). A state the list did not bring says nothing: no action.
  */
 function integratedAgain(c: Ctx, task: string, t: ExecTask): void {
   const state = readJson(path.resolve(c.io.cwd, c.db, 'state', `${task}.json`));
@@ -634,7 +635,7 @@ function integratedAgain(c: Ctx, task: string, t: ExecTask): void {
   const merges = (git(['log', '--merges', '--format=%H %P', c.runBranch]) ?? '').split('\n').map(l => l.trim().split(' ')).filter(p => p.length >= 3);
   // By its exact subject: a grep for «forge: integrate T1» would also find T10's.
   const titled = () => (git(['log', '--merges', '--format=%H%x09%s', c.runBranch]) ?? '').split('\n')
-    .map(l => l.trim().split('\t')).find(([, subject]) => subject === `forge: integrate ${task}`)?.[0];
+    .map(l => l.trim().split('\t')).find(([, subject]) => integratedTaskOf(subject ?? '') === task)?.[0];
   const sha = (tip ? merges.find(p => p.slice(2).includes(tip))?.[0] : undefined) ?? titled();
   if (!sha) return;
   // The same publish and metrics as the integrate that was lost (I3): the skill never composes the done state itself.

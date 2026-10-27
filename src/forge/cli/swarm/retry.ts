@@ -1,6 +1,6 @@
 import type { SwarmCommand } from './context.js';
 import { UsageError } from '../errors.js';
-import { writePublicTask } from '../../execution.js';
+import { writePublicTask, taskBranchOf } from '../../execution.js';
 import { LEASE_MINUTES } from '../../../lib/coordination.js';
 import { clearEnded } from '../../live.js';
 import type { ExecutionState, ExecTask } from '../../../lib/execution-state.js';
@@ -59,7 +59,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
         throw new UsageError(`swarm retry: the worktree of ${t.branch} (${holder}) has uncommitted changes; commit or discard them before --adopt`);
       }
     }
-    const worktree = holder ?? addTaskWorktree(deps, io.cwd, task, e.branch, e.kind === 'plan' ? e.project : null).worktree;
+    const worktree = holder ?? addTaskWorktree(deps, io.cwd, task, e.branch, e.kind === 'plan' ? e.project : null, taskBranchOf(e, task)).worktree;
     let adopted = t;
     update(cur => {
       if (!cur) return null;

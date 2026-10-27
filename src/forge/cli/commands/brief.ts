@@ -10,6 +10,9 @@ import { UsageError } from '../errors.js';
 import { renderSpBrief, SpPlanError } from '../../../lib/sp-plan.js';
 import type { Io } from '../run.js';
 import { planTask, spTaskNumber, tddFor } from '../shared.js';
+import { defaultGit } from '../exec.js';
+import { mainCheckout } from '../../local.js';
+import { commitStyleAt, type CommitStyle } from '../../../lib/commit-style.js';
 
 // The TDD line of a brief: an invalid config or a missing superpowers leaves it out (the brief never fails on it), and
 // nothing is looked for with tdd: off.
@@ -26,6 +29,10 @@ function briefBug(dir: string, title: string): string | null {
 function briefThreatModel(dir: string): string | null {
   try { const tm = loadConfig(dir).threatModel; return tm ? renderThreatModel(tm) : null; } catch { return null; }
 }
+
+// w9: the style of the commit titles: the config of the main checkout, as every commit forge makes reads it, then the
+// history of the code's checkout.
+const briefStyle = (io: Io, dir: string): CommitStyle => commitStyleAt(mainCheckout(dir), io.git ?? defaultGit(dir), io.env ?? process.env).style;
 
 // FC6: a brief that names a .md file Claude Code refuses to Write in a subagent ends with the line on how to deliver it.
 const withRefusedMd = (brief: string): string => {
@@ -76,6 +83,6 @@ export const command: Command = (args, ctx) => {
   const designPath = existsSync(path.resolve(io.cwd, design)) ? design.replace(/\\/g, '/') : null;
   return ok(withRefusedMd(renderBrief(plan, task, {
     planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: briefTdd(io, repoDir), bug: briefBug(repoDir, task.title),
-    threatModel: briefThreatModel(repoDir), prior, priorTotal,
+    threatModel: briefThreatModel(repoDir), prior, priorTotal, commitStyle: briefStyle(io, repoDir),
   })));
 };

@@ -10,10 +10,11 @@ import { normalizeExecution, isSafeId, isRunBranch, type ExecutionState } from '
 import { claudeSessionId, noClaudeSession } from '../../../lib/claude-session.js';
 import { mainWorktreeFrom, samePath } from '../../../lib/worktree.js';
 import { defaultBranchOf, excludeWorktrees } from '../../../lib/git-info.js';
+import { commitStyleAt, forgeCommitTitle } from '../../../lib/commit-style.js';
 import { isMemberId } from '../../members.js';
 import { planOfLoose, writeLoose, readLoose, type LooseTask } from '../../loose.js';
 import { startAnnounce } from '../../swarm.js';
-// auth's isForgeBranch (any forge/… branch: merging into it needs no answer) is not cleanup's (task/* and forge/run-*).
+// auth's isForgeBranch (any forge/… branch: merging into it needs no answer) is not cleanup's (forge/task/* and forge/run-*).
 import { checkMofAuth, isForgeBranch as isForgeTarget, readAuths, useAuth, type MofReason } from '../../auth.js';
 import { noteOnce, trustFor, trustOutput } from '../../trust.js';
 import { pruneRunState } from '../../cleanup.js';
@@ -165,7 +166,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
       else if (deps.git(['merge-base', '--is-ancestor', branch, base]) !== null) {
         if (at.git(['merge', '--ff-only', base]) === null) throw new UsageError(dirty ? dirtyMsg : `swarm start: cannot fast-forward ${branch} to ${base}`);
         baseSync = 'fast-forward';
-      } else if (at.git(['merge', '--no-ff', base, '-m', `forge: bring ${base} into ${branch}`]) !== null) baseSync = 'merged';
+      } else if (at.git(['merge', '--no-ff', base, '-m', forgeCommitTitle(commitStyleAt(io.cwd, at.git, io.env ?? process.env).style, { kind: 'bring', base, branch })]) !== null) baseSync = 'merged';
       else {
         at.git(['merge', '--abort']);
         // A refused merge in a dirty worktree is not a conflict: say what blocks it.

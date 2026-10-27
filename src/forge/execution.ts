@@ -6,6 +6,7 @@ import { pidAlive, removeFileIf, sleepSync } from './pid.js';
 import { readSwarm, swarmFile } from './swarm.js';
 import { mainCheckout } from './local.js';
 import { fromSwarm, isSafeId, parseExecution, type ExecutionState, type PublicTask } from '../lib/execution-state.js';
+export { taskBranch, legacyTaskBranch, taskBranchOf } from '../lib/execution-state.js';
 
 /** The id of a run of `project` started at `at`: swarm start gives it, swarm propose prints it before the run exists. */
 export const runIdOf = (project: string, at: Date) => `${project}-${at.toISOString().replace(/[:.]/g, '')}`;
@@ -24,7 +25,6 @@ export const hasRunStamp = (id: unknown): id is string => isSafeId(id) && new Re
 export const executionFile = (root: string) => path.join(root, '.forge', 'execution.json');
 export const executionTaskFile = (root: string, task: string) => path.join(root, '.forge', 'execution', `${task}.json`);
 export const runBranch = (project: string) => `forge/run-${project}`;
-export const taskBranch = (task: string) => `task/${task}`;
 export const runWorktree = (root: string) => path.join(root, '.claude', 'worktrees', 'run');
 export const taskWorktree = (root: string, task: string) => path.join(root, '.claude', 'worktrees', `task-${task}`);
 /**

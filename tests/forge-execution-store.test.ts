@@ -20,7 +20,7 @@ const T = '2026-10-12T12:00:00.000Z';
 describe('execution store', () => {
   it('names branches and worktrees', () => {
     expect(runBranch('shop')).toBe('forge/run-shop');
-    expect(taskBranch('T004')).toBe('task/T004');
+    expect(taskBranch('T004')).toBe('forge/task/T004');
     expect(runWorktree(root)).toBe(path.join(root, '.claude', 'worktrees', 'run'));
     expect(taskWorktree(root, 'T004')).toBe(path.join(root, '.claude', 'worktrees', 'task-T004'));
   });

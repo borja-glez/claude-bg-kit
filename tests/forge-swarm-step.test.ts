@@ -696,7 +696,7 @@ describe('swarm step: robustness (M1, M2, M7, M9)', () => {
     const s = stepWith(() => false);
     const starts = s.actions.filter(a => a.type === 'start');
     expect(starts.map(a => a.task)).toEqual(['T1', 'T2']);
-    for (const a of starts) expect(a.launch).toMatchObject({ branch: `task/${a.task}`, name: `wp-shop-${a.task}`, run: expect.stringContaining('/forge:member') });
+    for (const a of starts) expect(a.launch).toMatchObject({ branch: `forge/task/${a.task}`, name: `wp-shop-${a.task}`, run: expect.stringContaining('/forge:member') });
     expect(s.calls.filter(a => isCmd(a, 'brief') || isCmd(a, 'prep'))).toEqual([]);
   });
 });

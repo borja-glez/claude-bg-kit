@@ -36,6 +36,8 @@ import { blockBatch, claimBatch, cleanText, doneBatch, freeBatch, heartbeatBatch
 import { BOUND_VIAS, MAX_SEATS, isBoundVia, type BoundDoc } from '../lib/bound.js';
 import { boundFile, boundLive, checkoutSid, leftSeatOf, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, settleBinding, writeAtomic, writeBinding } from '../lib/bound-fs.js';
 import { isSafeId } from '../lib/execution-state.js';
+import { commitStyleAt, taskCommitTitle, type CommitStyleOf } from '../lib/commit-style.js';
+import type { GitRun } from '../lib/git-info.js';
 import type { Commit, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState, TaskStatus } from '../lib/types.js';
 
 // The classic hooks live in hooks.ts; the tests import isCommitCommand from here.
@@ -48,7 +50,7 @@ const nodeSpawn: Spawn = (command, options) => spawn(command, options);
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined>; spawn?: Spawn }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|replan|hash|clean-cache|db-import|page|set-roadmap|add-task|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-comments|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|replan|hash|clean-cache|db-import|page|set-roadmap|add-task|sync|doctor|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|commit-style|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-comments|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -496,7 +498,9 @@ export function run(argv: string[], io: Io): Result {
         if (seat && flag('states')) settlePending(seat, abs(flag('states')!));
         // unblock is only reported when true, as before
         const { unblock, ...rest } = r;
-        return ok(JSON.stringify({ ...(unblock ? r : rest), multi, ...(notes ? { notes } : {}) }));
+        // w9: the title of the task's commit in the repository's style (<type> is the session's to choose).
+        const commit = r.task ? { commit: taskCommitTitle(commitStyleHere(io.cwd, io.env ?? process.env).style, r.task.id, r.task.title) } : {};
+        return ok(JSON.stringify({ ...(unblock ? r : rest), multi, ...commit, ...(notes ? { notes } : {}) }));
       }
       case 'conflicts': {
         const session = flag('session');
@@ -638,6 +642,8 @@ export function run(argv: string[], io: Io): Result {
         return ok(eventId(io.now(), args[0] ?? 'main', io.rand));
       case 'now':
         return ok(io.now().toISOString());
+      case 'commit-style':
+        return ok(JSON.stringify(commitStyleHere(io.cwd, io.env ?? process.env)));
       case 'commit-info': {
         const rev = args[0] !== undefined && !args[0].startsWith('--') ? args[0] : 'HEAD';
         if (!args.includes('--event')) return ok(JSON.stringify(commitInfo(io.cwd, rev)));
@@ -1365,6 +1371,12 @@ function integratedShas(plan: PlanView, states: Record<string, TaskState>, base:
 }
 
 /** commit-info: a commit's sha, committer date, title and line counts. */
+/** w9: the style of the repository's commit titles: `.forge/config.yaml` of the main checkout, the history of HEAD here, FORGE_COMMIT_STYLE. */
+function commitStyleHere(cwd: string, env: Readonly<Record<string, string | undefined>>): CommitStyleOf {
+  const git: GitRun = a => { try { return execFileSync('git', a, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
+  return commitStyleAt(mainWorktreeFrom(git(['worktree', 'list', '--porcelain']) ?? '') ?? cwd, git, env);
+}
+
 function commitInfo(cwd: string, rev: string): Commit {
   const git = (...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' });
   const [sha, ts, ...title] = git('log', '-1', '--format=%H%x09%cI%x09%s', rev).trim().split('\t');

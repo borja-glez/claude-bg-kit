@@ -12,6 +12,16 @@ export const isSafeId = (s: unknown): s is string => typeof s === 'string' && SA
 /** The run branch rule of `swarm start`: at most 120 characters, no leading dash, no `..`. */
 const RUN_BRANCH = /^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/;
 export const isRunBranch = (s: unknown): s is string => typeof s === 'string' && RUN_BRANCH.test(s) && !s.includes('..');
+/** w9: a task's branch, in forge's own namespace, so none of the person's branches can pass for one. */
+export const taskBranch = (task: string) => `forge/task/${task}`;
+/** w9: the task branch forge named before 0.33.0. */
+export const legacyTaskBranch = (task: string) => `task/${task}`;
+/**
+ * w9: the branch of task `task` in execution `e`: the `task/<T>` it recorded when an earlier forge started it, kept
+ * until the execution ends (its worktree, its member's launch, integrate and retry stay on it), else taskBranch.
+ */
+export const taskBranchOf = (e: { tasks: Readonly<Record<string, { branch: string }>> } | null, task: string): string =>
+  (e?.tasks[task]?.branch === legacyTaskBranch(task) ? legacyTaskBranch(task) : taskBranch(task));
 
 export type ExecMode = 'subagents' | 'sessions';
 /** stopped (D3): forge stop stopped the task while it ran; swarm close and the end of a run release it like a running one. */

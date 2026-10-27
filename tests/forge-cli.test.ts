@@ -3007,6 +3007,21 @@ describe('forge begin (J-12)', () => {
       expect(run(bad, none).code, bad.join(' ')).toBe(2);
     }
   });
+  it('w9: prints the commit style and the Commit title line of a brief written by hand, as commit-style reads it', () => {
+    repo();
+    const none: Io = { ...io, env: { CLAUDE_CONFIG_DIR: tmp('forge-begin-none-') } };
+    // `init` alone is too short a history to say: FORGE_COMMIT_STYLE decides, else plain.
+    expect(JSON.parse(run(['begin', '--task', 'cart'], { ...none, env: { ...none.env, FORGE_COMMIT_STYLE: 'conventional' } }).stdout).commit).toMatchObject({ style: 'conventional', source: 'env' });
+    expect(JSON.parse(run(['begin', '--task', 'cart'], none).stdout).commit).toEqual({
+      style: 'plain', source: 'default', line: "Commit title: <what the commit does>, in the style of this repository's recent commits (git log --oneline -10)",
+    });
+    for (const m of ['feat: a', 'fix: b', 'docs: c']) git('commit', '-q', '--allow-empty', '-m', m);
+    expect(JSON.parse(run(['begin', '--task', 'cart'], none).stdout).commit).toMatchObject({ style: 'conventional', source: 'history', line: expect.stringMatching(/^Commit title: <type>: <what the commit does>, in Conventional Commits/) });
+    expect(JSON.parse(run(['commit-style'], none).stdout)).toEqual({ style: 'conventional', source: 'history' });
+    put('.forge/config.yaml', 'commits:\n  style: plain\n');
+    expect(JSON.parse(run(['begin', '--task', 'cart'], none).stdout).commit).toMatchObject({ style: 'plain', source: 'config' });
+    expect(JSON.parse(run(['commit-style'], none).stdout)).toEqual({ style: 'plain', source: 'config' });
+  });
   it('says why there is no snapshot: snapshotError is the message of the tree snapshot it ran (T3)', () => {
     repo();
     // git answers everything but the work tree's top level, which tree snapshot needs.

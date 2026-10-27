@@ -76,7 +76,7 @@ describe("forge's texts (w8 integration)", () => {
     const ts = line('plugins/forge/skills/run/references/task-steps.md', '2. **implement**');
     const med = line('plugins/forge/skills/run/references/medium.md', '2. For each task');
     for (const [name, t] of [['task-steps', ts], ['medium', med]] as const) {
-      for (const w of ['under a line `--- <path> ---`', 'with the Write tool', "brief's `Commit title prefix`", 'tell the person in one line']) expect(t, `${name}: ${w}`).toContain(w);
+      for (const w of ['under a line `--- <path> ---`', 'with the Write tool', "brief's `Commit title`", 'tell the person in one line']) expect(t, `${name}: ${w}`).toContain(w);
     }
     expect(ts).toContain("in the task's worktree");
     expect(ts).toContain('before the step that names the task in `--returned`');

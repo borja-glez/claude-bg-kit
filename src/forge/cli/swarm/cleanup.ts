@@ -10,6 +10,7 @@ import { isPlanId } from '../../../lib/plan.js';
 import { forgeBranches, forgeWorktrees, isForgeBranch, pruneRunState, pruneWork } from '../../cleanup.js';
 import { copyTree, evidenceOf } from '../../evidence-copy.js';
 import { worktreeHolding } from './shared.js';
+import { legacyTaskBranch } from '../../../lib/execution-state.js';
 
 export const subcommand: SwarmCommand = (rest, ctx) => {
   const { io, deps, has, json, now } = ctx;
@@ -32,7 +33,9 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   const head = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim() || 'HEAD';
   const merged = (b: string) => deps.git(['merge-base', '--is-ancestor', `refs/heads/${b}`, 'HEAD']) !== null;
   const rel = (p: string) => path.relative(io.cwd, p).split(path.sep).join('/');
-  const taskOf = (b: string) => (b.startsWith('task/') && isPlanId(b.slice(5)) ? b.slice(5) : null);
+  const taskOf = (b: string) => { const t = /^(?:forge\/)?task\/(.+)$/.exec(b)?.[1]; return t && isPlanId(t) ? t : null; };
+  // w9: the task/<T> of an earlier forge is forge's only in its own worktree, task-<T>; elsewhere it may be the person's.
+  const forgeOwn = (name: string, branch: string) => isForgeBranch(branch) || branch === legacyTaskBranch(name.slice('task-'.length));
   const removed = { worktrees: [] as string[], branches: [] as string[], files: 0, bytes: 0 };
   const kept: { path?: string; branch?: string; reason: string }[] = [];
   const gone: string[] = [];
@@ -88,7 +91,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     }
     removed.worktrees.push(where.path);
     // The run worktree may hold a branch the person named (--branch): only forge's own branches go.
-    if (!isForgeBranch(w.branch)) { kept.push({ branch: w.branch, reason: 'not a forge branch (task/* or forge/run-*)' }); continue; }
+    if (!forgeOwn(w.name, w.branch)) { kept.push({ branch: w.branch, reason: 'not a forge branch (forge/task/* or forge/run-*)' }); continue; }
     if (!dryRun) halt();
     if (!dryRun && deps.git(['branch', '-d', w.branch]) === null) { kept.push({ branch: w.branch, reason: 'git branch -d refused it' }); continue; }
     removed.branches.push(w.branch);
@@ -96,7 +99,7 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
     if (t) gone.push(t);
   }
   const held = new Set(worktrees.map(w => w.branch).filter((b): b is string => !!b));
-  const refs = deps.git(['for-each-ref', '--format=%(refname)', 'refs/heads/task', 'refs/heads/forge', 'refs/heads/track']) ?? '';
+  const refs = deps.git(['for-each-ref', '--format=%(refname)', 'refs/heads/forge', 'refs/heads/track']) ?? '';
   for (const b of forgeBranches(refs)) {
     if (held.has(b)) continue;
     if (b === head) { kept.push({ branch: b, reason: 'checked out in the main checkout' }); continue; }

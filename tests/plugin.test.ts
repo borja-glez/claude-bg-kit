@@ -160,7 +160,7 @@ describe('plugin layout', () => {
       'FORGE waypoint-cli', 'run.json', 'final-validators.json', 'FORGE verdict --task <project>-final', 'final-fix.txt', '`start_prompt`']) expect(large).toContain(w);
     for (const w of ['FORGE brief --plan', '/waypoint:work', 'block <plan> --db DB']) expect(runRef('execution')).toContain(w);
     const steps = read('plugins/forge/skills/run/references/task-steps.md');
-    for (const w of ['FORGE triage --plan', 'mkdir -p <WORK>', 'Commit title prefix']) expect(steps).toContain(w);
+    for (const w of ['FORGE triage --plan', 'mkdir -p <WORK>', "brief's `Commit title`"]) expect(steps).toContain(w);
     expect(all).not.toContain('report-<n>.md');
   });
   it('forge run skill sizes and reviews each plan task by its real diff', () => {
@@ -214,7 +214,7 @@ describe('plugin layout', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     const large = runRef('large');
     for (const w of ['final-validators-2.json', 'final-2.patch', '--dir .forge/work/<project>/final-2 --validators .forge/work/<project>/final-validators-2.json',
-      '`redo` is treated as `fix`', '--no-merged', 'design-page']) expect(large).toContain(w);
+      '`redo` is treated as `fix`', 'does not show as `integrated`', 'design-page']) expect(large).toContain(w);
     expect(runRef('review-close')).toContain('FORGE log --kind ruling --task <id>-<n>');
     expect(read('plugins/forge/README.md')).toContain('keeps its verdict and still scores');
   });
@@ -464,7 +464,7 @@ describe('plugin layout', () => {
     for (const w of ['--session <SID>', '--locale <es|en>', 'Always write `revert`', '--cwd .claude/worktrees/run', 'before `FORGE swarm merge`']) expect(dec).toContain(w);
     expect(runRef('execution')).toMatch(/Before `FORGE swarm merge`, without a roadmap, write and commit the run's decisions file/);
     const skill = read('plugins/forge/skills/decisions/SKILL.md');
-    for (const w of ['relative to `MAIN`', 'git log --all --oneline --grep', 'from the `depends_on` of every task left', '"runId"', 'node "<WP>" design-validate', 'node "<WP>" design-snapshot']) expect(skill).toContain(w);
+    for (const w of ['relative to `MAIN`', 'git log --all --oneline -E --grep "^(<T>|[a-z]+\\(<T>\\)!?): "', 'from the `depends_on` of every task left', '"runId"', 'node "<WP>" design-validate', 'node "<WP>" design-snapshot']) expect(skill).toContain(w);
   });
   it('READMEs describe the decisions', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
@@ -617,7 +617,7 @@ describe('plugin layout', () => {
       expect(inReply, a).toHaveLength(1);
       expect(inReply[0].startsWith('5. '), a).toBe(true);
       expect(inReply[0], a).toContain('`--- report ---`');
-      expect(md).toContain('Commit title prefix');
+      expect(md).toContain("written as the brief's `Commit title` line says");
     }
     expect(read('plugins/forge/agents/forge-review-final.md')).toMatch(/final review/i);
   });
@@ -699,7 +699,7 @@ describe('plugin layout', () => {
       expect(s).not.toContain('Run `/waypoint:work` and follow it');
       expect(s).not.toContain('Then continue `/waypoint:work` at §4');
     }
-    for (const w of ['FORGE swarm propose --plan', 'git -C .claude/worktrees/run diff', '--no-merged forge/run-', '--cwd .claude/worktrees/run']) expect(runRef('large')).toContain(w);
+    for (const w of ['FORGE swarm propose --plan', 'git -C .claude/worktrees/run diff', 'the `branch` of each task `FORGE swarm status`', '--cwd .claude/worktrees/run']) expect(runRef('large')).toContain(w);
     expect(infiniteText()).not.toContain("the tick's `progress`");
     const inf = infiniteText();
     // Citations point to where the text lives now: the references of forge:run.
@@ -974,7 +974,7 @@ describe('plugin layout', () => {
     const exec = runRef('execution');
     expect(manual).toContain('FORGE swarm join --session <SID> --role manual --hook-session <CSID>');
     expect(exec).toContain('`start {task}` in mode `sessions`: first `FORGE swarm worktree <T>`');
-    expect(manual).toMatch(/5\. \*\*Finish\.\*\* Commits on `task\/<T>`[^\n]*FORGE swarm report <T> --session <SID> --stage verdict --status accepted --no-agent/);
+    expect(manual).toMatch(/5\. \*\*Finish\.\*\* Commits on `forge\/task\/<T>`[^\n]*FORGE swarm report <T> --session <SID> --stage verdict --status accepted --no-agent/);
     for (const s of [runMd, exec]) expect(s).not.toContain('on `integrated` only');
     expect(exec).toContain('(`/waypoint:plan`)');
     const stop = read('plugins/forge/skills/stop/SKILL.md');

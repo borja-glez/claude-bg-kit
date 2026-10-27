@@ -128,9 +128,12 @@ describe('forge doctor (the command)', () => {
   });
   it('a merged task branch: the dry run of swarm cleanup warns with a confirm fix, and the branch stays', () => {
     git(root, 'commit', '--allow-empty', '-q', '-m', 'init');
+    // w9: a loose task/T1 may be the person's: swarm cleanup leaves it, so there is nothing to warn about.
     git(root, 'branch', 'task/T1');
+    expect(check('worktrees')).toMatchObject({ status: 'ok' });
+    git(root, 'branch', 'forge/task/T1');
     expect(check('worktrees')).toMatchObject({ status: 'warn', fix: { kind: 'confirm' } });
-    expect(git(root, 'branch', '--list', 'task/T1')).not.toBe('');
+    expect(git(root, 'branch', '--list', 'forge/task/T1')).not.toBe('');
   });
   it('a merged worktree: its index keeps its bytes and mtime, though git status would refresh it (spec: read-only)', () => {
     writeFileSync(path.join(root, 'a.txt'), 'a\n');

@@ -18,6 +18,7 @@ import { loadTrustedConfig } from '../../trust.js';
 import type { Result } from '../context.js';
 import { mergeIn, attemptExtras, commitInfo, integratedPublish, logValidations } from './integration.js';
 import { localeArg, spanish } from './shared.js';
+import { forgeCommitTitle, resolveCommitStyle } from '../../../lib/commit-style.js';
 
 const WORK_FILES = /^(?:baseline-\d+\.json|brief-\d+\.md|report-\d+\.txt)$/;
 
@@ -95,8 +96,9 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps, planArg?: string, db
   const personal = e.kind !== 'plan';
   // --no-cache: neither read nor write the tree cache (a red result it holds may have been flaky).
   const cache = config.validate.cache && !rest.includes('--no-cache');
+  const style = resolveCommitStyle(config.commits?.style, target.git, io.env ?? process.env).style;
   const r = mergeIn(target, t.branch, {
-    message: `forge: integrate ${task}`, task, scope: 'heavy', timeoutSec: config.validatorTimeoutSec, configRoot: wt,
+    message: forgeCommitTitle(style, { kind: 'integrate', task }), task, scope: 'heavy', timeoutSec: config.validatorTimeoutSec, configRoot: wt,
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'run', setup: config.swarm.setup, personal,
     retryDeps: rest.includes('--retry-deps'),
     run: runOptions(config, readEvents(io.cwd), io.now()),

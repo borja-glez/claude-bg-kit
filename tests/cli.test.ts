@@ -67,6 +67,24 @@ describe('waypoint CLI', () => {
     expect(fresh.unblock).toBeUndefined();
   });
 
+  it("w9: next prints the title of the task's commit in the repository's style, as commit-style reads it", () => {
+    // Outside git, with no FORGE_COMMIT_STYLE: the task's id and its title.
+    const first = JSON.parse(run(['next', 'plan.yaml', '--session', 'main'], { ...io, env: {} }).stdout);
+    expect(first.commit).toBe(`${first.task.id}: ${first.task.title}`);
+    expect(JSON.parse(run(['commit-style'], { ...io, env: {} }).stdout)).toEqual({ style: 'plain', source: 'default' });
+    expect(JSON.parse(run(['commit-style'], { ...io, env: { FORGE_COMMIT_STYLE: 'conventional' } }).stdout)).toEqual({ style: 'conventional', source: 'env' });
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' });
+    git('init', '-q', '-b', 'main'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 't');
+    for (const m of ['feat: a', 'fix: b', 'chore: c']) git('commit', '-q', '--allow-empty', '-m', m);
+    const conv = JSON.parse(run(['next', 'plan.yaml', '--session', 'main'], io).stdout);
+    expect(conv.commit).toMatch(new RegExp(`^<type>\\(${conv.task.id}\\): `));
+    expect(JSON.parse(run(['commit-style'], io).stdout)).toEqual({ style: 'conventional', source: 'history' });
+    // forge's config says it for both plugins.
+    mkdirSync(path.join(dir, '.forge'));
+    writeFileSync(path.join(dir, '.forge', 'config.yaml'), 'commits:\n  style: plain\n');
+    expect(JSON.parse(run(['commit-style'], io).stdout)).toEqual({ style: 'plain', source: 'config' });
+  });
+
   it('validate reports ok and fails with all issues', () => {
     expect(run(['validate', 'plan.yaml'], io)).toMatchObject({ code: 0, stdout: 'ok: 6 tasks, 2 phases, 2 tracks\nwarning: 1 task(s) without zones run alone in a forge execution: T006\n' });
     // With zones on every task there is no warning.

@@ -7,6 +7,7 @@ import { readExecution } from './execution.js';
 import { parsePlan } from '../lib/plan.js';
 import type { ExecutionState } from '../lib/execution-state.js';
 import type { PlanTask } from '../lib/types.js';
+import { integratedTaskOf } from '../lib/commit-style.js';
 
 export const flowDirName = (runId: string, n: number): string => `flow-${runId}-${n}`;
 
@@ -24,7 +25,7 @@ export function flowDirs(root: string, runId: string): string[] {
 /**
  * The commit a flow pass diffs from: the last pass's (execution.flow), or that pass's own base when it was blocked; else the first parent of the run's first
  * integration on HEAD. That integration is the oldest merge among the shas the run recorded for its tasks; with none
- * recorded, the oldest merge titled `forge: integrate <T>` of one of its tasks since the run started (the run branch
+ * recorded, the oldest merge titled `forge: integrate <T>` (`chore(forge): …` in Conventional Commits) of one of its tasks since the run started (the run branch
  * is reused across runs, and plan ids repeat). Null before any.
  */
 export function flowSince(
@@ -51,20 +52,20 @@ export function runStart(e: Pick<ExecutionState, 'tasks'> & { startedAt?: string
   if (e.startedAt) args.push(`--since=${e.startedAt}`);
   for (const line of (git([...args, 'HEAD']) ?? '').split('\n')) {
     const [shas, subject] = line.split('\t');
-    const m = /^forge: integrate (.+)$/.exec((subject ?? '').trim());
+    const task = integratedTaskOf(subject ?? '');
     const parent = shas?.trim().split(' ')[1];
-    if (m && ids.has(m[1]) && parent) return parent;
+    if (task && ids.has(task) && parent) return parent;
   }
   return null;
 }
 
-/** The run's tasks whose integration (`forge: integrate <T>`) is in since..HEAD, oldest first. */
+/** The run's tasks whose integration (`forge: integrate <T>`, in either commit style) is in since..HEAD, oldest first. */
 export function integratedSince(e: Pick<ExecutionState, 'tasks'>, git: (args: string[]) => string | null, since: string): string[] {
   const ids = new Set(Object.keys(e.tasks));
   const out: string[] = [];
   for (const subject of (git(['log', '--merges', '--reverse', '--format=%s', `${since}..HEAD`]) ?? '').split('\n')) {
-    const m = /^forge: integrate (.+)$/.exec(subject.trim());
-    if (m && ids.has(m[1]) && !out.includes(m[1])) out.push(m[1]);
+    const task = integratedTaskOf(subject);
+    if (task && ids.has(task) && !out.includes(task)) out.push(task);
   }
   return out;
 }

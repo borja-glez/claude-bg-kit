@@ -27,10 +27,10 @@ export function forgeWorktrees(porcelain: string, main: string): ForgeWorktree[]
   return out;
 }
 
-/** A branch forge makes: task/<T> or forge/run-<project>. */
-export const isForgeBranch = (b: string) => /^task\/.+/.test(b) || /^forge\/run-.+/.test(b);
+/** A branch forge makes: forge/task/<T> or forge/run-<project> (w9: a task/<T> is forge's only in its own worktree). */
+export const isForgeBranch = (b: string) => /^forge\/task\/.+/.test(b) || /^forge\/run-.+/.test(b);
 
-/** forge's branches in `git for-each-ref --format=%(refname) refs/heads/task refs/heads/forge`: task/* and forge/run-*. */
+/** forge's branches in `git for-each-ref --format=%(refname) refs/heads/forge`: forge/task/* and forge/run-*. */
 export function forgeBranches(refs: string): string[] {
   return refs.split(/\r?\n/).map(l => l.trim()).filter(l => l.startsWith('refs/heads/')).map(l => l.slice('refs/heads/'.length))
     .filter(isForgeBranch);

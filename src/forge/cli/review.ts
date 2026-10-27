@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { samePath } from '../../lib/worktree.js';
+import { commitStyleAt, forgeCommitTitle } from '../../lib/commit-style.js';
 import { isSafeId, type ExecutionState } from '../../lib/execution-state.js';
 import { UsageError } from './errors.js';
 import { appendEvent, appendPhase, ledgerRoot, readEvents, type LedgerEvent } from '../ledger.js';
@@ -898,7 +899,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const revert = undo
     ? deps.git(['rev-list', '--merges', `${planBase}..HEAD`])?.trim()
       ? { base: planBase, head: headNow, steps: [['-C', deps.repoDir, 'read-tree', '-u', '--reset', planBase],
-        ['-C', deps.repoDir, 'commit', '--allow-empty', '-m', `${id}: undo the attempt for a redo (back to the tree of ${planBase.slice(0, 12)})`]] }
+        ['-C', deps.repoDir, 'commit', '--allow-empty', '-m', forgeCommitTitle(commitStyleAt(ledgerRoot(deps.cwd), deps.git).style, { kind: 'undo', task: id, tree: planBase.slice(0, 12) })]] }
       : { base: planBase, head: headNow, args: ['-C', deps.repoDir, 'revert', '--no-edit', `${planBase}..HEAD`] }
     : null;
 

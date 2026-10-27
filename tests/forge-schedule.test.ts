@@ -16,7 +16,7 @@ const exec = (over: Partial<ExecutionState> = {}): ExecutionState => ({
   lastBlockStep: null, sleepUntil: null, tasks: {}, ...over,
 });
 const running = (id: string, status: 'running' | 'accepted' | 'conflict' | 'blocked' = 'running') => ({
-  [id]: { status, stage: 'implement' as const, round: 1, worktree: `/w/${id}`, branch: `task/${id}`, executor: 'subagents' as const, attempts: 0, agent: null, startedAt: at(-5), stageSince: at(-5), updatedAt: at(-1), detail: null },
+  [id]: { status, stage: 'implement' as const, round: 1, worktree: `/w/${id}`, branch: `forge/task/${id}`, executor: 'subagents' as const, attempts: 0, agent: null, startedAt: at(-5), stageSince: at(-5), updatedAt: at(-1), detail: null },
 });
 const input = (over: Partial<ScheduleInput>): ScheduleInput => ({ plan: plan([]), states: {}, sessions: {}, exec: exec(), integrated: [], now: NOW, ...over });
 const starts = (r: ReturnType<typeof schedule>) => r.actions.filter(a => a.type === 'start').map(a => (a as { task: string }).task);
@@ -37,7 +37,7 @@ describe('schedule', () => {
   it('starts independent tasks up to parallel, in plan order', () => {
     const r = schedule(input({ plan: plan([task('T1'), task('T2'), task('T3'), task('T4')]), exec: exec({ parallel: 2 }) }));
     expect(starts(r)).toEqual(['T1', 'T2']);
-    expect(r.next.tasks.T1).toMatchObject({ status: 'running', stage: 'brief', branch: 'task/T1', executor: 'subagents' });
+    expect(r.next.tasks.T1).toMatchObject({ status: 'running', stage: 'brief', branch: 'forge/task/T1', executor: 'subagents' });
     expect(r.actions.at(-1)).toEqual({ type: 'wait', seconds: STEP_WAIT_SECONDS });
   });
   it('counts running tasks against the slots and never restarts them', () => {
@@ -71,7 +71,7 @@ describe('schedule', () => {
   });
   it('integrates one accepted task per tick and then ticks again at once', () => {
     const r = schedule(input({ plan: plan([task('T1'), task('T2')]), exec: exec({ tasks: { ...running('T1', 'accepted'), ...running('T2', 'accepted') } }), states: { T1: { status: 'in_progress', owner: 'main' }, T2: { status: 'in_progress', owner: 'main' } } }));
-    expect(r.actions[0]).toEqual({ type: 'integrate', task: 'T1', ref: 'task/T1' });
+    expect(r.actions[0]).toEqual({ type: 'integrate', task: 'T1', ref: 'forge/task/T1' });
     expect(r.actions.filter(a => a.type === 'integrate')).toHaveLength(1);
     expect(r.actions.at(-1)).toEqual({ type: 'wait', seconds: 0 });
   });
@@ -81,7 +81,7 @@ describe('schedule', () => {
     const busy = schedule(input({ ...base, merging: true }));
     expect(busy.actions).toEqual([{ type: 'wait', seconds: STEP_WAIT_SECONDS }]);
     expect(busy.next).toMatchObject({ active: true, stopReason: null });
-    expect(schedule(input(base)).actions).toEqual([{ type: 'integrate', task: 'T1', ref: 'task/T1' }, { type: 'wait', seconds: 0 }]);
+    expect(schedule(input(base)).actions).toEqual([{ type: 'integrate', task: 'T1', ref: 'forge/task/T1' }, { type: 'wait', seconds: 0 }]);
   });
   it('finishes when every task is done and nothing waits to be integrated', () => {
     const r = schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'done' } }, exec: exec({ tasks: running('T1', 'integrated' as never) }) }));
@@ -169,7 +169,7 @@ describe('schedule', () => {
   it('accepts a sessions task its session marked done and integrates it', () => {
     const r = schedule(input({ plan: plan([task('T1')]), exec: exec({ mode: 'sessions', tasks: sess('T1') }), states: { T1: { status: 'done', owner: 'S2', commits: [{ sha: 'bbb2222', ts: at(-1), title: 't', add: 1, del: 0 }] } } }));
     expect(r.next.tasks.T1).toMatchObject({ status: 'accepted', stage: 'integrate' });
-    expect(r.actions[0]).toEqual({ type: 'integrate', task: 'T1', ref: 'task/T1' });
+    expect(r.actions[0]).toEqual({ type: 'integrate', task: 'T1', ref: 'forge/task/T1' });
   });
   it('a member task marked done on the roadmap is accepted without a finishedAt', () => {
     const acc = schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'done' as const, owner: 'S2' } }, sessions: { S2: live(at(5)) },
@@ -180,11 +180,15 @@ describe('schedule', () => {
   it('adopts a task a manual session finished with commits not yet on the run branch', () => {
     const states: States = { T1: { status: 'done', owner: 'M1', commits: [{ sha: 'ccc3333', ts: at(-1), title: 't', add: 1, del: 0 }] } };
     const r = schedule(input({ plan: plan([task('T1')]), states }));
-    expect(r.next.tasks.T1).toMatchObject({ status: 'accepted', executor: 'manual', branch: 'task/T1' });
-    expect(r.actions[0]).toEqual({ type: 'integrate', task: 'T1', ref: 'task/T1' });
+    expect(r.next.tasks.T1).toMatchObject({ status: 'accepted', executor: 'manual', branch: 'forge/task/T1' });
+    expect(r.actions[0]).toEqual({ type: 'integrate', task: 'T1', ref: 'forge/task/T1' });
     const done = schedule(input({ plan: plan([task('T1')]), states, integrated: ['ccc3333'] }));
     expect(done.next.tasks.T1).toBeUndefined();
     expect(done.actions.at(-1)).toEqual({ type: 'finish' });
+    // w9: the branch the tick reads from the member's worktree (an earlier forge's task/<T> it took up) is the one integrated.
+    const legacy = schedule({ ...input({ plan: plan([task('T1')]), states }), branchOf: t => `task/${t}` });
+    expect(legacy.next.tasks.T1).toMatchObject({ branch: 'task/T1' });
+    expect(legacy.actions[0]).toEqual({ type: 'integrate', task: 'T1', ref: 'task/T1' });
   });
   it('waits instead of stalling while the last task is claimed by another live session', () => {
     const r = schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'in_progress', owner: 'M1' } }, sessions: { M1: { ...live(at(5)), role: 'manual' } } }));

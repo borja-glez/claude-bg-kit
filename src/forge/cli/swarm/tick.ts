@@ -1,8 +1,8 @@
 import type { SwarmCommand } from './context.js';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { UsageError } from '../errors.js';
-import { runWorktree } from '../../execution.js';
+import { legacyTaskBranch, runWorktree, taskBranch, taskWorktree } from '../../execution.js';
 import { mergeInFlight } from '../../merging.js';
 import { schedule, type BgAgent } from '../../schedule.js';
 import { normalizePublicTask, type PublicTask } from '../../../lib/execution-state.js';
@@ -54,11 +54,18 @@ export const subcommand: SwarmCommand = (rest, ctx) => {
   }
   // D-07: an integration is in flight (merging.json, from its baseline to its commit): this tick integrates nothing.
   const merging = mergeInFlight(io.cwd, now.getTime()) !== null;
+  // w9: a manual member works in the task worktree on the branch `swarm worktree --member` gave it, which may be the
+  // task/<T> an earlier forge left: its finished work is integrated from there.
+  const branchOf = (task: string) => {
+    const dir = taskWorktree(io.cwd, task);
+    const on = existsSync(dir) ? deps.at(dir).git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim() : null;
+    return on === legacyTaskBranch(task) ? on : taskBranch(task);
+  };
   // The scheduler decides on the execution as it is under the lock, so a swarm task or an integrate that ran
   // meanwhile is never overwritten (I-15).
   let d!: ReturnType<typeof schedule>;
   update(cur => {
-    d = schedule({ plan, states, sessions, exec: cur ?? e, integrated, now: now.getTime(), publicTasks, agents, merging });
+    d = schedule({ plan, states, sessions, exec: cur ?? e, integrated, now: now.getTime(), publicTasks, agents, merging, branchOf });
     // Wave 0 handoff: an ephemeral run integrates each task into the person's branch as it goes, so the tick that
     // finishes it finds all its work merged already, and no swarm merge will ever close it: it closes here (C2).
     if (d.next.kind === 'ephemeral' && !d.next.active && d.next.stopReason === 'finished' && !d.next.closedAt) d = { ...d, next: { ...d.next, closedAt: iso, closedBy: 'merge' } };

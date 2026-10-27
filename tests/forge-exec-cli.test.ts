@@ -90,7 +90,7 @@ describe('forge swarm (execution)', () => {
     const e = readExecution(root)!;
     const at = NOW.toISOString();
     const task = (executor: 'subagents' | 'sessions' | 'manual', status: 'running' | 'integrated') =>
-      ({ status, stage: 'implement' as const, round: 1, worktree: '', branch: 'task/x', executor, attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null });
+      ({ status, stage: 'implement' as const, round: 1, worktree: '', branch: 'forge/task/x', executor, attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null });
     seedExecution(root, { ...e, tasks: { T1: task('subagents', 'running'), T2: task('sessions', 'running'), T3: task('subagents', 'integrated') } });
     const calls: string[][] = [];
     const deps = { git: (a: string[]) => { calls.push(a); return null; }, exec: defaultExec(root), repo: repoReader(root), at: (): never => { throw new Error('no git'); } };
@@ -240,7 +240,7 @@ describe('forge swarm (execution)', () => {
     const t = out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io));
     expect(t.actions.filter((a: { type: string }) => a.type === 'start').map((a: { task: string }) => a.task)).toEqual(['T1', 'T2']);
     const w = out(run(['swarm', 'worktree', 'T1'], io));
-    expect(w).toMatchObject({ branch: 'task/T1', worktree: path.join(root, '.claude', 'worktrees', 'task-T1') });
+    expect(w).toMatchObject({ branch: 'forge/task/T1', worktree: path.join(root, '.claude', 'worktrees', 'task-T1') });
     expect(existsSync(path.join(w.worktree, 'plan.yaml'))).toBe(true);
     expect(readExecution(root)!.tasks.T1.worktree).toBe(w.worktree);
     out(run(['swarm', 'task', 'T1', '--stage', 'implement', '--agent', 'forge-impl', '--round', '1'], io));
@@ -434,10 +434,10 @@ describe('forge swarm (execution)', () => {
   });
   it('the line for files a rejected install changed quotes each one and names at most ten', () => {
     const files = Array.from({ length: 12 }, (_, i) => `f${i}.txt`);
-    expect(keptFilesSay(false, 'task/x', ['a`b.txt'])).toBe('These files of your checkout changed during the dependency install for the rejected merge of task/x and were left as they are; check them: ``a`b.txt``.');
-    expect(keptFilesSay(false, 'task/x', files)).toMatch(/: `f0\.txt`, .*`f9\.txt` and 2 more\.$/);
-    expect(keptFilesSay(true, 'task/x', files)).toMatch(/revísalos: `f0\.txt`, .*`f9\.txt` y 2 más\.$/);
-    expect(keptFilesSay(true, 'task/x', files)).not.toContain('f10.txt');
+    expect(keptFilesSay(false, 'forge/task/x', ['a`b.txt'])).toBe('These files of your checkout changed during the dependency install for the rejected merge of forge/task/x and were left as they are; check them: ``a`b.txt``.');
+    expect(keptFilesSay(false, 'forge/task/x', files)).toMatch(/: `f0\.txt`, .*`f9\.txt` and 2 more\.$/);
+    expect(keptFilesSay(true, 'forge/task/x', files)).toMatch(/revísalos: `f0\.txt`, .*`f9\.txt` y 2 más\.$/);
+    expect(keptFilesSay(true, 'forge/task/x', files)).not.toContain('f10.txt');
   });
   it('task --drop forgets a task lost in a claim race, so the next tick leaves it to its owner', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
@@ -600,7 +600,7 @@ describe('forge swarm (execution)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     for (const bad of ['a:b', '..', 'a/b', 'x'.repeat(65)]) expect(run(['swarm', 'worktree', bad], io).code).toBe(2);
     for (const sub of ['task', 'retry', 'integrate']) expect(run(['swarm', sub, 'a:b'], io).code).toBe(2);
-    expect(normalizeExecution({ ...readExecution(root)!, tasks: { 'a:b': { status: 'running', stage: 'brief', executor: 'subagents', worktree: '', branch: 'task/x', startedAt: NOW.toISOString() } } })!.tasks).toEqual({});
+    expect(normalizeExecution({ ...readExecution(root)!, tasks: { 'a:b': { status: 'running', stage: 'brief', executor: 'subagents', worktree: '', branch: 'forge/task/x', startedAt: NOW.toISOString() } } })!.tasks).toEqual({});
   });
   it('top-level forge stop ends an active execution and leaves the stop file', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
@@ -619,22 +619,22 @@ describe('forge swarm (execution)', () => {
     sessionsRun();
     const wt1 = out(run(['swarm', 'worktree', 'T1'], io)).worktree;
     const mine = path.join(root, '.claude', 'worktrees', 'mine');
-    git('branch', 'task/T2', 'forge/run-shop');
-    git('worktree', 'add', mine, 'task/T2');
+    git('branch', 'forge/task/T2', 'forge/run-shop');
+    git('worktree', 'add', mine, 'forge/task/T2');
     const e = readExecution(root)!;
     seedExecution(root, { ...e, tasks: {
       ...e.tasks,
-      T1: { ...e.tasks.T1, status: 'conflict', detail: 'merge conflict with task/T1' },
+      T1: { ...e.tasks.T1, status: 'conflict', detail: 'merge conflict with forge/task/T1' },
       T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' },
     } });
     const r1 = out(run(['swarm', 'retry', 'T1', '--adopt'], io));
-    expect(r1).toMatchObject({ task: 'T1', adopted: true, previous: 'sessions', branch: 'task/T1', work: '.forge/work/shop/T1' });
+    expect(r1).toMatchObject({ task: 'T1', adopted: true, previous: 'sessions', branch: 'forge/task/T1', work: '.forge/work/shop/T1' });
     expect(samePath(r1.worktree, wt1)).toBe(true);
     const r2 = out(run(['swarm', 'retry', 'T2', '--adopt'], io));
     expect(r2.previous).toBe('manual');
     expect(samePath(r2.worktree, mine)).toBe(true);
     const after = readExecution(root)!;
-    expect(after.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', executor: 'subagents', attempts: 1, detail: 'merge conflict with task/T1', finishedAt: NOW.toISOString() });
+    expect(after.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', executor: 'subagents', attempts: 1, detail: 'merge conflict with forge/task/T1', finishedAt: NOW.toISOString() });
     expect(JSON.parse(readFileSync(executionTaskFile(root, 'T1'), 'utf8'))).toMatchObject({ by: 'main', mode: 'subagents', stage: 'implement' });
     // The member marked it done on the roadmap: the tick no longer takes that as accepted, nor relaunches it.
     writeDocs(path.join(root, 'db', 'state'), { T1: { status: 'done', owner: 'S2' } });
@@ -646,9 +646,9 @@ describe('forge swarm (execution)', () => {
     sessionsRun();
     out(run(['swarm', 'worktree', 'T1'], io));
     seedExecution(root, onT1({ status: 'conflict', detail: 'merge conflict' })(readExecution(root)!));
-    const r = out(run(['swarm', 'retry', 'T1', '--adopt'], meanwhile(onT1({ round: 4, detail: 'merge conflict with task/T2' }))));
+    const r = out(run(['swarm', 'retry', 'T1', '--adopt'], meanwhile(onT1({ round: 4, detail: 'merge conflict with forge/task/T2' }))));
     expect(r).toMatchObject({ task: 'T1', adopted: true, previous: 'sessions' });
-    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', executor: 'subagents', attempts: 1, round: 4, detail: 'merge conflict with task/T2' });
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', executor: 'subagents', attempts: 1, round: 4, detail: 'merge conflict with forge/task/T2' });
     expect(JSON.parse(readFileSync(executionTaskFile(root, 'T1'), 'utf8'))).toMatchObject({ round: 4, mode: 'subagents' });
   });
   it('retry --adopt is refused under the lock once the execution was stopped meanwhile: the task stays as it was (K2-02)', () => {
@@ -670,13 +670,13 @@ describe('forge swarm (execution)', () => {
     expect(run(['swarm', 'retry', 'T1', '--adopt'], io).stderr).toMatch(/--adopt takes a member's task in conflict/);
     expect(run(['swarm', 'retry', 'T2', '--adopt'], io).code).toBe(2);
     seedExecution(root, { ...readExecution(root)!, tasks: { ...readExecution(root)!.tasks, T2: { ...e.tasks.T2, executor: 'sessions', status: 'conflict' } } });
-    expect(run(['swarm', 'retry', 'T2', '--adopt'], io).stderr).toMatch(/task\/T2 does not exist/);
+    expect(run(['swarm', 'retry', 'T2', '--adopt'], io).stderr).toMatch(/swarm retry: forge\/task\/T2 does not exist/);
   });
   it('retry --adopt refuses with code 2 when the worktree it would take over has uncommitted edits', () => {
     sessionsRun();
     const mine = path.join(root, '.claude', 'worktrees', 'mine');
-    git('branch', 'task/T2', 'forge/run-shop');
-    git('worktree', 'add', mine, 'task/T2');
+    git('branch', 'forge/task/T2', 'forge/run-shop');
+    git('worktree', 'add', mine, 'forge/task/T2');
     writeFileSync(path.join(mine, 'wip.txt'), 'unsaved');
     const e = readExecution(root)!;
     seedExecution(root, { ...e, tasks: { ...e.tasks, T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' } } });
@@ -690,8 +690,8 @@ describe('forge swarm (execution)', () => {
   it('retry --adopt refuses when the status of the worktree it would take over cannot be read', () => {
     sessionsRun();
     const mine = path.join(root, '.claude', 'worktrees', 'mine');
-    git('branch', 'task/T2', 'forge/run-shop');
-    git('worktree', 'add', mine, 'task/T2');
+    git('branch', 'forge/task/T2', 'forge/run-shop');
+    git('worktree', 'add', mine, 'forge/task/T2');
     const e = readExecution(root)!;
     seedExecution(root, { ...e, tasks: { ...e.tasks, T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' } } });
     const real = defaultGit(root);
@@ -743,7 +743,7 @@ describe('forge swarm (execution)', () => {
       const name = `wp-shop-${a.task}`;
       const prompt = `/forge:member --plan plan.yaml --task ${a.task} — run member of ${e.coordinator}: work only ${a.task}, then stop`;
       expect(a.launch).toEqual({
-        worktree, branch: `task/${a.task}`, name, prompt,
+        worktree, branch: `forge/task/${a.task}`, name, prompt,
         command: `claude --bg --name ${name} --effort medium "${prompt}"`,
         run: launchRun({ name, prompt, worktree, effort: 'medium' }),
       });
@@ -798,7 +798,7 @@ describe('forge swarm (execution)', () => {
     sessionsRun();
     const r = out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
     const e = readExecution(root)!;
-    expect(r).toMatchObject({ task: 'T1', attempt: 1, launch: { branch: 'task/T1', name: 'wp-shop-T1', prompt: expect.stringContaining('/forge:member --plan plan.yaml --task T1') } });
+    expect(r).toMatchObject({ task: 'T1', attempt: 1, launch: { branch: 'forge/task/T1', name: 'wp-shop-T1', prompt: expect.stringContaining('/forge:member --plan plan.yaml --task T1') } });
     const note = readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'handover.md'), 'utf8');
     expect(note).toContain('# Handover: T1 (attempt 1 of 3)');
     // It names the real brief, in the task worktree, and its own main-checkout path; never a task.json.
@@ -823,7 +823,7 @@ describe('forge swarm (execution)', () => {
     seedExecution(root, { ...e0, tasks: { ...e0.tasks, T1: { ...e0.tasks.T1, startedAt: '2026-10-12T00:00:00.000Z', nudgedAt: '2026-10-12T01:00:00.000Z' } } });
     const tree = git('rev-parse', 'forge/run-shop^{tree}');
     const sha = git('commit-tree', tree, '-p', 'forge/run-shop', '-m', 'work on t1');
-    git('branch', '-f', 'task/T1', sha);
+    git('branch', '-f', 'forge/task/T1', sha);
     out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
     const t = readExecution(root)!.tasks.T1;
     expect(t.startedAt).toBe(NOW.toISOString());
@@ -846,7 +846,7 @@ describe('forge swarm (execution)', () => {
     expect(out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io))).toMatchObject({ task: 'T1', work: '.forge/work/shop/T1' });
     // A task an earlier version started keeps its folder while its brief is there and the ledger gives it this project.
     const e = readExecution(root)!;
-    seedExecution(root, { ...e, tasks: { ...e.tasks, T9: { ...e.tasks.T1, branch: 'task/T9', worktree: '' } } });
+    seedExecution(root, { ...e, tasks: { ...e.tasks, T9: { ...e.tasks.T1, branch: 'forge/task/T9', worktree: '' } } });
     mkdirSync(path.join(root, '.forge', 'work', 'T9'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'work', 'T9', 'brief-1.md'), '# T9\n');
     appendEvent(root, { ts: NOW.toISOString(), kind: 'triage', task: 'T9', project: 'shop' });
@@ -1017,7 +1017,7 @@ describe('forge swarm (execution)', () => {
       out(start());
       const e = readExecution(root)!;
       const at = NOW.toISOString();
-      seedExecution(root, { ...e, active: false, stopReason: 'stopped', tasks: { 'fix-a': { status: 'running', stage: 'implement', round: 1, worktree: '', branch: 'task/fix-a', executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
+      seedExecution(root, { ...e, active: false, stopReason: 'stopped', tasks: { 'fix-a': { status: 'running', stage: 'implement', round: 1, worktree: '', branch: 'forge/task/fix-a', executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
       expect(out(run(['swarm', 'close'], io))).toMatchObject({ closed: true, kind: 'ephemeral', release: [], members: [] });
     });
     it('start keeps the user branch, creates no run worktree and records the loose tasks', () => {
@@ -1037,9 +1037,9 @@ describe('forge swarm (execution)', () => {
       expect(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral'], io).code).toBe(2);
       const cyc = tasksFile([{ id: 'a', title: 'a', path: 'small', zones: [], depends_on: ['b'] }, { id: 'b', title: 'b', path: 'small', zones: [], depends_on: ['a'] }]);
       expect(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', cyc], io).stderr).toMatch(/cycle/);
-      git('branch', 'task/fix-a'); git('checkout', '-q', 'task/fix-a');
+      git('branch', 'forge/task/fix-a'); git('checkout', '-q', 'forge/task/fix-a');
       writeFileSync(path.join(root, 'old.txt'), 'x'); git('add', 'old.txt'); git('commit', '-qm', 'old work'); git('checkout', '-q', 'main');
-      expect(start().stderr).toMatch(/task\/fix-a has work not on main/);
+      expect(start().stderr).toMatch(/swarm start: forge\/task\/fix-a has work not on main/);
       expect(readExecution(root)).toBeNull();
     });
     it('start refuses an existing task worktree for a loose id', () => {
@@ -1064,10 +1064,10 @@ describe('forge swarm (execution)', () => {
       expect(readFileSync(file).equals(before)).toBe(true);
     });
     it('start deletes a task branch that is already merged into the base', () => {
-      git('branch', 'task/fix-a');
+      git('branch', 'forge/task/fix-a');
       writeFileSync(path.join(root, 'later.txt'), 'x'); git('add', 'later.txt'); git('commit', '-qm', 'later');
       out(start());
-      expect(git('branch', '--list', 'task/fix-a')).toBe('');
+      expect(git('branch', '--list', 'forge/task/fix-a')).toBe('');
     });
     it('a second run reusing merged ids starts the dependent task from the integrated work of its dependency', () => {
       const ids = tasksFile([
@@ -1091,7 +1091,7 @@ describe('forge swarm (execution)', () => {
       out(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', ids], io));
       finish('a', 'a1.txt'); finish('b', 'b1.txt');
       seedExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
-      expect(git('branch', '--list', 'task/a')).toContain('task/a');
+      expect(git('branch', '--list', 'forge/task/a')).toContain('forge/task/a');
       // Second run reuses the same ids.
       out(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', ids], io));
       finish('a', 'a2.txt');
@@ -1118,7 +1118,7 @@ describe('forge swarm (execution)', () => {
       writeFileSync(path.join(w, 'a.txt'), 'a\n');
       execFileSync('git', ['add', 'a.txt'], { cwd: w }); execFileSync('git', ['commit', '-qm', 'fix-a: work'], { cwd: w });
       out(run(['swarm', 'task', 'fix-a', '--stage', 'verdict', '--status', 'accepted'], io));
-      expect(tick()[0]).toEqual({ type: 'integrate', task: 'fix-a', ref: 'task/fix-a' });
+      expect(tick()[0]).toEqual({ type: 'integrate', task: 'fix-a', ref: 'forge/task/fix-a' });
       expect(out(run(['swarm', 'integrate', 'fix-a'], io))).toMatchObject({ result: 'integrated' });
       expect(git('log', '-1', '--format=%s')).toBe('forge: integrate fix-a');
       expect(git('rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
@@ -1135,7 +1135,7 @@ describe('forge swarm (execution)', () => {
       const at = (min: number) => new Date(NOW.getTime() + min * 60000).toISOString();
       const marker = (staleAt: string) => {
         mkdirSync(path.dirname(mergingFile(root)), { recursive: true });
-        writeFileSync(mergingFile(root), JSON.stringify({ task: 'fix-b', pre: git('rev-parse', 'HEAD'), ref: 'task/fix-b', pid: process.ppid, startedAt: at(-1), staleAt, dir: root, phase: 'baseline' }));
+        writeFileSync(mergingFile(root), JSON.stringify({ task: 'fix-b', pre: git('rev-parse', 'HEAD'), ref: 'forge/task/fix-b', pid: process.ppid, startedAt: at(-1), staleAt, dir: root, phase: 'baseline' }));
       };
       marker(at(60));
       const busy = tick();
@@ -1143,7 +1143,7 @@ describe('forge swarm (execution)', () => {
       expect(busy.at(-1)).toEqual({ type: 'wait', seconds: STEP_WAIT_SECONDS });
       expect(readExecution(root)).toMatchObject({ active: true, stopReason: null });
       marker(at(-1));
-      expect(tick()[0]).toEqual({ type: 'integrate', task: 'fix-a', ref: 'task/fix-a' });
+      expect(tick()[0]).toEqual({ type: 'integrate', task: 'fix-a', ref: 'forge/task/fix-a' });
     });
     it('a tick during an integration\'s baseline sees the merge in flight: no integrate, a wait (D-07)', () => {
       writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators:\n  - name: ok\n    cmd: node -e "0"\n');
@@ -1165,7 +1165,7 @@ describe('forge swarm (execution)', () => {
       expect(during!.some(a => a.type === 'integrate')).toBe(false);
       expect(during!.at(-1)).toEqual({ type: 'wait', seconds: STEP_WAIT_SECONDS });
       // Once it committed, the next tick integrates the other one at once.
-      expect(out(run(['swarm', 'tick'], io)).actions[0]).toEqual({ type: 'integrate', task: 'fix-b', ref: 'task/fix-b' });
+      expect(out(run(['swarm', 'tick'], io)).actions[0]).toEqual({ type: 'integrate', task: 'fix-b', ref: 'forge/task/fix-b' });
     });
     it('a rejected integration into the user checkout removes the node_modules it created, or says the dependencies may not match', () => {
       const counter = path.join(root, '..', `inst-${path.basename(root)}.txt`);
@@ -1189,7 +1189,7 @@ describe('forge swarm (execution)', () => {
       out(run(['swarm', 'task', 'fix-a', '--stage', 'verdict', '--status', 'accepted'], io));
       const again = out(run(['swarm', 'integrate', 'fix-a', '--locale', 'es'], io));
       expect(again).toMatchObject({ result: 'conflict', depsFromRejectedMerge: true });
-      expect(again.say).toEqual(['Las dependencias de tu copia de trabajo se instalaron para la integración rechazada de task/fix-a y puede que no coincidan con tus archivos: reinstálalas antes de usarla.']);
+      expect(again.say).toEqual(['Las dependencias de tu copia de trabajo se instalaron para la integración rechazada de forge/task/fix-a y puede que no coincidan con tus archivos: reinstálalas antes de usarla.']);
       expect(existsSync(path.join(root, 'node_modules'))).toBe(true);
       rmSync(counter, { force: true });
     });
@@ -1231,12 +1231,12 @@ describe('forge swarm (execution)', () => {
       accepted('fix-a', 'package.json', '{}\n');
       const r = out(run(['swarm', 'integrate', 'fix-a'], io));
       expect(r).toMatchObject({ result: 'conflict', touchedKept: ['plan.yaml'] });
-      expect(r.say).toEqual(['These files of your checkout changed during the dependency install for the rejected merge of task/fix-a and were left as they are; check them: `plan.yaml`.']);
+      expect(r.say).toEqual(['These files of your checkout changed during the dependency install for the rejected merge of forge/task/fix-a and were left as they are; check them: `plan.yaml`.']);
       expect(readFileSync(path.join(root, 'plan.yaml'), 'utf8')).toBe(`${PLAN}# install\n`);
       git('checkout', '--', 'plan.yaml');
       expect(run(['swarm', 'retry', 'fix-a'], io).code).toBe(0);
       out(run(['swarm', 'task', 'fix-a', '--stage', 'verdict', '--status', 'accepted'], io));
-      expect(out(run(['swarm', 'integrate', 'fix-a', '--locale', 'es'], io)).say).toEqual(['Estos archivos de tu copia de trabajo cambiaron durante la instalación de dependencias de la integración rechazada de task/fix-a y se han dejado como están; revísalos: `plan.yaml`.']);
+      expect(out(run(['swarm', 'integrate', 'fix-a', '--locale', 'es'], io)).say).toEqual(['Estos archivos de tu copia de trabajo cambiaron durante la instalación de dependencias de la integración rechazada de forge/task/fix-a y se han dejado como están; revísalos: `plan.yaml`.']);
     });
     it('integrate refuses a dirty user checkout and takes no members', () => {
       out(start());
@@ -1286,11 +1286,11 @@ describe('forge swarm (execution)', () => {
       expect(run(['swarm', 'join', '--session', 'main', '--role', 'manual'], wio).code).toBe(2);
       expect(run(['swarm', 'join', '--session', 'E1', '--role', 'executor'], wio).code).toBe(2);
     });
-    it('worktree --member creates task/<T> from the run branch without touching execution.json', () => {
+    it('worktree --member creates forge/task/<T> from the run branch without touching execution.json', () => {
       out(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], wio));
       const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
       const w = out(run(['swarm', 'worktree', 'T2', '--member', 'M1'], wio));
-      expect(w.branch).toBe('task/T2');
+      expect(w.branch).toBe('forge/task/T2');
       // D-08: the task's work folder, by its project, the same relative path in the main checkout and in its worktree.
       expect(w.work).toBe('.forge/work/shop/T2');
       expect(path.resolve(w.worktree).toLowerCase()).toBe(path.resolve(root, '.claude', 'worktrees', 'task-T2').toLowerCase());
@@ -1301,7 +1301,7 @@ describe('forge swarm (execution)', () => {
     it('report from a member worktree prints a publish file with an absolute path under that worktree\'s work folder; --claim refuses a status that is not running', () => {
       const e = readExecution(root)!;
       const at = NOW.toISOString();
-      seedExecution(root, { ...e, tasks: { T2: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T2', executor: 'sessions', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
+      seedExecution(root, { ...e, tasks: { T2: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'forge/task/T2', executor: 'sessions', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
       writeMember(root, { sessionId: 'M2', role: 'executor', runId: e.runId, task: 'T2', name: null, since: at, hookSession: null });
       const r = out(run(['swarm', 'report', 'T2', '--session', 'M2', '--stage', 'review'], wio));
       expect(path.isAbsolute(r.publish.file_path)).toBe(true);
@@ -1380,7 +1380,7 @@ describe('forge swarm (execution)', () => {
       out(run(['swarm', 'join', '--session', 'E1', '--role', 'executor', '--task', 'T1'], wio));
       expect(run(['swarm', 'worktree', 'T2', '--member', 'E1'], wio).code).toBe(2);
       expect(existsSync(path.join(root, '.claude', 'worktrees', 'task-T2'))).toBe(false);
-      expect(out(run(['swarm', 'worktree', 'T1', '--member', 'E1'], wio)).branch).toBe('task/T1');
+      expect(out(run(['swarm', 'worktree', 'T1', '--member', 'E1'], wio)).branch).toBe('forge/task/T1');
     });
     it('report refuses a task another live session reports, and takes it once that lease is over', () => {
       out(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], wio));
@@ -1489,7 +1489,7 @@ describe('forge swarm (execution)', () => {
 describe('forge stop stops the execution of the main checkout for real, from any worktree (K2-01, K2-02)', () => {
   const at = NOW.toISOString();
   const task = (executor: 'subagents' | 'sessions', status: 'running' | 'integrated' | 'stopped' = 'running') =>
-    ({ status, stage: 'implement' as const, round: 1, worktree: '', branch: 'task/x', executor, attempts: 0, agent: 'forge-impl', startedAt: at, stageSince: at, updatedAt: at, detail: null });
+    ({ status, stage: 'implement' as const, round: 1, worktree: '', branch: 'forge/task/x', executor, attempts: 0, agent: 'forge-impl', startedAt: at, stageSince: at, updatedAt: at, detail: null });
   it('running tasks become stopped, their leases end, the run members go, and it prints what to release', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const e = readExecution(root)!;
@@ -1508,7 +1508,7 @@ describe('forge stop stops the execution of the main checkout for real, from any
     expect(r.release).toEqual([{ task: 'T1', write: { op: 'update', collection: 'state', doc_id: 'T1', data: { status: 'free', owner: del, claimedAt: del, startedAt: del, exec: del } } }]);
     const after = readExecution(root)!;
     expect(after).toMatchObject({ active: false, stopReason: 'stopped', sleepUntil: null, closedAt: null });
-    expect(after.tasks.T1).toMatchObject({ status: 'stopped', executor: 'subagents', branch: 'task/x', agent: null, detail: 'stopped by forge stop' });
+    expect(after.tasks.T1).toMatchObject({ status: 'stopped', executor: 'subagents', branch: 'forge/task/x', agent: null, detail: 'stopped by forge stop' });
     expect(after.tasks.T2).toMatchObject({ status: 'stopped', executor: 'sessions' });
     expect(after.tasks.T3.status).toBe('integrated');
     expect(JSON.parse(readFileSync(executionTaskFile(root, 'T1'), 'utf8'))).toMatchObject({ status: 'stopped', agent: null, leaseUntil: at });
@@ -1614,8 +1614,8 @@ describe('forge stop stops the execution of the main checkout for real, from any
   it('swarm retry and retry --adopt refuse a stopped execution and move none of its tasks; a stalled one is still revived (final review 2)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const e = readExecution(root)!;
-    git('branch', 'task/T2', 'forge/run-shop');
-    const tasks = { T1: { ...task('subagents'), status: 'conflict' as const }, T2: { ...task('sessions'), status: 'conflict' as const, branch: 'task/T2' } };
+    git('branch', 'forge/task/T2', 'forge/run-shop');
+    const tasks = { T1: { ...task('subagents'), status: 'conflict' as const }, T2: { ...task('sessions'), status: 'conflict' as const, branch: 'forge/task/T2' } };
     seedExecution(root, { ...e, tasks });
     out(run(['stop'], io));
     const file = path.join(root, '.forge', 'execution.json');
@@ -1855,7 +1855,7 @@ describe('rebinding a run needs the bound conversation to have stopped (wave 0 h
 
 describe('an ephemeral run is closed by the tick that finishes it (wave 0 handoff)', () => {
   const at = NOW.toISOString();
-  const done = (id: string, status: 'integrated' | 'blocked') => ({ status, stage: 'integrate' as const, round: 1, worktree: '', branch: `task/${id}`, executor: 'subagents' as const, attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null });
+  const done = (id: string, status: 'integrated' | 'blocked') => ({ status, stage: 'integrate' as const, round: 1, worktree: '', branch: `forge/task/${id}`, executor: 'subagents' as const, attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null });
   // An ephemeral run takes at least 2 tasks: fix-b is integrated, and fix-a ends as `status`.
   const loose = (status: 'integrated' | 'blocked') => ({ 'fix-a': done('fix-a', status), 'fix-b': done('fix-b', 'integrated') });
   const startLoose = () => {
@@ -1953,27 +1953,27 @@ describe('a task resumed in its worktree is reviewed with its earlier commits (D
 
 describe("a task branch another plan's run left is never this plan's earlier attempt (final review 7)", () => {
   const g = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim();
-  // task/T1 with a commit above forge/run-shop that was never integrated, and no worktree.
+  // forge/task/T1 with a commit above forge/run-shop that was never integrated, and no worktree.
   const leftover = () => {
     const tmp = path.join(root, '.claude', 'worktrees', 'tmp');
-    git('worktree', 'add', '-q', '-b', 'task/T1', tmp, 'forge/run-shop');
+    git('worktree', 'add', '-q', '-b', 'forge/task/T1', tmp, 'forge/run-shop');
     writeFileSync(path.join(tmp, 'other.txt'), 'x\n'); g(tmp, 'add', 'other.txt'); g(tmp, 'commit', '-qm', 'T1: some other plan');
     git('worktree', 'remove', tmp);
   };
   const phase = (project: string | null) =>
     appendEvent(root, { ts: NOW.toISOString(), kind: 'phase', task: 'T1', phase: 'implement', brief: 1, base: 'b'.repeat(40), ...(project ? { project } : {}) });
-  it("refuses another project's commits on task/<T> before anything is created", () => {
+  it("refuses another project's commits on forge/task/<T> before anything is created", () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     leftover();
     appendEvent(root, { ts: NOW.toISOString(), kind: 'triage', task: 'T1', path: 'large', reasons: [], project: 'web' });
     phase('web');
     const r = run(['swarm', 'worktree', 'T1'], io);
     expect(r.code).toBe(2);
-    expect(r.stderr).toBe("swarm worktree: task/T1 holds commits that are not this plan's T1 (another project's run): integrate, rename or remove that branch first\n");
+    expect(r.stderr).toBe("swarm worktree: forge/task/T1 holds commits that are not this plan's T1 (another project's run): integrate, rename or remove that branch first\n");
     expect(existsSync(path.join(root, '.claude', 'worktrees', 'task-T1'))).toBe(false);
     expect(readExecution(root)!.tasks.T1).toBeUndefined();
     // Nor does a branch with no implement phase of this plan at all.
-    git('branch', '-m', 'task/T1', 'task/T2');
+    git('branch', '-m', 'forge/task/T1', 'forge/task/T2');
     expect(run(['swarm', 'worktree', 'T2'], io).code).toBe(2);
   });
   it("accepts this plan's own earlier attempt, and a branch whose implement phases name no project (before 2c)", () => {
@@ -1982,9 +1982,44 @@ describe("a task branch another plan's run left is never this plan's earlier att
     phase('shop');
     expect(out(run(['swarm', 'worktree', 'T1'], io))).toMatchObject({ resumed: true, prior: [{ title: 'T1: some other plan' }] });
     git('worktree', 'remove', path.join(root, '.claude', 'worktrees', 'task-T1'));
-    git('branch', '-m', 'task/T1', 'task/T2');
+    git('branch', '-m', 'forge/task/T1', 'forge/task/T2');
     appendEvent(root, { ts: NOW.toISOString(), kind: 'phase', task: 'T2', phase: 'implement', brief: 1, base: 'b'.repeat(40) });
     expect(out(run(['swarm', 'worktree', 'T2'], io))).toMatchObject({ resumed: true });
+  });
+  it("w9: an earlier forge's task/<T> with this plan's work is taken up as it is; another project's stays untouched", () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    leftover();
+    git('branch', '-m', 'forge/task/T1', 'task/T1');
+    phase('shop');
+    expect(out(run(['swarm', 'worktree', 'T1'], io))).toMatchObject({ branch: 'task/T1', resumed: true, prior: [{ title: 'T1: some other plan' }] });
+    expect(readExecution(root)!.tasks.T1.branch).toBe('task/T1');
+    // Its worktree stays on it.
+    expect(out(run(['swarm', 'worktree', 'T1'], io))).toMatchObject({ branch: 'task/T1' });
+    expect(git('branch', '--list', 'forge/task/T1')).toBe('');
+  });
+  it("w9: a task/<T> of another project's run is never taken up: the task starts on forge/task/<T>", () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    leftover();
+    git('branch', '-m', 'forge/task/T1', 'task/T1');
+    appendEvent(root, { ts: NOW.toISOString(), kind: 'triage', task: 'T1', path: 'large', reasons: [], project: 'web' });
+    phase('web');
+    expect(out(run(['swarm', 'worktree', 'T1'], io))).toMatchObject({ branch: 'forge/task/T1', resumed: false });
+    expect(git('branch', '--list', 'task/T1')).not.toBe('');
+  });
+});
+
+describe('w9: an execution an earlier forge started keeps the task/<T> branches it recorded', () => {
+  it('its worktree and its member launch stay on task/<T>, and a task it schedules now gets forge/task/<T>', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--mode', 'sessions'], io));
+    const e = readExecution(root)!;
+    const iso = NOW.toISOString();
+    seedExecution(root, { ...e, tasks: { T1: { status: 'running', stage: 'brief', round: 0, worktree: '', branch: 'task/T1', executor: 'sessions', attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: null, title: 'T1' } } });
+    expect(out(run(['swarm', 'worktree', 'T1'], io))).toMatchObject({ branch: 'task/T1' });
+    expect(git('-C', path.join(root, '.claude', 'worktrees', 'task-T1'), 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('task/T1');
+    expect(readExecution(root)!.tasks.T1.branch).toBe('task/T1');
+    expect(memberLaunch('tick', root, 'plan.yaml', 'T1', readExecution(root)!).branch).toBe('task/T1');
+    expect(out(run(['swarm', 'worktree', 'T2'], io))).toMatchObject({ branch: 'forge/task/T2' });
+    expect(memberLaunch('tick', root, 'plan.yaml', 'T2', readExecution(root)!).branch).toBe('forge/task/T2');
   });
 });
 
@@ -2044,7 +2079,7 @@ describe('the swarm commands print the state/T write the CLI builds (J-15)', () 
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const e = readExecution(root)!;
     const at = NOW.toISOString();
-    seedExecution(root, { ...e, tasks: { T2: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T2', executor: 'sessions', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
+    seedExecution(root, { ...e, tasks: { T2: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'forge/task/T2', executor: 'sessions', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
     writeMember(root, { sessionId: 'ui', role: 'executor', runId: e.runId, task: 'T2', name: 'wp-shop-T2', since: at, hookSession: 'h2' });
     const r = out(run(['swarm', 'report', 'T2', '--session', 'ui', '--stage', 'review', '--claim'], io));
     expect(doc(r.publish)).toMatchObject({ status: 'in_progress', owner: 'ui', forge: { v: 2, stage: 'review' }, exec: { runId: e.runId, mode: 'sessions', by: 'ui', stage: 'review' } });

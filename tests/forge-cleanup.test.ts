@@ -39,18 +39,18 @@ beforeEach(() => {
   g(root, 'add', '.gitignore');
   commitIn(root, 'a.txt', 'init');
   io = { cwd: root, now: () => NOW, git: defaultGit(root), env: {} };
-  // T1 integrated, with evidence in its worktree; T2 not integrated; T3 integrated but with an untracked file; task/T4
+  // T1 integrated, with evidence in its worktree; T2 not integrated; T3 integrated but with an untracked file; forge/task/T4
   // integrated without a worktree; track/ui and feature/x are not forge's.
-  g(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt('task-T1'));
+  g(root, 'worktree', 'add', '-q', '-b', 'forge/task/T1', wt('task-T1'));
   commitIn(wt('task-T1'), 't1.txt', 'T1 work');
-  g(root, 'merge', '-q', '--no-ff', 'task/T1', '-m', 'merge T1');
+  g(root, 'merge', '-q', '--no-ff', 'forge/task/T1', '-m', 'merge T1');
   mkdirSync(path.join(wt('task-T1'), '.forge', 'work', 'shop', 'T1', 'evidence', '1-1'), { recursive: true });
   writeFileSync(path.join(wt('task-T1'), '.forge', 'work', 'shop', 'T1', 'evidence', '1-1', '01.png'), 'png');
-  g(root, 'worktree', 'add', '-q', '-b', 'task/T2', wt('task-T2'));
+  g(root, 'worktree', 'add', '-q', '-b', 'forge/task/T2', wt('task-T2'));
   commitIn(wt('task-T2'), 't2.txt', 'T2 work');
-  g(root, 'worktree', 'add', '-q', '-b', 'task/T3', wt('task-T3'));
+  g(root, 'worktree', 'add', '-q', '-b', 'forge/task/T3', wt('task-T3'));
   writeFileSync(path.join(wt('task-T3'), 'loose.txt'), 'x');
-  for (const b of ['task/T4', 'track/ui', 'feature/x']) g(root, 'branch', b);
+  for (const b of ['forge/task/T4', 'track/ui', 'feature/x']) g(root, 'branch', b);
   for (const d of ['execution/baseline', 'members', 'live', 'work/shop/T1']) mkdirSync(forge(d), { recursive: true });
   seedExecution(root, exec());
   writeFileSync(forge('execution', 'T1.json'), JSON.stringify({ task: 'T1', runId: 'r1', stage: 'integrate', status: 'integrated', agent: null, round: 1, since: at, updatedAt: at, leaseUntil: at, by: 'main', mode: 'subagents' }));
@@ -75,24 +75,24 @@ describe('forge swarm cleanup (D-03, D-18)', () => {
     const r = JSON.parse(swarmCommand(['cleanup', '--dry-run'], io, spyDeps([])).stdout);
     expect(r.dryRun).toBe(true);
     expect(r.removed.worktrees).toEqual(['.claude/worktrees/task-T1']);
-    expect([...r.removed.branches].sort()).toEqual(['task/T1', 'task/T4']);
+    expect([...r.removed.branches].sort()).toEqual(['forge/task/T1', 'forge/task/T4']);
     expect(r.removed.files).toBeGreaterThan(0);
     expect(r.kept).toEqual(expect.arrayContaining([
-      { path: '.claude/worktrees/task-T2', branch: 'task/T2', reason: 'not merged into main' },
-      { path: '.claude/worktrees/task-T3', branch: 'task/T3', reason: 'has uncommitted changes or untracked files' },
+      { path: '.claude/worktrees/task-T2', branch: 'forge/task/T2', reason: 'not merged into main' },
+      { path: '.claude/worktrees/task-T3', branch: 'forge/task/T3', reason: 'has uncommitted changes or untracked files' },
     ]));
     expect(existsSync(wt('task-T1'))).toBe(true);
-    expect(g(root, 'branch', '--list', 'task/T4')).not.toBe('');
+    expect(g(root, 'branch', '--list', 'forge/task/T4')).not.toBe('');
     expect(existsSync(forge('members', 'ui.json'))).toBe(true);
   });
   it('removes the integrated worktree and branches, keeps the rest with their reason, prunes the state and never forces git', () => {
     const calls: string[][] = [];
     const r = JSON.parse(swarmCommand(['cleanup'], io, spyDeps(calls)).stdout);
     expect(r).toMatchObject({ dryRun: false, removed: { worktrees: ['.claude/worktrees/task-T1'] } });
-    expect([...r.removed.branches].sort()).toEqual(['task/T1', 'task/T4']);
+    expect([...r.removed.branches].sort()).toEqual(['forge/task/T1', 'forge/task/T4']);
     expect(existsSync(wt('task-T1'))).toBe(false);
     expect(existsSync(wt('task-T2')) && existsSync(wt('task-T3'))).toBe(true);
-    expect(g(root, 'branch', '--format=%(refname:short)').split('\n').sort()).toEqual(['feature/x', 'main', 'task/T2', 'task/T3', 'track/ui']);
+    expect(g(root, 'branch', '--format=%(refname:short)').split('\n').sort()).toEqual(['feature/x', 'forge/task/T2', 'forge/task/T3', 'main', 'track/ui']);
     // The evidence of T1 reached the main checkout before its worktree went (K2-04).
     expect(readFileSync(forge('work', 'shop', 'T1', 'evidence', '1-1', '01.png'), 'utf8')).toBe('png');
     for (const f of ['execution/T1.json', 'members/ui.json', 'live/h1.json', 'execution/baseline/old.json', 'work/shop/T1/diff-1.patch', 'execution/asked/r1', 'execution/asked/r2']) {
@@ -145,13 +145,13 @@ describe('forge swarm cleanup (D-03, D-18)', () => {
     expect(existsSync(forge('execution', 'asked', 'r2'))).toBe(false);
   });
   it("reads forge's own worktrees and branches only", () => {
-    const porcelain = ['worktree /r', 'HEAD a', 'branch refs/heads/main', '', 'worktree /r/.claude/worktrees/task-T1', 'HEAD b', 'branch refs/heads/task/T1', '',
+    const porcelain = ['worktree /r', 'HEAD a', 'branch refs/heads/main', '', 'worktree /r/.claude/worktrees/task-T1', 'HEAD b', 'branch refs/heads/forge/task/T1', '',
       'worktree /r/.claude/worktrees/run', 'HEAD c', 'detached', '', 'worktree /r/.claude/worktrees/ui', 'HEAD d', 'branch refs/heads/track/ui', ''].join('\n');
     expect(forgeWorktrees(porcelain, path.resolve('/r'))).toEqual([
-      { path: path.resolve('/r/.claude/worktrees/task-T1'), name: 'task-T1', branch: 'task/T1' },
+      { path: path.resolve('/r/.claude/worktrees/task-T1'), name: 'task-T1', branch: 'forge/task/T1' },
       { path: path.resolve('/r/.claude/worktrees/run'), name: 'run', branch: null },
     ]);
-    expect(forgeBranches('refs/heads/task/T1\nrefs/heads/forge/run-shop\nrefs/heads/forge/other\nrefs/heads/track/ui\n')).toEqual(['task/T1', 'forge/run-shop']);
+    expect(forgeBranches('refs/heads/forge/task/T1\nrefs/heads/forge/run-shop\nrefs/heads/forge/other\nrefs/heads/track/ui\n')).toEqual(['forge/task/T1', 'forge/run-shop']);
   });
   it('the usage names cleanup [--dry-run] among the subcommands', () => {
     const r = run(['swarm', 'nope'], io);
@@ -177,17 +177,33 @@ describe('forge swarm cleanup (D-03, D-18)', () => {
     expect(g(root, 'branch', '--list', 'forge/run-shop')).toBe('');
     expect(calls).toContainEqual(['branch', '-d', 'forge/run-shop']);
   });
+  it("w9: an earlier forge's task/<T> goes only from forge's own worktree task-<T>; any other task/* stays, unnamed", () => {
+    g(root, 'worktree', 'add', '-q', '-b', 'task/T5', wt('task-T5'));
+    commitIn(wt('task-T5'), 't5.txt', 'T5 work');
+    g(root, 'merge', '-q', '--no-ff', 'task/T5', '-m', 'merge T5');
+    // Merged too, but outside forge's worktrees: the person's own, or an earlier forge's whose worktree is gone.
+    g(root, 'branch', 'task/mine');
+    g(root, 'worktree', 'add', '-q', '-b', 'task/T6', wt('task-other'));
+    const r = JSON.parse(swarmCommand(['cleanup'], io, spyDeps([])).stdout);
+    expect(r.removed.branches).toContain('task/T5');
+    expect(r.removed.worktrees).toContain('.claude/worktrees/task-T5');
+    expect(g(root, 'branch', '--list', 'task/T5')).toBe('');
+    expect(r.removed.worktrees).toContain('.claude/worktrees/task-other');
+    expect(r.kept).toContainEqual({ branch: 'task/T6', reason: 'not a forge branch (forge/task/* or forge/run-*)' });
+    expect(g(root, 'branch', '--list', 'task/mine')).not.toBe('');
+    expect(JSON.stringify(r)).not.toContain('task/mine');
+  });
 });
 
 describe('swarm cleanup leaves what is still in use, or not yet kept anywhere else', () => {
   const nothingMoved = () => {
     expect(existsSync(wt('task-T1'))).toBe(true);
-    expect(g(root, 'branch', '--list', 'task/T4')).not.toBe('');
+    expect(g(root, 'branch', '--list', 'forge/task/T4')).not.toBe('');
     expect(existsSync(forge('members', 'ui.json'))).toBe(true);
   };
   it('refuses while an integration is merging (the merging.json of a live attempt)', () => {
     const staleAt = new Date(NOW.getTime() + 3600_000).toISOString();
-    writeFileSync(forge('execution', 'merging.json'), JSON.stringify({ task: 'T2', pre: g(root, 'rev-parse', 'HEAD'), ref: 'task/T2', pid: process.ppid, startedAt: at, staleAt, dir: root, phase: 'merge' }));
+    writeFileSync(forge('execution', 'merging.json'), JSON.stringify({ task: 'T2', pre: g(root, 'rev-parse', 'HEAD'), ref: 'forge/task/T2', pid: process.ppid, startedAt: at, staleAt, dir: root, phase: 'merge' }));
     for (const argv of [['swarm', 'cleanup'], ['swarm', 'cleanup', '--dry-run']]) {
       const r = run(argv, io);
       expect(r.code).toBe(2);
@@ -206,8 +222,8 @@ describe('swarm cleanup leaves what is still in use, or not yet kept anywhere el
     nothingMoved();
   });
   it('a task worktree whose folder is gone is pruned first: its branch goes in the same run when merged, and stays with its reason otherwise', () => {
-    g(root, 'worktree', 'add', '-q', '-b', 'task/T7', wt('task-T7'));
-    g(root, 'worktree', 'add', '-q', '-b', 'task/T8', wt('task-T8'));
+    g(root, 'worktree', 'add', '-q', '-b', 'forge/task/T7', wt('task-T7'));
+    g(root, 'worktree', 'add', '-q', '-b', 'forge/task/T8', wt('task-T8'));
     commitIn(wt('task-T8'), 't8.txt', 'T8 work');
     for (const t of ['task-T7', 'task-T8']) rmSync(wt(t), { recursive: true, force: true });
     const dry = JSON.parse(swarmCommand(['cleanup', '--dry-run'], io, spyDeps([])).stdout);
@@ -215,22 +231,22 @@ describe('swarm cleanup leaves what is still in use, or not yet kept anywhere el
     expect(g(root, 'worktree', 'list', '--porcelain')).toContain('task-T7');
     const real = JSON.parse(swarmCommand(['cleanup'], io, spyDeps([])).stdout);
     for (const r of [dry, real]) {
-      expect(r.removed.branches).toContain('task/T7');
-      expect(r.kept).toContainEqual({ branch: 'task/T8', reason: 'not merged into main' });
+      expect(r.removed.branches).toContain('forge/task/T7');
+      expect(r.kept).toContainEqual({ branch: 'forge/task/T8', reason: 'not merged into main' });
       expect(JSON.stringify(r.kept)).not.toMatch(/task-T7|task-T8/);
     }
-    expect(g(root, 'branch', '--list', 'task/T7')).toBe('');
-    expect(g(root, 'branch', '--list', 'task/T8')).not.toBe('');
+    expect(g(root, 'branch', '--list', 'forge/task/T7')).toBe('');
+    expect(g(root, 'branch', '--list', 'forge/task/T8')).not.toBe('');
     expect(g(root, 'worktree', 'list', '--porcelain')).not.toMatch(/task-T7|task-T8/);
   });
   it('a locked task worktree whose folder is gone stays registered, with its branch, and says why', () => {
-    g(root, 'worktree', 'add', '-q', '-b', 'task/T7', wt('task-T7'));
+    g(root, 'worktree', 'add', '-q', '-b', 'forge/task/T7', wt('task-T7'));
     g(root, 'worktree', 'lock', wt('task-T7'));
     rmSync(wt('task-T7'), { recursive: true, force: true });
     const r = JSON.parse(swarmCommand(['cleanup'], io, spyDeps([])).stdout);
-    expect(r.kept).toContainEqual({ path: '.claude/worktrees/task-T7', branch: 'task/T7', reason: 'its folder is gone and git keeps it registered (locked): git worktree unlock it, then run swarm cleanup again' });
-    expect(r.removed.branches).not.toContain('task/T7');
-    expect(g(root, 'branch', '--list', 'task/T7')).not.toBe('');
+    expect(r.kept).toContainEqual({ path: '.claude/worktrees/task-T7', branch: 'forge/task/T7', reason: 'its folder is gone and git keeps it registered (locked): git worktree unlock it, then run swarm cleanup again' });
+    expect(r.removed.branches).not.toContain('forge/task/T7');
+    expect(g(root, 'branch', '--list', 'forge/task/T7')).not.toBe('');
   });
   it('refuses while a background forge command runs (.forge/jobs)', () => {
     const r = withJob(root, { cmd: 'integrate', task: 'T2', out: 'o.json', session: null, startedAt: at }, () => run(['swarm', 'cleanup'], io));
@@ -259,7 +275,7 @@ describe('swarm cleanup leaves what is still in use, or not yet kept anywhere el
   it('a marker, a job or a step.lock whose process died does not stop it', () => {
     const dead = spawnSync(process.execPath, ['-e', '']).pid!;
     const staleAt = new Date(NOW.getTime() + 3600_000).toISOString();
-    writeFileSync(forge('execution', 'merging.json'), JSON.stringify({ task: 'T2', pre: g(root, 'rev-parse', 'HEAD'), ref: 'task/T2', pid: dead, startedAt: at, staleAt, dir: root, phase: 'merge' }));
+    writeFileSync(forge('execution', 'merging.json'), JSON.stringify({ task: 'T2', pre: g(root, 'rev-parse', 'HEAD'), ref: 'forge/task/T2', pid: dead, startedAt: at, staleAt, dir: root, phase: 'merge' }));
     mkdirSync(forge('jobs'), { recursive: true });
     writeFileSync(forge('jobs', 'step.lock'), JSON.stringify({ pid: dead, startedAt: at }) + '\n');
     writeFileSync(forge('jobs', 'integrate-T2-1.json'), JSON.stringify({ name: 'integrate-T2-1', cmd: 'integrate', task: 'T2', pid: dead, startedAt: at, out: 'o.json', session: null }));
@@ -275,15 +291,15 @@ describe('swarm cleanup leaves what is still in use, or not yet kept anywhere el
     writeFileSync(path.join(wt('task-T1'), '.forge', 'ledger.jsonl'), `${line}\n${line}\n{"ts":"2026`);
     writeFileSync(forge('ledger.jsonl'), `${line}\n`);
     const first = JSON.parse(swarmCommand(['cleanup'], io, spyDeps([])).stdout);
-    expect(first.kept).toContainEqual({ path: '.claude/worktrees/task-T1', branch: 'task/T1', reason: 'unmerged ledger' });
+    expect(first.kept).toContainEqual({ path: '.claude/worktrees/task-T1', branch: 'forge/task/T1', reason: 'unmerged ledger' });
     expect(first.removed.worktrees).toEqual([]);
     expect(existsSync(wt('task-T1'))).toBe(true);
-    expect(g(root, 'branch', '--list', 'task/T1')).not.toBe('');
+    expect(g(root, 'branch', '--list', 'forge/task/T1')).not.toBe('');
     // The main ledger is never written by cleanup.
     expect(readFileSync(forge('ledger.jsonl'), 'utf8')).toBe(`${line}\n`);
     appendFileSync(forge('ledger.jsonl'), `${line}\n`);
     const second = JSON.parse(swarmCommand(['cleanup'], io, spyDeps([])).stdout);
-    expect(second.removed).toMatchObject({ worktrees: ['.claude/worktrees/task-T1'], branches: ['task/T1'] });
+    expect(second.removed).toMatchObject({ worktrees: ['.claude/worktrees/task-T1'], branches: ['forge/task/T1'] });
     expect(existsSync(wt('task-T1'))).toBe(false);
   });
   it('keeps a task worktree whose evidence cannot reach the main checkout', () => {
@@ -291,7 +307,7 @@ describe('swarm cleanup leaves what is still in use, or not yet kept anywhere el
     try {
       symlinkSync(outside, forge('work', 'shop', 'T1', 'evidence'), 'junction');
       const r = JSON.parse(swarmCommand(['cleanup'], io, spyDeps([])).stdout);
-      expect(r.kept).toContainEqual({ path: '.claude/worktrees/task-T1', branch: 'task/T1', reason: 'its evidence could not be copied to the main checkout (1 file); run swarm cleanup again once it can' });
+      expect(r.kept).toContainEqual({ path: '.claude/worktrees/task-T1', branch: 'forge/task/T1', reason: 'its evidence could not be copied to the main checkout (1 file); run swarm cleanup again once it can' });
       expect(r.removed.worktrees).toEqual([]);
       expect(existsSync(wt('task-T1'))).toBe(true);
       expect(readdirSync(outside)).toEqual([]);
@@ -301,23 +317,23 @@ describe('swarm cleanup leaves what is still in use, or not yet kept anywhere el
     }
   });
   it('keeps the branch the main checkout is on, a forge branch another worktree holds and the waypoint tracks, each with its reason', () => {
-    g(root, 'worktree', 'add', '-q', '-b', 'task/T6', wt('ui'));
-    g(root, 'checkout', '-q', '-b', 'task/T9');
+    g(root, 'worktree', 'add', '-q', '-b', 'forge/task/T6', wt('ui'));
+    g(root, 'checkout', '-q', '-b', 'forge/task/T9');
     const r = JSON.parse(swarmCommand(['cleanup', '--dry-run'], io, spyDeps([])).stdout);
     expect(r.kept).toEqual(expect.arrayContaining([
-      { branch: 'task/T9', reason: 'checked out in the main checkout' },
-      { branch: 'task/T6', reason: 'checked out in .claude/worktrees/ui' },
+      { branch: 'forge/task/T9', reason: 'checked out in the main checkout' },
+      { branch: 'forge/task/T6', reason: 'checked out in .claude/worktrees/ui' },
       { branch: 'track/ui', reason: "a waypoint track, not forge's" },
-      { path: '.claude/worktrees/task-T2', branch: 'task/T2', reason: 'not merged into task/T9' },
+      { path: '.claude/worktrees/task-T2', branch: 'forge/task/T2', reason: 'not merged into forge/task/T9' },
     ]));
-    expect(r.removed.branches).not.toContain('task/T9');
+    expect(r.removed.branches).not.toContain('forge/task/T9');
     expect(JSON.stringify(r)).not.toContain('feature/x');
   });
   it("removes forge's run worktree once merged, and leaves a run branch the person named", () => {
     g(root, 'worktree', 'add', '-q', '-b', 'feature/run', wt('run'));
     const r = JSON.parse(swarmCommand(['cleanup'], io, spyDeps([])).stdout);
     expect(r.removed.worktrees).toContain('.claude/worktrees/run');
-    expect(r.kept).toContainEqual({ branch: 'feature/run', reason: "not a forge branch (task/* or forge/run-*)" });
+    expect(r.kept).toContainEqual({ branch: 'feature/run', reason: "not a forge branch (forge/task/* or forge/run-*)" });
     expect(existsSync(wt('run'))).toBe(false);
     expect(g(root, 'branch', '--list', 'feature/run')).not.toBe('');
   });
@@ -343,11 +359,11 @@ describe('swarm cleanup never loses evidence, a waypoint track or a run that sta
     many(work('evidence', '1-2'), EVIDENCE_FILES_MAX);
     for (const argv of [['cleanup', '--dry-run'], ['cleanup']]) {
       const r = JSON.parse(swarmCommand(argv, io, spyDeps([])).stdout);
-      expect(r.kept, argv.join(' ')).toContainEqual({ path: '.claude/worktrees/task-T1', branch: 'task/T1', reason: 'too many files under .forge/work to check its evidence' });
+      expect(r.kept, argv.join(' ')).toContainEqual({ path: '.claude/worktrees/task-T1', branch: 'forge/task/T1', reason: 'too many files under .forge/work to check its evidence' });
       expect(r.removed.worktrees, argv.join(' ')).toEqual([]);
     }
     expect(existsSync(wt('task-T1'))).toBe(true);
-    expect(g(root, 'branch', '--list', 'task/T1')).not.toBe('');
+    expect(g(root, 'branch', '--list', 'forge/task/T1')).not.toBe('');
   });
   it("keeps a waypoint track's worktree, also one named run, and names its branch once (final review 4)", () => {
     g(root, 'worktree', 'add', '-q', '-b', 'track/run', wt('run'));
@@ -373,13 +389,13 @@ describe('swarm cleanup never loses evidence, a waypoint track or a run that sta
     expect(err).toBeInstanceOf(UsageError);
     expect((err as Error).message).toBe('swarm cleanup: the execution r2 became active; run it again once it ends (already removed: .claude/worktrees/task-T1)');
     expect(existsSync(wt('task-T1'))).toBe(false);
-    for (const b of ['task/T1', 'task/T4']) expect(g(root, 'branch', '--list', b), b).not.toBe('');
+    for (const b of ['forge/task/T1', 'forge/task/T4']) expect(g(root, 'branch', '--list', b), b).not.toBe('');
   });
   it('re-reads the execution before the first removal too: a run that started meanwhile loses nothing (final review 5)', () => {
     const deps = startsMeanwhile(a => a[0] === 'status' && a[1] === '--porcelain');
     expect(() => swarmCommand(['cleanup'], io, deps)).toThrow('swarm cleanup: the execution r2 became active; run it again once it ends (nothing was removed)');
     expect(existsSync(wt('task-T1'))).toBe(true);
-    for (const b of ['task/T1', 'task/T4']) expect(g(root, 'branch', '--list', b), b).not.toBe('');
+    for (const b of ['forge/task/T1', 'forge/task/T4']) expect(g(root, 'branch', '--list', b), b).not.toBe('');
   });
   it('runs git worktree prune only when one of its own worktrees is prunable, and names what it drops (carry 7)', () => {
     // A waypoint track's worktree whose folder is gone, under any name, is not forge's: no prune, and it stays registered.
@@ -393,7 +409,7 @@ describe('swarm cleanup never loses evidence, a waypoint track or a run that sta
     expect(first.kept).toContainEqual({ path: '.claude/worktrees/task-x', branch: 'track/x', reason: "a waypoint track, not forge's" });
     for (const d of ['worktrees/gone', 'worktrees/task-x']) expect(g(root, 'worktree', 'list', '--porcelain')).toContain(d);
     // One of forge's task worktrees lost its folder: the prune runs (git's, for every registration it can drop), and says so.
-    g(root, 'worktree', 'add', '-q', '-b', 'task/T7', wt('task-T7'));
+    g(root, 'worktree', 'add', '-q', '-b', 'forge/task/T7', wt('task-T7'));
     rmSync(wt('task-T7'), { recursive: true, force: true });
     const dryCalls: string[][] = [];
     const dry = JSON.parse(swarmCommand(['cleanup', '--dry-run'], io, spyDeps(dryCalls)).stdout);

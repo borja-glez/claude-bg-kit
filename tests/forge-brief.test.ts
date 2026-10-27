@@ -47,9 +47,14 @@ describe('brief', () => {
   });
   it('renders every field the implementer needs, verbatim', () => {
     const md = renderBrief(PLAN, PLAN.tasks[1], { planPath: 'docs/waypoint/shop/plan.yaml', designPath: 'docs/waypoint/shop/design.md' });
-    for (const s of ['# T002: API de pedidos', 'Done when: GET /orders devuelve la lista', 'Zones: src/api/orders/**', 'Depends on: T001', 'Commit title prefix: T002: ',
+    for (const s of ['# T002: API de pedidos', 'Done when: GET /orders devuelve la lista', 'Zones: src/api/orders/**', 'Depends on: T001', 'Commit title: T002: <what the commit does>',
       'Track: backend', 'Phase: F1', 'Plan: docs/waypoint/shop/plan.yaml', 'Design: docs/waypoint/shop/design.md']) expect(md).toContain(s);
     expect(md).not.toContain('Verification:');
+  });
+  it('w9: the Commit title line in the repository style, the task id as its prefix or its scope', () => {
+    expect(renderBrief(PLAN, PLAN.tasks[1], { planPath: 'p.yaml', designPath: null, commitStyle: 'conventional' })).toContain('\nCommit title: <type>(T002): <what the commit does>, in Conventional Commits');
+    expect(renderBrief(PLAN, PLAN.tasks[1], { planPath: 'p.yaml', designPath: null, commitStyle: 'plain' })).toContain('\nCommit title: T002: <what the commit does>\n');
+    expect(renderBrief(PLAN, PLAN.tasks[1], { planPath: 'p.yaml', designPath: null })).not.toContain('Commit title prefix');
   });
   it('a task without zones is told it covers the whole repository and runs alone (carry 1)', () => {
     const md = renderBrief(PLAN, { ...PLAN.tasks[1], zones: [] }, { planPath: 'p.yaml', designPath: null });
@@ -118,7 +123,7 @@ describe('the previous attempt of a resumed task (D-02)', () => {
   it('priorSection lists each commit with its short sha and says they are reviewed with the task', () => {
     const s = priorSection('T1', [{ sha, title: 'T1: first try' }]);
     expect(s.startsWith('## Previous attempt\n')).toBe(true);
-    expect(s).toContain('task/T1');
+    expect(s).toContain('from an earlier attempt on its branch');
     expect(s).toContain('- aaaaaaa T1: first try');
   });
   it('priorSection frames the titles as commit text, and says when it lists only the newest of more (carry 3)', () => {

@@ -15,6 +15,7 @@ import { command as log } from './log.js';
 import { command as market } from './market.js';
 import { command as prefs } from './prefs.js';
 import { command as begin } from './begin.js';
+import { command as commitStyle } from './commit-style.js';
 import { command as proposals } from './proposals.js';
 import { command as blocked } from './blocked.js';
 import { command as resource } from './resource.js';
@@ -50,7 +51,7 @@ import { command as waypointCli } from './waypoint-cli.js';
 export const COMMANDS: Readonly<Record<string, Command>> = {
   triage, doctor, brief, validate, stats, verdict, round,
   'review-prep': review, 'review-close': review, prep: review, shadow: review,
-  log, decision, agents, last, diagnose, proposals, surfaces, tools, local, prefs, begin, route,
+  log, decision, agents, last, diagnose, proposals, surfaces, tools, local, prefs, begin, 'commit-style': commitStyle, route,
   'verify-env': verifyEnv, 'verify-plan': verifyPlan, 'verify-preflight': verifyPreflight,
   'verify-result': verifyResult, 'verify-cleanup': verifyCleanup, 'verify-close': verifyClose, 'verify-spawn': verifySpawn,
   'waypoint-cli': waypointCli, 'sp-path': spPath, 'sp-specs': spSpecs, 'sp-plans': spPlans, 'sp-plan': spPlan,
