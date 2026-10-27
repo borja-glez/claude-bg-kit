@@ -13836,7 +13836,7 @@ function applyReplan(text3, ops, why, at2) {
 var import_node_crypto = require("node:crypto");
 
 // src/lib/waypoint-version.ts
-var WAYPOINT_VERSION = true ? "0.41.0" : "0.0.0";
+var WAYPOINT_VERSION = true ? "0.42.0" : "0.0.0";
 var VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})/;
 var partsOf = (v) => {
   const m = typeof v === "string" ? VERSION.exec(v) : null;
