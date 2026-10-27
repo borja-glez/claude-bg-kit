@@ -172,8 +172,14 @@ function start(on: On) {
   const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('agent.list', () => ({ value: [] }));
+  on('tool.call', { tool: 'Write' }, () => ({ result: { type: 'update' } }) as never);
   serveSpawns(on);
   return clock;
+}
+
+// The lens anchor design, decision 2.5: a superpowers run is this conversation's, and shown, once it wrote its ledger.
+async function writeLedger($: Engine, path = `${ROOT}/.superpowers/sdd/new/progress.md`): Promise<void> {
+  await $.tool.call({ tool: 'Write', file_path: path, content: '# SDD ledger', tool_use_id: `w-${path}` } as never);
 }
 
 test('the command opens the pane and shows the newest ledger against its plan', async ($, on) => {
@@ -182,6 +188,9 @@ test('the command opens the pane and shows the newest ledger against its plan', 
   const open = servePanes(on);
   start(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  // This conversation wrote both ledgers, the older first.
+  await writeLedger($, `${ROOT}/.superpowers/sdd/old/progress.md`);
+  await writeLedger($);
   const ran = await $.command.run(RUN);
   expect(open.has(PANE)).toBe(true);
   expect(ran.text).toBe('Progress panel opened.');
@@ -204,6 +213,7 @@ test('the Todos and Claude Code tasks cards are never drawn empty: not before th
   on('tool.call', { tool: 'TaskCreate' }, (_$, e) => ({ result: { task: { id: '1', subject: e.subject } } }));
   on('tool.call', { tool: 'TaskUpdate' }, (_$, e) => ({ result: { success: true, taskId: e.taskId, updatedFields: ['status'] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await writeLedger($);
   await $.command.run(RUN);
   await clock.advance(0);
   const cards = async () => {
@@ -666,6 +676,7 @@ test('inline, the pane draws its cards without a frame and says how many rows it
   const clock = start(on);
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await writeLedger($);
   await $.command.run(RUN);
   await $.tool.call({ tool: 'TodoWrite', todos: Array.from({ length: 6 }, (_, i) => ({ content: `Step ${i}`, status: i === 0 ? 'in_progress' : 'pending', activeForm: `Doing step ${i}` })) });
   await clock.advance(1000);
@@ -693,6 +704,7 @@ test('the first /lens, with no model yet, asks for the pane at once with the row
   });
   const clock = start(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await writeLedger($);
   // A terminal of 60 rows on the main screen: a third of it is 20.
   const band = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS, viewport: { columns: 100, rows: 60, isFullscreen: false } });
   await band.unmount();
@@ -779,6 +791,7 @@ test('with fewer rows than the one card it keeps, the pane clips that card to it
   const clock = start(on);
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await writeLedger($);
   await $.command.run(RUN);
   await $.tool.call({ tool: 'TodoWrite', todos: Array.from({ length: 6 }, (_, i) => ({ content: `Step ${i}`, status: i === 0 ? 'in_progress' : 'pending', activeForm: `Doing step ${i}` })) });
   await clock.advance(1000);
@@ -807,6 +820,7 @@ test('inline, a card with 53 task boxes or more takes its summary row too, so «
   const clock = start(on);
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await writeLedger($, `${ROOT}/.superpowers/sdd/big/progress.md`);
   await $.command.run(RUN);
   await $.tool.call({ tool: 'TodoWrite', todos: Array.from({ length: 6 }, (_, i) => ({ content: `Step ${i}`, status: i === 0 ? 'in_progress' : 'pending', activeForm: `Doing step ${i}` })) });
   await clock.advance(1000);
@@ -874,6 +888,7 @@ test('a superpowers ledger whose plan path is absolute, in plan-path or in its h
   servePanes(on);
   const clock = start(on);
   await $.session.start({ cwd: 'E:\\repo', surface: 'terminal', isInteractive: true });
+  await writeLedger($, 'E:\\repo\\.superpowers\\sdd\\a\\progress.md');
   await $.command.run(RUN);
   await clock.advance(0);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
@@ -893,6 +908,7 @@ test("a ledger whose header names a plan in a worktree of the root, with no plan
   servePanes(on);
   const clock = start(on);
   await $.session.start({ cwd: 'E:\\repo', surface: 'terminal', isInteractive: true });
+  await writeLedger($, 'E:\\repo\\.superpowers\\sdd\\b\\progress.md');
   await $.command.run(RUN);
   await clock.advance(0);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
@@ -929,6 +945,7 @@ test('a ledger that names its plan by the real path of a root under a symbolic l
   servePanes(on);
   const clock = start(on);
   await $.session.start({ cwd: '/link/repo', surface: 'terminal', isInteractive: true });
+  await writeLedger($, '/link/repo/.superpowers/sdd/s/progress.md');
   await $.command.run(RUN);
   await clock.advance(0);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
@@ -948,6 +965,7 @@ test('a ledger whose plan cannot be read shows the tasks done, never a total nor
   servePanes(on);
   const clock = start(on);
   await $.session.start({ cwd: 'E:\\repo', surface: 'terminal', isInteractive: true });
+  await writeLedger($, 'E:\\repo\\.superpowers\\sdd\\c\\progress.md');
   await $.command.run(RUN);
   await clock.advance(0);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });

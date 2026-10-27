@@ -23,10 +23,38 @@ const PROPOSAL = JSON.stringify({
   ts: '2026-10-11T10:00:00.000Z', category: 'perf', risk: 'low', title: 'Cache the parser', rationale: 'r', evidence: 'e',
   pillar: '', status: 'proposed', source: 'scout', author: 'scout',
 });
+// The lens anchor design, decision 2: a conversation sees a checkout's forge files whole (its proposals, automatic
+// decisions and infinite run, other sessions' tasks) once it joined it; here by `claude`'s binding to its roadmap.
+const JOIN_PLAN = `project: shop
+locale: en
+version: "0.1"
+versions:
+  - id: "0.1"
+    phases: [F1]
+tracks:
+  - { id: backend, name: Backend, color: blue }
+phases:
+  - { id: F1, name: Base, plan_status: committed }
+tasks:
+  - id: T001
+    title: Order schema
+    track: backend
+    phase: F1
+    done_when: migration applied
+    zones: ["src/db/**"]
+`;
+const joined = (claude: string = SESSION): Record<string, string> => ({
+  [`${ROOT}/docs/waypoint/shop/plan.yaml`]: JOIN_PLAN,
+  [`${ROOT}/.waypoint/shop/session.json`]: JSON.stringify({ sessionId: 'S1', track: 'backend' }),
+  [`${ROOT}/.waypoint/shop/bound.json`]: JSON.stringify({
+    sid: 'S1', claude, pid: null, via: 'work', since: new Date(NOW - 3600_000).toISOString(), seenAt: new Date(NOW - 60_000).toISOString(), endedAt: null, endReason: null,
+  }),
+});
 const FORGE: Record<string, string> = {
   [`${ROOT}/.forge/ledger.jsonl`]: LEDGER,
   [`${ROOT}/.forge/status.json`]: JSON.stringify(STATUS),
   [`${ROOT}/.forge/proposals/${ID}.json`]: PROPOSAL,
+  ...joined(),
 };
 
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
@@ -303,7 +331,7 @@ test('an inactive run, or a run.json over 16 KiB, shows no infinite line', async
 });
 
 test('without a cycle budget the infinite line shows the cycle alone, even with no status', async ($, on) => {
-  serveFiles(on, { [`${ROOT}/.forge/run.json`]: JSON.stringify({ ...RUN_STATE, budget: { hours: 3 } }) });
+  serveFiles(on, { [`${ROOT}/.forge/run.json`]: JSON.stringify({ ...RUN_STATE, budget: { hours: 3 } }), ...joined() });
   servePanes(on);
   start(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
@@ -382,7 +410,7 @@ test('at 40 columns an execution row keeps its dot, tag and right text whole: on
     coordinator: 'main', hookSession: 's1', active: true, stopReason: null, stallReason: null, startedAt: at(-60), lastStepAt: at(-1), lastBlockStep: null, sleepUntil: null,
     tasks: { T4: { status: 'running', stage: 'review', round: 2, worktree: '/w', branch: 'task/T4', executor: 'subagents', attempts: 0, agent: 'forge-review-correctness', startedAt: at(-20), stageSince: at(-3), updatedAt: at(-1), detail: null, title: TITLE } },
   };
-  serveFiles(on, { [`${ROOT}/.forge/execution.json`]: JSON.stringify(exec) });
+  serveFiles(on, { [`${ROOT}/.forge/execution.json`]: JSON.stringify(exec), ...joined() });
   servePanes(on);
   start(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
@@ -459,6 +487,7 @@ test('every task status of .forge/status/ is a row of Tasks in progress; another
     [`${ROOT}/.forge/status/T002.json`]: st('T002', { phase: 'implement', agent: 'forge-impl' }),
     [`${ROOT}/.forge/status/T003.json`]: st('T003', { session: 'another-conversation' }),
     [`${ROOT}/.forge/jobs/review-prep-T002-1-42.json`]: JSON.stringify({ name: 'review-prep-T002-1-42', cmd: 'review-prep', task: 'T002-1', pid: 42, startedAt: at(1.5), out: 'x.json', session: SESSION }),
+    ...joined(),
   }, [], { mtimeMs: NOW - 60_000 });
   servePanes(on);
   start(on);
@@ -499,7 +528,9 @@ test('lens reads at most the 20 newest statuses, none over 64 KiB, and reads one
   await $.command.run(RUN);
   await clock.advance(0);
   const reads = () => touched.filter(p => /\/\.forge\/status\/[^/]+\.json$/.test(p));
-  expect(reads()).toHaveLength(20);
+  // The pane opening also searches for the anchor (decision 4 of the lens anchor design), which reads the same newest
+  // statuses once more: 20 files, none of them the oversized one.
+  expect(new Set(reads()).size).toBe(20);
   expect(reads()).not.toContain(`${ROOT}/.forge/status/BIG.json`);
   touched.length = 0;
   await clock.advance(10_000);
@@ -572,7 +603,8 @@ test('when .forge/status/ goes away its cached reads go too: a file back with th
   const before = JSON.stringify({ ...STATUS, task: 'T001', phase: 'review', lastAt: at });
   const after = JSON.stringify({ ...STATUS, task: 'T001', phase: 'verify', lastAt: at });
   expect(after.length).toBe(before.length);
-  const files: Record<string, string> = { [path]: before };
+  // Joined, the conversation keeps its anchor while the folder is gone (a lone task's anchor would go with its status).
+  const files: Record<string, string> = { [path]: before, ...joined() };
   serveFiles(on, files, [], { mtimeMs: NOW - 60_000 });
   servePanes(on);
   const clock = start(on);
@@ -590,7 +622,8 @@ test('when .forge/status/ goes away its cached reads go too: a file back with th
 });
 
 test("after an in-process resume the next turn still draws this session's tasks as its own (M1)", async ($, on) => {
-  serveFiles(on, { [`${ROOT}/.forge/status/T001.json`]: JSON.stringify({ ...STATUS, task: 'T001', lastAt: new Date(NOW - 60_000).toISOString() }) }, [], { mtimeMs: NOW - 60_000 });
+  // conv-9 is bound to the checkout's roadmap (decision 2 of the lens anchor design), so it sees conv-1's task there.
+  serveFiles(on, { [`${ROOT}/.forge/status/T001.json`]: JSON.stringify({ ...STATUS, task: 'T001', lastAt: new Date(NOW - 60_000).toISOString() }), ...joined('conv-9') }, [], { mtimeMs: NOW - 60_000 });
   servePanes(on);
   // The conversation conv-9 resumes conv-1, whose status T001 is: the id the engine answers changes with the resume.
   let current = 'conv-9';
@@ -607,11 +640,15 @@ test("after an in-process resume the next turn still draws this session's tasks 
   };
   expect(await pane()).toContain('Tasks in progress · 1');
   expect(await pane()).toContain('other session');
-  // The resume forgets the usage meter's session id; the first turn after it writes the panel before any refresh.
+  // The resume forgets the usage meter's session id; the first turn after it writes the panel before any refresh. The
+  // anchor goes with the conversation it was conv-9's, and so do the files read for it: none is drawn as another's.
   await $.session.end({ reason: 'resume', sessionId: 'conv-9', resume: {} as never });
   current = SESSION;
   await $.turn.start({ text: 'go', turnId: 'main-1' });
   await clock.advance(1000);
+  expect(await pane()).not.toContain('other session');
+  // The next refresh finds conv-1's own task (decision 2.4) and draws it as its own.
+  await clock.advance(10_000);
   expect(await pane()).toContain('Tasks in progress · 1');
   expect(await pane()).not.toContain('other session');
 });
@@ -624,9 +661,10 @@ test('when the session id cannot be read, the panel still draws (E-06)', async (
   await $.command.run(RUN);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
   const text = await said(ui);
-  expect(text).toContain('Tasks in progress · 1');
-  // Its status names conv-1, which lens could not tell is this session: drawn as another session's (Review Focus 5).
-  expect(text).toContain('other session');
+  // Its status names conv-1, which lens cannot tell is this session: decisions 2 and 3 of the lens anchor design leave
+  // a conversation without an id unanchored, so nothing read from project files is drawn, and the pane says so.
+  expect(text).not.toContain('Tasks in progress');
+  expect(text).toContain('Nothing to show yet');
   await ui.unmount();
 });
 

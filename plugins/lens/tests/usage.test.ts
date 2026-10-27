@@ -9,6 +9,28 @@ const SESSION = 'sess-1';
 
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
 
+// The lens anchor design, decision 7: a usage file is written only by a conversation with an anchor, in the anchored
+// checkout. `ownTask`: a forge task that conversation ran there, done a minute ago, anchors it by its own work (decision
+// 2.4) and keeps nothing busy. `joined`: its binding to the checkout's roadmap, which a run's spend needs (decision 2).
+const ownTask = (session: string): Record<string, string> => {
+  const at = new Date(NOW - 60_000).toISOString();
+  return {
+    [`${ROOT}/.forge/status/T-${session}.json`]: JSON.stringify({
+      ts: at, task: `T-${session}`, path: 'medium', phase: 'done', agent: null, validators: [], verdict: null, round: null, cap: null,
+      doneAt: at, lastAt: at, session, runId: null, project: null,
+    }),
+  };
+};
+const joined = (session: string): Record<string, string> => ({
+  [`${ROOT}/docs/waypoint/shop/plan.yaml`]: 'project: shop\nlocale: en\nversion: "0.1"\nversions:\n  - id: "0.1"\n    phases: [F1]\ntracks:\n  - { id: backend, name: Backend, color: blue }\nphases:\n  - { id: F1, name: Base, plan_status: committed }\ntasks:\n  - id: T001\n    title: Order schema\n    track: backend\n    phase: F1\n    done_when: migration applied\n    zones: ["src/db/**"]\n',
+  [`${ROOT}/.waypoint/shop/session.json`]: JSON.stringify({ sessionId: 'S1', track: 'backend' }),
+  [`${ROOT}/.waypoint/shop/bound.json`]: JSON.stringify({
+    sid: 'S1', claude: session, pid: null, via: 'work', since: new Date(NOW - 3600_000).toISOString(), seenAt: new Date(NOW - 60_000).toISOString(), endedAt: null, endReason: null,
+  }),
+});
+// The forge call that starts or steps a run: it may make this conversation its coordinator, so the anchor is searched again.
+const FORGE_RUN_CALL = { tool: 'Bash', command: 'node "/x/dist/forge.cjs" run', tool_use_id: 'f1' } as never;
+
 // A file system answered from memory; writes land in `written`.
 function serveFiles(
   on: On, files: Record<string, string>, written: Record<string, string> = {}, reads: string[] = [],
@@ -119,7 +141,7 @@ test('a main-loop turn.step is measured and passed through unchanged', async ($,
 });
 
 test('with .forge/ in the root a refresh writes the session usage file', async ($, on) => {
-  const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' });
+  const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n', ...ownTask(SESSION) });
   servePanes(on);
   const clock = start(on);
   serveSteps(on);
@@ -139,7 +161,8 @@ test('with .forge/ in the root a refresh writes the session usage file', async (
 });
 
 test('without .forge/ no usage file is written', async ($, on) => {
-  const written = serveFiles(on, {});
+  // Anchored by its binding, so only the missing .forge/ keeps the file from being written.
+  const written = serveFiles(on, joined(SESSION));
   servePanes(on);
   start(on);
   serveSteps(on);
@@ -152,7 +175,7 @@ test('without .forge/ no usage file is written', async ($, on) => {
 });
 
 test('the session end writes the usage file even within 30 s of the last write', async ($, on) => {
-  const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' });
+  const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n', ...ownTask(SESSION) });
   servePanes(on);
   const clock = start(on);
   serveSteps(on);
@@ -219,6 +242,7 @@ test('with a forge run, the panel sums every session file updated since the run 
     [`${ROOT}/.forge/usage/sess-2.json`]: JSON.stringify(other),
     [`${ROOT}/.forge/usage/sess-3.json`]: JSON.stringify(stale),
     [`${ROOT}/.forge/usage/${SESSION}.json`]: JSON.stringify({ ...other, session: SESSION }),
+    ...joined(SESSION),
   });
   servePanes(on);
   const panel = panelWrites(on);
@@ -280,6 +304,7 @@ test('usage files are re-read one by one only when they change, and not on every
     [`${ROOT}/.forge/run.json`]: JSON.stringify({ startedAt: new Date(NOW - 3600_000).toISOString() }),
     [`${ROOT}/.forge/usage/sess-2.json`]: usageFile('sess-2'),
     [`${ROOT}/.forge/usage/sess-3.json`]: '{ torn',
+    ...joined(SESSION),
   };
   serveFiles(on, files, {}, reads);
   servePanes(on);
@@ -309,7 +334,7 @@ test('usage files are re-read one by one only when they change, and not on every
 });
 
 test('a resumed session continues its own usage file when its start matches', async ($, on) => {
-  const written = serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: usageFile(SESSION) });
+  const written = serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: usageFile(SESSION), ...ownTask(SESSION) });
   servePanes(on);
   const panel = panelWrites(on);
   const clock = start(on);
@@ -324,7 +349,7 @@ test('a resumed session continues its own usage file when its start matches', as
 
 test('a session file with another start is not continued', async ($, on) => {
   const old = usageFile(SESSION, { startedAt: new Date(NOW - 7200_000).toISOString() });
-  const written = serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: old });
+  const written = serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: old, ...ownTask(SESSION) });
   servePanes(on);
   const clock = start(on);
   serveSteps(on);
@@ -337,7 +362,7 @@ test('a session file with another start is not continued', async ($, on) => {
 
 test('an unchanged count is not written again on the tick', async ($, on) => {
   const writes: string[] = [];
-  serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' }, {}, [], path => { writes.push(path); });
+  serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n', ...ownTask(SESSION) }, {}, [], path => { writes.push(path); });
   servePanes(on);
   const clock = start(on);
   serveSteps(on);
@@ -359,7 +384,7 @@ test('the session end waits for a write in flight and then writes the final coun
   const gate = new Promise<void>(r => { release = r; });
   let started = () => {};
   const inFlight = new Promise<void>(r => { started = r; });
-  serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' }, {}, [], async (_path, text) => {
+  serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n', ...ownTask(SESSION) }, {}, [], async (_path, text) => {
     if (!texts.length) { started(); await gate; }
     texts.push(text);
   });
@@ -393,7 +418,8 @@ function startSwitchable(on: On) {
 }
 
 test('after /clear the old file is kept and the new session gets its own, the timers still running', async ($, on) => {
-  const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' });
+  // Each conversation has a task of its own here.
+  const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n', ...ownTask(SESSION), ...ownTask('sess-new') });
   servePanes(on);
   const { clock, cur } = startSwitchable(on);
   serveSteps(on);
@@ -420,6 +446,9 @@ test('after an in-process resume the resumed session continues its own file and 
   const written = serveFiles(on, {
     [`${ROOT}/.forge/config.yaml`]: 'x: 1\n',
     [`${ROOT}/.forge/usage/sess-old.json`]: usageFile('sess-old', { startedAt: new Date(NOW - 7200_000).toISOString() }),
+    // Each conversation has a task of its own here.
+    ...ownTask(SESSION),
+    ...ownTask('sess-old'),
   });
   servePanes(on);
   const { clock, cur } = startSwitchable(on);
@@ -441,7 +470,7 @@ test('after an in-process resume the resumed session continues its own file and 
 });
 
 test('no usage file is written before the session start is known', async ($, on) => {
-  const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' });
+  const written = serveFiles(on, { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n', ...ownTask(SESSION) });
   servePanes(on);
   mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
@@ -465,12 +494,13 @@ const execution = (over: Record<string, unknown> = {}) => JSON.stringify({
 });
 
 test('with the pane closed and nothing going on, the usage file names no run until the tick reads the band, then the run (I2)', async ($, on) => {
-  const files: Record<string, string> = { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' };
+  const files: Record<string, string> = { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n', ...ownTask(SESSION) };
   const texts: string[] = [];
   serveFiles(on, files, {}, [], (_path, text) => { texts.push(text); });
   servePanes(on);
   const clock = start(on);
   serveSteps(on);
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   const path = `${ROOT}/.forge/usage/${SESSION}.json`;
@@ -479,6 +509,7 @@ test('with the pane closed and nothing going on, the usage file names no run unt
   expect(JSON.parse(files[path]!)).not.toHaveProperty('runKey');
   // The run starts: the next tick reads the band once, the file names the run, and its baseline is taken now.
   files[`${ROOT}/.forge/execution.json`] = execution();
+  await $.tool.call(FORGE_RUN_CALL);
   await clock.advance(30_000);
   expect(JSON.parse(files[path]!)).toMatchObject({ runKey: 'e1', runBaseline: { runKey: 'e1' } });
   expect(texts.map(t => JSON.parse(t)).filter(f => 'runKey' in f && f.runKey === null)).toEqual([]);
@@ -491,10 +522,12 @@ test('a session counts in its run only what it spent once its band names the run
   const panel = panelWrites(on);
   const clock = start(on);
   serveSteps(on);
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   // $4 before the run, then the run starts and the tick reads the band: the baseline is that $4.
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   files[`${ROOT}/.forge/execution.json`] = execution();
+  await $.tool.call(FORGE_RUN_CALL);
   await clock.advance(30_000);
   // $4 more within the run.
   await drain($.turn.step({ turnId: 't1', index: 1, model: 'claude-opus-5-5', messageCount: 2 }));
@@ -543,11 +576,12 @@ test("a compaction of the main conversation stops the re-read of the tracking ga
 });
 
 test('a band read before any run, the pane closed and nothing busy: a run that starts later is named in the next usage write (R2)', async ($, on) => {
-  const files: Record<string, string> = { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' };
+  const files: Record<string, string> = { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n', ...ownTask(SESSION) };
   serveFiles(on, files);
   const open = servePanes(on);
   const clock = start(on);
   serveSteps(on);
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   // The person opens /lens (the band is read: no run), then closes the pane.
@@ -560,6 +594,7 @@ test('a band read before any run, the pane closed and nothing busy: a run that s
   expect(JSON.parse(files[path]!)).toMatchObject({ runKey: null });
   // Later this session coordinates a run in mode sessions, without subagents or todos.
   files[`${ROOT}/.forge/execution.json`] = execution({ mode: 'sessions' });
+  await $.tool.call(FORGE_RUN_CALL);
   await drain($.turn.step({ turnId: 't2', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await clock.advance(30_000);
   expect(JSON.parse(files[path]!)).toMatchObject({ runKey: 'e1', runBaseline: { runKey: 'e1' } });
@@ -602,7 +637,9 @@ test("after /clear the viewer is never the ending conversation, even when a pane
   await $.command.run(RUN);
   await clock.advance(2000);
   const owners = () => (panel.last?.activities ?? []).map((a: { key: string; owner: string }) => `${a.key}:${a.owner}`).sort();
-  expect(owners()).toEqual(['T001:own', 'T002:other']);
+  // Each conversation is anchored by its own task (decision 2.4 of the lens anchor design), and own work shows nothing of
+  // another conversation's (decision 2): the viewer is told by whose task is drawn.
+  expect(owners()).toEqual(['T001:own']);
   const old = `${ROOT}/.forge/usage/conv-1.json`;
   await $.session.end({ reason: 'clear', sessionId: 'conv-1', resume: {} as never });
   const oldWrites = writes[old]?.length ?? 0;
@@ -611,7 +648,7 @@ test("after /clear the viewer is never the ending conversation, even when a pane
   await drain($.turn.step({ turnId: 't2', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
   await clock.advance(30_000);
   await clock.advance(30_000);
-  expect(owners()).toEqual(['T001:other', 'T002:own']);
+  expect(owners()).toEqual(['T002:own']);
   // The ending conversation's file keeps its last write; the new one writes its own.
   expect(writes[old]?.length ?? 0).toBe(oldWrites);
   expect(JSON.parse(files[`${ROOT}/.forge/usage/conv-2.json`]!)).toMatchObject({ session: 'conv-2', startedAt: new Date(NOW + 2000).toISOString() });
@@ -621,6 +658,7 @@ test('a run that is neither active nor touched within 12 hours is over: only thi
   const files = {
     [`${ROOT}/.forge/run.json`]: JSON.stringify({ active: false, startedAt: new Date(NOW - 20 * 3600_000).toISOString() }),
     [`${ROOT}/.forge/usage/sess-2.json`]: usageFile('sess-2'),
+    ...joined(SESSION),
   };
   serveFiles(on, files, {}, [], () => undefined, { [`${ROOT}/.forge/run.json`]: NOW - 13 * 3600_000 });
   servePanes(on);
@@ -636,7 +674,7 @@ test('a run that is neither active nor touched within 12 hours is over: only thi
 
 test('a resumed session checks /cost against what it spent since the seed, not against the seeded file too (E-12)', async ($, on) => {
   const seeded = { main: { kind: 'main', description: null, model: 'claude-opus-5-5', effort: null, steps: 3, input: 25_000_000, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 100, unpriced: 0 } };
-  serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: usageFile(SESSION, { loops: seeded }) });
+  serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: usageFile(SESSION, { loops: seeded }), ...ownTask(SESSION) });
   servePanes(on);
   const panel = panelWrites(on);
   const clock = start(on);

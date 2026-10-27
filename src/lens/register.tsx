@@ -2,9 +2,10 @@ import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
 import { noneBand, type BandModel } from '../mod/model.js';
 import { buildPanelModel, bandKey, parsePlanTasks, parseSddLedger, planFileOf, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
-import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
-import { normalizeStatus, statusKey } from '../lib/forge-status.js';
-import { JOB_FILE_MAX, runRoleOf } from './activities.js';
+import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, type Engine } from '../mod/files.js';
+import { findAnchor, samePath, under, type Anchor, type AnchorScope, type Refusal } from '../mod/anchor.js';
+import { normalizeStatus, statusKey, type ForgeStatus } from '../lib/forge-status.js';
+import { JOB_FILE_MAX, parseJob, runRoleOf } from './activities.js';
 import { isSafeId, parseExecution } from '../lib/execution-state.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
 import { buildCards, cardAlt } from './cards.js';
@@ -37,7 +38,6 @@ const MAX_ACTIVITY = 50;
 const SUBAGENT_TTL_MS = 3600_000;
 const PANEL_EVERY_MS = 10_000;
 const WRITE_GAP_MS = 1000;
-const PLAN_FALLBACK_AGE_MS = 24 * 3600_000;
 // forge's status.json is a few hundred bytes; anything above this is not read.
 const FORGE_STATUS_MAX = 64 * 1024;
 const MAX_PROPOSAL_FILES = 50;
@@ -93,6 +93,22 @@ let roadmap: BandModel = noneBand();
 // I2: whether this session read its band since it started (or since /clear or a resume): until then lens cannot tell
 // whether it works for a run, and neither names one in its usage file nor takes a run baseline.
 let bandRead = false;
+// The lens anchor design (docs/superpowers/specs/2026-10-27-lens-project-anchor-design.md), D2-D5: the checkout every
+// file-backed card reads, and whether this conversation joined it or works there alone. The search (anchor.ts) runs when
+// `anchorDirty` says so (a session or conversation start, the pane opening, a waypoint or forge call, a superpowers
+// ledger or plan written, an anchor gone) or when the session root moved; the ordinary refresh reads the anchored
+// checkout without searching. No anchor: no card read from project files (D3).
+let anchor: Anchor | null = null;
+let anchorDirty = true;
+let anchorRoot: string | null = null;
+// D2.5, D2.6: the superpowers ledgers and plans this session wrote, newest last, at most OWN_PATHS_MAX.
+let ownPaths: { path: string; at: number }[] = [];
+const OWN_PATHS_MAX = 20;
+// D8: a refused read of the session root or of the anchored checkout, for the panel to say.
+let refused: Refusal | null = null;
+// One search at a time; the epoch moves with the conversation, so a search begun for the one before is not adopted.
+let anchorSearch: Promise<void> | null = null;
+let anchorEpoch = 0;
 
 type PanelFiles = {
   ledger?: string; ledgerPlan?: string; ledgerPlanPath?: string; planFallback?: string; ledgerMtimeMs?: number;
@@ -376,13 +392,34 @@ async function isPaneOpen($: Engine): Promise<boolean> {
   try { return (await $.ui.panes()).some(p => p.id === PANE); } catch { return false; }
 }
 
-async function newest($: Engine, paths: string[]): Promise<{ path: string; t: number } | null> {
-  let best: { path: string; t: number } | null = null;
-  for (const path of paths) {
-    const t = await mtime($, path);
-    if (t !== null && (!best || t > best.t)) best = { path, t };
+// D2.5, D2.6: a superpowers ledger or plan as lens hears this session write it, and as it sits in a checkout.
+const OWN_LEDGER_PATH = /[\\/]\.superpowers[\\/]sdd[\\/][^\\/]+[\\/]progress\.md$/;
+const OWN_PLAN_PATH = /[\\/]docs[\\/]superpowers[\\/]plans[\\/][^\\/]+\.md$/;
+const LEDGER_IN_CHECKOUT = /^\.superpowers\/sdd\/[^/]+\/progress\.md$/;
+const PLAN_IN_CHECKOUT = /^docs\/superpowers\/plans\/[^/]+\.md$/;
+
+// The newest of the paths this session wrote that sits in `dir` as `kind` says, or null.
+function newestOwnPath(dir: string, kind: RegExp): string | null {
+  const base = dir.replace(/\\/g, '/').replace(/\/+$/, '');
+  let best: { path: string; at: number } | null = null;
+  for (const p of ownPaths) {
+    if (under(p.path, dir) && kind.test(p.path.slice(base.length + 1)) && (!best || p.at >= best.at)) best = p;
   }
-  return best;
+  return best?.path ?? null;
+}
+
+// A task id names `task` or one of its attempts (T001-1 is of T001), as activities.ts matches them.
+const isTaskOf = (task: string, id: string): boolean => id === task || (id.startsWith(`${task}-`) && /^\d{1,4}$/.test(id.slice(task.length + 1)));
+
+// D2: a status of this conversation's own work: by the session it names, else by a task it touched with forge.cjs
+// (E-06), as the panel tells its own rows.
+function ownStatus(text: string | undefined): ForgeStatus | null {
+  let st: ForgeStatus | null = null;
+  try { st = text === undefined ? null : normalizeStatus(JSON.parse(text)); } catch { st = null; }
+  if (!st) return null;
+  const task = st.task;
+  const mine = st.session !== null && sessionId ? st.session === sessionId : ownTasks.some(t => isTaskOf(task, t));
+  return mine ? st : null;
 }
 
 let proposalCache: { key: string; proposals: Record<string, string> } | null = null;
@@ -478,40 +515,46 @@ async function loadExecutionFiles($: Engine, main: string, listing?: Listing): P
 // forge's state for the panel. Each task's status (.forge/status/, kept by forge on each ledger append; the ledger itself
 // is never read) beside the ledger this root writes to (C5: the main checkout for a forge task worktree), else, from an
 // older forge, the root's status.json; the jobs in the background, the automatic decisions and the execution from the
-// main checkout; the infinite run and the 50 newest proposals from the session root, only when its .forge/ lists.
-async function loadForgeFiles($: Engine, root: string, now: number): Promise<PanelFiles> {
-  // Resolved once per session and shared with the usage meter (usageWhere). A .git folder does not read (undefined):
-  // a normal checkout, the root itself.
-  if (mainCheckout === null) mainCheckout = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
-  const main = mainCheckout;
+// main checkout; the infinite run and the 50 newest proposals from the root, only when its .forge/ lists. `root` is the
+// anchored checkout (D5); an anchor of its own work (`own`, D2) reads its own tasks alone: their statuses, briefs and
+// jobs, and no run, proposals, automatic decisions nor infinite run.
+async function loadForgeFiles($: Engine, root: string, now: number, scope: AnchorScope): Promise<PanelFiles> {
+  const main = await mainOf($, root);
+  const joined = scope === 'join';
   const dir = join(root, '.forge');
   const entries = await listOpt($, dir);
   let execFiles: PanelFiles = {};
-  try { execFiles = await loadExecutionFiles($, main, main === root ? entries : undefined); } catch { /* no execution card */ }
+  if (joined) {
+    try { execFiles = await loadExecutionFiles($, main, main === root ? entries : undefined); } catch { /* no execution card */ }
+  }
   const out: PanelFiles = { ...execFiles };
   // forge's automatic decisions (.forge/decisions.json, a few hundred bytes; not read above DECISIONS_MAX), kept in the
   // main checkout whichever worktree this session is in, so read even when this root has no .forge/ of its own.
   const mainDir = join(main, '.forge');
   const mainEntries = main === root ? entries : await listOpt($, mainDir);
-  const decisions = mainEntries.find(f => f.kind === 'file' && f.name === 'decisions.json');
+  const decisions = joined ? mainEntries.find(f => f.kind === 'file' && f.name === 'decisions.json') : undefined;
   if (decisions && decisions.size <= DECISIONS_MAX) out.forgeDecisions = await readOpt($, join(mainDir, 'decisions.json'));
   // Wave 1: the commands running in the background (prep, review-prep, validate, integrate, step), in the main checkout.
+  let jobs: string[] = [];
   if (mainEntries.some(f => f.kind === 'dir' && f.name === 'jobs')) {
-    const jobs = await readCached($, join(mainDir, 'jobs'), JOBS_MAX, JOB_FILE_MAX, jobCache, () => true);
-    if (jobs.length) out.forgeJobs = jobs;
+    jobs = await readCached($, join(mainDir, 'jobs'), JOBS_MAX, JOB_FILE_MAX, jobCache, () => true);
   } else jobCache.clear();
   // C5: the statuses beside the ledger: at most the 20 newest touched within the day, each at most 64 KiB.
   const statusRoot = statusRootOf(root, main);
   const statusEntries = statusRoot === root ? entries : mainEntries;
   if (statusEntries.some(f => f.kind === 'dir' && f.name === 'status')) {
-    out.forgeStatuses = await readCached($, join(statusRoot, '.forge', 'status'), FORGE_STATUSES_READ, FORGE_STATUS_MAX, statusCache, f => now - f.mtimeMs < STATUS_AGE_MS);
+    const statuses = await readCached($, join(statusRoot, '.forge', 'status'), FORGE_STATUSES_READ, FORGE_STATUS_MAX, statusCache, f => now - f.mtimeMs < STATUS_AGE_MS);
+    out.forgeStatuses = joined ? statuses : statuses.filter(text => ownStatus(text) !== null);
     out.forgeBriefsBy = await briefsByKey($, statusRoot, out.forgeStatuses);
   } else {
     // The folder went away: so do its cached reads, or a file back with the same size and mtime would read stale.
     statusCache.clear();
     // An older forge: the root's one status.json, as before C5.
     const status = entries.find(f => f.kind === 'file' && f.name === 'status.json');
-    if (status && status.size <= FORGE_STATUS_MAX) out.forgeStatus = await readOpt($, join(dir, 'status.json'));
+    if (status && status.size <= FORGE_STATUS_MAX) {
+      const text = await readOpt($, join(dir, 'status.json'));
+      if (joined || ownStatus(text)) out.forgeStatus = text;
+    }
     // How many briefs the current task has: the brief-<n>.md files in its work folder, .forge/work/<project>/<task> for a
     // plan task (D-08), else (a loose task, an older status or a task started before) .forge/work/<task>.
     if (out.forgeStatus !== undefined) {
@@ -526,7 +569,11 @@ async function loadForgeFiles($: Engine, root: string, now: number): Promise<Pan
       }
     }
   }
-  if (!entries.length) { forgeSeen = { dir, entries }; return out; }
+  // Own work keeps the jobs of its own tasks alone.
+  const tasks = joined ? [] : [...(out.forgeStatuses ?? []), ...(out.forgeStatus !== undefined ? [out.forgeStatus] : [])].flatMap(text => ownStatus(text)?.task ?? []);
+  const kept = joined ? jobs : jobs.filter(text => { const task = parseJob(text)?.task; return !!task && tasks.some(t => isTaskOf(t, task)); });
+  if (kept.length) out.forgeJobs = kept;
+  if (!joined || !entries.length) { forgeSeen = { dir, entries }; return out; }
   // The infinite run (.forge/run.json, a few hundred bytes): not read above 16 KiB.
   const run = entries.find(f => f.kind === 'file' && f.name === 'run.json');
   if (run && run.size <= FORGE_RUN_MAX) out.forgeRun = await readOpt($, join(dir, 'run.json'));
@@ -554,12 +601,81 @@ async function loadForgeFiles($: Engine, root: string, now: number): Promise<Pan
   return out;
 }
 
-async function loadPanelFiles($: Engine, now: number): Promise<PanelFiles> {
-  const root = await $.session.root();
-  let forge: PanelFiles = {};
+// D4: this conversation's anchor, searched for only when a trigger marked it or the session root moved. A caller that
+// finds a search in flight waits for it and looks again: a trigger may have come meanwhile.
+async function ensureAnchor($: Engine): Promise<void> {
+  try {
+    const root = await $.session.root();
+    while (anchorSearch) await anchorSearch;
+    if (!anchorDirty && anchorRoot !== null && samePath(root, anchorRoot)) return;
+    const run: Promise<void> = searchAnchor($, root).finally(() => { if (anchorSearch === run) anchorSearch = null; });
+    anchorSearch = run;
+    await run;
+  } catch { /* the anchor held stands */ }
+}
+
+// D1, D2: the search, among the anchor held, the session root and the marked folders below it, for every kind of anchor.
+async function searchAnchor($: Engine, root: string): Promise<void> {
+  const epoch = anchorEpoch;
+  // Cleared before the search: a trigger that raises it meanwhile may not have been read, and the next look searches.
+  anchorDirty = false;
+  try {
+    let id = sessionId;
+    if (id === null) { try { id = await sessionIdNow($); } catch { id = null; } }
+    const found = await findAnchor($, { root, sessionId: id, held: anchor?.checkout ?? null, kinds: 'all', own: { tasks: ownTasks, paths: ownPaths }, now: await nowMs($) });
+    if (epoch !== anchorEpoch) return;
+    anchor = found.anchor;
+    refused = found.refused;
+    anchorRoot = root;
+    // Without an id nothing could be searched for: the next look asks again.
+    if (id === null) anchorDirty = true;
+  } catch { anchorDirty = true; }
+}
+
+// D2, D5: the band of the anchored checkout and project, for a conversation that joined it; none otherwise (D3). A join
+// whose band no longer names this conversation its owner (a binding ended or released, a run closed) is searched again.
+async function readBand($: Engine): Promise<void> {
+  const at = anchor;
+  const band = at?.scope === 'join' ? await loadBandModel($, { checkout: at.checkout, project: at.project }) : noneBand();
+  roadmap = band;
+  bandRead = true;
+  if (at?.scope === 'join' && at === anchor && band.viewer.role !== 'owner') anchorDirty = true;
+}
+
+// The anchor is this conversation's: a new one (a session start, /clear, a resume) searches from nothing, and what was
+// read for the one before goes with it.
+function resetAnchor(): void {
+  anchor = null;
+  anchorDirty = true;
+  anchorRoot = null;
+  refused = null;
+  ownPaths = [];
+  anchorEpoch++;
+  roadmap = noneBand();
+  panelFiles = {};
   forgeSeen = null;
-  try { forge = await loadForgeFiles($, root, now); } catch { /* no forge section */ }
-  return { ...await loadSuperpowersFiles($, root, now), ...forge };
+}
+
+// D2.5, D2.6: a superpowers ledger or plan this session wrote is its own work: kept, absolute against the shell's
+// directory when relative, and the anchor is searched for again.
+async function noteOwnPath($: Engine, filePath: unknown): Promise<void> {
+  if (typeof filePath !== 'string' || !filePath) return;
+  const path = (/^([A-Za-z]:)?[\\/]/.test(filePath) ? filePath : join(await $.session.cwd(), filePath)).replace(/\\/g, '/');
+  if (!OWN_LEDGER_PATH.test(path) && !OWN_PLAN_PATH.test(path)) return;
+  ownPaths = [...ownPaths.filter(p => !samePath(p.path, path)), { path, at: await nowMs($) }].slice(-OWN_PATHS_MAX);
+  anchorDirty = true;
+}
+
+// D3, D5: the files of the anchored checkout; no anchor, none.
+async function loadPanelFiles($: Engine, now: number): Promise<PanelFiles> {
+  forgeSeen = null;
+  const at = anchor;
+  if (!at) return {};
+  let forge: PanelFiles = {};
+  try { forge = await loadForgeFiles($, at.checkout, now, at.scope); } catch { /* no forge section */ }
+  // A lone forge task whose status no longer reads as this conversation's is searched for again.
+  if (at.kind === 'forge-task' && at === anchor && !forge.forgeStatuses?.length && forge.forgeStatus === undefined) anchorDirty = true;
+  return { ...await loadSuperpowersFiles($, at.checkout), ...forge };
 }
 
 // A plan-path file holds one path: one above this is not read.
@@ -588,21 +704,23 @@ function shownPlanPath(file: string, bases: readonly string[]): string {
   return file;
 }
 
-async function loadSuperpowersFiles($: Engine, root: string, now: number): Promise<PanelFiles> {
+// D2.5, D2.6: the superpowers run of this conversation in the anchored checkout `root`: the newest ledger it wrote there,
+// else the newest plan it wrote or edited (executing-plans ticks its checkboxes and writes no ledger). No other ledger or
+// plan is listed or read: another conversation's run is not this one's.
+async function loadSuperpowersFiles($: Engine, root: string): Promise<PanelFiles> {
   const out: PanelFiles = {};
-  const sdd = join(root, '.superpowers', 'sdd');
-  const ledgers = (await listOpt($, sdd)).filter(d => d.kind === 'dir').slice(0, MAX_DOCS).map(d => join(sdd, d.name, 'progress.md'));
-  const ledger = await newest($, ledgers);
+  const ledger = newestOwnPath(root, LEDGER_IN_CHECKOUT);
   if (ledger) {
-    out.ledger = await readOpt($, ledger.path);
-    if (out.ledger !== undefined) out.ledgerMtimeMs = ledger.t;
+    out.ledger = await readOpt($, ledger);
+    const t = out.ledger !== undefined ? await mtime($, ledger) : null;
+    if (t !== null) out.ledgerMtimeMs = t;
   }
   if (ledger && out.ledger !== undefined) {
     // w8 M4: superpowers 7 writes the plan's path to plan-path beside the ledger, and absolute (`X:/…`, msys `/x/…`) there
     // and in the ledger's header: the first that names a plan inside the root, or its main checkout from a worktree.
-    if (mainCheckout === null) mainCheckout = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
-    const bases = mainCheckout !== root ? [root, mainCheckout] : [root];
-    const marker = join(ledger.path.slice(0, ledger.path.lastIndexOf('/')), 'plan-path');
+    const main = await mainOf($, root);
+    const bases = main !== root ? [root, main] : [root];
+    const marker = join(ledger.slice(0, ledger.lastIndexOf('/')), 'plan-path');
     let markerText: string | undefined;
     try { if ((await $.fs.stat(marker)).size <= PLAN_PATH_MAX) markerText = await readOpt($, marker); } catch { /* none */ }
     const names = [markerText, parseSddLedger(out.ledger).planPath];
@@ -626,19 +744,17 @@ async function loadSuperpowersFiles($: Engine, root: string, now: number): Promi
     }
     return out;
   }
-  // No ledger: the newest superpowers plan, if it was touched within the day, shown by its checkboxes.
-  const plans = join(root, 'docs', 'superpowers', 'plans');
-  const mds = (await listOpt($, plans)).filter(f => f.kind === 'file' && f.name.endsWith('.md')).slice(0, MAX_DOCS).map(f => join(plans, f.name));
-  const plan = await newest($, mds);
-  if (plan && now - plan.t <= PLAN_FALLBACK_AGE_MS) out.planFallback = await readOpt($, plan.path);
+  // No ledger: the newest plan of its own, shown by its checkboxes.
+  const plan = newestOwnPath(root, PLAN_IN_CHECKOUT);
+  if (plan) out.planFallback = await readOpt($, plan);
   return out;
 }
 
 // ---- The usage meter ---------------------------------------------------------------------------
-// What each model loop spent, from the turn.step responses (src/lens/usage.ts), kept in module memory. When the main
-// checkout has .forge/, it is also written to .forge/usage/<session>.json (at most every 30 s and at session end) and
-// every session's file there is summed for the current run. All file work is on the refresh / tick path; a panel
-// build only merges what that path read with the live state.
+// What each model loop spent, from the turn.step responses (src/lens/usage.ts), kept in module memory. When this
+// conversation has an anchor whose main checkout has .forge/ (D7), it is also written to .forge/usage/<session>.json (at
+// most every 30 s and at session end) and, for a join, every session's file there is summed for the current run. All
+// file work is on the refresh / tick path; a panel build only merges what that path read with the live state.
 
 const USAGE_WRITE_MS = 30_000;
 const LARGE_RUNS_MAX = 100;
@@ -651,7 +767,8 @@ let lastUsageWrite = 0;
 let lastUsageSig = '';
 let usageWrite: Promise<void> | null = null;
 let sessionId: string | null = null;
-let mainCheckout: string | null = null;
+// The main checkout of the anchored checkout (the repo a worktree belongs to), resolved once for each.
+let mainCheckout: { checkout: string; main: string } | null = null;
 // The run's start and the other sessions' parsed files, as the last refresh read them.
 let runInputs: { since: number; files: UsageFile[] } | null = null;
 // Each usage file's last read by name, kept while its size and mtime stay; `file: null` is one that did not parse.
@@ -699,6 +816,7 @@ function resetUsage(): void {
   runInputs = null;
   usageFileCache.clear();
   largeRunsCache = null;
+  resetAnchor();
 }
 
 // The main checkout's execution.json as the last check saw it (`<size>:<mtime>`, '' when absent), null before any.
@@ -718,9 +836,8 @@ async function watchRun($: Engine, main: string): Promise<void> {
     const active = !!st && st.size <= FORGE_EXEC_MAX && parseExecution(await readOpt($, path), await nowMs($))?.active === true;
     if (!active) { execSeen = seen; return; }
   }
-  try { roadmap = await loadBandModel($); } catch { return; }
+  try { await readBand($); } catch { return; }
   execSeen = seen;
-  bandRead = true;
   keepRunBaseline();
 }
 
@@ -732,15 +849,24 @@ async function sessionIdNow($: Engine): Promise<string | null> {
   return id === endedId ? null : id;
 }
 
-// The session's id and its main checkout (the repo a worktree belongs to), resolved once per session. Until the new
-// conversation's id can be read (R1), there is no file of this session to read or write.
+// The main checkout of `checkout`. A .git folder does not read (undefined): a normal checkout, the checkout itself.
+async function mainOf($: Engine, checkout: string): Promise<string> {
+  if (mainCheckout?.checkout === checkout) return mainCheckout.main;
+  const main = mainCheckoutFrom(checkout, (await readOpt($, join(checkout, '.git'))) ?? null);
+  mainCheckout = { checkout, main };
+  return main;
+}
+
+// The session's id, the anchored checkout and its main checkout. Until the new conversation's id can be read (R1), and
+// without an anchor (D7), there is no file of this session to read or write.
 async function usageWhere($: Engine): Promise<{ root: string; session: string; main: string }> {
-  const root = await $.session.root();
   if (sessionId === null) sessionId = await sessionIdNow($);
-  if (sessionId === null) throw new Error('the session id is not known yet');
-  // A .git folder does not read (undefined): a normal checkout, the root itself.
-  if (mainCheckout === null) mainCheckout = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
-  return { root, session: sessionId, main: mainCheckout };
+  const session = sessionId;
+  if (session === null) throw new Error('the session id is not known yet');
+  await ensureAnchor($);
+  const at = anchor;
+  if (!at) throw new Error('no anchor');
+  return { root: at.checkout, session, main: await mainOf($, at.checkout) };
 }
 
 // A resumed session keeps its id: its own file, when it has the same start, is continued rather than overwritten.
@@ -787,10 +913,11 @@ function usageSig(): string {
   return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}|${key === undefined ? '?' : key ?? ''}`;
 }
 
-// Writes this session's usage file when the main checkout has .forge/ and the count changed: at most every 30 s
-// unless forced (session end). A failed write is ignored. The engine's fs has no rename, so the file is written in
-// place; a reader that catches it half-written skips it and reads it again when its size or mtime changes. `watch`: no
-// refresh reads the band (the 30 s tick with the pane closed and nothing busy), so the write follows the run (R2).
+// Writes this session's usage file when it has an anchor (D7), the anchored main checkout has .forge/ and the count
+// changed: at most every 30 s unless forced (session end). A failed write is ignored. The engine's fs has no rename, so
+// the file is written in place; a reader that catches it half-written skips it and reads it again when its size or mtime
+// changes. `watch`: no refresh reads the band (the 30 s tick with the pane closed and nothing busy), so the write
+// follows the run (R2).
 async function writeUsageFileNow($: Engine, force: boolean, watch: boolean): Promise<void> {
   try {
     // Before the session's start is known there is no file to write (its start would read 1970).
@@ -798,6 +925,8 @@ async function writeUsageFileNow($: Engine, force: boolean, watch: boolean): Pro
     const now = await nowMs($);
     if (!force && now - lastUsageWrite < USAGE_WRITE_MS) return;
     if (!Object.values(usage.loops).some(l => l.steps > 0)) return;
+    await ensureAnchor($);
+    if (!anchor) return;
     // I2, R2: the run this session works for, while no refresh reads the band, or as long as it was never read.
     if (watch || !bandRead) await watchRun($, (await usageWhere($)).main);
     const sig = usageSig();
@@ -848,8 +977,10 @@ async function largeRuns($: Engine, forge: string, now: number): Promise<RunSour
 }
 
 // The run's start and the other sessions' files, or null when the main checkout has no .forge/ or no run. The .forge
-// listing, run.json and execution.json come from the panel's own read when the root is the main checkout.
+// listing, run.json and execution.json come from the panel's own read when the root is the main checkout. D2: only for
+// a conversation that joined the checkout; one there by its own work counts its own spend alone.
 async function refreshRunInputs($: Engine, now: number): Promise<void> {
+  if (anchor?.scope !== 'join') { runInputs = null; return; }
   const where = await usageWhere($);
   const forge = join(where.main, '.forge');
   const seen = forgeSeen?.dir === forge ? forgeSeen : null;
@@ -1087,8 +1218,9 @@ async function refreshPanelOnce($: Engine, force: boolean): Promise<void> {
     // With the pane closed the files are still read while there is activity, for the band: at the 30 s tick's pace.
     if (!paneUp && !busy && !force) return;
     if (paneUp) startPanelTimer($);
+    await ensureAnchor($);
     // The roadmap section follows the waypoint project's files at the panel's pace.
-    try { roadmap = await loadBandModel($); bandRead = true; } catch { /* keep the last one */ }
+    try { await readBand($); } catch { /* keep the last one */ }
     keepRunBaseline();
     const now = await nowMs($);
     // E-06: who looks, so the panel knows whose tasks are its own; null when the engine cannot say (or still names the
@@ -1196,6 +1328,8 @@ const lensTexts = (): Texts => textsFor(roadmap.locale);
 // cards' rows (carry 5, review Minor 5). An open that fails fails the command's hook, whose .catch says why. `inline`:
 // whether the pane would sit inline as the command saw the screen (no dock outside fullscreen or under 110 columns).
 async function openPanel($: Engine, inline: boolean): Promise<boolean> {
+  // D4: the pane opening searches for the anchor again.
+  anchorDirty = true;
   const first = bandModel === null;
   let model: PanelModel | null = bandModel;
   try { model ??= await buildPanel($); } catch { model = null; }
@@ -1250,7 +1384,8 @@ async function readForPhoto($: Engine, now: number): Promise<void> {
   if (sessionId === null) {
     try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
   }
-  try { roadmap = await loadBandModel($); bandRead = true; } catch { /* keep the last one */ }
+  await ensureAnchor($);
+  try { await readBand($); } catch { /* keep the last one */ }
   keepRunBaseline();
   try { panelFiles = await loadPanelFiles($, now); } catch { /* the files read last */ }
   try { adoptListed(await agentList($), now); } catch { /* the agents heard of */ }
@@ -1620,7 +1755,10 @@ export const register: Register = on => {
               forgeHeardAt = await nowMs($);
               void noteActivity($);
             }
+            // D4: a waypoint or forge call may bind this conversation, start or join a run, or start a task of its own.
+            if (own || trackingKind('Bash', input)) anchorDirty = true;
           }
+          if (e.tool === 'Skill' && trackingKind('Skill', input)) anchorDirty = true;
           // w8 M1: a TaskCreate or TaskUpdate of any loop that ran moves the Claude Code tasks card.
           if (answer.isError !== true) {
             const cc = taskCall(activity.ccTasks, String(e.tool), input, (answer as { result?: unknown }).result);
@@ -1631,6 +1769,7 @@ export const register: Register = on => {
             const delay = typeof input.delaySeconds === 'number' && Number.isFinite(input.delaySeconds) ? input.delaySeconds : null;
             wakeAt = input.stop === true || delay === null || answer.isError === true ? null : started + Math.min(WAKE_MAX_S, Math.max(WAKE_MIN_S, delay)) * 1000;
           }
+          if (e.tool === 'Write' || e.tool === 'Edit' || e.tool === 'MultiEdit') await noteOwnPath($, input.file_path);
         }
       } catch { /* ignore */ }
       // A main-loop waypoint or forge call is tracking: its input and result, about four characters a token.

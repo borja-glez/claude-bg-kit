@@ -48,12 +48,12 @@ function servePanes(on: On) {
   return open;
 }
 
-// The engine beneath lens: its clock and session, the agents list `agents.list` answers, and agent.spawn answering the
-// next of `ids`.
-function start(on: On, agents: { list: unknown[] } = { list: [] }, ids: string[] = []) {
+// The engine beneath lens: its clock and session (whose id `id` answers), the agents list `agents.list` answers, and
+// agent.spawn answering the next of `ids`.
+function start(on: On, agents: { list: unknown[] } = { list: [] }, ids: string[] = [], id: () => string = () => SESSION) {
   const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
-  on('session.id', () => ({ value: SESSION }));
+  on('session.id', () => ({ value: id() }));
   on('agent.list', () => ({ value: agents.list as never }));
   let n = 0;
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: ids[n++] ?? `x${n}` }));
@@ -218,13 +218,14 @@ test('forge.cjs --task T001-1 makes the T001 row own when its status names no se
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
   await clock.advance(0);
-  expect(panel.last?.activities).toMatchObject([{ key: 'T001', owner: 'other' }]);
+  // Decision 3 of the lens anchor design: before the call nothing anchors this conversation, so no status is drawn.
+  expect(panel.last?.activities).toEqual([]);
   await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T001-1 --path medium', tool_use_id: 'b1' } as never);
   await clock.advance(10_000);
   expect(panel.last?.activities).toMatchObject([{ key: 'T001', owner: 'own' }]);
 });
 
-test('with the session id unreadable, a task this session touched stays own and nothing throws (Review Focus 5)', async ($, on) => {
+test('with the session id unreadable nothing anchors the conversation, so no task is drawn, and nothing throws (Review Focus 5)', async ($, on) => {
   serveFiles(on, { [`${ROOT}/.forge/status/T005.json`]: status('T005', { session: 'other-conv', project: null }) });
   servePanes(on);
   const panel = panelWrites(on);
@@ -236,11 +237,12 @@ test('with the session id unreadable, a task this session touched stays own and 
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
   await clock.advance(0);
-  // Before any forge.cjs call the status that names another session is another's, dim: ownTasks makes the difference.
-  expect(panel.last?.activities).toMatchObject([{ key: 'T005', owner: 'other', dim: true }]);
+  // Decisions 2 and 3 of the lens anchor design: an anchor is this conversation's by its id; with none readable there is
+  // none, before the forge.cjs call and after it, and no status is drawn. The panel is still written.
+  expect(panel.last?.activities).toEqual([]);
   await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T005 --path medium', tool_use_id: 'b1' } as never);
   await clock.advance(10_000);
-  expect(panel.last?.activities).toMatchObject([{ key: 'T005', owner: 'own', dim: false }]);
+  expect(panel.last?.activities).toEqual([]);
 });
 
 // Now with one live agent of the main loop and no turn open, after a ScheduleWakeup with `input` the engine answers `answer`.
@@ -286,7 +288,8 @@ test('a forge.cjs call the engine refuses does not make its task this session ow
   await $.command.run(RUN);
   await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T009-1 --path medium', tool_use_id: 'b1' } as never);
   await clock.advance(10_000);
-  expect(panel.last?.activities).toMatchObject([{ key: 'T009', owner: 'other' }]);
+  // Decision 3 of the lens anchor design: the refused call made no task its own, so nothing anchors it and no status is drawn.
+  expect(panel.last?.activities).toEqual([]);
 });
 
 test('/clear forgets the agents, the tasks touched with forge.cjs and the wake-up (E-13)', async ($, on) => {
@@ -294,7 +297,9 @@ test('/clear forgets the agents, the tasks touched with forge.cjs and the wake-u
   servePanes(on);
   const panel = panelWrites(on);
   const agents = { list: [] as unknown[] };
-  const clock = start(on, agents, ['a1']);
+  // The engine answers the new conversation's id once /clear is done.
+  let current = SESSION;
+  const clock = start(on, agents, ['a1'], () => current);
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
   on('tool.call', { tool: 'ScheduleWakeup' }, () => ({ result: { scheduledFor: NOW + 240_000, clampedDelaySeconds: 240, wasClamped: false } }) as never);
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
@@ -308,8 +313,11 @@ test('/clear forgets the agents, the tasks touched with forge.cjs and the wake-u
   expect(panel.last).toMatchObject({ waiting: { agents: 1, wakeSeconds: 230 }, activities: [{ key: 'T009', owner: 'own' }, { kind: 'adhoc', agents: [{ id: 'a1' }] }] });
   agents.list = [];
   await $.session.end({ reason: 'clear', sessionId: SESSION, resume: {} as never });
+  current = 'conv-2';
   await clock.advance(10_000);
-  expect(panel.last).toMatchObject({ waiting: null, activities: [{ key: 'T009', owner: 'other' }] });
+  // Decision 3 of the lens anchor design: the new conversation did not touch T009, so nothing anchors it on that task and
+  // its status is not drawn at all (it would be its own had the old conversation's tasks stayed).
+  expect(panel.last).toMatchObject({ waiting: null, activities: [] });
 });
 
 const turnEnd = (agentId: string) => ({ turnId: `t-${agentId}`, agentId, answer: '', durationMs: 1, isAborted: false, reason: 'answer' }) as never;
@@ -515,6 +523,9 @@ tasks:
 test('with a Spanish plan the pane speaks Spanish: the tasks in progress, a job and the wait on one subagent (task 8 review)', async ($, on) => {
   serveFiles(on, {
     [`${ROOT}/docs/waypoint/shop/plan.yaml`]: ES_PLAN,
+    // The lens anchor design, decision 2: the plan's language is read from the roadmap this conversation is bound to.
+    [`${ROOT}/.waypoint/shop/session.json`]: JSON.stringify({ sessionId: 'S1', track: 'backend' }),
+    [`${ROOT}/.waypoint/shop/bound.json`]: JSON.stringify({ sid: 'S1', claude: SESSION, pid: null, via: 'work', since: at(60), seenAt: at(1), endedAt: null, endReason: null }),
     [`${ROOT}/.forge/status/shop__T001.json`]: status('T001'),
     [`${ROOT}/.forge/jobs/review-prep-T001-1-42.json`]: JSON.stringify({ name: 'review-prep-T001-1-42', cmd: 'review-prep', task: 'T001-1', pid: 42, startedAt: at(2), out: 'x.json', session: SESSION }),
   });

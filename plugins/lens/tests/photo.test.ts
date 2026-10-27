@@ -58,8 +58,12 @@ function start(on: On, agents: unknown[] = []) {
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('agent.list', () => ({ value: agents as never }));
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
+  on('tool.call', { tool: 'Write' }, () => ({ result: { type: 'update' } }) as never);
   return clock;
 }
+
+// The lens anchor design, decision 2.5: the superpowers run is this conversation's, and shown, once it wrote its ledger.
+const LEDGER_WRITE = { tool: 'Write', file_path: `${ROOT}/.superpowers/sdd/run/progress.md`, content: '# SDD ledger', tool_use_id: 'w0' } as never;
 
 // The engine's own rows beneath lens: a command's output line and the band, as drawn when no hook draws them.
 function engineRows(on: On) {
@@ -111,6 +115,7 @@ test('outside fullscreen /lens leaves a photo: one stamped line, no pane, and it
   engineRows(on);
   start(on);
   await $.session.start(SESSION);
+  await $.tool.call(LEDGER_WRITE);
   const ran = await $.command.run({ ...RUN, presentation: { isFullscreen: false, columns: 160 } });
   expect(ran.text).toMatch(/^lens · \d\d:\d\d:\d\d #1 · no tasks$/);
   expect(open.has(PANE)).toBe(false);
@@ -177,6 +182,7 @@ test('a photo reads the files once, writes no state, starts no timer, and its ro
   const clock = start(on);
   on('state.set', (_$, e, next) => { written.push(`${e.plugin}.${e.key}`); return next(e); });
   await $.session.start(SESSION);
+  await $.tool.call(LEDGER_WRITE);
   reads.length = 0;
   written.length = 0;
   const first = (await $.command.run({ ...RUN, args: 'foto' })).text!;
@@ -211,6 +217,7 @@ test('/lens foto bounds its read: files that do not come within 5 s leave the ph
   engineRows(on);
   const clock = start(on);
   await $.session.start(SESSION);
+  await $.tool.call(LEDGER_WRITE);
   // A first photo reads the files whole.
   const first = (await $.command.run({ ...RUN, args: 'foto' })).text!;
   expect(first).toMatch(/#1 · /);
@@ -273,6 +280,7 @@ test('on the desktop a photo is drawn as the SVG cards the pane draws there, not
   engineRows(on);
   start(on);
   await $.session.start(SESSION);
+  await $.tool.call(LEDGER_WRITE);
   const shot = (await $.command.run({ ...RUN, args: 'foto' })).text!;
   const desktop = await $.ui.mount({ plugin: 'lens', surface: 'desktop', component: 'CommandOutput', props: OUTPUT(shot), viewport: { columns: 120, rows: 40 } });
   expect((await desktop.findAll({ type: 'Svg' })).length).toBeGreaterThan(0);
@@ -289,6 +297,7 @@ test('a photo is laid out at the transcript width: the screen undocked, narrower
   engineRows(on);
   const clock = start(on);
   await $.session.start(SESSION);
+  await $.tool.call(LEDGER_WRITE);
   const shot = (await $.command.run({ ...RUN, args: 'foto' })).text!;
   const SCREEN = { columns: 160, rows: 40, isFullscreen: true };
   // Cards without a frame are indented by two: their bar is the row's width less two.
