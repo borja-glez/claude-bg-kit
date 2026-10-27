@@ -13836,7 +13836,7 @@ function applyReplan(text3, ops, why, at2) {
 var import_node_crypto = require("node:crypto");
 
 // src/lib/waypoint-version.ts
-var WAYPOINT_VERSION = true ? "0.38.0" : "0.0.0";
+var WAYPOINT_VERSION = true ? "0.39.0" : "0.0.0";
 var VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})/;
 var partsOf = (v) => {
   const m = typeof v === "string" ? VERSION.exec(v) : null;
@@ -14393,6 +14393,12 @@ var DOC_PATHS = ["trivial", "small", "medium", "large"];
 var DOC_STAGES = [...STAGES, "triage", "done", "blocked", "stopped"];
 var ACTIONS = ["accept", "fix", "redo"];
 var STAGE_KEYS = [...STAGES, "triage"];
+var WHY_MAX = 3;
+var WHY_PROBLEM_MAX = 100;
+var RED_MAX = 4;
+var TRAIL_MAX = 16;
+var ROUND_NEXTS = ["done", "resume", "fresh-stronger", "redo", "stalled", "breaker"];
+var TRAIL_STAGES = [...STAGES, "triage", "fix", "done", "stopped", "blocked"];
 var isObj3 = (x2) => typeof x2 === "object" && x2 !== null && !Array.isArray(x2);
 var kindOf = (v) => v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
 var int2 = (v, min, max) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
@@ -14420,7 +14426,30 @@ function roundOf(r2) {
   const findings = { critical: c("critical"), important: c("important"), minor: c("minor"), deferred: c("deferred") };
   if (Object.values(findings).some((x2) => x2 === null)) return null;
   const reviewers = (Array.isArray(r2.reviewers) ? r2.reviewers : []).filter((x2) => typeof x2 === "string" && !!x2.trim()).map((x2) => line(x2, REVIEWER_MAX)).slice(0, REVIEWERS_MAX);
-  return { brief: r2.brief, n: r2.n, action: r2.action, note: line(r2.note, NOTE_MAX), findings, reviewers, at: r2.at };
+  const out = { brief: r2.brief, n: r2.n, action: r2.action, note: line(r2.note, NOTE_MAX), findings, reviewers, at: r2.at };
+  if (ROUND_NEXTS.includes(r2.next)) out.next = r2.next;
+  if (typeof r2.impl === "string" && r2.impl.trim()) out.impl = line(r2.impl, NAME_MAX);
+  if (typeof r2.score === "number" && Number.isFinite(r2.score) && r2.score >= 0 && r2.score <= 1) out.score = r2.score;
+  const why = (Array.isArray(r2.why) ? r2.why : []).map(whyOf).filter((w) => !!w).slice(0, WHY_MAX);
+  if (why.length) out.why = why;
+  const red = (Array.isArray(r2.red) ? r2.red : []).filter((x2) => typeof x2 === "string" && !!x2.trim()).map((x2) => line(x2, REVIEWER_MAX)).slice(0, RED_MAX);
+  if (red.length) out.red = red;
+  return out;
+}
+function whyOf(w) {
+  if (!isObj3(w) || w.sev !== "critical" && w.sev !== "important" || typeof w.problem !== "string" || !w.problem.trim()) return null;
+  const out = { sev: w.sev, problem: line(w.problem, WHY_PROBLEM_MAX) };
+  if (typeof w.file === "string" && w.file.trim()) out.file = line(w.file, TEXT_MAX2);
+  if (int2(w.line, 1, 1e7)) out.line = w.line;
+  if (typeof w.by === "string" && w.by.trim()) out.by = line(w.by, REVIEWER_MAX);
+  return out;
+}
+function trailOf(t) {
+  if (!isObj3(t) || typeof t.s !== "string" || !TRAIL_STAGES.includes(t.s) || !iso2(t.at)) return null;
+  const out = { s: t.s, at: t.at };
+  if (int2(t.b, 1, 9999)) out.b = t.b;
+  if (int2(t.r, 1, 99)) out.r = t.r;
+  return out;
 }
 function deferredOf(d) {
   if (!isObj3(d) || typeof d.problem !== "string" || !d.problem.trim()) return null;
@@ -14500,6 +14529,10 @@ function parseForgeDocV2(x2, report) {
     overCap: x2.overCap,
     updatedAt: x2.updatedAt
   };
+  if (Array.isArray(x2.trail)) {
+    const trail = keep(x2.trail, trailOf, "trail", TRAIL_MAX, true);
+    if (trail.length) doc.trail = trail;
+  } else if (x2.trail !== void 0) report?.("forge.trail", "coerced", kindOf(x2.trail));
   const coerced = (field2, v) => report?.(`forge.${field2}`, "coerced", kindOf(v));
   if (typeof x2.agent === "string" && x2.agent.trim()) doc.agent = line(x2.agent, NAME_MAX);
   else if (x2.agent !== void 0) coerced("agent", x2.agent);
@@ -17870,6 +17903,10 @@ function maxOf(values) {
   return max;
 }
 function forecastEnd(plan, states, now, opts) {
+  const s = forecastSchedule(plan, states, now, opts);
+  return s ? { at: s.at, parallel: s.parallel } : null;
+}
+function forecastSchedule(plan, states, now, opts) {
   const pending = plan.tasks.filter((t) => !isDone(states, t.id));
   if (!pending.length) return null;
   const parallel = Math.max(1, Math.floor(Number.isFinite(opts.parallel) ? opts.parallel : 1));
@@ -17915,7 +17952,9 @@ function forecastEnd(plan, states, now, opts) {
     left.delete(id);
   }
   const at2 = now + maxOf(finish.values()) * MIN2;
-  return Number.isFinite(at2) && Math.abs(at2) <= MAX_DATE ? { at: Math.round(at2), parallel } : null;
+  if (!(Number.isFinite(at2) && Math.abs(at2) <= MAX_DATE)) return null;
+  const ends = new Map([...finish].map(([id, m]) => [id, Math.round(now + m * MIN2)]));
+  return { at: Math.round(at2), parallel, ends };
 }
 
 // src/lib/worktree.ts

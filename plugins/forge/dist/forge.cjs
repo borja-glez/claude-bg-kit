@@ -28871,6 +28871,12 @@ var DOC_PATHS = ["trivial", "small", "medium", "large"];
 var DOC_STAGES = [...STAGES, "triage", "done", "blocked", "stopped"];
 var ACTIONS = ["accept", "fix", "redo"];
 var STAGE_KEYS = [...STAGES, "triage"];
+var WHY_MAX = 3;
+var WHY_PROBLEM_MAX = 100;
+var RED_MAX = 4;
+var TRAIL_MAX = 16;
+var ROUND_NEXTS = ["done", "resume", "fresh-stronger", "redo", "stalled", "breaker"];
+var TRAIL_STAGES = [...STAGES, "triage", "fix", "done", "stopped", "blocked"];
 var isObj8 = (x) => typeof x === "object" && x !== null && !Array.isArray(x);
 var kindOf2 = (v) => v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
 var int3 = (v, min, max) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
@@ -28899,7 +28905,30 @@ function roundOf2(r2) {
   const findings = { critical: c("critical"), important: c("important"), minor: c("minor"), deferred: c("deferred") };
   if (Object.values(findings).some((x) => x === null)) return null;
   const reviewers = (Array.isArray(r2.reviewers) ? r2.reviewers : []).filter((x) => typeof x === "string" && !!x.trim()).map((x) => line2(x, REVIEWER_MAX)).slice(0, REVIEWERS_MAX);
-  return { brief: r2.brief, n: r2.n, action: r2.action, note: line2(r2.note, NOTE_MAX2), findings, reviewers, at: r2.at };
+  const out = { brief: r2.brief, n: r2.n, action: r2.action, note: line2(r2.note, NOTE_MAX2), findings, reviewers, at: r2.at };
+  if (ROUND_NEXTS.includes(r2.next)) out.next = r2.next;
+  if (typeof r2.impl === "string" && r2.impl.trim()) out.impl = line2(r2.impl, NAME_MAX2);
+  if (typeof r2.score === "number" && Number.isFinite(r2.score) && r2.score >= 0 && r2.score <= 1) out.score = r2.score;
+  const why = (Array.isArray(r2.why) ? r2.why : []).map(whyOf).filter((w) => !!w).slice(0, WHY_MAX);
+  if (why.length) out.why = why;
+  const red = (Array.isArray(r2.red) ? r2.red : []).filter((x) => typeof x === "string" && !!x.trim()).map((x) => line2(x, REVIEWER_MAX)).slice(0, RED_MAX);
+  if (red.length) out.red = red;
+  return out;
+}
+function whyOf(w) {
+  if (!isObj8(w) || w.sev !== "critical" && w.sev !== "important" || typeof w.problem !== "string" || !w.problem.trim()) return null;
+  const out = { sev: w.sev, problem: line2(w.problem, WHY_PROBLEM_MAX) };
+  if (typeof w.file === "string" && w.file.trim()) out.file = line2(w.file, TEXT_MAX);
+  if (int3(w.line, 1, 1e7)) out.line = w.line;
+  if (typeof w.by === "string" && w.by.trim()) out.by = line2(w.by, REVIEWER_MAX);
+  return out;
+}
+function trailOf(t) {
+  if (!isObj8(t) || typeof t.s !== "string" || !TRAIL_STAGES.includes(t.s) || !iso4(t.at)) return null;
+  const out = { s: t.s, at: t.at };
+  if (int3(t.b, 1, 9999)) out.b = t.b;
+  if (int3(t.r, 1, 99)) out.r = t.r;
+  return out;
 }
 function deferredOf(d) {
   if (!isObj8(d) || typeof d.problem !== "string" || !d.problem.trim()) return null;
@@ -28979,6 +29008,10 @@ function parseForgeDocV2(x, report) {
     overCap: x.overCap,
     updatedAt: x.updatedAt
   };
+  if (Array.isArray(x.trail)) {
+    const trail = keep(x.trail, trailOf, "trail", TRAIL_MAX, true);
+    if (trail.length) doc.trail = trail;
+  } else if (x.trail !== void 0) report?.("forge.trail", "coerced", kindOf2(x.trail));
   const coerced = (field2, v) => report?.(`forge.${field2}`, "coerced", kindOf2(v));
   if (typeof x.agent === "string" && x.agent.trim()) doc.agent = line2(x.agent, NAME_MAX2);
   else if (x.agent !== void 0) coerced("agent", x.agent);
@@ -28994,6 +29027,13 @@ function parseForgeDocV2(x, report) {
   return doc;
 }
 var STEPS = [
+  // v3: what the page adds goes first, so a block that fitted before still carries everything it carried.
+  ["trail>8", (d) => d.trail && d.trail.length > 8 ? { ...d, trail: d.trail.slice(-8) } : null],
+  ["rounds.why>1", (d) => d.rounds.some((r2) => (r2.why?.length ?? 0) > 1) ? { ...d, rounds: d.rounds.map((r2) => r2.why && r2.why.length > 1 ? { ...r2, why: r2.why.slice(0, 1) } : r2) } : null],
+  ["trail", (d) => d.trail ? withoutTrail(d) : null],
+  ["rounds.why", (d) => d.rounds.some((r2) => r2.why || r2.red) ? { ...d, rounds: d.rounds.map(({ why: _w, red: _r, ...r2 }) => r2) } : null],
+  // The page falls back to the round's note without them.
+  ["rounds.next", (d) => d.rounds.some((r2) => r2.next || r2.impl || r2.score !== void 0) ? { ...d, rounds: d.rounds.map(({ next: _n, impl: _i, score: _s, ...r2 }) => r2) } : null],
   ["deferred>5", (d) => d.deferred.length > 5 ? { ...d, deferred: d.deferred.slice(0, 5) } : null],
   ["rounds:earlier-briefs", (d) => d.rounds.some((r2) => r2.brief !== d.brief) ? { ...d, rounds: d.rounds.filter((r2) => r2.brief === d.brief) } : null],
   ["validators.failing", (d) => d.validators.some((v) => v.failing !== void 0) ? { ...d, validators: d.validators.map(({ failing: _f, ...v }) => v) } : null],
@@ -29002,8 +29042,12 @@ var STEPS = [
   // The last resort, so the cap is a guarantee: the v1 core and the v2 scalars. Every v2 list goes (the rounds, and with
   // them their reviewers; the deferred findings, the verification and the integration), and of the validators only the
   // ones that failed stay, without their v2 fields.
-  ["core", (d) => ({ ...d, validators: d.validators.filter((v) => !v.ok).map((v) => ({ name: v.name, ok: v.ok })), rounds: [], verify: null, integration: null, deferred: [] })]
+  ["core", (d) => ({ ...withoutTrail(d), validators: d.validators.filter((v) => !v.ok).map((v) => ({ name: v.name, ok: v.ok })), rounds: [], verify: null, integration: null, deferred: [] })]
 ];
+function withoutTrail(d) {
+  const { trail: _t, ...rest } = d;
+  return rest;
+}
 function fitForgeDoc(doc, max = FORGE_DOC_MAX) {
   let cur = doc;
   const dropped = [];
@@ -31978,6 +32022,11 @@ var dirOf2 = (e) => {
   return m ? { brief: Number(m[1]), n: Number(m[2]) } : null;
 };
 var reviewsOf2 = (x) => isObj10(x) && int4(x.n, 1, 20) && int4(x.max, 1, 20) ? { n: x.n, max: x.max } : null;
+var lineOf2 = (v, max) => typeof v === "string" ? Array.from(oneLine3(v)).slice(0, max).join("").trimEnd() : "";
+var isIso = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v) && !Number.isNaN(Date.parse(v));
+var NAME_MAX3 = 80;
+var FILE_MAX = 200;
+var REVIEWER_MAX2 = 40;
 function reviewersFor(i, d) {
   const phase = i.events.filter((e) => e.kind === "phase" && e.phase === "review" && e.brief === d.brief && e.round === d.n && Array.isArray(e.reviewers)).at(-1);
   const dir = i.reviews.find((r2) => r2.brief === d.brief && r2.n === d.n);
@@ -31995,17 +32044,53 @@ function roundsOf(i) {
   return [...last.values()].sort((a, b) => a - b).map((at2) => {
     const e = i.events[at2];
     const d = dirOf2(e);
-    const next = i.events.slice(at2 + 1).find((x) => x.kind === "round" && x.task === e.task);
-    return {
+    const action = e.action;
+    const decided = i.events.slice(at2 + 1).find((x) => x.kind === "round" && x.task === e.task);
+    const round = {
       brief: d.brief,
       n: d.n,
-      action: e.action,
-      note: typeof next?.reason === "string" ? clip2(next.reason, NOTE_MAX2) : "",
+      action,
+      note: typeof decided?.reason === "string" ? clip2(decided.reason, NOTE_MAX2) : "",
       findings: { critical: count2(e.critical), important: count2(e.important), minor: count2(e.minor), deferred: count2(e.deferred) },
       reviewers: reviewersFor(i, d),
       at: e.ts
     };
+    if (ROUND_NEXTS.includes(decided?.next)) round.next = decided.next;
+    const implementer = decided?.implementer;
+    const impl = isObj10(implementer) ? lineOf2(implementer.agent, NAME_MAX3) : "";
+    if (impl) round.impl = impl;
+    if (typeof e.score === "number" && Number.isFinite(e.score) && e.score >= 0 && e.score <= 1) round.score = e.score;
+    return { ...round, ...blockingOf(i, d, action) };
   });
+}
+var SEVERITY = { critical: 0, important: 1 };
+function blockingOf(i, d, action) {
+  const f = action === "accept" ? null : i.blocking.find((b) => b.brief === d.brief && b.n === d.n)?.file;
+  if (!isObj10(f) || isAction2(f.action) && f.action !== action) return {};
+  const why = (Array.isArray(f.findings) ? f.findings : []).filter((x) => isObj10(x) && (x.severity === "critical" || x.severity === "important") && !!lineOf2(x.problem, WHY_PROBLEM_MAX)).sort((a, b) => SEVERITY[a.severity] - SEVERITY[b.severity]).slice(0, WHY_MAX).map((x) => {
+    const w = { sev: x.severity, problem: lineOf2(x.problem, WHY_PROBLEM_MAX) };
+    const file = lineOf2(x.file, FILE_MAX), by = lineOf2(x.reviewer, REVIEWER_MAX2);
+    if (file) w.file = file;
+    if (int4(x.line, 1, 1e7)) w.line = x.line;
+    if (by) w.by = by;
+    return w;
+  });
+  const red = [...new Set((Array.isArray(f.validators) ? f.validators : []).map((v) => lineOf2(isObj10(v) ? v.validator : v, REVIEWER_MAX2)).filter(Boolean))].slice(0, RED_MAX);
+  return { ...why.length ? { why } : {}, ...red.length ? { red } : {} };
+}
+function trailOf2(events) {
+  const steps = [];
+  for (const e of events) {
+    const s2 = e.kind === "triage" ? "triage" : e.kind === "phase" && typeof e.phase === "string" ? e.phase.trim().toLowerCase() : null;
+    if (!s2 || !TRAIL_STAGES.includes(s2) || !isIso(e.ts)) continue;
+    const step = { s: s2, at: e.ts };
+    if (e.kind === "phase" && int4(e.brief, 1, 9999)) step.b = e.brief;
+    if (e.kind === "phase" && int4(e.round, 1, 99)) step.r = e.round;
+    const prev = steps.at(-1);
+    if (prev && prev.s === step.s && prev.b === step.b && prev.r === step.r) continue;
+    steps.push(step);
+  }
+  return steps.slice(-TRAIL_MAX);
 }
 function validatorsOf2(events) {
   const e = events.filter((x) => x.kind === "validate" && x.baseline !== true && x.integrate !== "baseline" && x.scope !== "affected" && Array.isArray(x.results)).at(-1);
@@ -32123,7 +32208,15 @@ function ownRun(i) {
     const kept2 = deferred.filter((d) => current(isObj10(d) && (typeof d.ts === "string" || typeof d.at === "string") ? d.ts ?? d.at : i.deferredAt));
     deferred = kept2.length ? kept2 : null;
   }
-  return { ...i, events, status: own2, deferred, reviews: i.reviews.filter((r2) => current(r2.at)), verifies: i.verifies.filter((v) => current(v.at)) };
+  return {
+    ...i,
+    events,
+    status: own2,
+    deferred,
+    reviews: i.reviews.filter((r2) => current(r2.at)),
+    verifies: i.verifies.filter((v) => current(v.at)),
+    blocking: i.blocking.filter((b) => current(b.at))
+  };
 }
 function buildRoadmapData(input) {
   const i = ownRun(input);
@@ -32138,6 +32231,7 @@ function buildRoadmapData(input) {
   const stage = stageOf(i);
   const agent = i.execTask?.agent ?? liveOf(i)?.agent ?? s2?.agent ?? null;
   const verdict = s2?.verdict && isAction2(s2.verdict.action) ? { action: s2.verdict.action, score: s2.verdict.score } : null;
+  const trail = trailOf2(i.events);
   const forge = {
     v: 2,
     path: pathOf(i),
@@ -32155,7 +32249,8 @@ function buildRoadmapData(input) {
     deferred: deferredOf2(i),
     acceptedRound,
     overCap,
-    updatedAt: i.now.toISOString()
+    updatedAt: i.now.toISOString(),
+    ...trail.length ? { trail } : {}
   };
   return { forge, evidence: evidenceOf2(i, brief), exec: execOf(i) };
 }
@@ -32232,8 +32327,10 @@ function integrationInRun(main, e, t) {
 function readReviews(folders) {
   const seen = /* @__PURE__ */ new Set();
   const verified = /* @__PURE__ */ new Set();
+  const blocked = /* @__PURE__ */ new Set();
   const reviews = [];
   const verifies = [];
+  const blocking2 = [];
   for (const f of folders) {
     let names3 = [];
     try {
@@ -32242,6 +32339,15 @@ function readReviews(folders) {
       continue;
     }
     for (const name of names3.sort()) {
+      const b = /^findings-(\d+)-(\d+)\.json$/.exec(name);
+      if (b && !blocked.has(name)) {
+        const file2 = import_node_path54.default.join(f.dir, name);
+        const json4 = readJson3(file2);
+        if (json4 && typeof json4 === "object" && !Array.isArray(json4)) {
+          blocked.add(name);
+          blocking2.push({ brief: Number(b[1]), n: Number(b[2]), file: json4, at: mtimeOf(file2) });
+        }
+      }
       const m = /^reviews-(\d+)-(\d+)$/.exec(name);
       if (!m) continue;
       const brief = Number(m[1]), n = Number(m[2]);
@@ -32264,7 +32370,7 @@ function readReviews(folders) {
       verifies.push({ brief, n, file, local: relOf(f.root, evidence), shotPath: (shot) => import_node_path54.default.resolve(evidence, shot), at: mtimeOf(verifyFile) });
     }
   }
-  return { reviews, verifies };
+  return { reviews, verifies, blocking: blocking2 };
 }
 var isUpload = (a) => !!a && typeof a === "object" && typeof a.path === "string" && !!a.path && typeof a.id === "string" && ASSET_ID.test(a.id) && safeUrl2(a.url);
 var ROUND = /^\d{1,4}-\d{1,3}$/;
@@ -32316,7 +32422,7 @@ function generateRoadmapDoc(io, task, opts = {}) {
   if (!status2 && !mine.length && !execTask) throw new RoadmapDocError(2, `roadmap-doc: forge has no status, event or execution task of ${task}`);
   const roots = [...new Set([here, io.cwd, main].map((r2) => import_node_path54.default.resolve(r2)))];
   const folders = roots.map((root) => ({ root, dir: readWorkDir(root, ref, events) })).filter((f) => (0, import_node_fs50.existsSync)(f.dir));
-  const { reviews, verifies } = readReviews(folders);
+  const { reviews, verifies, blocking: blocking2 } = readReviews(folders);
   const mainWork = readWorkDir(main, ref, events);
   const assetsFile = import_node_path54.default.join(mainWork, "assets.json");
   let assets = readAssets(assetsFile);
@@ -32337,6 +32443,7 @@ function generateRoadmapDoc(io, task, opts = {}) {
     publicTask,
     reviews,
     verifies,
+    blocking: blocking2,
     deferred: deferredFile ? readJson3(deferredFile) : null,
     deferredAt: deferredFile ? mtimeOf(deferredFile) : null,
     integration: execTask && execution ? integrationInRun(main, execution, execTask) : integrationAt(here),
