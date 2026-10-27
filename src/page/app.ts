@@ -37,6 +37,9 @@ export interface Env {
 
 /** A composition longer than this renders anyway (a lost compositionend must not freeze the page). */
 const COMPOSE_CEILING_MS = 3000;
+/** A 4K screen: this many device pixels across or more. Its text starts at FOUR_K_SCALE, two steps of A− (0.1 each). */
+export const FOUR_K_PX = 3840;
+export const FOUR_K_SCALE = 0.8;
 
 interface Snap { exists?: boolean; data(): unknown; id?: string }
 interface QSnap { docs: (Snap & { id: string })[] }
@@ -1191,7 +1194,10 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   // The page grows with wide screens (a 4K window draws as a 1920-wide one at twice the size) and the viewer can
   // adjust it; the adjustment is a per-viewer convenience kept in this browser.
   const SCALE_KEY = 'waypoint.scale';
-  let userScale = 1;
+  // A 4K screen (3840 device pixels across or more) starts two steps smaller, where A− twice would leave it: there the
+  // page's own growth draws its text too big. The viewer's choice, once made, wins.
+  let userScale = FOUR_K_SCALE;
+  try { if (Math.round(screen.width * (window.devicePixelRatio || 1)) < FOUR_K_PX) userScale = 1; } catch { userScale = 1; }
   try { const v = Number(localStorage.getItem(SCALE_KEY)); if (v >= 0.6 && v <= 2) userScale = v; } catch { /* no storage */ }
   const applyScale = () => {
     const w = typeof window !== 'undefined' ? window.innerWidth : 0;

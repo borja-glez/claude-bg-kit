@@ -3256,3 +3256,51 @@ describe('Sesiones folds a group as its data says, unless the person folded or o
     app.stop();
   });
 });
+
+describe('the text size: A− and A+, and a 4K screen two steps smaller by default', () => {
+  // happy-dom's window is 1024 wide: the page's own growth (its width over 1920, at least 1) is 1, so --z is the scale.
+  const screenOf = (width: number, ratio: number) => {
+    const w = Object.getOwnPropertyDescriptor(window.screen, 'width');
+    const r = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+    Object.defineProperty(window.screen, 'width', { value: width, configurable: true });
+    Object.defineProperty(window, 'devicePixelRatio', { value: ratio, configurable: true });
+    return () => {
+      if (w) Object.defineProperty(window.screen, 'width', w); else delete (window.screen as { width?: number }).width;
+      if (r) Object.defineProperty(window, 'devicePixelRatio', r); else delete (window as { devicePixelRatio?: number }).devicePixelRatio;
+    };
+  };
+  const z = (root: HTMLElement) => root.style.getPropertyValue('--z');
+  beforeEach(() => { localStorage.clear(); });
+
+  it('a 4K screen starts at 0.8, at 100 % or scaled by the system (2560 × 1.5), and A− goes on from there; the choice is kept', async () => {
+    for (const [width, ratio] of [[3840, 1], [2560, 1.5]] as const) {
+      localStorage.clear();
+      const restore = screenOf(width, ratio);
+      try {
+        const { root, app } = await boot(fakeDb(), fakeUser());
+        expect(z(root), `${width}×${ratio}`).toBe('0.8');
+        expect(localStorage.getItem('waypoint.scale')).toBeNull();
+        click(root, '[data-action="scale"][data-dir="-1"]');
+        expect(z(root)).toBe('0.7');
+        expect(localStorage.getItem('waypoint.scale')).toBe('0.7');
+        app.stop();
+      } finally { restore(); }
+    }
+  });
+
+  it('a smaller screen starts at 1; a choice already made wins on a 4K one', async () => {
+    const small = screenOf(1920, 1);
+    try {
+      const { root, app } = await boot(fakeDb(), fakeUser());
+      expect(z(root)).toBe('1');
+      app.stop();
+    } finally { small(); }
+    localStorage.setItem('waypoint.scale', '1.1');
+    const big = screenOf(3840, 1);
+    try {
+      const { root, app } = await boot(fakeDb(), fakeUser());
+      expect(z(root)).toBe('1.1');
+      app.stop();
+    } finally { big(); }
+  });
+});
