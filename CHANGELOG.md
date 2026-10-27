@@ -17,6 +17,11 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## waypoint
 
+### 0.40.1 — 2026-10-27
+
+#### Changed
+- On a 4K screen (3840 device pixels across or more, at 100 % or scaled by the system) the roadmap's text starts two steps of A− smaller (0.8): the page's own growth with wide windows drew it too big there. A size the viewer chose with A− or A+ is still kept in the browser and wins.
+
 ### 0.40.0 — 2026-10-27
 
 #### Added
