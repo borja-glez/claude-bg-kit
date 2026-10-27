@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.34.1](https://img.shields.io/badge/version-0.34.1-fab387?style=flat-square)
-![depends on waypoint ^0.40.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.40.0-cba6f7?style=flat-square)
+![version 0.35.0](https://img.shields.io/badge/version-0.35.0-fab387?style=flat-square)
+![depends on waypoint ^0.41.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.41.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -52,7 +52,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.40.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permissions, in `.claude/settings.local.json` of the projects you trust (not in your `~/.claude/settings.json`, which every project reads): `"allow": ["Bash(node *forge.cjs*)"]` so forge runs without a prompt, and `"deny": ["Bash(*forge.cjs* hook *)"]`, which stops Claude from calling forge's hook commands by hand (for example `hook answer`, which records your answers) and does not touch the real hooks, because permission rules never apply to them. Optionally add `"ask": ["Bash(*forge.cjs* swarm merge*)", "Bash(*forge.cjs* local set*)"]`: the first asks you before every final merge, the second before Claude records a surface permission or a preference (your trust in the commands is recorded only from your answer).
+forge depends on [waypoint](../waypoint/README.md) ^0.41.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permissions, in `.claude/settings.local.json` of the projects you trust (not in your `~/.claude/settings.json`, which every project reads): `"allow": ["Bash(node *forge.cjs*)"]` so forge runs without a prompt, and `"deny": ["Bash(*forge.cjs* hook *)"]`, which stops Claude from calling forge's hook commands by hand (for example `hook answer`, which records your answers) and does not touch the real hooks, because permission rules never apply to them. Optionally add `"ask": ["Bash(*forge.cjs* swarm merge*)", "Bash(*forge.cjs* local set*)"]`: the first asks you before every final merge, the second before Claude records a surface permission or a preference (your trust in the commands is recorded only from your answer).
 
 ## Usage
 
@@ -61,6 +61,7 @@ forge depends on [waypoint](../waypoint/README.md) ^0.40.0, which is installed w
 | `/forge:run <task>` | Triage the task and work it on the path its size calls for. |
 | `/forge:run --parallel N <task>` | Same, running up to N tasks at once on the Large path (3 by default, max 10). |
 | `/forge:run --from-spec <spec> [<task>]` | Start from a superpowers spec: a Large triage imports it as the design's first version, a smaller one works from it as the task text. |
+| `/forge:run --handoff <project> [--plan-only]` | Take over from waypoint when you choose forge in its question of how to go on: with no plan, `forge-planner` writes it; then the Large path's start questions (mode, how many at once, final merge and where). With `--plan-only` («Plan it, start later») it stops once the plan is written and synced. |
 | `/forge:run --superpowers-plan <plan>` | Run a superpowers plan task by task on the Medium path, with validators, review and verdict. |
 | `/forge:run --auto <task>` | Work the task in auto mode: questions only at launch, every decision recorded. |
 | `/forge:review [<base>]` | Review a branch with forge's validators and reviewers, without fixing it. |

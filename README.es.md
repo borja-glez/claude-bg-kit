@@ -7,8 +7,8 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 [English](README.md) · **Español** · [Historial de cambios](CHANGELOG.md)
 
-![waypoint 0.40.1](https://img.shields.io/badge/waypoint-0.40.1-cba6f7?style=flat-square)
-![forge 0.34.1](https://img.shields.io/badge/forge-0.34.1-fab387?style=flat-square)
+![waypoint 0.41.0](https://img.shields.io/badge/waypoint-0.41.0-cba6f7?style=flat-square)
+![forge 0.35.0](https://img.shields.io/badge/forge-0.35.0-fab387?style=flat-square)
 ![lens 0.15.0](https://img.shields.io/badge/lens-0.15.0-b4befe?style=flat-square)
 ![java 0.1.1](https://img.shields.io/badge/java-0.1.1-f9e2af?style=flat-square)
 ![web 0.1.1](https://img.shields.io/badge/web-0.1.1-94e2d5?style=flat-square)
@@ -92,7 +92,7 @@ Añade el marketplace directamente desde GitHub e instala los plugins que quiera
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # instala waypoint ^0.40.0 como dependencia
+claude plugin install forge@bg-kit     # instala waypoint ^0.41.0 como dependencia
 claude plugin install lens@bg-kit
 claude plugin install java@bg-kit      # Java y Spring Boot: dos skills y el revisor de arquitectura
 claude plugin install web@bg-kit       # sitios Astro en Dokploy: una skill y sus referencias
@@ -169,8 +169,8 @@ forge la clasifica como Large, así que empieza con `/waypoint:design`. Itera el
 
 ```text
 /waypoint:design new        # escribir y pulir el diseño
-/waypoint:design approve
-/waypoint:plan              # plan.yaml + roadmap vivo
+/waypoint:design approve    # pregunta cómo seguir: forge, superpowers, aquí, en segundo plano o más tarde
+/waypoint:plan              # plan.yaml + roadmap vivo (approve lo lanza cuando el plan lo escribe waypoint)
 /waypoint:work              # tomar tareas una a una
 /waypoint:launch api        # una sesión en segundo plano en el frente «api»
 ```

@@ -17,6 +17,13 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## waypoint
 
+### 0.41.0 — 2026-10-27
+
+#### Added
+- **How to go on, asked once.** When a design is approved, before the plan is written, `/waypoint:plan` asks with AskUserQuestion how the work goes on, the same question every time: run it with forge, with superpowers, here task by task (`/waypoint:work`), a background session on a track (`/waypoint:launch`), or plan it and start later. forge and superpowers are offered only when the session has them. One option is recommended (forge when it is there, working here otherwise), and the lines before the question say what was found and why. Before, the end of an approved design only said «run /waypoint:work», and the other ways showed up only when the model remembered them.
+- The same question comes back with `/waypoint:plan` once the plan is ready and no task has started. It is not asked while forge runs the plan or drives the session; in a background session or in auto, the options are printed with their commands.
+- `waypoint handoff <project> [--skills a,b] [--states DIR] [--locale code]` prints that question: `{stage, detected, recommended, options, ask, say}`. With `--skills`, a plugin is offered only when the session lists its skill (one installed after the session started is not loaded); without it, when Claude Code installed and enabled it for the project. The installed version says whether forge is too old: one before 0.35.0 is not offered. waypoint still depends on neither.
+
 ### 0.40.1 — 2026-10-27
 
 #### Changed
@@ -506,6 +513,14 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.35.0 — 2026-10-27
+
+#### Added
+- `/forge:run --handoff <project> [--plan-only]` takes over when the person chooses forge in waypoint's question of how to go on. With no plan yet, forge-planner writes it (the Large path's step 2), then come the Large path's start questions, where it runs among them; with a plan waypoint wrote, it starts at those questions, after the stats file and the evidence setting step 2 would have read. Either way it records the run's base in `.forge/work/<project>/run.json`, as the Large path does once a design is approved. `--plan-only` (waypoint's «Plan it, start later») stops once the plan is written and synced, and says that nothing started.
+
+#### Changed
+- Depends on waypoint ^0.41.0.
 
 ### 0.34.1 — 2026-10-27
 

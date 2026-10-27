@@ -7,8 +7,8 @@ Design them, plan them, build them with independent review, run them in parallel
 
 **English** · [Español](README.es.md) · [Changelog](CHANGELOG.md)
 
-![waypoint 0.40.1](https://img.shields.io/badge/waypoint-0.40.1-cba6f7?style=flat-square)
-![forge 0.34.1](https://img.shields.io/badge/forge-0.34.1-fab387?style=flat-square)
+![waypoint 0.41.0](https://img.shields.io/badge/waypoint-0.41.0-cba6f7?style=flat-square)
+![forge 0.35.0](https://img.shields.io/badge/forge-0.35.0-fab387?style=flat-square)
 ![lens 0.15.0](https://img.shields.io/badge/lens-0.15.0-b4befe?style=flat-square)
 ![java 0.1.1](https://img.shields.io/badge/java-0.1.1-f9e2af?style=flat-square)
 ![web 0.1.1](https://img.shields.io/badge/web-0.1.1-94e2d5?style=flat-square)
@@ -92,7 +92,7 @@ Add the marketplace straight from GitHub, then install the plugins you want:
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # pulls in waypoint ^0.40.0 as a dependency
+claude plugin install forge@bg-kit     # pulls in waypoint ^0.41.0 as a dependency
 claude plugin install lens@bg-kit
 claude plugin install java@bg-kit      # Java and Spring Boot: two skills and the architecture reviewer
 claude plugin install web@bg-kit       # Astro sites on Dokploy: one skill and its references
@@ -169,8 +169,8 @@ forge triages it as Large, so it starts `/waypoint:design`. Iterate on the desig
 
 ```text
 /waypoint:design new        # write and refine the design
-/waypoint:design approve
-/waypoint:plan              # plan.yaml + live roadmap
+/waypoint:design approve    # asks how to go on: forge, superpowers, here, background or later
+/waypoint:plan              # plan.yaml + live roadmap (approve runs it when waypoint writes the plan)
 /waypoint:work              # take tasks one by one
 /waypoint:launch api        # a background session on the "api" track
 ```
