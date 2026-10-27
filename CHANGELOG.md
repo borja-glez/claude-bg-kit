@@ -17,6 +17,13 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## waypoint
 
+### 0.42.0 — 2026-10-27
+
+#### Changed
+- **The band follows this conversation's project.** It used to look only in the folder the session started in, so a conversation started in a folder above several repositories and working in one of them (after a shell `cd`) saw no band. It now looks at the session root and at the repositories one level below it, anchored to this conversation: a forge run it coordinates or is a member of, or a binding of its own. A shell `cd` does not move the anchor. At the session root the band is as before, notices included; below it, the band draws only for this conversation's binding or run, and a clean session gets none.
+- The band renews this conversation's binding in the anchored repository, and mirrors the roadmap's writes into that repository's cache.
+- `/waypoint:work`, and `/forge:run --join` and Takeover, which reuse its setup, find a plan one level below a session started above the repositories and `cd` there.
+
 ### 0.41.0 — 2026-10-27
 
 #### Added
@@ -513,6 +520,11 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.35.1 — 2026-10-27
+
+#### Changed
+- Depends on waypoint ^0.42.0.
 
 ### 0.35.0 — 2026-10-27
 
@@ -1233,6 +1245,17 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.16.0 — 2026-10-27
+
+#### Added
+- **lens finds this conversation's project.** It used to read the folder the session started in, so a conversation started in a folder above several repositories and working in one of them showed only Now, Subagents and Usage. It now reads the session root or a repository one level below it, chosen by this conversation's anchor: a forge run it coordinates or is a member of, a waypoint binding of its own (these join the project, and everything shows as before, other sessions' work in it included), or its own work alone, a lone forge task or a superpowers ledger or plan it wrote (only that work, and the needs tied to its own tasks, show). A shell `cd` does not move it.
+- The anchor is searched again only on the session start, opening the panel, a waypoint or forge CLI call or skill, writing a superpowers ledger or plan, the session root moving, or the anchor being lost; the ordinary refresh walks no other repository.
+- When the session root or the anchored repository cannot be read, the panel and the photo say it in one line with the path and the reason (`cannot read <path>: <reason>`). A missing folder says nothing; a refused unrelated folder only goes to the debug log.
+
+#### Changed
+- **A clean session shows only its own.** With no anchor nothing is read from project files (no Roadmap, Execution, Tasks in progress, Waiting for you, superpowers card, proposals, infinite run or automatic decisions); Now, Subagents, Usage, Todos and Claude Code tasks stay, and the language is Claude Code's `language` setting. This holds also when the session started inside the repository: another session's run and tasks no longer show there, dimmed or not.
+- The usage file `.forge/usage/<session>.json` is written only with an anchor, in the anchored repository.
 
 ### 0.15.0 — 2026-10-26
 
