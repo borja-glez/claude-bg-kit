@@ -81,21 +81,33 @@ function repoA(o: { run: string; tasks: string; bound?: string }): Record<string
   };
 }
 
-// The session's folders and id, its shell's directory, and a file system answered from memory: every file touched a
-// minute ago, with its size; writes land in `files` and their paths in `writes`.
-type World = { root: string; cwd: string; id: string; files: Record<string, string>; writes: string[] };
+// The session's folders and id (null: it cannot be read), its shell's directory, Claude Code's `language` setting when
+// given, and a file system answered from memory: every file touched a minute ago, with its size; writes land in `files`
+// and their paths in `writes`, and every folder listed goes to `lists`.
+// `gate`: a read of a path it answers for waits for the promise it gives.
+type World = {
+  root: string; cwd: string; id: string | null; language?: string; files: Record<string, string>; writes: string[]; lists: string[];
+  gate?: (path: string) => Promise<void> | undefined;
+};
 function serveWorld(on: On, world: World) {
   const at = NOW - 60_000;
   on('session.root', () => ({ value: world.root }));
   on('session.cwd', () => ({ value: world.cwd }));
-  on('session.id', () => ({ value: world.id }));
-  on('fs.read', (_$, e) => { const f = world.files[norm(e.path)]; return f !== undefined ? { value: f } : { deny: `ENOENT ${e.path}` }; });
+  on('session.id', () => { if (world.id === null) throw new Error('no id'); return { value: world.id }; });
+  if (world.language !== undefined) on('settings.read', () => ({ value: { language: world.language } }) as never);
+  on('fs.read', async (_$, e) => {
+    const wait = world.gate?.(norm(e.path));
+    if (wait) await wait;
+    const f = world.files[norm(e.path)];
+    return f !== undefined ? { value: f } : { deny: `ENOENT ${e.path}` };
+  });
   on('fs.exists', (_$, e) => { const p = norm(e.path); return { value: p in world.files || Object.keys(world.files).some(f => f.startsWith(`${p}/`)) }; });
   on('fs.stat', (_$, e) => {
     const f = world.files[norm(e.path)];
     return f !== undefined ? { value: { kind: 'file' as const, size: f.length, mtimeMs: at, isLink: false } } : { deny: `ENOENT ${e.path}` };
   });
   on('fs.list', (_$, e) => {
+    world.lists.push(norm(e.path));
     const prefix = `${norm(e.path)}/`;
     const names = new Map<string, { kind: 'file' | 'dir'; size: number }>();
     for (const [path, text] of Object.entries(world.files)) {
@@ -159,7 +171,7 @@ async function pane($: Engine): Promise<string> {
   return out.join(' | ');
 }
 
-const world = (root: string, files: Record<string, string>): World => ({ root, cwd: root, id: SESSION_ID, files, writes: [] });
+const world = (root: string, files: Record<string, string>): World => ({ root, cwd: root, id: SESSION_ID, files, writes: [], lists: [] });
 
 test('a coordinator started in the central folder sees its roadmap, run and tasks', async ($, on) => {
   serveWorld(on, world(CENTRAL, repoA({ run: SESSION_ID, tasks: SESSION_ID })));
@@ -320,5 +332,144 @@ test("/clear gives a new conversation that is not anchored by the old one's bind
   await clock.advance(1000);
   expect(await pane($)).not.toContain('Fase');
   await clock.advance(10_000);
+  expect(await pane($)).not.toContain('Fase');
+});
+
+test('with the session id unreadable no refresh lists the folders, and the id once read anchors it', async ($, on) => {
+  const w = world(CENTRAL, repoA({ run: OTHER, tasks: OTHER, bound: SESSION_ID }));
+  w.id = null;
+  serveWorld(on, w);
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  await clock.advance(30_000);
+  // Without an id nothing can be this conversation's: the search lists nothing, at the opening or on any refresh.
+  expect(w.lists.filter(p => p === CENTRAL || p.startsWith(`${CENTRAL}/`))).toEqual([]);
+  expect(await pane($)).not.toContain('Fase');
+  w.id = SESSION_ID;
+  await clock.advance(10_000);
+  expect(await pane($)).toContain('Fase 1/2 · Base');
+});
+
+// A run of another conversation in repository B with two tasks in review, each with a question for the person.
+const REVIEW_EXEC = JSON.stringify({
+  runId: 'r2', kind: 'plan', mode: 'subagents', parallel: 2, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+  coordinator: 'main', hookSession: OTHER, active: true, stopReason: null, stallReason: null, startedAt: AT(-60), lastStepAt: AT(-1), lastBlockStep: null, sleepUntil: null,
+  tasks: Object.fromEntries(['T050', 'T001'].map(t => [t, {
+    status: 'running', stage: 'review', round: 1, worktree: '/w', branch: `task/${t}`, executor: 'subagents', attempts: 0, agent: 'forge-review',
+    startedAt: AT(-20), stageSince: AT(-3), updatedAt: AT(-1), detail: null, title: `Title ${t}`,
+  }])),
+});
+
+test("an own task's review question shows under Waiting for you; another conversation's does not", async ($, on) => {
+  serveWorld(on, world(CENTRAL, {
+    [`${SIBLING}/.forge/execution.json`]: REVIEW_EXEC,
+    [`${SIBLING}/.forge/status/shop__T050.json`]: STATUS('T050', SESSION_ID, { phase: 'review', runId: 'r2' }),
+    [`${SIBLING}/.forge/status/shop__T001.json`]: STATUS('T001', OTHER, { phase: 'review', runId: 'r2' }),
+    [`${SIBLING}/.forge/work/shop/T050/reviews-1-1/asked.json`]: JSON.stringify({ at: AT(-2), findings: ['F1'] }),
+    [`${SIBLING}/.forge/work/shop/T001/reviews-1-1/asked.json`]: JSON.stringify({ at: AT(-2), findings: ['F9'] }),
+  }));
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  const text = await pane($);
+  // Anchored by its own task alone (decision 2): the question of that task, nothing of the run or the other's task.
+  expect(text).toContain('Waiting for you');
+  expect(text).toContain('[T050] F1');
+  expect(text).not.toContain('F9');
+  expect(text).not.toContain('T001');
+});
+
+test("a session in a worktree of the repository sees its own forge task, written beside that worktree's ledger", async ($, on) => {
+  const wt = `${REPO}/.claude/worktrees/x`;
+  serveWorld(on, world(wt, {
+    [`${wt}/.git`]: `gitdir: ${REPO}/.git/worktrees/x\n`,
+    [`${wt}/.forge/status/T070.json`]: STATUS('T070', SESSION_ID, { runId: null, project: null }),
+  }));
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: wt, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  const text = await pane($);
+  expect(text).toContain('Tasks in progress · 1');
+  expect(text).toContain('T070');
+});
+
+test('a clean conversation speaks the language set in Claude Code', async ($, on) => {
+  const w = world(CENTRAL, repoA({ run: OTHER, tasks: OTHER, bound: OTHER }));
+  w.language = 'Español';
+  serveWorld(on, w);
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await step($);
+  await $.command.run(RUN);
+  await clock.advance(10_000);
+  const text = await pane($);
+  expect(text).not.toContain('Fase');
+  expect(text).toContain('Ahora');
+  expect(text).toContain('Consumo');
+});
+
+test('ticking the checkboxes of its own plan searches no more', async ($, on) => {
+  const w = world(CENTRAL, repoA({ run: OTHER, tasks: OTHER }));
+  serveWorld(on, w);
+  servePanes(on);
+  const clock = start(on);
+  const PLAN_FILE = `${REPO}/docs/superpowers/plans/new.md`;
+  on('tool.call', { tool: 'Write' }, (_$, e) => { w.files[norm(String(e.file_path))] = String(e.content); return { result: { type: 'create' } } as never; });
+  on('tool.call', { tool: 'Edit' }, (_$, e) => {
+    const p = norm(String(e.file_path));
+    w.files[p] = w.files[p]!.replace(String(e.old_string), String(e.new_string));
+    return { result: { filePath: p } } as never;
+  });
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  await $.tool.call({ tool: 'Write', file_path: PLAN_FILE, content: OWN_PLAN, tool_use_id: 'w1' } as never);
+  await clock.advance(10_000);
+  expect(await pane($)).toMatch(/Shop inline plan.*Task 2\/2.*1 done/);
+  // Each search lists the session root once.
+  const searches = w.lists.filter(p => p === CENTRAL).length;
+  await $.tool.call({ tool: 'Edit', file_path: PLAN_FILE, old_string: '### Task 2: Step 2\n- [ ]', new_string: '### Task 2: Step 2\n- [x]', tool_use_id: 'e1' } as never);
+  await clock.advance(10_000);
+  await $.tool.call({ tool: 'Edit', file_path: PLAN_FILE, old_string: '# Shop inline plan', new_string: '# Shop inline plan', tool_use_id: 'e2' } as never);
+  await clock.advance(10_000);
+  expect(w.lists.filter(p => p === CENTRAL).length).toBe(searches);
+  expect(await pane($)).toMatch(/Shop inline plan.*2 done/);
+});
+
+test('a refresh in flight across /clear keeps nothing of the old conversation', async ($, on) => {
+  const w = world(CENTRAL, repoA({ run: OTHER, tasks: OTHER, bound: SESSION_ID }));
+  // Armed, the next read of repository A's .git (the band's first read on a refresh) waits until released.
+  let armed = false;
+  let held = 0;
+  let release: () => void = () => undefined;
+  w.gate = path => {
+    if (!armed || path !== `${REPO}/.git`) return undefined;
+    armed = false;
+    held++;
+    return new Promise<void>(r => { release = r; });
+  };
+  serveWorld(on, w);
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await clock.advance(0);
+  expect(await pane($)).toContain('Fase 1/2 · Base');
+  armed = true;
+  await clock.advance(10_000);
+  for (let i = 0; i < 50 && held === 0; i++) await clock.advance(0);
+  expect(held).toBe(1);
+  await $.session.end({ reason: 'clear', sessionId: SESSION_ID, resume: {} as never });
+  w.id = 'conv-2';
+  release();
+  await clock.advance(1000);
   expect(await pane($)).not.toContain('Fase');
 });

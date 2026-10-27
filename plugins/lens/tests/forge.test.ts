@@ -529,8 +529,9 @@ test('lens reads at most the 20 newest statuses, none over 64 KiB, and reads one
   await clock.advance(0);
   const reads = () => touched.filter(p => /\/\.forge\/status\/[^/]+\.json$/.test(p));
   // The pane opening also searches for the anchor (decision 4 of the lens anchor design), which reads the same newest
-  // statuses once more: 20 files, none of them the oversized one.
+  // statuses once more: 20 files, each read at most twice, none of them the oversized one.
   expect(new Set(reads()).size).toBe(20);
+  expect(reads().length).toBeLessThanOrEqual(40);
   expect(reads()).not.toContain(`${ROOT}/.forge/status/BIG.json`);
   touched.length = 0;
   await clock.advance(10_000);
@@ -640,15 +641,13 @@ test("after an in-process resume the next turn still draws this session's tasks 
   };
   expect(await pane()).toContain('Tasks in progress · 1');
   expect(await pane()).toContain('other session');
-  // The resume forgets the usage meter's session id; the first turn after it writes the panel before any refresh. The
-  // anchor goes with the conversation it was conv-9's, and so do the files read for it: none is drawn as another's.
+  // The resume forgets the usage meter's session id; the first turn after it writes the panel before the 10 s refresh.
+  // The anchor goes with conv-9, and so do the files read for it; conv-1's is searched for at once, and its own task
+  // (decision 2.4) drawn as its own, never as another's.
   await $.session.end({ reason: 'resume', sessionId: 'conv-9', resume: {} as never });
   current = SESSION;
   await $.turn.start({ text: 'go', turnId: 'main-1' });
   await clock.advance(1000);
-  expect(await pane()).not.toContain('other session');
-  // The next refresh finds conv-1's own task (decision 2.4) and draws it as its own.
-  await clock.advance(10_000);
   expect(await pane()).toContain('Tasks in progress · 1');
   expect(await pane()).not.toContain('other session');
 });

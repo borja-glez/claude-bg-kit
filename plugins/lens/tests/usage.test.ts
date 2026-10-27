@@ -347,6 +347,26 @@ test('a resumed session continues its own usage file when its start matches', as
   expect(JSON.parse(written[`${ROOT}/.forge/usage/${SESSION}.json`]!).loops.main.steps).toBe(4);
 });
 
+test('a resumed session whose anchor appears after its start still continues its own file', async ($, on) => {
+  const files: Record<string, string> = { [`${ROOT}/.forge/usage/${SESSION}.json`]: usageFile(SESSION) };
+  const written = serveFiles(on, files);
+  servePanes(on);
+  const clock = start(on);
+  serveSteps(on);
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
+  await clock.advance(30_000);
+  // No anchor yet: nothing is written, and the file waits to be continued.
+  expect(written).toEqual({});
+  // A forge task of its own, from the forge call that started it, anchors it.
+  Object.assign(files, ownTask(SESSION));
+  await $.tool.call(FORGE_RUN_CALL);
+  await clock.advance(30_000);
+  // The file had 3 steps; one more since the resume.
+  expect(JSON.parse(written[`${ROOT}/.forge/usage/${SESSION}.json`]!).loops.main.steps).toBe(4);
+});
+
 test('a session file with another start is not continued', async ($, on) => {
   const old = usageFile(SESSION, { startedAt: new Date(NOW - 7200_000).toISOString() });
   const written = serveFiles(on, { [`${ROOT}/.forge/usage/${SESSION}.json`]: old, ...ownTask(SESSION) });

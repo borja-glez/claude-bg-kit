@@ -7,7 +7,7 @@ import { isSafeId, parseExecution } from '../lib/execution-state.js';
 import { isVisibleRun, lastMovedAt } from '../lib/execution-view.js';
 import { memberOfHook } from '../lib/forge-activity.js';
 import { newestMemberFiles, normalizeMember, type MemberDoc } from '../lib/member-doc.js';
-import { normalizeStatus } from '../lib/forge-status.js';
+import { normalizeStatus, statusRootOf } from '../lib/forge-status.js';
 import { join, mtime, readOpt, seatFiles, type Engine } from './files.js';
 import { seatsOf } from './model.js';
 
@@ -104,8 +104,11 @@ export async function anchorCandidates($: Engine, root: string, held: string | n
   return { dirs, refused };
 }
 
-/** Whether a forge status belongs to this conversation: its session when it names one, else the tasks it ran (T1-2 is of T1). */
-const isOwnStatus = (st: { task: string; session: string | null }, sessionId: string, tasks: readonly string[]): boolean =>
+/**
+ * Whether a forge status belongs to this conversation: its session when it names one, else the tasks it ran (T1-2 is of
+ * T1). The search and lens's reads of an own-work anchor both ask it, so they never disagree.
+ */
+export const isOwnStatus = (st: { task: string; session: string | null }, sessionId: string, tasks: readonly string[]): boolean =>
   st.session !== null ? st.session === sessionId
     : tasks.some(t => t === st.task || (t.startsWith(`${st.task}-`) && /^\d{1,4}$/.test(t.slice(st.task.length + 1))));
 
@@ -115,12 +118,13 @@ const PLAN = /^docs\/superpowers\/plans\/[^/]+\.md$/;
 /**
  * This conversation's anchor among the candidates: the first kind of ANCHOR_ORDER found, the most recent within it.
  * `kinds: 'join'` looks only for what the person joined (a run, a binding); 'all' adds the conversation's own work. A
- * refusal on the root or the held checkout is returned beside the anchor.
+ * refusal on the root or the held checkout is returned beside the anchor. Without an id nothing can be this
+ * conversation's: nothing is listed or read.
  */
 export async function findAnchor($: Engine, o: { root: string; sessionId: string | null; held: string | null; kinds: 'join' | 'all'; own?: OwnWork; now: number }): Promise<AnchorSearch> {
-  const { dirs, refused: rootRefused } = await anchorCandidates($, o.root, o.held);
-  if (!o.sessionId) return { anchor: null, refused: rootRefused };
+  if (!o.sessionId) return { anchor: null, refused: null };
   const sid = o.sessionId;
+  const { dirs, refused: rootRefused } = await anchorCandidates($, o.root, o.held);
   let refused = rootRefused;
   const hits: Anchor[] = [];
   for (const dir of dirs) {
@@ -170,12 +174,14 @@ export async function findAnchor($: Engine, o: { root: string; sessionId: string
     }
 
     if (o.kinds !== 'all') continue;
-    const recent = (await list(join(forge, 'status')))
+    // The statuses sit beside the ledger forge writes to: the main checkout's for a task worktree, else this checkout's.
+    const statusDir = join(statusRootOf(dir, main), '.forge', 'status');
+    const recent = (await list(statusDir))
       .filter(f => f.kind === 'file' && f.name.endsWith('.json') && f.size <= STATUS_MAX_BYTES && o.now - f.mtimeMs <= STATUS_WINDOW_MS)
       .sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, STATUS_KEEP);
     for (const f of recent) {
       let st;
-      try { st = normalizeStatus(JSON.parse((await read(join(forge, 'status', f.name))) ?? '')); } catch { continue; }
+      try { st = normalizeStatus(JSON.parse((await read(join(statusDir, f.name))) ?? '')); } catch { continue; }
       if (!st || !isOwnStatus(st, sid, o.own?.tasks ?? [])) continue;
       const last = Date.parse(st.lastAt ?? '');
       hits.push({ kind: 'forge-task', scope: 'own', checkout: dir, project: null, at: Number.isFinite(last) ? last : f.mtimeMs });

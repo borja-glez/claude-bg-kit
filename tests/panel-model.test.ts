@@ -4,7 +4,8 @@ import { buildBandModel, noneBand, NO_VIEWER, type BandModel } from '../src/mod/
 import { newUsage, recordStep, labelLoop, closeTurn } from '../src/lens/usage.js';
 import { FINISHED_TTL_MS } from '../src/lens/finished.js';
 import { headline } from '../src/lens/view.js';
-import { buildPanelModel, bandKey, usageTime, elapsed, executionFromFiles, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, statusRootOf, type Activity, type PanelModel } from '../src/lens/model.js';
+import { buildPanelModel, bandKey, usageTime, elapsed, executionFromFiles, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity, type PanelModel } from '../src/lens/model.js';
+import { statusRootOf } from '../src/lib/forge-status.js';
 
 const LEDGER = `# SDD ledger — plan: docs/superpowers/plans/2026-10-11-waypoint-views.md
 

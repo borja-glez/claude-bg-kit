@@ -1,10 +1,10 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
 import { noneBand, type BandModel } from '../mod/model.js';
-import { buildPanelModel, bandKey, parsePlanTasks, parseSddLedger, planFileOf, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
+import { buildPanelModel, bandKey, parsePlanTasks, parseSddLedger, planFileOf, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, type Engine } from '../mod/files.js';
-import { findAnchor, samePath, under, type Anchor, type AnchorScope, type Refusal } from '../mod/anchor.js';
-import { normalizeStatus, statusKey, type ForgeStatus } from '../lib/forge-status.js';
+import { findAnchor, isOwnStatus, samePath, under, type Anchor, type AnchorScope, type Refusal } from '../mod/anchor.js';
+import { normalizeStatus, statusKey, statusRootOf, type ForgeStatus } from '../lib/forge-status.js';
 import { JOB_FILE_MAX, parseJob, runRoleOf } from './activities.js';
 import { isSafeId, parseExecution } from '../lib/execution-state.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
@@ -101,9 +101,15 @@ let bandRead = false;
 let anchor: Anchor | null = null;
 let anchorDirty = true;
 let anchorRoot: string | null = null;
+// The conversation id the last search used: an own-work anchor's statuses are told own by it, as the search told them.
+// `anchorNoId`: the last search had no id; the next look asks for the id alone, and searches once it reads one.
+let anchorId: string | null = null;
+let anchorNoId = false;
 // D2.5, D2.6: the superpowers ledgers and plans this session wrote, newest last, at most OWN_PATHS_MAX.
 let ownPaths: { path: string; at: number }[] = [];
 const OWN_PATHS_MAX = 20;
+// D2: the tasks of the own statuses the last read found, which an own-work anchor's needs keep to.
+let ownStatusTasks: string[] = [];
 // D8: a refused read of the session root or of the anchored checkout, for the panel to say.
 let refused: Refusal | null = null;
 // One search at a time; the epoch moves with the conversation, so a search begun for the one before is not adopted.
@@ -411,15 +417,12 @@ function newestOwnPath(dir: string, kind: RegExp): string | null {
 // A task id names `task` or one of its attempts (T001-1 is of T001), as activities.ts matches them.
 const isTaskOf = (task: string, id: string): boolean => id === task || (id.startsWith(`${task}-`) && /^\d{1,4}$/.test(id.slice(task.length + 1)));
 
-// D2: a status of this conversation's own work: by the session it names, else by a task it touched with forge.cjs
-// (E-06), as the panel tells its own rows.
+// D2: a status of this conversation's own work, told as the search that found the anchor told it (isOwnStatus, with
+// the id it used), so the lost-anchor rule never disagrees with it.
 function ownStatus(text: string | undefined): ForgeStatus | null {
   let st: ForgeStatus | null = null;
   try { st = text === undefined ? null : normalizeStatus(JSON.parse(text)); } catch { st = null; }
-  if (!st) return null;
-  const task = st.task;
-  const mine = st.session !== null && sessionId ? st.session === sessionId : ownTasks.some(t => isTaskOf(task, t));
-  return mine ? st : null;
+  return st && anchorId !== null && isOwnStatus(st, anchorId, ownTasks) ? st : null;
 }
 
 let proposalCache: { key: string; proposals: Record<string, string> } | null = null;
@@ -569,8 +572,9 @@ async function loadForgeFiles($: Engine, root: string, now: number, scope: Ancho
       }
     }
   }
-  // Own work keeps the jobs of its own tasks alone.
+  // Own work keeps the jobs of its own tasks alone (and its needs, readBand).
   const tasks = joined ? [] : [...(out.forgeStatuses ?? []), ...(out.forgeStatus !== undefined ? [out.forgeStatus] : [])].flatMap(text => ownStatus(text)?.task ?? []);
+  ownStatusTasks = tasks;
   const kept = joined ? jobs : jobs.filter(text => { const task = parseJob(text)?.task; return !!task && tasks.some(t => isTaskOf(t, task)); });
   if (kept.length) out.forgeJobs = kept;
   if (!joined || !entries.length) { forgeSeen = { dir, entries }; return out; }
@@ -602,10 +606,16 @@ async function loadForgeFiles($: Engine, root: string, now: number, scope: Ancho
 }
 
 // D4: this conversation's anchor, searched for only when a trigger marked it or the session root moved. A caller that
-// finds a search in flight waits for it and looks again: a trigger may have come meanwhile.
+// finds a search in flight waits for it and looks again: a trigger may have come meanwhile. A search made without an id
+// is not repeated on every look: the id alone is asked for again, and the search runs once it reads.
 async function ensureAnchor($: Engine): Promise<void> {
   try {
     const root = await $.session.root();
+    if (anchorNoId && !anchorDirty) {
+      let id = sessionId;
+      if (id === null) { try { id = await sessionIdNow($); } catch { id = null; } }
+      if (id !== null) anchorDirty = true;
+    }
     while (anchorSearch) await anchorSearch;
     if (!anchorDirty && anchorRoot !== null && samePath(root, anchorRoot)) return;
     const run: Promise<void> = searchAnchor($, root).finally(() => { if (anchorSearch === run) anchorSearch = null; });
@@ -625,31 +635,45 @@ async function searchAnchor($: Engine, root: string): Promise<void> {
     const found = await findAnchor($, { root, sessionId: id, held: anchor?.checkout ?? null, kinds: 'all', own: { tasks: ownTasks, paths: ownPaths }, now: await nowMs($) });
     if (epoch !== anchorEpoch) return;
     anchor = found.anchor;
+    anchorId = id;
+    anchorNoId = id === null;
     refused = found.refused;
     anchorRoot = root;
-    // Without an id nothing could be searched for: the next look asks again.
-    if (id === null) anchorDirty = true;
   } catch { anchorDirty = true; }
 }
 
 // D2, D5: the band of the anchored checkout and project, for a conversation that joined it; none otherwise (D3). A join
 // whose band no longer names this conversation its owner (a binding ended or released, a run closed) is searched again.
+// Own work keeps the needs tied to its own tasks (a review question of its task), and nothing of a run, proposals or
+// notes. Read for a conversation that a /clear or a resume has since replaced, it is dropped.
 async function readBand($: Engine): Promise<void> {
   const at = anchor;
-  const band = at?.scope === 'join' ? await loadBandModel($, { checkout: at.checkout, project: at.project }) : noneBand();
+  const epoch = anchorEpoch;
+  let band: BandModel = noneBand();
+  if (at?.scope === 'join') band = await loadBandModel($, { checkout: at.checkout, project: at.project });
+  else if (at) {
+    const items = ((await loadBandModel($, { checkout: at.checkout, project: null })).needs?.items ?? [])
+      .filter(n => n.task !== null && ownStatusTasks.some(t => isTaskOf(t, n.task!)));
+    if (items.length) band = { ...noneBand(), needs: { total: items.length, items } };
+  }
+  if (epoch !== anchorEpoch) return;
   roadmap = band;
   bandRead = true;
   if (at?.scope === 'join' && at === anchor && band.viewer.role !== 'owner') anchorDirty = true;
 }
 
 // The anchor is this conversation's: a new one (a session start, /clear, a resume) searches from nothing, and what was
-// read for the one before goes with it.
+// read or heard for the one before goes with it, the tasks it touched with forge.cjs included.
 function resetAnchor(): void {
   anchor = null;
   anchorDirty = true;
   anchorRoot = null;
+  anchorId = null;
+  anchorNoId = false;
   refused = null;
   ownPaths = [];
+  ownTasks = [];
+  ownStatusTasks = [];
   anchorEpoch++;
   roadmap = noneBand();
   panelFiles = {};
@@ -657,13 +681,32 @@ function resetAnchor(): void {
 }
 
 // D2.5, D2.6: a superpowers ledger or plan this session wrote is its own work: kept, absolute against the shell's
-// directory when relative, and the anchor is searched for again.
+// directory when relative, and the anchor is searched for again, unless the path was known and the anchored checkout
+// holds it (executing-plans ticks a checkbox a step: that moves no anchor).
 async function noteOwnPath($: Engine, filePath: unknown): Promise<void> {
   if (typeof filePath !== 'string' || !filePath) return;
   const path = (/^([A-Za-z]:)?[\\/]/.test(filePath) ? filePath : join(await $.session.cwd(), filePath)).replace(/\\/g, '/');
   if (!OWN_LEDGER_PATH.test(path) && !OWN_PLAN_PATH.test(path)) return;
+  const known = ownPaths.some(p => samePath(p.path, path));
   ownPaths = [...ownPaths.filter(p => !samePath(p.path, path)), { path, at: await nowMs($) }].slice(-OWN_PATHS_MAX);
+  if (!(known && anchor && under(path, anchor.checkout))) anchorDirty = true;
+}
+
+// After /clear or a resume: the new conversation's language, its panel written emptied (E-13), and its first read at
+// once, its anchor searched from nothing, so an open pane is not left empty until the next 10 s refresh.
+async function afterSwitch($: Engine): Promise<void> {
+  try {
+    await readUiLocale($);
+    void requestPanelWrite($);
+    await refreshPanel($);
+  } catch { /* the next refresh reads it */ }
+}
+
+// A conversation whose last search had no id searches once its id reads: at once while the pane shows (a resume, M1).
+function idRead($: Engine): void {
+  if (!anchorNoId || anchorDirty || sessionId === null) return;
   anchorDirty = true;
+  if (paneUp) void refreshPanel($, true);
 }
 
 // D3, D5: the files of the anchored checkout; no anchor, none.
@@ -778,6 +821,9 @@ let largeRunsCache: { key: string; at: number; runs: RunSource[] } | null = null
 let officialOwnUsd: number | null = null;
 // E-12: the cost of this session's own file seeded into the live state on a resume; /cost does not count it.
 let seededUsd = 0;
+// The start whose own usage file is still to be continued: without an anchor yet (D7) there is no file to read, so the
+// seed waits, and runs before the first write that has one (it would overwrite the file otherwise).
+let seedPending: number | null = null;
 // E-07: this session's totals the first time it saw the run it works for, kept in memory and in its usage file.
 let runBaseline: RunBaseline | null = null;
 
@@ -816,6 +862,7 @@ function resetUsage(): void {
   runInputs = null;
   usageFileCache.clear();
   largeRunsCache = null;
+  seedPending = null;
   resetAnchor();
 }
 
@@ -870,9 +917,17 @@ async function usageWhere($: Engine): Promise<{ root: string; session: string; m
 }
 
 // A resumed session keeps its id: its own file, when it has the same start, is continued rather than overwritten.
+// The seed is taken once per start: a caller that finds it pending takes it, and gives it back when there is no id or
+// anchor yet to read the file by.
 async function seedFromOwnFile($: Engine, startedAt: number): Promise<void> {
+  if (seedPending !== startedAt) return;
+  seedPending = null;
   const target = usage;
-  const where = await usageWhere($);
+  let where: Awaited<ReturnType<typeof usageWhere>>;
+  try { where = await usageWhere($); } catch (err) {
+    if (usage === target && usageStartedAt === startedAt) seedPending = startedAt;
+    throw err;
+  }
   if (!SAFE_SESSION.test(where.session)) return;
   const file = parseUsageFile(await readOpt($, join(where.main, '.forge', 'usage', `${where.session}.json`)));
   if (file && Date.parse(file.startedAt) === startedAt && usage === target && usageStartedAt === startedAt) {
@@ -892,7 +947,8 @@ async function syncUsageStart($: Engine): Promise<void> {
     if (adopt) usage.startedAt = u.startedAt;
     else { usage = newUsage(u.startedAt); seededUsd = 0; }
     lastUsageSig = '';
-    try { await seedFromOwnFile($, u.startedAt); } catch { /* counted from here */ }
+    seedPending = u.startedAt;
+    try { await seedFromOwnFile($, u.startedAt); } catch { /* seeded before the first write, or counted from here */ }
   }
   takeOfficial(u);
 }
@@ -927,6 +983,10 @@ async function writeUsageFileNow($: Engine, force: boolean, watch: boolean): Pro
     if (!Object.values(usage.loops).some(l => l.steps > 0)) return;
     await ensureAnchor($);
     if (!anchor) return;
+    // A resumed session's own file, continued now that it has an anchor to read it by, before this write replaces it.
+    if (seedPending !== null && seedPending === usageStartedAt) {
+      try { await seedFromOwnFile($, seedPending); } catch { /* counted from here */ }
+    }
     // I2, R2: the run this session works for, while no refresh reads the band, or as long as it was never read.
     if (watch || !bandRead) await watchRun($, (await usageWhere($)).main);
     const sig = usageSig();
@@ -1111,12 +1171,12 @@ async function buildPanel($: Engine): Promise<PanelModel> {
   // The id is the new conversation's: after a resume, the resumed one's; never the one that is ending (R1).
   if (sessionId === null) {
     try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
+    idRead($);
   }
   const subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   return buildPanelModel({
     band: roadmap, ...panelFiles, activity: { ...activity, subagents, finished: freshFinished(finished, now) }, now, usage: usageInput(), sessionId,
-    links, ownTasks, wakeAt, focusAgent,
-    ...(roadmap.locale ? { locale: roadmap.locale } : {}),
+    links, ownTasks, wakeAt, focusAgent, locale: localeNow(),
   });
 }
 
@@ -1218,17 +1278,21 @@ async function refreshPanelOnce($: Engine, force: boolean): Promise<void> {
     // With the pane closed the files are still read while there is activity, for the band: at the 30 s tick's pace.
     if (!paneUp && !busy && !force) return;
     if (paneUp) startPanelTimer($);
-    await ensureAnchor($);
-    // The roadmap section follows the waypoint project's files at the panel's pace.
-    try { await readBand($); } catch { /* keep the last one */ }
-    keepRunBaseline();
-    const now = await nowMs($);
     // E-06: who looks, so the panel knows whose tasks are its own; null when the engine cannot say (or still names the
-    // conversation that is ending, R1).
+    // conversation that is ending, R1). Read before the anchor, which is this conversation's.
     if (sessionId === null) {
       try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
     }
-    panelFiles = await loadPanelFiles($, now);
+    await ensureAnchor($);
+    const now = await nowMs($);
+    // Files read for a conversation that a /clear or a resume has since replaced are dropped.
+    const epoch = anchorEpoch;
+    const files = await loadPanelFiles($, now);
+    if (epoch === anchorEpoch) panelFiles = files;
+    // The roadmap section follows the waypoint project's files at the panel's pace (after the files: own work's needs
+    // keep to the tasks they read).
+    try { await readBand($); } catch { /* keep the last one */ }
+    keepRunBaseline();
     // E-09: the agents list is the truth for what it lists; a workflow's agents live by their own turn.
     adoptListed(await agentList($), now);
     // The tools in flight of an agent that ended go with it.
@@ -1318,7 +1382,20 @@ const TEXT = {
 type Texts = (typeof TEXT)[keyof typeof TEXT];
 
 const textsFor = (locale: string | undefined): Texts => (locale === 'es' ? TEXT.es : TEXT.en);
-const lensTexts = (): Texts => textsFor(roadmap.locale);
+const lensTexts = (): Texts => textsFor(localeNow());
+
+// The language the person set in Claude Code (`language`), read once a session start, /clear or resume, for a panel
+// whose band names none: with no anchor no plan is read for it (decision 3). A refused read, or another language, is
+// English.
+let uiLocale: 'es' | 'en' = 'en';
+const SPANISH = /^(?:es(?![a-z])|español|espanol|spanish|castellano)/;
+async function readUiLocale($: Engine): Promise<void> {
+  let value: unknown;
+  try { value = await $.settings.read({ key: 'language' }); } catch { value = undefined; }
+  uiLocale = typeof value === 'string' && SPANISH.test(value.trim().toLowerCase()) ? 'es' : 'en';
+}
+// The plan's language when the band has one, as before; else the person's.
+const localeNow = (): string => roadmap.locale ?? uiLocale;
 
 // Opens the pane at the person's request (F-01): inline it asks for the rows its compact cards take (between 6 and a
 // third of the screen), docked for 56 columns; both are requests the engine may not grant. Where it is not placed, a
@@ -1385,9 +1462,13 @@ async function readForPhoto($: Engine, now: number): Promise<void> {
     try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
   }
   await ensureAnchor($);
+  try {
+    const epoch = anchorEpoch;
+    const files = await loadPanelFiles($, now);
+    if (epoch === anchorEpoch) panelFiles = files;
+  } catch { /* the files read last */ }
   try { await readBand($); } catch { /* keep the last one */ }
   keepRunBaseline();
-  try { panelFiles = await loadPanelFiles($, now); } catch { /* the files read last */ }
   try { adoptListed(await agentList($), now); } catch { /* the agents heard of */ }
 }
 
@@ -1514,6 +1595,7 @@ export const register: Register = on => {
     resetUsage();
     clearStatus($);
     endedId = null;
+    await readUiLocale($);
     try { await syncUsageStart($); } catch { /* counted from the first refresh that reads it */ }
     waypointBand = false;
     waypointLoaded = null;
@@ -1549,11 +1631,10 @@ export const register: Register = on => {
       // written once the end chain beneath has run.
       if (e.reason === 'clear') {
         try { resetPanel(); clearStatus($); } catch { /* ignore */ }
-        const r = await next(e);
-        void requestPanelWrite($);
-        return r;
       }
-      return next(e);
+      const r = await next(e);
+      void afterSwitch($);
+      return r;
     }
     timer?.cancel();
     timer = null;

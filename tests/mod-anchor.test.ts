@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ANCHOR_ORDER, anchorCandidates, chooseAnchor, findAnchor, fsFailure, refusalReason, samePath, scopeOf, under, type Anchor } from '../src/mod/anchor.js';
+import { ANCHOR_ORDER, anchorCandidates, chooseAnchor, findAnchor, fsFailure, isOwnStatus, refusalReason, samePath, scopeOf, under, type Anchor } from '../src/mod/anchor.js';
 import type { Engine } from '../src/mod/files.js';
 
 const ID = 'conv-1';
@@ -179,8 +179,29 @@ describe('findAnchor', () => {
     expect(samePath(got.anchor!.checkout, 'E:/c/a')).toBe(true);
   });
 
-  it('no session id anchors nothing', async () => {
-    expect((await search(fake(project('/c/a', 'p', ID)), { sessionId: null })).anchor).toBeNull();
+  it('no session id anchors nothing, and lists nothing', async () => {
+    const f = fake(project('/c/a', 'p', ID));
+    expect((await search(f, { sessionId: null, kinds: 'all' })).anchor).toBeNull();
+    expect(f.lists).toEqual([]);
+  });
+
+  it("a session in a worktree reads its statuses beside that worktree's ledger; a task worktree, beside the main checkout's", async () => {
+    const wt = '/c/a/.claude/worktrees/x';
+    const own = fake({ [`${wt}/.git`]: 'gitdir: /c/a/.git/worktrees/x\n', [`${wt}/.forge/status/T1.json`]: status('T1', ID) });
+    expect((await search(own, { root: wt, kinds: 'all' })).anchor).toMatchObject({ kind: 'forge-task', checkout: wt });
+    // Its main checkout's statuses are not its worktree's.
+    const main = fake({ [`${wt}/.git`]: 'gitdir: /c/a/.git/worktrees/x\n', '/c/a/.forge/status/T1.json': status('T1', ID) });
+    expect((await search(main, { root: wt, kinds: 'all' })).anchor).toBeNull();
+    const task = '/c/a/.claude/worktrees/task-T1';
+    const t = fake({ [`${task}/.git`]: 'gitdir: /c/a/.git/worktrees/task-T1\n', '/c/a/.forge/status/T1.json': status('T1', ID) });
+    expect((await search(t, { root: task, kinds: 'all' })).anchor).toMatchObject({ kind: 'forge-task', checkout: task });
+  });
+
+  it('isOwnStatus: the session it names first, else the tasks it ran (T1-2 is of T1)', () => {
+    expect(isOwnStatus({ task: 'T1', session: ID }, ID, [])).toBe(true);
+    expect(isOwnStatus({ task: 'T1', session: 'conv-2' }, ID, ['T1'])).toBe(false);
+    expect(isOwnStatus({ task: 'T1', session: null }, ID, ['T1-2'])).toBe(true);
+    expect(isOwnStatus({ task: 'T1', session: null }, ID, ['T10'])).toBe(false);
   });
 
   it('a refused .forge of the root is reported', async () => {
