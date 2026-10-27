@@ -637,3 +637,27 @@ describe('loadBandFiles · what waits for the person (w7 A5)', () => {
     expect(await loadBandModel(fake(root, forge).$)).toMatchObject({ mode: 'none', needs: { total: 1 } });
   });
 });
+
+describe('the band at an anchor (a checkout below the session root)', () => {
+  const root = '/c'; const child = '/c/a';
+  it("draws that project's work band from the checkout, where the root has none", async () => {
+    const { $ } = fake(root, { [`${child}/docs/waypoint/p/plan.yaml`]: plan, [`${child}/.waypoint/p/session.json`]: JSON.stringify({ sessionId: 'main', track: null }), [`${child}/.waypoint/p/bound.json`]: bound('main') });
+    expect(await loadBandModel($, { checkout: child, project: 'p' })).toMatchObject({ mode: 'work', project: 'p' });
+    expect(await loadBandModel($)).toMatchObject({ mode: 'none' });
+  });
+  it('reads forge from the main checkout of that checkout', async () => {
+    const main = '/c/main';
+    const { $, reads } = fake(root, { ...base(child), [`${child}/.git`]: `gitdir: ${main}/.git/worktrees/x\n`, [`${main}/.forge/execution.json`]: EXEC });
+    await loadBandModel($, { checkout: child, project: 'demo-shop' });
+    expect(reads).toContain(`${main}/.forge/execution.json`);
+  });
+  it("renewBindings renews this conversation's binding in the extra checkout", async () => {
+    const at = Date.parse('2026-10-15T12:00:00.000Z');
+    const file = `${child}/.waypoint/p/bound.json`;
+    const files: Record<string, string> = { [`${child}/.waypoint/p/session.json`]: JSON.stringify({ sessionId: 'main' }), [file]: JSON.stringify({ sid: 'main', claude: ID, pid: null, via: 'work', since: new Date(at - 3600_000).toISOString(), seenAt: new Date(at - 120_000).toISOString(), endedAt: null, endReason: null }) };
+    const { $, writes } = fake(root, files, { at: () => at });
+    expect(await renewBindings($)).toBe(0);
+    expect(await renewBindings($, child)).toBe(1);
+    expect(writes).toEqual([file]);
+  });
+});

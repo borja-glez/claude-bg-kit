@@ -14,6 +14,7 @@ import { AUTH_ID } from '../lib/needs-you.js';
 import { NOTE_ID } from '../lib/notes.js';
 import { PROPOSAL_ID } from '../lib/proposals.js';
 import { clip as clipCells } from './band-line.js';
+import { samePath } from './anchor.js';
 
 export type Engine = EngineInterface;
 
@@ -345,20 +346,23 @@ async function loadNeeds($: Engine, main: string, root: string, project: string 
  * The project this conversation looks at and the files of its band: the project of its binding, else the one with the
  * latest activity (A-15), with this conversation's id and the engine's clock (C3). Null without a project.
  */
-export async function loadBandFiles($: Engine): Promise<{ project: string; files: BandFiles } | null> {
-  const read = await readBandFiles($);
+export async function loadBandFiles($: Engine, at?: BandAt): Promise<{ project: string; files: BandFiles } | null> {
+  const read = await readBandFiles($, at);
   return read.project ? { project: read.project, files: read.files } : null;
 }
 
+/** Where the band reads: this checkout (not the folder the session started in) and the project of the anchor, null for an ephemeral run. */
+export interface BandAt { checkout: string; project: string | null }
+
 /** As loadBandFiles; without a project, forge's files alone (I2: the role still comes from its execution). */
-async function readBandFiles($: Engine): Promise<{ project: string | null; files: BandFiles }> {
-  const root = await $.session.root();
+async function readBandFiles($: Engine, at?: BandAt): Promise<{ project: string | null; files: BandFiles }> {
+  const root = at ? at.checkout : await $.session.root();
   const now = await nowMs($);
   const sessionId = await sessionIdOf($);
   // The main checkout (the session may be in a worktree of it), resolved once for forge's files and the sources of the band.
   const main = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
-  const projects = await projectEntries($, root, now);
-  const project = pickProject(projects.map(p => p.entry), sessionId);
+  const projects = at && at.project === null ? [] : await projectEntries($, root, now);
+  const project = at?.project && projects.some(p => p.entry.name === at.project) ? at.project : pickProject(projects.map(p => p.entry), sessionId);
   const chosen = projects.find(p => p.entry.name === project);
   if (!project || !chosen) {
     const forge = await loadForge($, main, now);
@@ -408,8 +412,8 @@ async function readBandFiles($: Engine): Promise<{ project: string | null; files
 }
 
 /** The band of this conversation; without a waypoint project it draws nothing, with the role from forge's execution (I2). */
-export async function loadBandModel($: Engine): Promise<BandModel> {
-  const { project, files } = await readBandFiles($);
+export async function loadBandModel($: Engine, at?: BandAt): Promise<BandModel> {
+  const { project, files } = await readBandFiles($, at);
   return project ? buildBandModel(project, files) : withNeeds(noneBand(undefined, executionViewer(files)), null, files);
 }
 
@@ -419,9 +423,10 @@ export async function loadBandModel($: Engine): Promise<BandModel> {
  * last renewal. It is read again just before the write and must still pass that rule, so an end, a release or a
  * takeover written meanwhile is never undone, an ended binding is never reopened, and a renewal the hooks made
  * meanwhile is not repeated. Only the newest of them in each project is renewed (M5), no other binding is
- * touched, and a write the engine refuses is left for the next tick. Returns how many it renewed.
+ * touched, and a write the engine refuses is left for the next tick. Returns how many it renewed. `extra`, the checkout
+ * of this conversation's anchor when it is not the root, is renewed the same way.
  */
-export async function renewBindings($: Engine): Promise<number> {
+export async function renewBindings($: Engine, extra?: string | null): Promise<number> {
   const id = await sessionIdOf($);
   if (!id) return 0;
   const root = await $.session.root();
@@ -429,9 +434,13 @@ export async function renewBindings($: Engine): Promise<number> {
   const due = (b: BoundDoc | null, sid: string): b is BoundDoc =>
     b !== null && b.sid === sid && b.claude === id && b.endedAt === null && now - Date.parse(b.seenAt) >= RENEW_MS;
   let renewed = 0;
-  const projects = (await listOpt($, join(root, '.waypoint'))).filter(d => d.kind === 'dir').slice(0, MAX_PROJECTS);
+  const places = extra && !samePath(extra, root) ? [root, extra] : [root];
+  const projects = [];
+  for (const place of places) {
+    for (const d of (await listOpt($, join(place, '.waypoint'))).filter(d => d.kind === 'dir').slice(0, MAX_PROJECTS)) projects.push({ name: d.name, place });
+  }
   for (const p of projects) {
-    const wp = join(root, '.waypoint', p.name);
+    const wp = join(p.place, '.waypoint', p.name);
     // M5: only the newest of its live bindings in the project is renewed (the newest renewal, the checkout seat first
     // on a tie, as describeViewer and the hooks pick it); any other lapses. A seat that a bind of this conversation
     // released, and that a renewal raced back to life, does not stay held.
