@@ -17,6 +17,22 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 
 ## waypoint
 
+### 0.40.0 — 2026-10-27
+
+#### Added
+- **Three views on the design page.** A bar that stays on top switches between **Document**, **Review** and **History**; the rounds of the critic and the versions no longer sit in front of the text. The bar names the section you are in and opens the list of every section with its number and words, and a strip under it fills section by section as you read. The arrow keys, Home and End move between the views.
+- **A map of the document.** The document opens with the pillars and a card per section: its number, its first sentence, how long it is against the longest one and whether the version shown added or changed it. The headings carry the same mark, and the page says when the version shown is not the current one, with a button back.
+- **Review and History drawn.** Review charts the proposals of each round by severity, so you see whether the critic converges, and splits every proposal by what became of it (applied, resolved, dismissed, rewritten, pending); each round lists its proposals with the problem and the proposed change side by side, and a section name opens it in the document. History draws every version by its words, coloured by what made it (draft, edits, rewrite, approval, reopen); a version opens in the document view.
+- **Visual blocks in the body.** ```` ```mermaid ```` diagrams, which the page draws itself in its light or dark theme (it loads Mermaid 11.4.1 from jsDelivr when the version shown has one; the artifact viewer does not draw them on this page), and a diagram whose source does not parse stays as its source with a line that says so; ```` ```chart ```` bars from a few numbers, one series or 2 to 4; ```` ```steps ```` for 2 to 8 phases; and GitHub callouts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`). Code blocks show their language.
+- `/waypoint:design` writes the body with them: `new` and `rewrite` read the new `references/visuals.md`, which says which block fits what the text describes and how to write each. `design-validate` checks the chart and steps blocks and empty diagrams, with the line of the file each problem is on.
+
+#### Changed
+- The article shares one left edge with the map, with prose up to 80 characters a line; tables, diagrams, charts with several series and steps run on to the right edge. The side contents column is gone.
+- Tables scroll in their own box, never squeeze their columns below a width set by how many they have, right-align a column of quantities and take the full width from four columns.
+
+#### Fixed
+- Tables no longer come out squashed: the text of the page could break inside any word, and a table shrank its columns to a few letters.
+
 ### 0.39.0 — 2026-10-27
 
 #### Added
@@ -485,6 +501,11 @@ elsewhere and are reconstructed from their READMEs. java, web, ml and crew start
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.34.1 — 2026-10-27
+
+#### Changed
+- Depends on waypoint ^0.40.0.
 
 ### 0.34.0 — 2026-10-27
 

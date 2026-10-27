@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.34.0](https://img.shields.io/badge/versi%C3%B3n-0.34.0-fab387?style=flat-square)
-![depende de waypoint ^0.39.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.39.0-cba6f7?style=flat-square)
+![versión 0.34.1](https://img.shields.io/badge/versi%C3%B3n-0.34.1-fab387?style=flat-square)
+![depende de waypoint ^0.40.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.40.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -52,7 +52,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.39.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permisos recomendados, en `.claude/settings.local.json` de los proyectos en los que confías (no en tu `~/.claude/settings.json`, que lee todo proyecto): `"allow": ["Bash(node *forge.cjs*)"]` para que forge corra sin preguntar, y `"deny": ["Bash(*forge.cjs* hook *)"]`, que impide que Claude llame a mano a los comandos de hook de forge (por ejemplo `hook answer`, que registra tus respuestas) y no toca los hooks reales, porque las reglas de permisos nunca se les aplican. Opcionalmente añade `"ask": ["Bash(*forge.cjs* swarm merge*)", "Bash(*forge.cjs* local set*)"]`: la primera te pregunta antes de cada integración final, la segunda antes de que Claude registre un permiso de superficie o una preferencia (tu confianza en los comandos se registra solo con tu respuesta).
+forge depende de [waypoint](../waypoint/README.es.md) ^0.40.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permisos recomendados, en `.claude/settings.local.json` de los proyectos en los que confías (no en tu `~/.claude/settings.json`, que lee todo proyecto): `"allow": ["Bash(node *forge.cjs*)"]` para que forge corra sin preguntar, y `"deny": ["Bash(*forge.cjs* hook *)"]`, que impide que Claude llame a mano a los comandos de hook de forge (por ejemplo `hook answer`, que registra tus respuestas) y no toca los hooks reales, porque las reglas de permisos nunca se les aplican. Opcionalmente añade `"ask": ["Bash(*forge.cjs* swarm merge*)", "Bash(*forge.cjs* local set*)"]`: la primera te pregunta antes de cada integración final, la segunda antes de que Claude registre un permiso de superficie o una preferencia (tu confianza en los comandos se registra solo con tu respuesta).
 
 ## Uso
 
