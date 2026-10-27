@@ -384,7 +384,7 @@ const norm = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''
 
 // The conversation looking at the band is `id()` ($.session.id(), which may answer later); what the plugin writes lands
 // in `files`, and its path in `written`. $.session.root() answers `root()`, and refuses while it is null.
-function serveFiles(on: On, files: Record<string, string> = { ...FILES }, listed: string[] = [], id: () => string | Promise<string> = () => SESSION_ID, written: string[] = [], root: () => string | null = () => ROOT) {
+function serveFiles(on: On, files: Record<string, string> = { ...FILES }, listed: string[] = [], id: () => string | Promise<string> = () => SESSION_ID, written: string[] = [], root: () => string | null = () => ROOT, afterList: (path: string) => Promise<void> | void = () => undefined) {
   const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 0, mtimeMs: 1, isLink: false });
   on('session.root', () => {
     const value = root();
@@ -400,7 +400,7 @@ function serveFiles(on: On, files: Record<string, string> = { ...FILES }, listed
   on('fs.stat', (_$, e) => (norm(e.path) in files
     ? { value: { kind: 'file' as const, size: 0, mtimeMs: 1, isLink: false } }
     : { deny: `ENOENT ${e.path}` }));
-  on('fs.list', (_$, e) => {
+  on('fs.list', async (_$, e) => {
     listed.push(norm(e.path));
     const prefix = `${norm(e.path)}/`;
     const names = new Map<string, 'file' | 'dir'>();
@@ -409,6 +409,8 @@ function serveFiles(on: On, files: Record<string, string> = { ...FILES }, listed
       const [head = '', ...rest] = path.slice(prefix.length).split('/');
       names.set(head, rest.length ? 'dir' : 'file');
     }
+    // A listing may be held after it was taken, so a test can write files while a search is still reading.
+    await afterList(norm(e.path));
     return names.size ? { value: [...names].map(([name, kind]) => entry(name, kind)) } : { deny: `ENOENT ${e.path}` };
   });
 }
@@ -1810,4 +1812,34 @@ test("an ArtifactData write is mirrored into the anchored repository's cache", a
   const claim = { action: 'batch', url, writes: [{ op: 'update', collection: 'state', doc_id: 'T001', data: { status: 'free' } }] };
   await $.tool.call({ tool: 'ArtifactData', ...claim } as never);
   expect(written).toContain(`${REPO}/.waypoint/p/dbcache/state/T001.json`);
+});
+
+test('a bind that lands while the search is in flight is not lost: the rerun searches again', async ($, on) => {
+  engineBottom(on);
+  const files: Record<string, string> = { [`${REPO}/docs/waypoint/p/plan.yaml`]: PLAN, [`${REPO}/.waypoint/p/session.json`]: JSON.stringify({ sessionId: 'S1', track: 'backend' }) };
+  // The listing of the seats comes after the search read bound.json (absent): it waits, so the bind writes meanwhile.
+  let gate: Promise<void> | null = null;
+  let held = 0;
+  serveFiles(on, files, [], () => SESSION_ID, [], () => CENTRAL, async path => {
+    if (gate && path === `${REPO}/.waypoint/p/seats`) { held++; await gate; }
+  });
+  mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
+  await $.session.start({ cwd: CENTRAL, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  let release: () => void = () => undefined;
+  gate = new Promise<void>(r => { release = r; });
+  const call = { tool: 'Bash', command: 'node "/x/dist/waypoint.cjs" bind --task T002' } as never;
+  await $.tool.call(call);
+  for (let i = 0; i < 100 && held === 0; i++) await sleepMs(5);
+  expect(held).toBeGreaterThan(0);
+  Object.assign(files, projectIn(REPO));
+  await $.tool.call(call);
+  gate = null;
+  release();
+  let line: string | undefined;
+  for (let i = 0; i < 100 && !line; i++) { await sleepMs(5); await ui.redraw(); line = await lineOf(ui); }
+  expect(line).toBe(WORK_LINE);
+  await ui.unmount();
 });

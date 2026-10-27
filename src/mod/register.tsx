@@ -145,11 +145,13 @@ async function bandAt($: Engine): Promise<BandAt | undefined> {
     const root = await $.session.root();
     if (anchorDirty || anchorRoot === null || !samePath(root, anchorRoot)) {
       const sessionId = await sessionIdOf($);
+      // Cleared before the search: a bind that raises it meanwhile may not have been read, and its rerun must search.
+      anchorDirty = false;
       const found = await findAnchor($, { root, sessionId, held: anchor?.checkout ?? null, kinds: 'join', now: await nowMs($) });
       anchor = found.anchor;
       anchorRoot = root;
       // Without an id nothing could be searched for: ask again at the next refresh.
-      anchorDirty = sessionId === null;
+      if (sessionId === null) anchorDirty = true;
     }
     return anchor && !samePath(anchor.checkout, root) ? { checkout: anchor.checkout, project: anchor.project } : undefined;
   } catch { return undefined; }
