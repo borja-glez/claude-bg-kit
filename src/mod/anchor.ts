@@ -66,15 +66,18 @@ const STATUS_KEEP = 20;
 const STATUS_WINDOW_MS = 24 * 3_600_000;
 const EXEC_MAX_BYTES = 64 * 1024;
 const MARKERS = ['.waypoint', '.forge', '.superpowers'];
+/** The first-level folders looked at, by name, while collecting the MAX_PROJECTS marked checkouts. */
+const CHILDREN_MAX = 200;
 
 function debug($: Engine, message: string): void {
   try { $.ui.log(message, { to: 'debug' }); } catch { /* only a log */ }
 }
 
 /**
- * The checkouts to look in, the held one first, then the session root, then its first-level folders (the first
- * MAX_PROJECTS by name) that hold .waypoint, .forge, .superpowers, docs/waypoint or docs/superpowers/plans; each once.
- * A refused root is reported; a refused folder below it is skipped and only logged.
+ * The checkouts to look in, the held one first, then the session root, then the first MAX_PROJECTS of its first-level
+ * folders by name that are checkouts (they hold .git) with .waypoint, .forge, .superpowers, docs/waypoint or
+ * docs/superpowers/plans, among the first CHILDREN_MAX; each once. A folder without .git is not listed. A refused root is
+ * reported; a refused folder below it is skipped and only logged.
  */
 export async function anchorCandidates($: Engine, root: string, held: string | null): Promise<{ dirs: string[]; refused: Refusal | null }> {
   const dirs: string[] = [];
@@ -84,10 +87,14 @@ export async function anchorCandidates($: Engine, root: string, held: string | n
   let refused: Refusal | null = null;
   let top: Awaited<ReturnType<Engine['fs']['list']>> = [];
   try { top = await $.fs.list(root); } catch (err) { if (fsFailure(err) === 'refused') refused = { path: root, reason: refusalReason(err) }; }
-  const children = top.filter(d => d.kind === 'dir').sort(byName).slice(0, MAX_PROJECTS);
-  for (const c of children) {
+  let found = 0;
+  for (const c of top.filter(d => d.kind === 'dir').sort(byName).slice(0, CHILDREN_MAX)) {
+    if (found >= MAX_PROJECTS) break;
     const dir = join(root, c.name);
     try {
+      // Only a checkout: its .git (a folder, or a worktree's file), one stat before anything of it is listed, so the
+      // sources and dependencies of a session started inside a repository are never walked.
+      await $.fs.stat(join(dir, '.git'));
       const names = new Map((await $.fs.list(dir)).map(e => [e.name, e.kind] as const));
       let marked = MARKERS.some(m => names.has(m));
       if (!marked && names.get('docs') === 'dir') {
@@ -97,7 +104,7 @@ export async function anchorCandidates($: Engine, root: string, held: string | n
           marked = (await $.fs.list(join(dir, 'docs', 'superpowers'))).some(e => e.kind === 'dir' && e.name === 'plans');
         }
       }
-      if (marked) add(dir);
+      if (marked) { found++; add(dir); }
     } catch (err) {
       if (fsFailure(err) === 'refused') debug($, `lens: ${dir} not read while looking for the project: ${refusalReason(err)}`);
     }

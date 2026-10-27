@@ -65,10 +65,14 @@ const OTHER_PLAN = ['# Other plan', ...Array.from({ length: 4 }, (_, i) => `### 
 // The plan this conversation runs inline: executing-plans ticks its checkboxes and writes no ledger.
 const OWN_PLAN = '# Shop inline plan\n### Task 1: Step 1\n- [x] do it\n### Task 2: Step 2\n- [ ] do it\n';
 
+// A checkout at `dir`: its .git folder (a folder below the session root counts only as a checkout).
+const gitIn = (dir: string): Record<string, string> => ({ [`${dir}/.git/HEAD`]: 'ref: refs/heads/main\n' });
+
 // Repository A: the project shop, a run coordinated by `run`, its task statuses by `tasks`, a binding of `bound` when
 // given, and another conversation's superpowers run.
 function repoA(o: { run: string; tasks: string; bound?: string }): Record<string, string> {
   return {
+    ...gitIn(REPO),
     [`${REPO}/docs/waypoint/shop/plan.yaml`]: SHOP_PLAN,
     [`${REPO}/.waypoint/shop/session.json`]: JSON.stringify({ sessionId: 'S1', track: 'backend' }),
     ...(o.bound ? { [`${REPO}/.waypoint/shop/bound.json`]: BOUND(o.bound) } : {}),
@@ -104,9 +108,14 @@ function serveWorld(on: On, world: World) {
     return f !== undefined ? { value: f } : { deny: `ENOENT ${e.path}` };
   });
   on('fs.exists', (_$, e) => { const p = norm(e.path); return { value: p in world.files || Object.keys(world.files).some(f => f.startsWith(`${p}/`)) }; });
+  // A folder stats as one when some file is under it (a checkout's .git).
   on('fs.stat', (_$, e) => {
-    const f = world.files[norm(e.path)];
-    return f !== undefined ? { value: { kind: 'file' as const, size: f.length, mtimeMs: at, isLink: false } } : { deny: `ENOENT ${e.path}` };
+    const p = norm(e.path);
+    const f = world.files[p];
+    if (f !== undefined) return { value: { kind: 'file' as const, size: f.length, mtimeMs: at, isLink: false } };
+    return Object.keys(world.files).some(path => path.startsWith(`${p}/`))
+      ? { value: { kind: 'dir' as const, size: 0, mtimeMs: at, isLink: false } }
+      : { deny: `ENOENT ${e.path}` };
   });
   on('fs.list', (_$, e) => {
     world.lists.push(norm(e.path));
@@ -205,6 +214,7 @@ test('a shell cd to a sibling repository changes nothing', async ($, on) => {
   const w = world(CENTRAL, {
     ...repoA({ run: SESSION_ID, tasks: SESSION_ID }),
     // Repository B: another conversation's run, which the shell's directory must not bring in.
+    ...gitIn(SIBLING),
     [`${SIBLING}/.forge/execution.json`]: EXEC(OTHER, ['Rewrite the cart']),
     [`${SIBLING}/.forge/status/shop__T001.json`]: STATUS('T001', OTHER),
   });
@@ -282,6 +292,7 @@ test('binding later anchors it', async ($, on) => {
 
 test('a lone forge task of its own shows that task and nothing of the run', async ($, on) => {
   serveWorld(on, world(CENTRAL, {
+    ...gitIn(SIBLING),
     [`${SIBLING}/.forge/execution.json`]: EXEC(OTHER),
     [`${SIBLING}/.forge/status/shop__T001.json`]: STATUS('T001', OTHER),
     [`${SIBLING}/.forge/status/T050.json`]: STATUS('T050', SESSION_ID, { runId: null, project: null }),
@@ -381,6 +392,7 @@ const REVIEW_EXEC = JSON.stringify({
 
 test("an own task's review question shows under Waiting for you; another conversation's does not", async ($, on) => {
   serveWorld(on, world(CENTRAL, {
+    ...gitIn(SIBLING),
     [`${SIBLING}/.forge/execution.json`]: REVIEW_EXEC,
     [`${SIBLING}/.forge/status/shop__T050.json`]: STATUS('T050', SESSION_ID, { phase: 'review', runId: 'r2' }),
     [`${SIBLING}/.forge/status/shop__T001.json`]: STATUS('T001', OTHER, { phase: 'review', runId: 'r2' }),
@@ -541,6 +553,7 @@ test('a refused .forge of the anchored checkout shows the unreadable line with i
 test('a refused unrelated child says nothing', async ($, on) => {
   const w = world(CENTRAL, {
     ...repoA({ run: OTHER, tasks: OTHER, bound: OTHER }),
+    ...gitIn(`${CENTRAL}/locked`),
     [`${CENTRAL}/locked/.forge/x.json`]: '{}',
   });
   w.deny = { [`${CENTRAL}/locked`]: 'EACCES: permission denied' };

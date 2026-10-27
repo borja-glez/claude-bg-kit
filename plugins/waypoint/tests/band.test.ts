@@ -397,9 +397,12 @@ function serveFiles(on: On, files: Record<string, string> = { ...FILES }, listed
     return text !== undefined ? { value: text } : { deny: `ENOENT ${e.path}` };
   });
   on('fs.exists', (_$, e) => ({ value: norm(e.path) in files }));
+  // A folder stats as one when some file is under it (a checkout's .git).
   on('fs.stat', (_$, e) => (norm(e.path) in files
     ? { value: { kind: 'file' as const, size: 0, mtimeMs: 1, isLink: false } }
-    : { deny: `ENOENT ${e.path}` }));
+    : Object.keys(files).some(path => path.startsWith(`${norm(e.path)}/`))
+      ? { value: { kind: 'dir' as const, size: 0, mtimeMs: 1, isLink: false } }
+      : { deny: `ENOENT ${e.path}` }));
   on('fs.list', async (_$, e) => {
     listed.push(norm(e.path));
     const prefix = `${norm(e.path)}/`;
@@ -1707,10 +1710,13 @@ test('with two rows and no room for every folded button told apart, m opens the 
 const CENTRAL = '/c';
 const REPO = '/c/a';
 const WORK_LINE = '● frente backend 1/2 · T002 API de pedidos · 5 m / 30 m · global 33 %';
-// The project of FILES, named p and kept in `dir`.
-const projectIn = (dir: string, over: Record<string, unknown> = {}): Record<string, string> => Object.fromEntries(
-  Object.entries(FILES).map(([path, text]) => [path.replace(ROOT, dir).replace('/demo/', '/p/'), path.endsWith('/bound.json') ? BOUND(over) : text]),
-);
+// A checkout at `dir`: its .git folder (a folder below the session root counts only as a checkout).
+const gitIn = (dir: string): Record<string, string> => ({ [`${dir}/.git/HEAD`]: 'ref: refs/heads/main\n' });
+// The project of FILES, named p and kept in the checkout `dir`.
+const projectIn = (dir: string, over: Record<string, unknown> = {}): Record<string, string> => ({
+  ...gitIn(dir),
+  ...Object.fromEntries(Object.entries(FILES).map(([path, text]) => [path.replace(ROOT, dir).replace('/demo/', '/p/'), path.endsWith('/bound.json') ? BOUND(over) : text])),
+});
 
 test('a conversation bound in a repository below the session root gets its work band', async ($, on) => {
   engineBottom(on);
@@ -1764,7 +1770,7 @@ test('at the session root the band is as before', async ($, on) => {
 
 test('a waypoint CLI call makes the band search again', async ($, on) => {
   engineBottom(on);
-  const files: Record<string, string> = { [`${REPO}/docs/waypoint/p/plan.yaml`]: PLAN, [`${REPO}/.waypoint/p/session.json`]: JSON.stringify({ sessionId: 'S1', track: 'backend' }) };
+  const files: Record<string, string> = { ...gitIn(REPO), [`${REPO}/docs/waypoint/p/plan.yaml`]: PLAN, [`${REPO}/.waypoint/p/session.json`]: JSON.stringify({ sessionId: 'S1', track: 'backend' }) };
   serveFiles(on, files, [], () => SESSION_ID, [], () => CENTRAL);
   mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
@@ -1816,7 +1822,7 @@ test("an ArtifactData write is mirrored into the anchored repository's cache", a
 
 test('a bind that lands while the search is in flight is not lost: the rerun searches again', async ($, on) => {
   engineBottom(on);
-  const files: Record<string, string> = { [`${REPO}/docs/waypoint/p/plan.yaml`]: PLAN, [`${REPO}/.waypoint/p/session.json`]: JSON.stringify({ sessionId: 'S1', track: 'backend' }) };
+  const files: Record<string, string> = { ...gitIn(REPO), [`${REPO}/docs/waypoint/p/plan.yaml`]: PLAN, [`${REPO}/.waypoint/p/session.json`]: JSON.stringify({ sessionId: 'S1', track: 'backend' }) };
   // The listing of the seats comes after the search read bound.json (absent): it waits, so the bind writes meanwhile.
   let gate: Promise<void> | null = null;
   let held = 0;
